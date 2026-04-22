@@ -143,9 +143,12 @@ func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock) (
 		for _, p := range textParts {
 			text += p
 		}
-		// Prepend user text before tool results
+		// OpenAI-compatible tool calling requires tool responses to appear
+		// immediately after the assistant message that emitted tool_calls.
+		// If the Anthropic user turn also includes free-form text, emit it as
+		// a subsequent user message after all tool results.
 		userMsg := types.ChatMessage{Role: "user", Content: text}
-		result = append([]types.ChatMessage{userMsg}, result...)
+		result = append(result, userMsg)
 	}
 
 	return result, nil
@@ -154,6 +157,7 @@ func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock) (
 // transformAssistantMessage converts an assistant message with potential tool_use blocks.
 func (t *RequestTransformer) transformAssistantMessage(blocks []types.ContentBlock) ([]types.ChatMessage, error) {
 	var textParts []string
+	var thinkingParts []string
 	var toolCalls []types.ToolCall
 
 	for _, block := range blocks {
@@ -161,8 +165,11 @@ func (t *RequestTransformer) transformAssistantMessage(blocks []types.ContentBlo
 		case "text":
 			textParts = append(textParts, block.Text)
 		case "thinking":
-			// Skip thinking blocks — OpenAI doesn't have an equivalent
-			// (some models support reasoning_effort but not raw thinking blocks)
+			// Some OpenAI-compatible providers expect tool-call assistant messages
+			// to preserve chain-of-thought in a provider-specific reasoning field.
+			if block.Thinking != "" {
+				thinkingParts = append(thinkingParts, block.Thinking)
+			}
 		case "tool_use":
 			// Map to OpenAI function call format
 			arguments := "{}"
@@ -185,11 +192,24 @@ func (t *RequestTransformer) transformAssistantMessage(blocks []types.ContentBlo
 	for _, p := range textParts {
 		content += p
 	}
+	reasoningContent := ""
+	for _, p := range thinkingParts {
+		reasoningContent += p
+	}
+
+	var reasoningContentPtr *string
+	if len(toolCalls) > 0 || reasoningContent != "" {
+		// Some providers require reasoning_content to be present on assistant
+		// tool-call messages whenever thinking mode is enabled, even if the
+		// upstream Anthropic history did not include an explicit thinking block.
+		reasoningContentPtr = &reasoningContent
+	}
 
 	msg := types.ChatMessage{
-		Role:      "assistant",
-		Content:   content,
-		ToolCalls: toolCalls,
+		Role:             "assistant",
+		Content:          content,
+		ReasoningContent: reasoningContentPtr,
+		ToolCalls:        toolCalls,
 	}
 
 	return []types.ChatMessage{msg}, nil

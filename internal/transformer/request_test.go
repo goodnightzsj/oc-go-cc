@@ -90,6 +90,74 @@ func TestTransformRequestIncludesEmptyReasoningContentForToolCalls(t *testing.T)
 	}
 }
 
+func TestTransformRequestPreservesSystemCacheControl(t *testing.T) {
+	transformer := NewRequestTransformer()
+
+	req := &types.MessageRequest{
+		Model:     "claude-test",
+		MaxTokens: 256,
+		System: json.RawMessage(`[
+			{"type":"text","text":"You are helpful","cache_control":{"type":"ephemeral"}}
+		]`),
+		Messages: []types.Message{
+			{Role: "user", Content: json.RawMessage(`"hello"`)},
+		},
+	}
+
+	openaiReq, err := transformer.TransformRequest(req, config.ModelConfig{ModelID: "kimi-k2.6"})
+	if err != nil {
+		t.Fatalf("TransformRequest() error = %v", err)
+	}
+
+	if got, want := len(openaiReq.Messages), 2; got != want {
+		t.Fatalf("len(Messages) = %d, want %d", got, want)
+	}
+
+	systemMsg := openaiReq.Messages[0]
+	if got, want := systemMsg.Role, "system"; got != want {
+		t.Fatalf("Messages[0].Role = %q, want %q", got, want)
+	}
+	if got, want := systemMsg.Content, "You are helpful"; got != want {
+		t.Fatalf("Messages[0].Content = %q, want %q", got, want)
+	}
+	if systemMsg.CacheControl == nil {
+		t.Fatal("Messages[0].CacheControl = nil, want non-nil")
+	}
+	if got, want := systemMsg.CacheControl.Type, "ephemeral"; got != want {
+		t.Fatalf("Messages[0].CacheControl.Type = %q, want %q", got, want)
+	}
+}
+
+func TestTransformRequestOmitsCacheControlWhenAbsent(t *testing.T) {
+	transformer := NewRequestTransformer()
+
+	req := &types.MessageRequest{
+		Model:     "claude-test",
+		MaxTokens: 256,
+		System:    json.RawMessage(`"You are helpful"`),
+		Messages: []types.Message{
+			{Role: "user", Content: json.RawMessage(`"hello"`)},
+		},
+	}
+
+	openaiReq, err := transformer.TransformRequest(req, config.ModelConfig{ModelID: "kimi-k2.6"})
+	if err != nil {
+		t.Fatalf("TransformRequest() error = %v", err)
+	}
+
+	if got, want := len(openaiReq.Messages), 2; got != want {
+		t.Fatalf("len(Messages) = %d, want %d", got, want)
+	}
+
+	systemMsg := openaiReq.Messages[0]
+	if got, want := systemMsg.Role, "system"; got != want {
+		t.Fatalf("Messages[0].Role = %q, want %q", got, want)
+	}
+	if systemMsg.CacheControl != nil {
+		t.Fatalf("Messages[0].CacheControl = %v, want nil", systemMsg.CacheControl)
+	}
+}
+
 func TestTransformRequestPlacesToolResultsBeforeUserText(t *testing.T) {
 	transformer := NewRequestTransformer()
 

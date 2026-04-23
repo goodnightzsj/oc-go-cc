@@ -21,6 +21,8 @@ vet:
 	go vet ./...
 
 lint: vet test
+	@which golangci-lint > /dev/null || (echo "golangci-lint not found, please install it: https://golangci-lint.run/usage/install/" && exit 1)
+	golangci-lint run --timeout 5m
 
 clean:
 	rm -rf bin/ dist/

@@ -21,12 +21,13 @@ type ChatCompletionRequest struct {
 
 // ChatMessage represents a single message in the conversation.
 type ChatMessage struct {
-	Role             string     `json:"role"`
-	Content          string     `json:"content,omitempty"`
-	ReasoningContent *string    `json:"reasoning_content,omitempty"`
-	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
-	Name             string     `json:"name,omitempty"`
-	ToolCallID       string     `json:"tool_call_id,omitempty"`
+	Role             string        `json:"role"`
+	Content          string        `json:"content,omitempty"`
+	ReasoningContent *string       `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall    `json:"tool_calls,omitempty"`
+	Name             string        `json:"name,omitempty"`
+	ToolCallID       string        `json:"tool_call_id,omitempty"`
+	CacheControl     *CacheControl `json:"cache_control,omitempty"`
 }
 
 // ToolCall represents a function call made by the model.
@@ -75,9 +76,11 @@ type Choice struct {
 
 // UsageInfo represents token usage information.
 type UsageInfo struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens          int `json:"prompt_tokens"`
+	CompletionTokens      int `json:"completion_tokens"`
+	TotalTokens           int `json:"total_tokens"`
+	PromptCacheHitTokens  int `json:"prompt_cache_hit_tokens,omitempty"`
+	PromptCacheMissTokens int `json:"prompt_cache_miss_tokens,omitempty"`
 }
 
 // ChatCompletionChunk represents a streaming chunk from the Chat Completions API.

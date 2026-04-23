@@ -71,13 +71,26 @@ func (t *RequestTransformer) TransformRequest(
 func (t *RequestTransformer) transformMessages(anthropicReq *types.MessageRequest) ([]types.ChatMessage, error) {
 	var result []types.ChatMessage
 
-	// Add system message if present
+	// Add system message if present, preserving cache_control if available
 	systemText := anthropicReq.SystemText()
 	if systemText != "" {
-		result = append(result, types.ChatMessage{
+		systemMsg := types.ChatMessage{
 			Role:    "system",
 			Content: systemText,
-		})
+		}
+		// Try to extract cache_control from system array blocks
+		if len(anthropicReq.System) > 0 {
+			var blocks []types.SystemContentBlock
+			if err := json.Unmarshal(anthropicReq.System, &blocks); err == nil {
+				for _, b := range blocks {
+					if b.Type == "text" && b.CacheControl != nil {
+						systemMsg.CacheControl = b.CacheControl
+						break
+					}
+				}
+			}
+		}
+		result = append(result, systemMsg)
 	}
 
 	// Transform each message

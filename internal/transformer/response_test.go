@@ -201,3 +201,91 @@ func TestTransformResponseNoReasoningContent(t *testing.T) {
 		t.Fatalf("Content[0].Type = %q, want %q", got, want)
 	}
 }
+
+func TestTransformResponseWithCacheTokens(t *testing.T) {
+	transformer := NewResponseTransformer()
+
+	openaiResp := &types.ChatCompletionResponse{
+		ID:     "chatcmpl-123",
+		Object: "chat.completion",
+		Model:  "kimi-k2.6",
+		Choices: []types.Choice{
+			{
+				Index: 0,
+				Message: types.ChatMessage{
+					Role:    "assistant",
+					Content: "Hello, world!",
+				},
+				FinishReason: "stop",
+			},
+		},
+		Usage: types.UsageInfo{
+			PromptTokens:           100,
+			CompletionTokens:       50,
+			TotalTokens:            150,
+			PromptCacheHitTokens:   80,
+			PromptCacheMissTokens:  20,
+		},
+	}
+
+	anthropicResp, err := transformer.TransformResponse(openaiResp, "claude-3-sonnet")
+	if err != nil {
+		t.Fatalf("TransformResponse() error = %v", err)
+	}
+
+	if got, want := anthropicResp.Usage.InputTokens, 100; got != want {
+		t.Errorf("Usage.InputTokens = %d, want %d", got, want)
+	}
+	if got, want := anthropicResp.Usage.OutputTokens, 50; got != want {
+		t.Errorf("Usage.OutputTokens = %d, want %d", got, want)
+	}
+	if got, want := anthropicResp.Usage.CacheReadInputTokens, 80; got != want {
+		t.Errorf("Usage.CacheReadInputTokens = %d, want %d", got, want)
+	}
+	if got, want := anthropicResp.Usage.CacheCreationInputTokens, 20; got != want {
+		t.Errorf("Usage.CacheCreationInputTokens = %d, want %d", got, want)
+	}
+}
+
+func TestTransformResponseWithoutCacheTokens(t *testing.T) {
+	transformer := NewResponseTransformer()
+
+	openaiResp := &types.ChatCompletionResponse{
+		ID:     "chatcmpl-456",
+		Object: "chat.completion",
+		Model:  "glm-5",
+		Choices: []types.Choice{
+			{
+				Index: 0,
+				Message: types.ChatMessage{
+					Role:    "assistant",
+					Content: "No cache here",
+				},
+				FinishReason: "stop",
+			},
+		},
+		Usage: types.UsageInfo{
+			PromptTokens:     10,
+			CompletionTokens: 5,
+			TotalTokens:      15,
+		},
+	}
+
+	anthropicResp, err := transformer.TransformResponse(openaiResp, "claude-3-haiku")
+	if err != nil {
+		t.Fatalf("TransformResponse() error = %v", err)
+	}
+
+	if got, want := anthropicResp.Usage.InputTokens, 10; got != want {
+		t.Errorf("Usage.InputTokens = %d, want %d", got, want)
+	}
+	if got, want := anthropicResp.Usage.OutputTokens, 5; got != want {
+		t.Errorf("Usage.OutputTokens = %d, want %d", got, want)
+	}
+	if got, want := anthropicResp.Usage.CacheReadInputTokens, 0; got != want {
+		t.Errorf("Usage.CacheReadInputTokens = %d, want %d", got, want)
+	}
+	if got, want := anthropicResp.Usage.CacheCreationInputTokens, 0; got != want {
+		t.Errorf("Usage.CacheCreationInputTokens = %d, want %d", got, want)
+	}
+}

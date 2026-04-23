@@ -318,8 +318,10 @@ func (h *StreamHandler) processSSELine(
 		var usage *types.Usage
 		if chunk.Usage != nil {
 			usage = &types.Usage{
-				InputTokens:  chunk.Usage.PromptTokens,
-				OutputTokens: chunk.Usage.CompletionTokens,
+				InputTokens:              chunk.Usage.PromptTokens,
+				OutputTokens:             chunk.Usage.CompletionTokens,
+				CacheCreationInputTokens: chunk.Usage.PromptCacheMissTokens,
+				CacheReadInputTokens:     chunk.Usage.PromptCacheHitTokens,
 			}
 		}
 

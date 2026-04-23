@@ -46,8 +46,10 @@ func (t *ResponseTransformer) TransformResponse(
 		StopReason:   stopReason,
 		StopSequence: "",
 		Usage: types.Usage{
-			InputTokens:  openaiResp.Usage.PromptTokens,
-			OutputTokens: openaiResp.Usage.CompletionTokens,
+			InputTokens:              openaiResp.Usage.PromptTokens,
+			OutputTokens:             openaiResp.Usage.CompletionTokens,
+			CacheCreationInputTokens: openaiResp.Usage.PromptCacheMissTokens,
+			CacheReadInputTokens:     openaiResp.Usage.PromptCacheHitTokens,
 		},
 	}
 

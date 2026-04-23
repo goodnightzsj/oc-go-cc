@@ -31,6 +31,11 @@ func TestLoadJSON(t *testing.T) {
 	os.Setenv("OC_GO_CC_CONFIG", cfgPath)
 	defer os.Unsetenv("OC_GO_CC_CONFIG")
 
+	// Prevent env var API key from overriding test config
+	oldAPIKey := os.Getenv("OC_GO_CC_API_KEY")
+	os.Unsetenv("OC_GO_CC_API_KEY")
+	defer os.Setenv("OC_GO_CC_API_KEY", oldAPIKey)
+
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -70,6 +75,11 @@ func TestLoadMissingAPIKey(t *testing.T) {
 
 	os.Setenv("OC_GO_CC_CONFIG", cfgPath)
 	defer os.Unsetenv("OC_GO_CC_CONFIG")
+
+	// Prevent env var API key from making this test pass incorrectly
+	oldAPIKey := os.Getenv("OC_GO_CC_API_KEY")
+	os.Unsetenv("OC_GO_CC_API_KEY")
+	defer os.Setenv("OC_GO_CC_API_KEY", oldAPIKey)
 
 	_, err := Load()
 	if err == nil {

@@ -132,27 +132,24 @@ jobs:
             COMMITS=$(git log "${PREVIOUS_TAG}..HEAD" --pretty=format:"%H%n%s%n%b%n---COMMIT_SEP---")
             FILE_CHANGES=$(git diff --stat "${PREVIOUS_TAG}..HEAD")
 
-            PROMPT=$(cat <<'PROMPT_EOF'
-You are a technical writer generating release notes for a Go proxy server project (oc-go-cc).
+            PROMPT="You are a technical writer generating release notes for a Go proxy server project (oc-go-cc).
 
-Analyze the provided git commits and file changes, then generate a well-structured
-changelog in Markdown format. Follow these guidelines:
+            Analyze the provided git commits and file changes, then generate a well-structured
+            changelog in Markdown format. Follow these guidelines:
 
-1. Start with a brief summary paragraph (2-3 sentences) describing the overall theme of this release
-2. Group changes into sections with these exact headers:
-   - **New Features** — New capabilities, enhancements, additions
-   - **Bug Fixes** — Fixes for reported or discovered issues
-   - **Improvements** — Performance, reliability, or code quality improvements
-   - **Documentation** — README, docs, comments, config updates
-   - **Chores** — Build, CI/CD, dependency updates, refactoring
-3. Each bullet should be concise but descriptive (one line)
-4. Mention breaking changes prominently with a ⚠️ **Breaking Changes** section at the top
-5. Use present tense, imperative mood (e.g., "Add feature" not "Added feature")
-6. Keep it technical but accessible — target audience is developers using this tool
+            1. Start with a brief summary paragraph (2-3 sentences) describing the overall theme of this release
+            2. Group changes into sections with these exact headers:
+               - **New Features** - New capabilities, enhancements, additions
+               - **Bug Fixes** - Fixes for reported or discovered issues
+               - **Improvements** - Performance, reliability, or code quality improvements
+               - **Documentation** - README, docs, comments, config updates
+               - **Chores** - Build, CI/CD, dependency updates, refactoring
+            3. Each bullet should be concise but descriptive (one line)
+            4. Mention breaking changes prominently with a warning emoji Breaking Changes section at the top
+            5. Use present tense, imperative mood (e.g., Add feature not Added feature)
+            6. Keep it technical but accessible - target audience is developers using this tool
 
-Format output as clean Markdown without any preamble or explanation. Do not wrap the entire response in a code block.
-PROMPT_EOF
-)
+            Format output as clean Markdown without any preamble or explanation. Do not wrap the entire response in a code block."
 
             USER_CONTENT="Git commits since ${PREVIOUS_TAG}:\n\n${COMMITS}\n\nFiles changed:\n\n${FILE_CHANGES}"
 

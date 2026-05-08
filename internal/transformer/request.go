@@ -288,12 +288,17 @@ func (t *RequestTransformer) transformAssistantMessage(blocks []types.ContentBlo
 	if reasoningContent != "" {
 		// Real thinking content from the upstream history — preserve it.
 		reasoningContentPtr = &reasoningContent
-	} else if hasThinkingInHistory && len(toolCalls) > 0 && isDeepSeekModel(modelID) {
-		// DeepSeek in thinking mode requires reasoning_content on ALL assistant
-		// messages, including tool-call turns where Claude Code didn't preserve
-		// the thinking block. Use a placeholder that won't trigger validation:
-		// DeepSeek checks for the field's presence, not its content, when the
-		// original thinking was stripped by the client.
+	} else if hasThinkingInHistory && isDeepSeekModel(modelID) {
+		// DeepSeek in thinking mode requires reasoning_content on EVERY
+		// assistant message — text-only continuation turns and tool_use
+		// turns alike — whenever the conversation was opened in thinking
+		// mode. Without this, upstream returns:
+		//   400 invalid_request_error: "The `reasoning_content` in the
+		//   thinking mode must be passed back to the API."
+		// Use a single-space placeholder for assistant turns whose original
+		// thinking blocks were stripped by Claude Code (compact summaries,
+		// dropped reasoning blocks, etc.) — DeepSeek checks for the field's
+		// presence and non-empty content, not its semantic value.
 		placeholder := " "
 		reasoningContentPtr = &placeholder
 	} else if len(toolCalls) > 0 && needsPlaceholderReasoning(modelID) {

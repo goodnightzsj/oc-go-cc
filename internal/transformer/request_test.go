@@ -590,6 +590,82 @@ func TestTransformRequestDeepSeekPlaceholderWithThinkingHistory(t *testing.T) {
 	}
 }
 
+// Regression test for an upstream 400 observed in production:
+//
+//	"The reasoning_content in the thinking mode must be passed back to the API."
+//
+// Claude Code can produce assistant turns that are text-only (no tool_use,
+// no thinking block) inside a conversation where an earlier turn DID carry
+// thinking. Examples: a follow-up that the model answers in plain text, or
+// a post-/compact summary message. DeepSeek in thinking mode requires
+// reasoning_content on EVERY assistant message, not just tool_use ones, so
+// the proxy must add the placeholder for text-only turns too.
+func TestTransformRequestDeepSeekPlaceholderForTextOnlyAssistant(t *testing.T) {
+	transformer := NewRequestTransformer()
+
+	req := &types.MessageRequest{
+		Model:     "claude-test",
+		MaxTokens: 256,
+		Messages: []types.Message{
+			{Role: "user", Content: json.RawMessage(`"think about this"`)},
+			{
+				Role: "assistant",
+				Content: json.RawMessage(`[
+					{"type":"thinking","thinking":"Let me think..."},
+					{"type":"text","text":"My initial answer"}
+				]`),
+			},
+			{Role: "user", Content: json.RawMessage(`"a follow-up question"`)},
+			{
+				// Text-only continuation. No thinking block (Claude Code
+				// commonly drops thinking on simple follow-ups), no tool_use.
+				Role:    "assistant",
+				Content: json.RawMessage(`[{"type":"text","text":"A short reply"}]`),
+			},
+			{Role: "user", Content: json.RawMessage(`"and another"`)},
+		},
+	}
+
+	openaiReq, err := transformer.TransformRequest(req, config.ModelConfig{
+		ModelID:         "deepseek-v4-flash",
+		ReasoningEffort: "high",
+		Thinking:        json.RawMessage(`{"type":"enabled"}`),
+	})
+	if err != nil {
+		t.Fatalf("TransformRequest() error = %v", err)
+	}
+
+	// Find the second assistant message (text-only follow-up).
+	var textOnlyAssistant *types.ChatMessage
+	seen := 0
+	for i := range openaiReq.Messages {
+		if openaiReq.Messages[i].Role != "assistant" {
+			continue
+		}
+		seen++
+		if seen == 2 {
+			textOnlyAssistant = &openaiReq.Messages[i]
+			break
+		}
+	}
+	if textOnlyAssistant == nil {
+		t.Fatal("expected two assistant messages in transformed request, found fewer")
+	}
+	if len(textOnlyAssistant.ToolCalls) != 0 {
+		t.Fatalf("text-only assistant message unexpectedly had tool_calls: %+v", textOnlyAssistant.ToolCalls)
+	}
+
+	// The bug this test guards against: ReasoningContent was nil on this
+	// message, causing DeepSeek to 400 the entire request. After the fix,
+	// it's the single-space placeholder.
+	if textOnlyAssistant.ReasoningContent == nil {
+		t.Fatal("ReasoningContent = nil, want non-nil placeholder for DeepSeek text-only assistant in thinking-mode conversation")
+	}
+	if got, want := *textOnlyAssistant.ReasoningContent, " "; got != want {
+		t.Fatalf("ReasoningContent = %q, want %q", got, want)
+	}
+}
+
 func mustJSONBytes(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	b, err := json.Marshal(v)

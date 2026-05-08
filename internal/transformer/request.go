@@ -123,8 +123,16 @@ func (t *RequestTransformer) TransformRequest(
 	return openaiReq, nil
 }
 
-// HasThinkingBlocks returns true if any assistant message contains a
-// thinking content block.
+// HasThinkingBlocks returns true if any assistant message contains
+// thinking content — either as a dedicated `thinking`-typed block, or
+// attached as a non-empty `thinking` field on a `tool_use` block.
+//
+// Claude Code emits both shapes: dedicated thinking blocks for text-only
+// reasoning, and tool_use blocks with an inline `thinking` field when the
+// assistant turn ends in a tool call. Both forms must mark the
+// conversation as having thinking history so the proxy enables thinking
+// mode on subsequent upstream calls (DeepSeek defaults to thinking mode
+// and demands `reasoning_content` once it's been engaged).
 func HasThinkingBlocks(messages []types.Message) bool {
 	for _, msg := range messages {
 		if msg.Role != "assistant" {
@@ -132,6 +140,9 @@ func HasThinkingBlocks(messages []types.Message) bool {
 		}
 		for _, block := range msg.ContentBlocks() {
 			if block.Type == "thinking" {
+				return true
+			}
+			if block.Type == "tool_use" && block.Thinking != "" {
 				return true
 			}
 		}
@@ -258,7 +269,15 @@ func (t *RequestTransformer) transformAssistantMessage(blocks []types.ContentBlo
 				thinkingParts = append(thinkingParts, block.Thinking)
 			}
 		case "tool_use":
-			// Map to OpenAI function call format
+			// Claude Code can attach reasoning directly to the tool_use block
+			// (instead of emitting a separate thinking-typed block) when the
+			// assistant turn ends in a tool call. Extract that here so it
+			// round-trips back to upstream as reasoning_content — otherwise
+			// DeepSeek (which always operates in thinking mode after the
+			// first reasoning response) returns 400 on the next request.
+			if block.Thinking != "" {
+				thinkingParts = append(thinkingParts, block.Thinking)
+			}
 			arguments := "{}"
 			if len(block.Input) > 0 {
 				arguments = string(block.Input)

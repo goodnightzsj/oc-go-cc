@@ -666,6 +666,59 @@ func TestTransformRequestDeepSeekPlaceholderForTextOnlyAssistant(t *testing.T) {
 	}
 }
 
+// Regression test for the production failure that motivated this PR.
+//
+// User configured oc-go-cc with a bare DeepSeek model config — no
+// `thinking` field, no `reasoning_effort`. They ran Claude Code with
+// `effortLevel: xhigh` set globally. Workflow:
+//
+//   turn 1: user asks question  →  proxy forwards to deepseek-v4-flash
+//   turn 1 response: succeeds, upstream ran in DeepSeek's *default*
+//                    thinking mode (DeepSeek-v4 always defaults to
+//                    thinking mode unless explicitly disabled)
+//   turn 2: user follows up  →  proxy receives request, sees no thinking
+//                                blocks in history (Claude Code didn't
+//                                round-trip the reasoning back), forwards
+//                                with `openaiReq.Thinking = nil` because
+//                                neither model config nor history asked for
+//                                thinking-mode handling
+//   turn 2: upstream is STILL in thinking mode (default), demands
+//           reasoning_content on the prior assistant message which the
+//           proxy didn't add → 400.
+//
+// Fix: when the model is DeepSeek and there's no extant thinking history,
+// explicitly send `thinking: disabled` so upstream switches off thinking
+// mode and stops demanding reasoning_content.
+func TestTransformRequestForceDisablesThinkingForDeepSeekWithoutHistory(t *testing.T) {
+	transformer := NewRequestTransformer()
+
+	req := &types.MessageRequest{
+		Model:     "claude-test",
+		MaxTokens: 256,
+		Messages: []types.Message{
+			{Role: "user", Content: json.RawMessage(`"do something"`)},
+		},
+	}
+
+	// Bare DeepSeek config: no Thinking field, no ReasoningEffort.
+	// Mirrors a typical user setup for the `fast` slot.
+	openaiReq, err := transformer.TransformRequest(req, config.ModelConfig{
+		ModelID: "deepseek-v4-flash",
+	})
+	if err != nil {
+		t.Fatalf("TransformRequest() error = %v", err)
+	}
+
+	// Must explicitly disable thinking — leaving it nil lets DeepSeek's
+	// default thinking-mode behavior take over and 400 on subsequent turns.
+	if len(openaiReq.Thinking) == 0 {
+		t.Fatal("openaiReq.Thinking is empty — must be set to {\"type\":\"disabled\"} for DeepSeek without thinking history")
+	}
+	if got, want := string(openaiReq.Thinking), `{"type":"disabled"}`; got != want {
+		t.Fatalf("openaiReq.Thinking = %s, want %s", got, want)
+	}
+}
+
 // Regression test: Claude Code emits tool_use blocks with the chain-of-
 // thought attached directly via a `thinking` field, instead of as a
 // separate thinking-typed block. Real shape observed:

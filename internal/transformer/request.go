@@ -108,10 +108,18 @@ func (t *RequestTransformer) TransformRequest(
 				openaiReq.ReasoningEffort = &defaultEffort
 			}
 		}
-	} else if len(model.Thinking) > 0 || model.ReasoningEffort != "" {
-		// Model config wants thinking mode but history has no thinking blocks.
-		// Explicitly disable to prevent DeepSeek from requiring reasoning_content
-		// on assistant messages that can't provide it.
+	} else if isDeepSeekModel(model.ModelID) || len(model.Thinking) > 0 || model.ReasoningEffort != "" {
+		// DeepSeek-v4 models default to thinking mode upstream — once
+		// engaged, every assistant message in the conversation history is
+		// required to carry reasoning_content, and we can't synthesize that
+		// reliably (Claude Code emits assistant turns whose original
+		// thinking content was elided to "" or stripped on /compact). The
+		// safe default for DeepSeek with no extant thinking history is to
+		// explicitly disable upstream thinking mode.
+		//
+		// Same disable also applies when the model config requested thinking
+		// but we don't have any thinking blocks yet — sending thinking:enabled
+		// alongside assistant messages without reasoning_content 400s.
 		openaiReq.Thinking = json.RawMessage(`{"type":"disabled"}`)
 	}
 

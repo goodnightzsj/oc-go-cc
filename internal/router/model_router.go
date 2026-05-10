@@ -26,8 +26,29 @@ type RouteResult struct {
 }
 
 // Route determines which model to use for a request.
-func (r *ModelRouter) Route(messages []MessageContent, tokenCount int) (RouteResult, error) {
+// If respect_requested_model is enabled and requestedModel is provided, it overrides scenario-based routing.
+func (r *ModelRouter) Route(messages []MessageContent, tokenCount int, requestedModel string) (RouteResult, error) {
 	cfg := r.atomic.Get()
+
+	// If configured to respect user's model choice and user specified a model, use it directly
+	if cfg.RespectRequestedModel && requestedModel != "" {
+		// Create model config from the requested model
+		primary := config.ModelConfig{
+			Provider: "opencode-go",
+			ModelID:  requestedModel,
+		}
+
+		// Get default fallbacks
+		fallbacks := cfg.Fallbacks["default"]
+
+		return RouteResult{
+			Primary:   primary,
+			Fallbacks: fallbacks,
+			Scenario:  ScenarioDefault,
+		}, nil
+	}
+
+	// Otherwise, use scenario-based routing
 	result := DetectScenario(messages, tokenCount, cfg)
 
 	// Get primary model for scenario
@@ -69,8 +90,26 @@ func (rr *RouteResult) GetModelChain() []config.ModelConfig {
 
 // RouteForStreaming determines which model to use for streaming requests.
 // Prioritizes fast TTFT (time-to-first-token) over capability.
-func (r *ModelRouter) RouteForStreaming(messages []MessageContent, tokenCount int) RouteResult {
+// If respect_requested_model is enabled and requestedModel is provided, it overrides scenario-based routing.
+func (r *ModelRouter) RouteForStreaming(messages []MessageContent, tokenCount int, requestedModel string) RouteResult {
 	cfg := r.atomic.Get()
+
+	// If configured to respect user's model choice and user specified a model, use it directly
+	if cfg.RespectRequestedModel && requestedModel != "" {
+		primary := config.ModelConfig{
+			Provider: "opencode-go",
+			ModelID:  requestedModel,
+		}
+		fallbacks := cfg.Fallbacks["default"]
+
+		return RouteResult{
+			Primary:   primary,
+			Fallbacks: fallbacks,
+			Scenario:  ScenarioDefault,
+		}
+	}
+
+	// Otherwise, use scenario-based routing for streaming
 	result := RouteForStreaming(messages, tokenCount, cfg)
 
 	// Get primary model for scenario

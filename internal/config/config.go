@@ -12,6 +12,7 @@ type Config struct {
 	EnableStreamingScenarioRouting bool                     `json:"enable_streaming_scenario_routing"`
 	Models                         map[string]ModelConfig   `json:"models"`
 	Fallbacks                      map[string][]ModelConfig `json:"fallbacks"`
+	ModelOverrides                 map[string]ModelConfig   `json:"model_overrides"`
 	OpenCodeGo                     OpenCodeGoConfig         `json:"opencode_go"`
 	Logging                        LoggingConfig            `json:"logging"`
 }

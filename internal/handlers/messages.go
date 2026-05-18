@@ -425,6 +425,7 @@ func (h *MessagesHandler) handleAnthropicStreaming(
 
 	// Send raw Anthropic request to Anthropic endpoint
 	// Use ctx so cancellation propagates when client disconnects
+		rawBody = replaceModelInRawBody(rawBody, modelID)
 	resp, err := h.client.SendAnthropicRequest(ctx, rawBody, true)
 	if err != nil {
 		return err
@@ -518,6 +519,7 @@ func (h *MessagesHandler) executeAnthropicRequest(
 	model config.ModelConfig,
 ) ([]byte, error) {
 	// Send raw Anthropic request to Anthropic endpoint
+	rawBody = replaceModelInRawBody(rawBody, model.ModelID)
 	resp, err := h.client.SendAnthropicRequest(ctx, rawBody, false)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic request failed: %w", err)

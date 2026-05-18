@@ -85,35 +85,16 @@ func (t *RequestTransformer) TransformRequest(
 		openaiReq.MaxTokens = &maxTokens
 	}
 
-	// DeepSeek-v4 models always operate in thinking mode. When conversation
-	// history contains thinking blocks (round-tripped as reasoning_content),
-	// we MUST send thinking mode params so DeepSeek validates reasoning_content
-	// on assistant messages. When history LACKS thinking blocks (Claude Code
-	// dropped them), we MUST explicitly disable thinking mode so DeepSeek
-	// doesn't require reasoning_content we can't provide.
-	hasThinkingInHistory := HasThinkingBlocks(anthropicReq.Messages)
-	if hasThinkingInHistory {
-		if len(model.Thinking) > 0 {
-			openaiReq.Thinking = model.Thinking
-		} else {
-			openaiReq.Thinking = json.RawMessage(`{"type":"enabled"}`)
-		}
-		// DeepSeek returns 400 if reasoning_effort is sent alongside
-		// thinking: disabled — only set it when thinking is active.
-		if !isThinkingDisabled(openaiReq.Thinking) || !isDeepSeekModel(model.ModelID) {
-			if model.ReasoningEffort != "" {
-				openaiReq.ReasoningEffort = &model.ReasoningEffort
-			} else {
-				defaultEffort := "high"
-				openaiReq.ReasoningEffort = &defaultEffort
-			}
-		}
-	} else if len(model.Thinking) > 0 || model.ReasoningEffort != "" {
-		// Model config wants thinking mode but history has no thinking blocks.
-		// Explicitly disable to prevent DeepSeek from requiring reasoning_content
-		// on assistant messages that can't provide it.
-		openaiReq.Thinking = json.RawMessage(`{"type":"disabled"}`)
-	}
+	// Determine thinking and reasoning_effort for the upstream request.
+	// Priority: explicit config → history continuity → safety guard.
+	//
+	// The safety guard (thinking: disabled) only engages when the history
+	// contains assistant messages that lack thinking blocks — DeepSeek
+	// validates reasoning_content on every assistant message in thinking
+	// mode and will 400 if any are missing.  On a first turn (no assistant
+	// messages) or when the user explicitly opts in via config, we send
+	// thinking: enabled so the model can produce reasoning.
+	resolveThinkingAndEffort(anthropicReq, model, openaiReq)
 
 	// Transform tools if present
 	if len(anthropicReq.Tools) > 0 {
@@ -134,6 +115,80 @@ func HasThinkingBlocks(messages []types.Message) bool {
 			if block.Type == "thinking" {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// resolveThinkingAndEffort applies thinking/reasoning_effort to the OpenAI
+// request. Decision priority:
+//
+//  1. History continuity — a prior turn used thinking → keep it enabled.
+//  2. Explicit config — model.Thinking set → use it verbatim.
+//  3. Config intent — model.ReasoningEffort set without model.Thinking
+//     → enable on first turn (no assistant messages), disable only when
+//     safety guard fires (DeepSeek + history assistant msgs lack thinking).
+//  4. No config, no history → leave both unset.
+func resolveThinkingAndEffort(
+	anthropicReq *types.MessageRequest,
+	model config.ModelConfig,
+	openaiReq *types.ChatCompletionRequest,
+) {
+	hasThinking := HasThinkingBlocks(anthropicReq.Messages)
+	hasAssistant := hasAssistantMessages(anthropicReq.Messages)
+	explicitThinking := len(model.Thinking) > 0
+	explicitEffort := model.ReasoningEffort != ""
+	isDeepSeek := isDeepSeekModel(model.ModelID)
+
+	switch {
+	case hasThinking:
+		// History has thinking blocks — maintain continuity.
+		if explicitThinking {
+			openaiReq.Thinking = model.Thinking
+		} else {
+			openaiReq.Thinking = json.RawMessage(`{"type":"enabled"}`)
+		}
+		if !isThinkingDisabled(openaiReq.Thinking) || !isDeepSeek {
+			setReasoningEffort(openaiReq, model.ReasoningEffort)
+		}
+
+	case explicitThinking:
+		// Config explicitly sets thinking — respect it.
+		openaiReq.Thinking = model.Thinking
+		if !isThinkingDisabled(openaiReq.Thinking) || !isDeepSeek {
+			setReasoningEffort(openaiReq, model.ReasoningEffort)
+		}
+
+	case explicitEffort:
+		// User set reasoning_effort but not thinking. Intent is clear.
+		// Safety guard: disable only when history has assistant messages
+		// that lack thinking blocks AND the model is DeepSeek.
+		if hasAssistant && isDeepSeek {
+			openaiReq.Thinking = json.RawMessage(`{"type":"disabled"}`)
+		} else {
+			openaiReq.Thinking = json.RawMessage(`{"type":"enabled"}`)
+			setReasoningEffort(openaiReq, model.ReasoningEffort)
+		}
+	}
+}
+
+// setReasoningEffort sets reasoning_effort on the request, defaulting to
+// "high" when the config value is empty.
+func setReasoningEffort(openaiReq *types.ChatCompletionRequest, effort string) {
+	if effort != "" {
+		openaiReq.ReasoningEffort = &effort
+	} else {
+		defaultEffort := "high"
+		openaiReq.ReasoningEffort = &defaultEffort
+	}
+}
+
+// hasAssistantMessages returns true when the conversation contains at least
+// one assistant message.
+func hasAssistantMessages(messages []types.Message) bool {
+	for _, msg := range messages {
+		if msg.Role == "assistant" {
+			return true
 		}
 	}
 	return false

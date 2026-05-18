@@ -70,6 +70,31 @@ func NewServer(atomic *config.AtomicConfig) (*Server, error) {
 	mux.HandleFunc("/v1/messages", messagesHandler.HandleMessages)
 	mux.HandleFunc("/v1/messages/count_tokens", healthHandler.HandleCountTokens)
 	mux.HandleFunc("/health", healthHandler.HandleHealth)
+	// OpenAI-compatible model list (some clients use /models without /v1/ prefix)
+	mux.HandleFunc("/models", func(w http.ResponseWriter, r *http.Request) {
+		cfg := atomic.Get()
+		base := strings.TrimRight(cfg.OpenCodeGo.BaseURL, "/")
+		modelsURL := base[:strings.LastIndex(base, "/v1/")+4] + "models"
+		req, err := http.NewRequestWithContext(r.Context(), "GET", modelsURL, nil)
+		if err != nil {
+			http.Error(w, "failed to create request", http.StatusInternalServerError)
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			http.Error(w, "upstream request failed", http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		for k, vv := range resp.Header {
+			for _, v := range vv {
+				w.Header().Add(k, v)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
+	})
 	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
 		cfg := atomic.Get()
 		base := strings.TrimRight(cfg.OpenCodeGo.BaseURL, "/")

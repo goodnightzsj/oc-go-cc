@@ -182,15 +182,25 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 	requestedModel := anthropicReq.Model
 
 	var routeResult router.RouteResult
-	if isStreaming && !h.modelRouter.IsStreamingScenarioRoutingEnabled() {
-		// Streaming: use faster models to minimize TTFT (time-to-first-token)
-		routeResult = h.modelRouter.RouteForStreaming(routerMessages, tokenCount, requestedModel)
-	} else {
-		var err error
-		routeResult, err = h.modelRouter.Route(routerMessages, tokenCount, requestedModel)
-		if err != nil {
-			h.sendError(w, http.StatusInternalServerError, "routing failed", err)
-			return
+
+	// Check model_overrides first — user-specified model bypasses scenario routing
+	if anthropicReq.Model != "" {
+		if overrideResult, ok := h.modelRouter.RouteWithOverride(anthropicReq.Model); ok {
+			routeResult = overrideResult
+		}
+	}
+
+	if routeResult.Model.ModelID == "" {
+		if isStreaming && !h.modelRouter.IsStreamingScenarioRoutingEnabled() {
+			// Streaming: use faster models to minimize TTFT (time-to-first-token)
+			routeResult = h.modelRouter.RouteForStreaming(routerMessages, tokenCount, requestedModel)
+		} else {
+			var err error
+			routeResult, err = h.modelRouter.Route(routerMessages, tokenCount, requestedModel)
+			if err != nil {
+				h.sendError(w, http.StatusInternalServerError, "routing failed", err)
+				return
+			}
 		}
 	}
 
@@ -202,6 +212,21 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 
 	// Build fallback chain.
 	modelChain := routeResult.GetModelChain()
+
+	if isOverride {
+		// Append scenario fallback chain as safety net
+		var scenarioResult router.RouteResult
+		var scenarioErr error
+		if isStreaming && !h.modelRouter.IsStreamingScenarioRoutingEnabled() {
+			scenarioResult = h.modelRouter.RouteForStreaming(routerMessages, tokenCount)
+		} else {
+			scenarioResult, scenarioErr = h.modelRouter.Route(routerMessages, tokenCount)
+		}
+		if scenarioErr == nil {
+			scenarioChain := scenarioResult.GetModelChain()
+			modelChain = append(modelChain, scenarioChain...)
+		}
+	}
 
 	if isStreaming {
 		// Streaming: use ProxyStream for real-time SSE transformation

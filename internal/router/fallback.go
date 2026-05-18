@@ -153,6 +153,20 @@ func NewFallbackHandler(logger *slog.Logger, cbThreshold int, cbTimeout time.Dur
 }
 
 // getCircuitBreaker returns or creates a circuit breaker for a model.
+// ResetAll resets all circuit breakers so blocked models can be retried.
+func (h *FallbackHandler) ResetAll() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, cb := range h.circuitBreakers {
+		cb.mu.Lock()
+		cb.state = CircuitClosed
+		cb.failureCount = 0
+		cb.successCount = 0
+		cb.halfOpenCalls = 0
+		cb.mu.Unlock()
+	}
+}
+
 func (h *FallbackHandler) getCircuitBreaker(modelID string) *CircuitBreaker {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -216,6 +230,9 @@ func (h *FallbackHandler) ExecuteWithFallback(
 			"circuit_state", cb.State(),
 		)
 	}
+
+	h.ResetAll()
+	h.logger.Warn("all models exhausted, resetting circuit breakers for next retry")
 
 	return &FallbackResult{
 		ModelID:     models[0].ModelID,

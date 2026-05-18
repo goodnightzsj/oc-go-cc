@@ -115,6 +115,12 @@ func HasThinkingBlocks(messages []types.Message) bool {
 			if block.Type == "thinking" {
 				return true
 			}
+			// Claude Code attaches thinking to tool_use blocks when the
+			// assistant turn ends in a tool call — both forms mark the
+			// conversation as having thinking history for continuity.
+			if block.Type == "tool_use" && block.Thinking != "" {
+				return true
+			}
 		}
 	}
 	return false
@@ -313,6 +319,13 @@ func (t *RequestTransformer) transformAssistantMessage(blocks []types.ContentBlo
 				thinkingParts = append(thinkingParts, block.Thinking)
 			}
 		case "tool_use":
+			// Claude Code can attach reasoning directly to the tool_use
+			// block instead of emitting a separate thinking-typed block.
+			// Extract it so it round-trips back as reasoning_content.
+			if block.Thinking != "" {
+				thinkingParts = append(thinkingParts, block.Thinking)
+			}
+
 			// Map to OpenAI function call format
 			arguments := "{}"
 			if len(block.Input) > 0 {
@@ -343,7 +356,7 @@ func (t *RequestTransformer) transformAssistantMessage(blocks []types.ContentBlo
 	if reasoningContent != "" {
 		// Real thinking content from the upstream history — preserve it.
 		reasoningContentPtr = &reasoningContent
-	} else if hasThinkingInHistory && len(toolCalls) > 0 && isDeepSeekModel(modelID) {
+	} else if hasThinkingInHistory && isDeepSeekModel(modelID) {
 		// DeepSeek in thinking mode requires reasoning_content on ALL assistant
 		// messages, including tool-call turns where Claude Code didn't preserve
 		// the thinking block. Use a placeholder that won't trigger validation:

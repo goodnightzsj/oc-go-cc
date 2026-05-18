@@ -154,14 +154,14 @@ func resolveThinkingAndEffort(
 		} else {
 			openaiReq.Thinking = json.RawMessage(`{"type":"enabled"}`)
 		}
-		if !isThinkingDisabled(openaiReq.Thinking) || !isDeepSeek {
+		if !isThinkingDisabled(openaiReq.Thinking) && isDeepSeek {
 			setReasoningEffort(openaiReq, model.ReasoningEffort)
 		}
 
 	case explicitThinking:
 		// Config explicitly sets thinking — respect it.
 		openaiReq.Thinking = model.Thinking
-		if !isThinkingDisabled(openaiReq.Thinking) || !isDeepSeek {
+		if !isThinkingDisabled(openaiReq.Thinking) && isDeepSeek {
 			setReasoningEffort(openaiReq, model.ReasoningEffort)
 		}
 
@@ -171,7 +171,7 @@ func resolveThinkingAndEffort(
 		// that lack thinking blocks AND the model is DeepSeek.
 		if hasAssistant && isDeepSeek {
 			openaiReq.Thinking = json.RawMessage(`{"type":"disabled"}`)
-		} else {
+		} else if isDeepSeek {
 			openaiReq.Thinking = json.RawMessage(`{"type":"enabled"}`)
 			setReasoningEffort(openaiReq, model.ReasoningEffort)
 		}

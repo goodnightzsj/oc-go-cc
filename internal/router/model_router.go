@@ -81,6 +81,25 @@ func (r *ModelRouter) IsStreamingScenarioRoutingEnabled() bool {
 	return r.atomic.Get().EnableStreamingScenarioRouting
 }
 
+// RouteWithOverride checks if the requested model matches a model_overrides entry.
+// Returns the override RouteResult and true if matched, zero value and false otherwise.
+func (r *ModelRouter) RouteWithOverride(requestedModel string) (RouteResult, bool) {
+	cfg := r.atomic.Get()
+	if cfg.ModelOverrides == nil {
+		return RouteResult{}, false
+	}
+	override, ok := cfg.ModelOverrides[requestedModel]
+	if !ok {
+		return RouteResult{}, false
+	}
+	fallbacks := cfg.Fallbacks[requestedModel]
+	return RouteResult{
+		Primary:   override,
+		Fallbacks: fallbacks,
+		Scenario:  "override",
+	}, true
+}
+
 // GetModelChain returns the full chain of models to try (primary + fallbacks).
 func (rr *RouteResult) GetModelChain() []config.ModelConfig {
 	chain := []config.ModelConfig{rr.Primary}

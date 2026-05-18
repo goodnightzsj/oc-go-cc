@@ -3,6 +3,8 @@ package server
 
 import (
 	"context"
+	"strings"
+	"io"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -68,6 +70,30 @@ func NewServer(atomic *config.AtomicConfig) (*Server, error) {
 	mux.HandleFunc("/v1/messages", messagesHandler.HandleMessages)
 	mux.HandleFunc("/v1/messages/count_tokens", healthHandler.HandleCountTokens)
 	mux.HandleFunc("/health", healthHandler.HandleHealth)
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		cfg := atomic.Get()
+		base := strings.TrimRight(cfg.OpenCodeGo.BaseURL, "/")
+		modelsURL := base[:strings.LastIndex(base, "/v1/")+4] + "models"
+		req, err := http.NewRequestWithContext(r.Context(), "GET", modelsURL, nil)
+		if err != nil {
+			http.Error(w, "failed to create request", http.StatusInternalServerError)
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			http.Error(w, "upstream request failed", http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		for k, vv := range resp.Header {
+			for _, v := range vv {
+				w.Header().Add(k, v)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -75,7 +101,7 @@ func NewServer(atomic *config.AtomicConfig) (*Server, error) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"service":"oc-go-cc","status":"ok","endpoints":{"/v1/messages":"Anthropic Messages API proxy","/v1/messages/count_tokens":"tiktoken counter","/health":"health + metrics"}}`))
+		w.Write([]byte(`{"service":"oc-go-cc","status":"ok","endpoints":{"/v1/messages":"Anthropic Messages API proxy","/v1/models":"OpenCode Go model list","/v1/messages/count_tokens":"tiktoken counter","/health":"health + metrics"}}`))
 	})
 
 	// Create HTTP server.

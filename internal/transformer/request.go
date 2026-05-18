@@ -20,6 +20,16 @@ func NewRequestTransformer() *RequestTransformer {
 }
 
 // isThinkingDisabled checks if the thinking JSON config explicitly sets type to "disabled".
+
+// assistantCacheCtrl returns a CacheControl pointer for ephemeral caching
+// when the assistant message contained cache_control markers.
+func assistantCacheCtrl(caching bool) *types.CacheControl {
+	if caching {
+		return &types.CacheControl{Type: "ephemeral"}
+	}
+	return nil
+}
+
 func isThinkingDisabled(thinking json.RawMessage) bool {
 	var m map[string]interface{}
 	if err := json.Unmarshal(thinking, &m); err != nil {
@@ -271,19 +281,30 @@ func (t *RequestTransformer) transformMessage(msg types.Message, modelID string,
 func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock) ([]types.ChatMessage, error) {
 	var result []types.ChatMessage
 	var textParts []string
+	var promptCaching bool
 
 	for _, block := range blocks {
+		if block.CacheControl != nil && block.CacheControl.Type == "ephemeral" {
+			promptCaching = true
+		}
 		switch block.Type {
 		case "text":
+			if block.CacheControl != nil && block.CacheControl.Type == "ephemeral" {
+				promptCaching = true
+			}
 			textParts = append(textParts, block.Text)
 		case "tool_result":
 			// In OpenAI, tool results are separate messages with role "tool"
 			toolContent := block.TextContent()
-			result = append(result, types.ChatMessage{
+			toolMsg := types.ChatMessage{
 				Role:       "tool",
 				Content:    toolContent,
 				ToolCallID: block.GetToolID(),
-			})
+			}
+			if block.CacheControl != nil && block.CacheControl.Type == "ephemeral" {
+				toolMsg.CacheControl = &types.CacheControl{Type: "ephemeral"}
+			}
+			result = append(result, toolMsg)
 		case "image":
 			// Images not supported in text-only models, skip
 			textParts = append(textParts, "[Image]")
@@ -301,6 +322,9 @@ func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock) (
 		// If the Anthropic user turn also includes free-form text, emit it as
 		// a subsequent user message after all tool results.
 		userMsg := types.ChatMessage{Role: "user", Content: text}
+		if promptCaching {
+			userMsg.CacheControl = &types.CacheControl{Type: "ephemeral"}
+		}
 		result = append(result, userMsg)
 	}
 
@@ -312,18 +336,28 @@ func (t *RequestTransformer) transformAssistantMessage(blocks []types.ContentBlo
 	var textParts []string
 	var thinkingParts []string
 	var toolCalls []types.ToolCall
+	var assistantCaching bool
 
 	for _, block := range blocks {
 		switch block.Type {
 		case "text":
+			if block.CacheControl != nil && block.CacheControl.Type == "ephemeral" {
+				assistantCaching = true
+			}
 			textParts = append(textParts, block.Text)
 		case "thinking":
+			if block.CacheControl != nil && block.CacheControl.Type == "ephemeral" {
+				assistantCaching = true
+			}
 			// Preserve chain-of-thought so it can be forwarded back to providers
 			// that require reasoning_content to be preserved across turns.
 			if block.Thinking != "" {
 				thinkingParts = append(thinkingParts, block.Thinking)
 			}
 		case "tool_use":
+			if block.CacheControl != nil && block.CacheControl.Type == "ephemeral" {
+				assistantCaching = true
+			}
 			// Claude Code can attach reasoning directly to the tool_use
 			// block instead of emitting a separate thinking-typed block.
 			// Extract it so it round-trips back as reasoning_content.
@@ -379,6 +413,7 @@ func (t *RequestTransformer) transformAssistantMessage(blocks []types.ContentBlo
 	msg := types.ChatMessage{
 		Role:             "assistant",
 		Content:          content,
+		CacheControl:     assistantCacheCtrl(assistantCaching),
 		ReasoningContent: reasoningContentPtr,
 		ToolCalls:        toolCalls,
 	}

@@ -478,8 +478,8 @@ func TestTransformRequestNoThinkingConfigNoHistory(t *testing.T) {
 	if openaiReq.ReasoningEffort != nil {
 		t.Fatalf("ReasoningEffort = %v, want nil", *openaiReq.ReasoningEffort)
 	}
-	if openaiReq.Thinking != nil {
-		t.Fatalf("Thinking = %s, want nil", string(openaiReq.Thinking))
+	if got, want := string(openaiReq.Thinking), `{"type":"disabled"}`; got != want {
+		t.Fatalf("Thinking = %s, want %s", got, want)
 	}
 }
 

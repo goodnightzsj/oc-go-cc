@@ -175,11 +175,16 @@ func resolveThinkingAndEffort(
 			openaiReq.Thinking = json.RawMessage(`{"type":"enabled"}`)
 			setReasoningEffort(openaiReq, model.ReasoningEffort)
 		}
+
+	default:
+		// No config, no history. DeepSeek defaults to thinking mode
+		// upstream — explicitly disable to prevent 400s when
+		// subsequent turns lack reasoning_content.
+		if isDeepSeek {
+			openaiReq.Thinking = json.RawMessage(`{"type":"disabled"}`)
+		}
 	}
 }
-
-// setReasoningEffort sets reasoning_effort on the request, defaulting to
-// "high" when the config value is empty.
 func setReasoningEffort(openaiReq *types.ChatCompletionRequest, effort string) {
 	if effort != "" {
 		openaiReq.ReasoningEffort = &effort
@@ -218,7 +223,7 @@ func (t *RequestTransformer) transformMessages(anthropicReq *types.MessageReques
 			var blocks []types.SystemContentBlock
 			if err := json.Unmarshal(anthropicReq.System, &blocks); err == nil {
 				for _, b := range blocks {
-					if b.Type == "text" && b.CacheControl != nil {
+					if b.Type == "text" && b.CacheControl != nil && isDeepSeekModel(modelID) {
 						systemMsg.CacheControl = b.CacheControl
 						break
 					}

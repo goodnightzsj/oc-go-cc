@@ -189,8 +189,7 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 			routeResult = overrideResult
 		}
 	}
-
-	if routeResult.Model.ModelID == "" {
+	if routeResult.Primary.ModelID == "" {
 		if isStreaming && !h.modelRouter.IsStreamingScenarioRoutingEnabled() {
 			// Streaming: use faster models to minimize TTFT (time-to-first-token)
 			routeResult = h.modelRouter.RouteForStreaming(routerMessages, tokenCount, requestedModel)
@@ -213,14 +212,14 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 	// Build fallback chain.
 	modelChain := routeResult.GetModelChain()
 
-	if isOverride {
-		// Append scenario fallback chain as safety net
+	// When model override matched, append scenario fallback chain as safety net
+	if routeResult.Primary.ModelID != "" && anthropicReq.Model != "" {
 		var scenarioResult router.RouteResult
 		var scenarioErr error
 		if isStreaming && !h.modelRouter.IsStreamingScenarioRoutingEnabled() {
-			scenarioResult = h.modelRouter.RouteForStreaming(routerMessages, tokenCount)
+			scenarioResult = h.modelRouter.RouteForStreaming(routerMessages, tokenCount, requestedModel)
 		} else {
-			scenarioResult, scenarioErr = h.modelRouter.Route(routerMessages, tokenCount)
+			scenarioResult, scenarioErr = h.modelRouter.Route(routerMessages, tokenCount, requestedModel)
 		}
 		if scenarioErr == nil {
 			scenarioChain := scenarioResult.GetModelChain()

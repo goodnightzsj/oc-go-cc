@@ -3,6 +3,7 @@
 package router
 
 import (
+	"strings"
 	"fmt"
 
 	"oc-go-cc/internal/config"
@@ -27,6 +28,23 @@ type RouteResult struct {
 
 // Route determines which model to use for a request.
 // If respect_requested_model is enabled and requestedModel is provided, it overrides scenario-based routing.
+
+// stripContextSuffix removes [1m] / [256k] / [128k] context-window suffixes
+// that Claude Code appends to model names so that model matching works correctly.
+func stripContextSuffix(modelName string) string {
+	s := modelName
+	for {
+		before := s
+		s = strings.TrimSuffix(s, "[1m]")
+		s = strings.TrimSuffix(s, "[256k]")
+		s = strings.TrimSuffix(s, "[128k]")
+		if s == before {
+			break
+		}
+	}
+	return s
+}
+
 func (r *ModelRouter) Route(messages []MessageContent, tokenCount int, requestedModel string) (RouteResult, error) {
 	cfg := r.atomic.Get()
 
@@ -35,7 +53,7 @@ func (r *ModelRouter) Route(messages []MessageContent, tokenCount int, requested
 		// Create model config from the requested model
 		primary := config.ModelConfig{
 			Provider: "opencode-go",
-			ModelID:  requestedModel,
+			ModelID:  stripContextSuffix(requestedModel),
 		}
 
 		// Get default fallbacks
@@ -88,7 +106,7 @@ func (r *ModelRouter) RouteWithOverride(requestedModel string) (RouteResult, boo
 	if cfg.ModelOverrides == nil {
 		return RouteResult{}, false
 	}
-	override, ok := cfg.ModelOverrides[requestedModel]
+	override, ok := cfg.ModelOverrides[stripContextSuffix(requestedModel)]
 	if !ok {
 		return RouteResult{}, false
 	}
@@ -117,7 +135,7 @@ func (r *ModelRouter) RouteForStreaming(messages []MessageContent, tokenCount in
 	if cfg.RespectRequestedModel && requestedModel != "" {
 		primary := config.ModelConfig{
 			Provider: "opencode-go",
-			ModelID:  requestedModel,
+			ModelID:  stripContextSuffix(requestedModel),
 		}
 		fallbacks := cfg.Fallbacks["default"]
 

@@ -68,6 +68,15 @@ func NewServer(atomic *config.AtomicConfig) (*Server, error) {
 	mux.HandleFunc("/v1/messages", messagesHandler.HandleMessages)
 	mux.HandleFunc("/v1/messages/count_tokens", healthHandler.HandleCountTokens)
 	mux.HandleFunc("/health", healthHandler.HandleHealth)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"service":"oc-go-cc","status":"ok","endpoints":{"/v1/messages":"Anthropic Messages API proxy","/v1/messages/count_tokens":"tiktoken counter","/health":"health + metrics"}}`))
+	})
 
 	// Create HTTP server.
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)

@@ -992,12 +992,44 @@ func TestProxyStream_NoUsageFallback(t *testing.T) {
 		t.Fatalf("expected message_delta event, got none: %+v", events)
 	}
 
-	if messageDeltaEvent.Usage == nil {
-		t.Fatal("expected message_delta event to have non-nil Usage, but it was nil")
+	if messageDeltaEvent.Usage != nil {
+		t.Fatalf("Usage = %+v, want nil when upstream omits usage", messageDeltaEvent.Usage)
+	}
+}
+
+func TestProxyStream_ExplicitZeroUsage(t *testing.T) {
+	handler := NewStreamHandler()
+	w := newMockResponseWriter()
+	body := sseLines(
+		`{"choices":[{"delta":{"content":"Hello"}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		`{"choices":[],"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}}`,
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := handler.ProxyStream(w, body, "qwen3.6-plus", ctx); err != nil {
+		t.Fatalf("ProxyStream error: %v", err)
 	}
 
-	if messageDeltaEvent.Usage.InputTokens != 0 || messageDeltaEvent.Usage.OutputTokens != 0 {
-		t.Errorf("Usage = %+v, want InputTokens: 0, OutputTokens: 0", messageDeltaEvent.Usage)
+	events := parseSSEEvents(t, w.buf.String())
+	var usageEvent *types.MessageEvent
+	for i := range events {
+		if events[i].Usage != nil {
+			usageEvent = &events[i]
+			break
+		}
+	}
+
+	if usageEvent == nil {
+		t.Fatalf("expected usage event, got none: %+v", events)
+	}
+	if got, want := usageEvent.Usage.InputTokens, 0; got != want {
+		t.Errorf("Usage.InputTokens = %d, want %d", got, want)
+	}
+	if got, want := usageEvent.Usage.OutputTokens, 0; got != want {
+		t.Errorf("Usage.OutputTokens = %d, want %d", got, want)
 	}
 }
 

@@ -29,10 +29,10 @@ func TestTransformRequestRoundTripReasoning(t *testing.T) {
 			},
 			FinishReason: "stop",
 		}},
-		Usage: types.UsageInfo{
+		Usage: usageInfoPtr(types.UsageInfo{
 			PromptTokens:     10,
 			CompletionTokens: 20,
-		},
+		}),
 	}
 
 	// Step 2: Transform to Anthropic format (what Claude Code receives).

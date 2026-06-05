@@ -174,7 +174,6 @@ func (h *StreamHandler) ProxyStream(
 			Delta: &types.Delta{
 				StopReason: stopReason,
 			},
-			Usage: usageInfoToAnthropic(nil),
 		}
 		if err := writeSSEEvent(w, msgDelta); err != nil {
 			return ErrClientDisconnected
@@ -557,10 +556,7 @@ func (h *StreamHandler) sendUsageDelta(w http.ResponseWriter, flusher http.Flush
 
 func usageInfoToAnthropic(usage *types.UsageInfo) *types.Usage {
 	if usage == nil {
-		return &types.Usage{
-			InputTokens:  0,
-			OutputTokens: 0,
-		}
+		return nil
 	}
 	return &types.Usage{
 		// Per Anthropic Messages API spec, `input_tokens` is the count of
@@ -573,6 +569,26 @@ func usageInfoToAnthropic(usage *types.UsageInfo) *types.Usage {
 		OutputTokens:             usage.CompletionTokens,
 		CacheCreationInputTokens: usage.PromptCacheMissTokens,
 		CacheReadInputTokens:     usage.PromptCacheHitTokens,
+	}
+}
+
+func responsesUsageToAnthropic(usage *types.ResponsesUsage) *types.Usage {
+	if usage == nil {
+		return nil
+	}
+	return &types.Usage{
+		InputTokens:  usage.InputTokens,
+		OutputTokens: usage.OutputTokens,
+	}
+}
+
+func geminiUsageToAnthropic(usage *types.GeminiUsage) *types.Usage {
+	if usage == nil {
+		return nil
+	}
+	return &types.Usage{
+		InputTokens:  usage.PromptTokenCount,
+		OutputTokens: usage.CandidatesTokenCount,
 	}
 }
 
@@ -680,7 +696,6 @@ func (h *StreamHandler) ProxyResponsesStream(
 			Delta: &types.Delta{
 				StopReason: "end_turn",
 			},
-			Usage: &types.Usage{InputTokens: 0, OutputTokens: 0},
 		}
 		if err := writeSSEEvent(w, msgDelta); err != nil {
 			return ErrClientDisconnected
@@ -758,7 +773,7 @@ func (h *StreamHandler) processResponsesSSELine(
 				Delta: &types.Delta{
 					StopReason: "end_turn",
 				},
-				Usage: usageInfoToAnthropic(nil),
+				Usage: responsesUsageToAnthropic(chunk.Usage),
 			}
 			if err := writeSSEEvent(w, msgDelta); err != nil {
 				return ErrClientDisconnected
@@ -858,7 +873,6 @@ func (h *StreamHandler) ProxyGeminiStream(
 			Delta: &types.Delta{
 				StopReason: "end_turn",
 			},
-			Usage: &types.Usage{InputTokens: 0, OutputTokens: 0},
 		}
 		if err := writeSSEEvent(w, msgDelta); err != nil {
 			return ErrClientDisconnected
@@ -955,7 +969,7 @@ func (h *StreamHandler) processGeminiSSELine(
 				Delta: &types.Delta{
 					StopReason: stopReason,
 				},
-				Usage: usageInfoToAnthropic(nil),
+				Usage: geminiUsageToAnthropic(chunk.UsageMetadata),
 			}
 			if err := writeSSEEvent(w, msgDelta); err != nil {
 				return ErrClientDisconnected

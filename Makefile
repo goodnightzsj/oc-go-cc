@@ -1,4 +1,4 @@
-.PHONY: build run test clean install dist lint vet docker-up docker-stop
+.PHONY: build run dev dev-bg dev-stop dev-status prod-deploy prod-watch prod-status prod-install-systemd test clean install dist lint vet docker-up docker-stop
 
 # Build variables
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -13,6 +13,30 @@ build:
 
 run:
 	go run -ldflags "$(LDFLAGS)" $(CMD)
+
+dev:
+	./scripts/dev-watch.sh $(ARGS)
+
+dev-bg:
+	./scripts/dev-start.sh $(ARGS)
+
+dev-stop:
+	./scripts/dev-stop.sh
+
+dev-status:
+	./scripts/dev-status.sh
+
+prod-deploy:
+	./scripts/prod-deploy.sh
+
+prod-watch:
+	./scripts/prod-watch.sh
+
+prod-status:
+	./scripts/prod-status.sh
+
+prod-install-systemd:
+	./scripts/prod-install-systemd.sh
 
 test:
 	go test ./... -v -race

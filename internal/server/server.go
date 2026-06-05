@@ -55,6 +55,7 @@ func NewServer(atomic *config.AtomicConfig) (*Server, error) {
 
 	// Create handlers.
 	messagesHandler := handlers.NewMessagesHandler(
+		atomic,
 		openCodeClient,
 		modelRouter,
 		fallbackHandler,

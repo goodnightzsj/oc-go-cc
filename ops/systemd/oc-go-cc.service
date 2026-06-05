@@ -1,0 +1,21 @@
+[Unit]
+Description=oc-go-cc — OpenCode Go proxy for Claude Code
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/oc-go-cc
+ExecStart=/root/oc-go-cc/.tmp/prod/current/oc-go-cc serve
+Restart=always
+RestartSec=5
+Environment=HOME=/root
+EnvironmentFile=-/root/oc-go-cc/.env
+NoNewPrivileges=yes
+PrivateTmp=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

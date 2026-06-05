@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -24,6 +26,7 @@ import (
 
 // MessagesHandler handles /v1/messages requests.
 type MessagesHandler struct {
+	atomic              *config.AtomicConfig
 	client              *client.OpenCodeClient
 	modelRouter         *router.ModelRouter
 	fallbackHandler     *router.FallbackHandler
@@ -41,32 +44,70 @@ type MessagesHandler struct {
 // responseWriter wraps http.ResponseWriter to track if headers were written.
 type responseWriter struct {
 	http.ResponseWriter
+	mu          sync.Mutex
 	wroteHeader bool
+	statusCode  int
+	captureBody bool
+	capture     bytes.Buffer
 }
 
 func (w *responseWriter) WriteHeader(code int) {
-	if !w.wroteHeader {
-		w.wroteHeader = true
-		w.ResponseWriter.WriteHeader(code)
-	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.writeHeaderLocked(code)
 }
 
 func (w *responseWriter) Write(b []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
 	if !w.wroteHeader {
-		w.WriteHeader(http.StatusOK)
+		w.writeHeaderLocked(http.StatusOK)
+	}
+	if w.captureBody {
+		_, _ = w.capture.Write(b)
 	}
 	return w.ResponseWriter.Write(b)
 }
 
 // Flush implements http.Flusher for SSE streaming support.
 func (w *responseWriter) Flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
 }
 
+func (w *responseWriter) EnableCapture() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.captureBody = true
+}
+
+func (w *responseWriter) StatusCode() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.statusCode
+}
+
+func (w *responseWriter) CapturedBody() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.capture.String()
+}
+
+func (w *responseWriter) writeHeaderLocked(code int) {
+	if !w.wroteHeader {
+		w.wroteHeader = true
+		w.statusCode = code
+		w.ResponseWriter.WriteHeader(code)
+	}
+}
+
 // NewMessagesHandler creates a new messages handler.
 func NewMessagesHandler(
+	atomic *config.AtomicConfig,
 	openCodeClient *client.OpenCodeClient,
 	modelRouter *router.ModelRouter,
 	fallbackHandler *router.FallbackHandler,
@@ -74,6 +115,7 @@ func NewMessagesHandler(
 	metrics *metrics.Metrics,
 ) *MessagesHandler {
 	return &MessagesHandler{
+		atomic:              atomic,
 		client:              openCodeClient,
 		modelRouter:         modelRouter,
 		fallbackHandler:     fallbackHandler,
@@ -102,12 +144,13 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 		requestID = h.requestIDGen.Generate()
 	}
 	w.Header().Set("X-Request-ID", requestID)
+	requestLogger := h.logger.With("request_id", requestID)
 
 	// Rate limiting
 	clientIP := middleware.GetClientIP(r)
 	if !h.rateLimiter.Allow(clientIP) {
 		h.metrics.RecordRateLimited()
-		h.logger.Warn("rate limited", "client", clientIP, "request_id", requestID)
+		requestLogger.Warn("rate limited", "client", clientIP)
 		http.Error(w, "rate limited", http.StatusTooManyRequests)
 		return
 	}
@@ -115,27 +158,29 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 	// Read the raw request body for debug logging
 	var rawBody json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&rawBody); err != nil {
-		h.sendError(w, http.StatusBadRequest, "invalid request body", err)
+		h.sendError(requestLogger, w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
+
+	h.logInboundRequest(requestLogger, r, clientIP, rawBody)
 
 	// Deduplicate - skip duplicate requests
 	if _, ok := h.requestDedup.TryAcquire(rawBody); !ok {
 		h.metrics.RecordDeduplicated()
-		h.logger.Info("duplicate request skipped", "request_id", requestID)
+		requestLogger.Info("duplicate request skipped")
 		return
 	}
 
 	// Parse into Anthropic request
 	var anthropicReq types.MessageRequest
 	if err := json.Unmarshal(rawBody, &anthropicReq); err != nil {
-		h.sendError(w, http.StatusBadRequest, "invalid request body", err)
+		h.sendError(requestLogger, w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
 
 	// Validate request
 	if err := anthropicReq.Validate(); err != nil {
-		h.sendError(w, http.StatusBadRequest, err.Error(), nil)
+		h.sendError(requestLogger, w, http.StatusBadRequest, err.Error(), nil)
 		return
 	}
 
@@ -143,7 +188,7 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 	isStreaming := anthropicReq.Stream != nil && *anthropicReq.Stream
 	h.metrics.RecordRequest(isStreaming)
 
-	h.logger.Info("received request",
+	requestLogger.Info("received request",
 		"model", anthropicReq.Model,
 		"streaming", isStreaming,
 		"messages", len(anthropicReq.Messages),
@@ -180,11 +225,11 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 	// Route to appropriate model and build fallback chain.
 	modelChain, routeResult, err := h.buildModelChain(anthropicReq.Model, routerMessages, tokenCount, isStreaming)
 	if err != nil {
-		h.sendError(w, http.StatusInternalServerError, "routing failed", err)
+		h.sendError(requestLogger, w, http.StatusInternalServerError, "routing failed", err)
 		return
 	}
 
-	h.logger.Info("routing request",
+	requestLogger.Info("routing request",
 		"scenario", routeResult.Scenario,
 		"model", routeResult.Primary.ModelID,
 		"provider", routeResult.Primary.Provider,
@@ -193,10 +238,10 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 
 	if isStreaming {
 		// Streaming: use ProxyStream for real-time SSE transformation
-		h.handleStreaming(w, r, &anthropicReq, modelChain, rawBody)
+		h.handleStreaming(w, r, &anthropicReq, modelChain, rawBody, requestLogger)
 	} else {
 		// Non-streaming: execute with fallback and return full response
-		h.handleNonStreaming(w, r, &anthropicReq, modelChain, rawBody)
+		h.handleNonStreaming(w, r, &anthropicReq, modelChain, rawBody, requestLogger)
 	}
 }
 
@@ -279,10 +324,26 @@ func (h *MessagesHandler) handleStreaming(
 	anthropicReq *types.MessageRequest,
 	modelChain []config.ModelConfig,
 	rawBody json.RawMessage,
+	requestLogger *slog.Logger,
 ) {
 	clientCtx := r.Context()
 
 	rw := &responseWriter{ResponseWriter: w}
+	if h.requestLoggingEnabled() {
+		rw.EnableCapture()
+	}
+	responseLogged := false
+	logStreamingResponse := func(outcome string) {
+		if responseLogged || !h.requestLoggingEnabled() {
+			return
+		}
+		responseLogged = true
+		statusCode := rw.StatusCode()
+		if statusCode == 0 {
+			statusCode = http.StatusOK
+		}
+		h.logOutboundResponse(requestLogger, statusCode, rw.Header().Clone(), rw.CapturedBody(), true, outcome)
+	}
 
 	// Set SSE headers immediately
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -328,12 +389,13 @@ func (h *MessagesHandler) handleStreaming(
 	for _, model := range modelChain {
 		select {
 		case <-clientCtx.Done():
-			h.logger.Info("client disconnected, stopping streaming fallbacks")
+			requestLogger.Info("client disconnected, stopping streaming fallbacks")
+			logStreamingResponse("client_disconnected")
 			return
 		default:
 		}
 
-		h.logger.Info("attempting streaming model", "model", model.ModelID, "provider", model.Provider)
+		requestLogger.Info("attempting streaming model", "model", model.ModelID, "provider", model.Provider)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 
@@ -343,16 +405,18 @@ func (h *MessagesHandler) handleStreaming(
 			if err := h.handleAnthropicStreaming(ctx, rw, modelBody, model.ModelID, model); err != nil {
 				cancel()
 				if clientCtx.Err() == context.Canceled {
-					h.logger.Info("client disconnected during anthropic stream")
+					requestLogger.Info("client disconnected during anthropic stream")
+					logStreamingResponse("client_disconnected")
 					return
 				}
-				h.logger.Warn("anthropic streaming failed", "model", model.ModelID, "error", err)
+				requestLogger.Warn("anthropic streaming failed", "model", model.ModelID, "error", err)
 				continue
 			}
 			cancel()
 			latency := time.Since(streamStart)
 			h.metrics.RecordSuccess(model.ModelID, latency)
-			h.logger.Info("streaming completed", "model", model.ModelID, "latency", latency)
+			requestLogger.Info("streaming completed", "model", model.ModelID, "latency", latency)
+			logStreamingResponse("completed")
 			return
 		}
 
@@ -364,32 +428,36 @@ func (h *MessagesHandler) handleStreaming(
 				if err := h.handleResponsesStreaming(ctx, rw, anthropicReq, model, clientCtx); err != nil {
 					cancel()
 					if clientCtx.Err() == context.Canceled {
-						h.logger.Info("client disconnected during responses stream")
+						requestLogger.Info("client disconnected during responses stream")
+						logStreamingResponse("client_disconnected")
 						return
 					}
-					h.logger.Warn("responses streaming failed", "model", model.ModelID, "error", err)
+					requestLogger.Warn("responses streaming failed", "model", model.ModelID, "error", err)
 					continue
 				}
 				cancel()
 				latency := time.Since(streamStart)
 				h.metrics.RecordSuccess(model.ModelID, latency)
-				h.logger.Info("streaming completed", "model", model.ModelID, "latency", latency)
+				requestLogger.Info("streaming completed", "model", model.ModelID, "latency", latency)
+				logStreamingResponse("completed")
 				return
 
 			case client.EndpointGemini:
 				if err := h.handleGeminiStreaming(ctx, rw, anthropicReq, model, clientCtx); err != nil {
 					cancel()
 					if clientCtx.Err() == context.Canceled {
-						h.logger.Info("client disconnected during gemini stream")
+						requestLogger.Info("client disconnected during gemini stream")
+						logStreamingResponse("client_disconnected")
 						return
 					}
-					h.logger.Warn("gemini streaming failed", "model", model.ModelID, "error", err)
+					requestLogger.Warn("gemini streaming failed", "model", model.ModelID, "error", err)
 					continue
 				}
 				cancel()
 				latency := time.Since(streamStart)
 				h.metrics.RecordSuccess(model.ModelID, latency)
-				h.logger.Info("streaming completed", "model", model.ModelID, "latency", latency)
+				requestLogger.Info("streaming completed", "model", model.ModelID, "latency", latency)
+				logStreamingResponse("completed")
 				return
 
 			default:
@@ -409,10 +477,11 @@ func (h *MessagesHandler) handleStreaming(
 		if err != nil {
 			cancel()
 			if clientCtx.Err() == context.Canceled {
-				h.logger.Info("client disconnected during upstream request")
+				requestLogger.Info("client disconnected during upstream request")
+				logStreamingResponse("client_disconnected")
 				return
 			}
-			h.logger.Warn("streaming request failed", "model", model.ModelID, "error", err)
+			requestLogger.Warn("streaming request failed", "model", model.ModelID, "error", err)
 			continue
 		}
 
@@ -420,14 +489,16 @@ func (h *MessagesHandler) handleStreaming(
 			_ = streamBody.Close()
 			cancel()
 			if err == transformer.ErrClientDisconnected {
-				h.logger.Info("client disconnected during stream")
+				requestLogger.Info("client disconnected during stream")
+				logStreamingResponse("client_disconnected")
 				return
 			}
 			if clientCtx.Err() == context.Canceled {
-				h.logger.Info("client disconnected during stream (context canceled)")
+				requestLogger.Info("client disconnected during stream (context canceled)")
+				logStreamingResponse("client_disconnected")
 				return
 			}
-			h.logger.Warn("stream proxy failed", "model", model.ModelID, "error", err)
+			requestLogger.Warn("stream proxy failed", "model", model.ModelID, "error", err)
 			continue
 		}
 
@@ -435,15 +506,17 @@ func (h *MessagesHandler) handleStreaming(
 		cancel()
 		latency := time.Since(streamStart)
 		h.metrics.RecordSuccess(model.ModelID, latency)
-		h.logger.Info("streaming completed", "model", model.ModelID, "latency", latency)
+		requestLogger.Info("streaming completed", "model", model.ModelID, "latency", latency)
+		logStreamingResponse("completed")
 		return
 	}
 
 	h.metrics.RecordFailure()
 	if !rw.wroteHeader {
-		h.sendError(w, http.StatusBadGateway, "all streaming models failed", nil)
+		h.sendError(requestLogger, w, http.StatusBadGateway, "all streaming models failed", nil)
 	} else {
-		h.sendStreamError(rw, "all upstream models failed")
+		h.sendStreamError(requestLogger, rw, "all upstream models failed")
+		logStreamingResponse("error")
 	}
 }
 
@@ -554,8 +627,8 @@ func (h *MessagesHandler) handleAnthropicStreaming(
 }
 
 // sendStreamError sends an error event in the SSE stream.
-func (h *MessagesHandler) sendStreamError(w http.ResponseWriter, message string) {
-	h.logger.Error("sending stream error", "message", message)
+func (h *MessagesHandler) sendStreamError(logger *slog.Logger, w http.ResponseWriter, message string) {
+	logger.Error("sending stream error", "message", message)
 
 	errorEvent := map[string]interface{}{
 		"type": "error",
@@ -580,6 +653,7 @@ func (h *MessagesHandler) handleNonStreaming(
 	anthropicReq *types.MessageRequest,
 	modelChain []config.ModelConfig,
 	rawBody json.RawMessage,
+	requestLogger *slog.Logger,
 ) {
 	ctx := r.Context()
 	startTime := time.Now()
@@ -613,17 +687,25 @@ func (h *MessagesHandler) handleNonStreaming(
 
 	if err != nil {
 		h.metrics.RecordFailure()
-		h.sendError(w, http.StatusBadGateway, "all models failed", err)
+		h.sendError(requestLogger, w, http.StatusBadGateway, "all models failed", err)
 		return
 	}
 
 	latency := time.Since(startTime)
 	h.metrics.RecordSuccess(result.ModelID, latency)
 
-	h.logger.Info("request completed",
+	requestLogger.Info("request completed",
 		"model", result.ModelID,
 		"attempts", result.Attempted,
 		"latency", latency,
+	)
+	h.logOutboundResponse(
+		requestLogger,
+		http.StatusOK,
+		http.Header{"Content-Type": []string{"application/json"}},
+		string(responseBody),
+		false,
+		"completed",
 	)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -747,8 +829,8 @@ func extractTextFromBlocks(blocks []types.ContentBlock) string {
 }
 
 // sendError sends an error response in Anthropic format.
-func (h *MessagesHandler) sendError(w http.ResponseWriter, statusCode int, message string, err error) {
-	h.logger.Error("request error",
+func (h *MessagesHandler) sendError(logger *slog.Logger, w http.ResponseWriter, statusCode int, message string, err error) {
+	logger.Error("request error",
 		"status", statusCode,
 		"message", message,
 		"error", err,
@@ -758,9 +840,22 @@ func (h *MessagesHandler) sendError(w http.ResponseWriter, statusCode int, messa
 		return
 	}
 
+	errorResp := transformer.TransformErrorResponse(statusCode, message)
+	body, marshalErr := json.Marshal(errorResp)
+	if marshalErr != nil {
+		body = []byte(`{"type":"error","error":{"type":"api_error","message":"failed to marshal error response"}}`)
+	}
+	body = append(body, '\n')
+	h.logOutboundResponse(
+		logger,
+		statusCode,
+		http.Header{"Content-Type": []string{"application/json"}},
+		string(body),
+		false,
+		"error",
+	)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-
-	errorResp := transformer.TransformErrorResponse(statusCode, message)
-	_ = json.NewEncoder(w).Encode(errorResp)
+	_, _ = w.Write(body)
 }

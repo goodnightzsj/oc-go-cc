@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"oc-go-cc/internal/config"
@@ -24,6 +25,19 @@ const (
 type OpenCodeClient struct {
 	atomic     *config.AtomicConfig
 	httpClient *http.Client
+	keyCounter atomic.Uint64
+}
+
+// nextAPIKey returns the next API key in round-robin order from the given key pool.
+// The caller provides keys from a single config read so baseURL and apiKey
+// always come from the same snapshot.
+func (c *OpenCodeClient) nextAPIKey(keys []string) string {
+	if len(keys) == 0 {
+		return ""
+	}
+	n := uint64(len(keys))
+	old := c.keyCounter.Add(1)
+	return keys[(old-1)%n]
 }
 
 // NewOpenCodeClient creates a new OpenCode client.
@@ -134,26 +148,27 @@ func isResponsesModel(modelID string) bool {
 // getEndpoint returns the appropriate endpoint config for a model.
 func (c *OpenCodeClient) getEndpoint(modelID string, modelConfig config.ModelConfig) endpointConfig {
 	cfg := c.atomic.Get()
+	apiKey := c.nextAPIKey(cfg.EffectiveAPIKeys())
 
 	if IsZen(modelConfig) {
 		zen := cfg.OpenCodeZen
 		switch ClassifyEndpoint(modelID) {
 		case EndpointAnthropic:
-			return endpointConfig{BaseURL: zen.AnthropicBaseURL, APIKey: cfg.APIKey}
+			return endpointConfig{BaseURL: zen.AnthropicBaseURL, APIKey: apiKey}
 		case EndpointResponses:
-			return endpointConfig{BaseURL: zen.ResponsesBaseURL, APIKey: cfg.APIKey}
+			return endpointConfig{BaseURL: zen.ResponsesBaseURL, APIKey: apiKey}
 		case EndpointGemini:
-			return endpointConfig{BaseURL: zen.GeminiBaseURL + "/" + modelID, APIKey: cfg.APIKey}
+			return endpointConfig{BaseURL: zen.GeminiBaseURL + "/" + modelID, APIKey: apiKey}
 		default:
-			return endpointConfig{BaseURL: zen.BaseURL, APIKey: cfg.APIKey}
+			return endpointConfig{BaseURL: zen.BaseURL, APIKey: apiKey}
 		}
 	}
 
 	// Default: OpenCode Go
 	if IsAnthropicModel(modelID) {
-		return endpointConfig{BaseURL: cfg.OpenCodeGo.AnthropicBaseURL, APIKey: cfg.APIKey}
+		return endpointConfig{BaseURL: cfg.OpenCodeGo.AnthropicBaseURL, APIKey: apiKey}
 	}
-	return endpointConfig{BaseURL: cfg.OpenCodeGo.BaseURL, APIKey: cfg.APIKey}
+	return endpointConfig{BaseURL: cfg.OpenCodeGo.BaseURL, APIKey: apiKey}
 }
 
 // endpointConfig holds configuration for a specific API endpoint.
@@ -262,14 +277,14 @@ func (c *OpenCodeClient) SendAnthropicRequest(
 	modelConfig config.ModelConfig,
 ) (*http.Response, error) {
 	cfg := c.atomic.Get()
-	var baseURL string
+	apiKey := c.nextAPIKey(cfg.EffectiveAPIKeys())
 
+	var baseURL string
 	if IsZen(modelConfig) {
 		baseURL = cfg.OpenCodeZen.AnthropicBaseURL
 	} else {
 		baseURL = cfg.OpenCodeGo.AnthropicBaseURL
 	}
-	apiKey := cfg.APIKey
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL, bytes.NewReader(body))
 	if err != nil {

@@ -196,6 +196,10 @@ func TestEnvOverrides(t *testing.T) {
 	if cfg.APIKey != "env-key" {
 		t.Errorf("APIKey = %q, want %q", cfg.APIKey, "env-key")
 	}
+	// Env var must be the effective key (not appended to api_keys).
+	if keys := cfg.EffectiveAPIKeys(); len(keys) != 1 || keys[0] != "env-key" {
+		t.Errorf("EffectiveAPIKeys() = %v, want [env-key]", keys)
+	}
 	if cfg.Host != "env-host" {
 		t.Errorf("Host = %q, want %q", cfg.Host, "env-host")
 	}
@@ -207,6 +211,35 @@ func TestEnvOverrides(t *testing.T) {
 	}
 	if cfg.Logging.Level != "warn" {
 		t.Errorf("LogLevel = %q, want %q", cfg.Logging.Level, "warn")
+	}
+}
+
+func TestEnvOverrides_OC_GO_CC_API_KEY_OverridesAPIKeys(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.json")
+
+	cfJSON := `{
+		"api_keys": ["file-key-1", "file-key-2"]
+	}`
+	if err := os.WriteFile(cfgPath, []byte(cfJSON), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	_ = os.Setenv("OC_GO_CC_CONFIG", cfgPath)
+	_ = os.Setenv("OC_GO_CC_API_KEY", "env-key")
+	defer func() {
+		_ = os.Unsetenv("OC_GO_CC_CONFIG")
+		_ = os.Unsetenv("OC_GO_CC_API_KEY")
+	}()
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// Env var must fully replace the key pool, not append to it.
+	if keys := cfg.EffectiveAPIKeys(); len(keys) != 1 || keys[0] != "env-key" {
+		t.Errorf("EffectiveAPIKeys() = %v, want [env-key]", keys)
 	}
 }
 
@@ -384,5 +417,149 @@ func TestExpandHome(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("expandHome(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestEffectiveAPIKeys_APICKeysTakesPrecedence(t *testing.T) {
+	cfg := &Config{
+		APIKey:  "single-key",
+		APIKeys: []string{"key-a", "key-b"},
+	}
+	keys := cfg.EffectiveAPIKeys()
+	if len(keys) != 2 {
+		t.Fatalf("len(keys) = %d, want 2", len(keys))
+	}
+	if keys[0] != "key-a" || keys[1] != "key-b" {
+		t.Errorf("keys = %v, want [key-a key-b]", keys)
+	}
+}
+
+func TestEffectiveAPIKeys_FallsBackToAPIKey(t *testing.T) {
+	cfg := &Config{APIKey: "single-key"}
+	keys := cfg.EffectiveAPIKeys()
+	if len(keys) != 1 {
+		t.Fatalf("len(keys) = %d, want 1", len(keys))
+	}
+	if keys[0] != "single-key" {
+		t.Errorf("keys[0] = %q, want %q", keys[0], "single-key")
+	}
+}
+
+func TestEffectiveAPIKeys_EmptyReturnsNil(t *testing.T) {
+	cfg := &Config{}
+	keys := cfg.EffectiveAPIKeys()
+	if keys != nil {
+		t.Errorf("EffectiveAPIKeys() = %v, want nil", keys)
+	}
+}
+
+func TestLoad_AcceptsAPIKeysWithoutAPIKey(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.json")
+
+	cfgJSON := `{
+		"api_keys": ["key-1", "key-2"],
+		"host": "127.0.0.1"
+	}`
+	if err := os.WriteFile(cfgPath, []byte(cfgJSON), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	_ = os.Setenv("OC_GO_CC_CONFIG", cfgPath)
+	defer func() { _ = os.Unsetenv("OC_GO_CC_CONFIG") }()
+	oldAPIKey := os.Getenv("OC_GO_CC_API_KEY")
+	_ = os.Unsetenv("OC_GO_CC_API_KEY")
+	defer func() { _ = os.Setenv("OC_GO_CC_API_KEY", oldAPIKey) }()
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	keys := cfg.EffectiveAPIKeys()
+	if len(keys) != 2 {
+		t.Fatalf("len(EffectiveAPIKeys()) = %d, want 2", len(keys))
+	}
+}
+
+func TestLoadMissingAPIKey_NoKeys(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.json")
+
+	cfgJSON := `{"host": "127.0.0.1"}`
+	if err := os.WriteFile(cfgPath, []byte(cfgJSON), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	_ = os.Setenv("OC_GO_CC_CONFIG", cfgPath)
+	defer func() { _ = os.Unsetenv("OC_GO_CC_CONFIG") }()
+
+	oldAPIKey := os.Getenv("OC_GO_CC_API_KEY")
+	_ = os.Unsetenv("OC_GO_CC_API_KEY")
+	defer func() { _ = os.Setenv("OC_GO_CC_API_KEY", oldAPIKey) }()
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() expected error for missing API key, got nil")
+	}
+}
+
+func TestValidateAPIKeys_RejectsUnresolvedPlaceholder(t *testing.T) {
+	cfg := &Config{
+		APIKeys: []string{"valid-key", "${UNRESOLVED_VAR}"},
+	}
+	err := validate(cfg)
+	if err == nil {
+		t.Fatal("expected validation error for unresolved placeholder, got nil")
+	}
+}
+
+func TestValidateAPIKeys_AcceptsResolvedKeys(t *testing.T) {
+	cfg := &Config{
+		APIKeys: []string{"key-1", "key-2"},
+	}
+	if err := validate(cfg); err != nil {
+		t.Errorf("expected no validation error, got %v", err)
+	}
+}
+
+func TestLoad_RejectsUnresolvedAPIKeysPlaceholders(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.json")
+
+	cfgJSON := `{
+		"api_keys": ["real-key", "${OC_GO_CC_UNSET_TEST_PLACEHOLDER}"]
+	}`
+	if err := os.WriteFile(cfgPath, []byte(cfgJSON), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	_ = os.Setenv("OC_GO_CC_CONFIG", cfgPath)
+	defer func() { _ = os.Unsetenv("OC_GO_CC_CONFIG") }()
+	_ = os.Unsetenv("OC_GO_CC_UNSET_TEST_PLACEHOLDER")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() expected error for unresolved placeholder in api_keys, got nil")
+	}
+}
+
+func TestValidateAPIKeys_RejectsEmptyEntry(t *testing.T) {
+	cfg := &Config{
+		APIKeys: []string{"valid-key", ""},
+	}
+	err := validate(cfg)
+	if err == nil {
+		t.Fatal("expected validation error for empty api_keys entry, got nil")
+	}
+}
+
+func TestValidateAPIKeys_RejectsAllEmpty(t *testing.T) {
+	cfg := &Config{
+		APIKeys: []string{""},
+	}
+	err := validate(cfg)
+	if err == nil {
+		t.Fatal("expected validation error for empty api_keys entry, got nil")
 	}
 }

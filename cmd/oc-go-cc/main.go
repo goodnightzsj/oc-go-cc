@@ -3,10 +3,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"oc-go-cc/internal/config"
@@ -40,6 +42,7 @@ Configuration is stored at ~/.config/oc-go-cc/config.json`,
 	rootCmd.AddCommand(statusCmd())
 	rootCmd.AddCommand(initCmd())
 	rootCmd.AddCommand(validateCmd())
+	rootCmd.AddCommand(checkCmd())
 	rootCmd.AddCommand(modelsCmd())
 	rootCmd.AddCommand(autostartCmd())
 
@@ -275,6 +278,101 @@ func validateCmd() *cobra.Command {
 
 	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Path to config file")
 	return cmd
+}
+
+// checkCmd returns the command to check Claude Code environment conflicts.
+func checkCmd() *cobra.Command {
+	var configPath string
+
+	cmd := &cobra.Command{
+		Use:          "check",
+		Short:        "Check Claude Code env conflicts",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if configPath != "" {
+				_ = os.Setenv("OC_GO_CC_CONFIG", configPath)
+			}
+
+			cfg, err := config.Load()
+			if err != nil {
+				cfg = &config.Config{Host: "127.0.0.1", Port: 3456}
+				fmt.Printf("Warning: could not load config (%v), using defaults for check\n", err)
+			}
+
+			expectedURL := strings.TrimRight(fmt.Sprintf("http://%s:%d", cfg.Host, cfg.Port), "/")
+			conflicts := 0
+
+			env := map[string]string{}
+			for _, key := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"} {
+				if value, ok := os.LookupEnv(key); ok {
+					env[key] = value
+				}
+			}
+			conflicts += checkClaudeEnv("environment", env, expectedURL)
+
+			home, err := os.UserHomeDir()
+			if err != nil {
+				fmt.Printf("Warning: cannot determine home directory: %v\n", err)
+			} else {
+				for _, path := range []string{
+					filepath.Join(home, ".claude", "settings.json"),
+					filepath.Join(home, ".claude.json"),
+				} {
+					data, err := os.ReadFile(path)
+					if err != nil {
+						if !os.IsNotExist(err) {
+							fmt.Printf("%s: %v\n", path, err)
+						}
+						continue
+					}
+
+					var settings struct {
+						Env map[string]string `json:"env"`
+					}
+					if err := json.Unmarshal(data, &settings); err != nil {
+						fmt.Printf("%s: %v\n", path, err)
+						continue
+					}
+					conflicts += checkClaudeEnv(path, settings.Env, expectedURL)
+				}
+			}
+
+			if conflicts > 0 {
+				return fmt.Errorf("found %d Claude Code env conflict(s)", conflicts)
+			}
+			fmt.Println("No Claude Code env conflicts found.")
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Path to config file")
+	return cmd
+}
+
+// checkClaudeEnv checks a single environment map for conflicting Claude Code settings.
+// Returns the number of conflicts found.
+func checkClaudeEnv(source string, env map[string]string, expectedURL string) int {
+	conflicts := 0
+	if value, ok := env["ANTHROPIC_BASE_URL"]; ok {
+		normalized := strings.TrimRight(value, "/")
+		if normalized != expectedURL {
+			fmt.Printf("%s: ANTHROPIC_BASE_URL is %q, expected %q\n", source, value, expectedURL)
+			conflicts++
+		}
+	}
+	if _, ok := env["ANTHROPIC_API_KEY"]; ok {
+		fmt.Printf("%s: ANTHROPIC_API_KEY is set\n", source)
+		conflicts++
+	}
+	if value, ok := env["ANTHROPIC_AUTH_TOKEN"]; ok {
+		if value != "unused" {
+			fmt.Printf("%s: ANTHROPIC_AUTH_TOKEN is %q, expected \"unused\"\n", source, value)
+			conflicts++
+		}
+	} else {
+		fmt.Printf("%s: ANTHROPIC_AUTH_TOKEN is not set (recommended: \"unused\")\n", source)
+	}
+	return conflicts
 }
 
 // modelsCmd returns the command to list available models.

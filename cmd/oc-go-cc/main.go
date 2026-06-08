@@ -268,7 +268,11 @@ func validateCmd() *cobra.Command {
 			fmt.Println("Configuration is valid!")
 			fmt.Printf("  Host: %s\n", cfg.Host)
 			fmt.Printf("  Port: %d\n", cfg.Port)
-			fmt.Printf("  API Key: %s...\n", maskString(cfg.APIKey, 8))
+			if keys := cfg.EffectiveAPIKeys(); len(keys) > 1 {
+				fmt.Printf("  API Keys: %d keys (round-robin)\n", len(keys))
+			} else if len(keys) == 1 {
+				fmt.Printf("  API Key: %s...\n", maskString(keys[0], 8))
+			}
 			fmt.Printf("  Base URL: %s\n", cfg.OpenCodeGo.BaseURL)
 			fmt.Printf("  Models configured: %d\n", len(cfg.Models))
 			fmt.Printf("  Fallback chains: %d\n", len(cfg.Fallbacks))

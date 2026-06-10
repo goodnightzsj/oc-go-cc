@@ -23,6 +23,11 @@ func TestIsAnthropicModelOnlyRoutesNativeAnthropicModels(t *testing.T) {
 			want:    true,
 		},
 		{
+			name:    "minimax m3 uses anthropic endpoint",
+			modelID: "minimax-m3",
+			want:    true,
+		},
+		{
 			name:    "deepseek pro uses openai endpoint",
 			modelID: "deepseek-v4-pro",
 			want:    false,
@@ -41,6 +46,26 @@ func TestIsAnthropicModelOnlyRoutesNativeAnthropicModels(t *testing.T) {
 			name:    "glm-5.1 uses openai endpoint",
 			modelID: "glm-5.1",
 			want:    false,
+		},
+		{
+			name:    "qwen3.5-plus uses anthropic endpoint",
+			modelID: "qwen3.5-plus",
+			want:    true,
+		},
+		{
+			name:    "qwen3.6-plus uses anthropic endpoint",
+			modelID: "qwen3.6-plus",
+			want:    true,
+		},
+		{
+			name:    "qwen3.7-plus uses anthropic endpoint",
+			modelID: "qwen3.7-plus",
+			want:    true,
+		},
+		{
+			name:    "qwen3.7-max uses anthropic endpoint",
+			modelID: "qwen3.7-max",
+			want:    true,
 		},
 	}
 
@@ -131,6 +156,26 @@ func TestClassifyEndpoint(t *testing.T) {
 		{
 			name:     "minimax m2.7 uses anthropic endpoint",
 			modelID:  "minimax-m2.7",
+			expected: EndpointAnthropic,
+		},
+		{
+			name:     "minimax m3 uses anthropic endpoint",
+			modelID:  "minimax-m3",
+			expected: EndpointAnthropic,
+		},
+		{
+			name:     "qwen3.5-plus uses anthropic endpoint",
+			modelID:  "qwen3.5-plus",
+			expected: EndpointAnthropic,
+		},
+		{
+			name:     "qwen3.6-plus uses anthropic endpoint",
+			modelID:  "qwen3.6-plus",
+			expected: EndpointAnthropic,
+		},
+		{
+			name:     "qwen3.7-plus uses anthropic endpoint",
+			modelID:  "qwen3.7-plus",
 			expected: EndpointAnthropic,
 		},
 		{

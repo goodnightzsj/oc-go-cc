@@ -67,10 +67,11 @@ func NewOpenCodeClient(atomic *config.AtomicConfig) *OpenCodeClient {
 }
 
 // IsAnthropicModel returns true if the model requires the Anthropic endpoint.
-// This includes both Go models (minimax) and Zen models (claude, qwen).
+// This includes both Go models (minimax, all qwen) and Zen models (claude, qwen3.7-max).
 func IsAnthropicModel(modelID string) bool {
 	switch modelID {
-	case "minimax-m2.5", "minimax-m2.7", "qwen3.7-max":
+	case "minimax-m2.5", "minimax-m2.7", "minimax-m3",
+		"qwen3.5-plus", "qwen3.6-plus", "qwen3.7-plus", "qwen3.7-max":
 		return true
 	default:
 		return isZenAnthropicModel(modelID)

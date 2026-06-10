@@ -337,29 +337,27 @@ func (h *MessagesHandler) handleStreaming(
 
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 
-		// Check if this is an Anthropic-native model (MiniMax)
-		if client.IsAnthropicModel(model.ModelID) {
-			modelBody := replaceModelInRawBody(rawBody, model.ModelID)
-			if err := h.handleAnthropicStreaming(ctx, rw, modelBody, model.ModelID, model); err != nil {
-				cancel()
-				if clientCtx.Err() == context.Canceled {
-					h.logger.Info("client disconnected during anthropic stream")
-					return
-				}
-				h.logger.Warn("anthropic streaming failed", "model", model.ModelID, "error", err)
-				continue
-			}
-			cancel()
-			latency := time.Since(streamStart)
-			h.metrics.RecordSuccess(model.ModelID, latency)
-			h.logger.Info("streaming completed", "model", model.ModelID, "latency", latency)
-			return
-		}
-
-		// Zen-specific endpoint handling
+		// Zen models use their own endpoint classification
 		if client.IsZen(model) {
 			endpointType := client.ClassifyEndpoint(model.ModelID)
 			switch endpointType {
+			case client.EndpointAnthropic:
+				modelBody := replaceModelInRawBody(rawBody, model.ModelID)
+				if err := h.handleAnthropicStreaming(ctx, rw, modelBody, model.ModelID, model); err != nil {
+					cancel()
+					if clientCtx.Err() == context.Canceled {
+						h.logger.Info("client disconnected during anthropic stream")
+						return
+					}
+					h.logger.Warn("anthropic streaming failed", "model", model.ModelID, "error", err)
+					continue
+				}
+				cancel()
+				latency := time.Since(streamStart)
+				h.metrics.RecordSuccess(model.ModelID, latency)
+				h.logger.Info("streaming completed", "model", model.ModelID, "latency", latency)
+				return
+
 			case client.EndpointResponses:
 				if err := h.handleResponsesStreaming(ctx, rw, anthropicReq, model, clientCtx); err != nil {
 					cancel()
@@ -587,15 +585,12 @@ func (h *MessagesHandler) handleNonStreaming(
 		ctx,
 		modelChain,
 		func(ctx context.Context, model config.ModelConfig) ([]byte, error) {
-			// Check if this is an Anthropic-native model (MiniMax)
-			if client.IsAnthropicModel(model.ModelID) {
-				return h.executeAnthropicRequest(ctx, rawBody, model)
-			}
-
-			// Zen-specific endpoint handling
+			// Zen models use their own endpoint classification
 			if client.IsZen(model) {
 				endpointType := client.ClassifyEndpoint(model.ModelID)
 				switch endpointType {
+				case client.EndpointAnthropic:
+					return h.executeAnthropicRequest(ctx, rawBody, model)
 				case client.EndpointResponses:
 					return h.executeResponsesRequest(ctx, anthropicReq, model)
 				case client.EndpointGemini:
@@ -603,6 +598,9 @@ func (h *MessagesHandler) handleNonStreaming(
 				default:
 					// Fall through to OpenAI-compatible handling
 				}
+			} else if client.IsAnthropicModel(model.ModelID) {
+				// Go provider Anthropic-native models (MiniMax, Qwen)
+				return h.executeAnthropicRequest(ctx, rawBody, model)
 			}
 
 			// OpenAI-compatible models (both Go and Zen)

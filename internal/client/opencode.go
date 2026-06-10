@@ -80,6 +80,10 @@ func IsAnthropicModel(modelID string) bool {
 
 // isZenAnthropicModel returns true for models on Zen that use the Anthropic endpoint.
 func isZenAnthropicModel(modelID string) bool {
+	// Claude models on Zen use the Anthropic endpoint
+	if strings.HasPrefix(modelID, "claude-") {
+		return true
+	}
 	// Qwen models on Zen use the Anthropic endpoint
 	if strings.HasPrefix(modelID, "qwen") {
 		return true
@@ -112,9 +116,11 @@ const (
 )
 
 // ClassifyEndpoint determines the endpoint type for a model on Zen.
+// This is Zen-specific: minimax models use chat completions on Zen
+// (they use Anthropic only on the Go provider).
 func ClassifyEndpoint(modelID string) EndpointType {
 	switch {
-	case IsAnthropicModel(modelID):
+	case isZenAnthropicModel(modelID):
 		return EndpointAnthropic
 	case isGeminiModel(modelID):
 		return EndpointGemini

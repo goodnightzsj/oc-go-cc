@@ -407,9 +407,53 @@ func modelsCmd() *cobra.Command {
 			fmt.Println()
 			fmt.Println("Available OpenCode Zen models (free tier):")
 			fmt.Println()
+			fmt.Println("  deepseek-v4-pro            OpenAI-compatible")
 			fmt.Println("  deepseek-v4-flash-free     OpenAI-compatible")
+			fmt.Println("  grok-build-0.1             OpenAI-compatible")
+			fmt.Println("  big-pickle                 OpenAI-compatible")
 			fmt.Println("  mimo-v2.5-free             OpenAI-compatible")
+			fmt.Println("  north-mini-code-free       OpenAI-compatible")
 			fmt.Println("  nemotron-3-ultra-free      OpenAI-compatible")
+			fmt.Println()
+			fmt.Println("Available OpenCode Zen models (Anthropic endpoint):")
+			fmt.Println()
+			fmt.Println("  claude-fable-5             Anthropic-compatible")
+			fmt.Println("  claude-opus-4-8            Anthropic-compatible")
+			fmt.Println("  claude-opus-4-7            Anthropic-compatible")
+			fmt.Println("  claude-opus-4-6            Anthropic-compatible")
+			fmt.Println("  claude-opus-4-5            Anthropic-compatible")
+			fmt.Println("  claude-opus-4-1            Anthropic-compatible")
+			fmt.Println("  claude-sonnet-4-6          Anthropic-compatible")
+			fmt.Println("  claude-sonnet-4-5          Anthropic-compatible")
+			fmt.Println("  claude-sonnet-4            Anthropic-compatible")
+			fmt.Println("  claude-haiku-4-5           Anthropic-compatible")
+			fmt.Println("  claude-3-5-haiku           Anthropic-compatible")
+			fmt.Println()
+			fmt.Println("Available OpenCode Zen models (Responses endpoint):")
+			fmt.Println()
+			fmt.Println("  gpt-5.5                    Responses-compatible")
+			fmt.Println("  gpt-5.5-pro                Responses-compatible")
+			fmt.Println("  gpt-5.4                    Responses-compatible")
+			fmt.Println("  gpt-5.4-pro                Responses-compatible")
+			fmt.Println("  gpt-5.4-mini               Responses-compatible")
+			fmt.Println("  gpt-5.4-nano               Responses-compatible")
+			fmt.Println("  gpt-5.3-codex              Responses-compatible")
+			fmt.Println("  gpt-5.3-codex-spark        Responses-compatible")
+			fmt.Println("  gpt-5.2                    Responses-compatible")
+			fmt.Println("  gpt-5.2-codex              Responses-compatible")
+			fmt.Println("  gpt-5.1                    Responses-compatible")
+			fmt.Println("  gpt-5.1-codex              Responses-compatible")
+			fmt.Println("  gpt-5.1-codex-max          Responses-compatible")
+			fmt.Println("  gpt-5.1-codex-mini         Responses-compatible")
+			fmt.Println("  gpt-5                      Responses-compatible")
+			fmt.Println("  gpt-5-codex                Responses-compatible")
+			fmt.Println("  gpt-5-nano                 Responses-compatible")
+			fmt.Println()
+			fmt.Println("Available OpenCode Zen models (Gemini endpoint):")
+			fmt.Println()
+			fmt.Println("  gemini-3.5-flash           Gemini-compatible")
+			fmt.Println("  gemini-3.1-pro             Gemini-compatible")
+			fmt.Println("  gemini-3-flash             Gemini-compatible")
 			fmt.Println()
 			fmt.Println("Use these model IDs in your config.json file (model_overrides).")
 		},
@@ -559,6 +603,54 @@ func getDefaultConfig() string {
       { "provider": "opencode-go", "model_id": "qwen3.5-plus" },
       { "provider": "opencode-go", "model_id": "minimax-m2.5" }
     ]
+  },
+  "model_overrides": {
+    "deepseek-v4-pro": {
+      "provider": "opencode-zen",
+      "model_id": "deepseek-v4-pro",
+      "temperature": 0.7,
+      "max_tokens": 8192,
+      "reasoning_effort": "max",
+      "thinking": {
+        "type": "enabled"
+      }
+    },
+    "deepseek-v4-flash-free": {
+      "provider": "opencode-zen",
+      "model_id": "deepseek-v4-flash-free",
+      "temperature": 0.7,
+      "max_tokens": 4096
+    },
+    "grok-build-0.1": {
+      "provider": "opencode-zen",
+      "model_id": "grok-build-0.1",
+      "temperature": 0.7,
+      "max_tokens": 4096
+    },
+    "big-pickle": {
+      "provider": "opencode-zen",
+      "model_id": "big-pickle",
+      "temperature": 0.7,
+      "max_tokens": 4096
+    },
+    "mimo-v2.5-free": {
+      "provider": "opencode-zen",
+      "model_id": "mimo-v2.5-free",
+      "temperature": 0.7,
+      "max_tokens": 4096
+    },
+    "north-mini-code-free": {
+      "provider": "opencode-zen",
+      "model_id": "north-mini-code-free",
+      "temperature": 0.7,
+      "max_tokens": 4096
+    },
+    "nemotron-3-ultra-free": {
+      "provider": "opencode-zen",
+      "model_id": "nemotron-3-ultra-free",
+      "temperature": 0.7,
+      "max_tokens": 4096
+    }
   },
   "opencode_go": {
     "base_url": "https://opencode.ai/zen/go/v1/chat/completions",

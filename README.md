@@ -93,7 +93,7 @@ oc-go-cc stop               Stop the running proxy server
 oc-go-cc status             Check if the proxy is running
 oc-go-cc init               Create default configuration file
 oc-go-cc validate           Validate configuration file
-oc-go-cc models             List available OpenCode Go models
+oc-go-cc models             List all available models (Go + Zen)
 oc-go-cc autostart enable   Enable auto-start on login
 oc-go-cc autostart disable  Disable auto-start on login
 oc-go-cc autostart status   Check autostart status

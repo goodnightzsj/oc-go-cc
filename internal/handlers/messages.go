@@ -16,6 +16,7 @@ import (
 
 	"oc-go-cc/internal/client"
 	"oc-go-cc/internal/config"
+	"oc-go-cc/internal/lifecycle"
 	"oc-go-cc/internal/metrics"
 	"oc-go-cc/internal/middleware"
 	"oc-go-cc/internal/router"
@@ -39,6 +40,7 @@ type MessagesHandler struct {
 	requestDedup        *middleware.RequestDeduplicator
 	requestIDGen        *middleware.RequestIDGenerator
 	metrics             *metrics.Metrics
+	lifecycle           *lifecycle.State
 }
 
 // responseWriter wraps http.ResponseWriter to track if headers were written.
@@ -113,6 +115,7 @@ func NewMessagesHandler(
 	fallbackHandler *router.FallbackHandler,
 	tokenCounter *token.Counter,
 	metrics *metrics.Metrics,
+	lifecycleState *lifecycle.State,
 ) *MessagesHandler {
 	return &MessagesHandler{
 		atomic:              atomic,
@@ -128,6 +131,7 @@ func NewMessagesHandler(
 		requestDedup:        middleware.NewRequestDeduplicator(500 * time.Millisecond),
 		requestIDGen:        middleware.NewRequestIDGenerator(),
 		metrics:             metrics,
+		lifecycle:           lifecycleState,
 	}
 }
 
@@ -145,6 +149,15 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 	}
 	w.Header().Set("X-Request-ID", requestID)
 	requestLogger := h.logger.With("request_id", requestID)
+
+	if h.lifecycle != nil && h.lifecycle.IsDraining() {
+		requestLogger.Warn("rejecting request while server is draining",
+			"active_requests", h.lifecycle.ActiveRequests(),
+		)
+		w.Header().Set("Retry-After", "5")
+		h.sendError(requestLogger, w, http.StatusServiceUnavailable, "server is restarting, please retry", nil)
+		return
+	}
 
 	// Rate limiting
 	clientIP := middleware.GetClientIP(r)
@@ -407,12 +420,20 @@ func (h *MessagesHandler) handleStreaming(
 				modelBody := replaceModelInRawBody(rawBody, model.ModelID)
 				if err := h.handleAnthropicStreaming(ctx, rw, modelBody, model.ModelID, model); err != nil {
 					cancel()
+					if h.requestCanceledByDrain(clientCtx) {
+						requestLogger.Warn("server draining during anthropic stream",
+							"model", model.ModelID,
+							"active_requests", h.lifecycle.ActiveRequests(),
+						)
+						logStreamingResponse("server_draining")
+						return
+					}
 					if clientCtx.Err() == context.Canceled {
 						requestLogger.Info("client disconnected during anthropic stream")
 						logStreamingResponse("client_disconnected")
 						return
 					}
-					requestLogger.Warn("anthropic streaming failed", "model", model.ModelID, "error", err)
+					h.logModelFailure(requestLogger, "anthropic streaming failed", model.ModelID, err)
 					continue
 				}
 				cancel()
@@ -425,12 +446,20 @@ func (h *MessagesHandler) handleStreaming(
 			case client.EndpointResponses:
 				if err := h.handleResponsesStreaming(ctx, rw, anthropicReq, model, clientCtx); err != nil {
 					cancel()
+					if h.requestCanceledByDrain(clientCtx) {
+						requestLogger.Warn("server draining during responses stream",
+							"model", model.ModelID,
+							"active_requests", h.lifecycle.ActiveRequests(),
+						)
+						logStreamingResponse("server_draining")
+						return
+					}
 					if clientCtx.Err() == context.Canceled {
 						requestLogger.Info("client disconnected during responses stream")
 						logStreamingResponse("client_disconnected")
 						return
 					}
-					requestLogger.Warn("responses streaming failed", "model", model.ModelID, "error", err)
+					h.logModelFailure(requestLogger, "responses streaming failed", model.ModelID, err)
 					continue
 				}
 				cancel()
@@ -443,12 +472,20 @@ func (h *MessagesHandler) handleStreaming(
 			case client.EndpointGemini:
 				if err := h.handleGeminiStreaming(ctx, rw, anthropicReq, model, clientCtx); err != nil {
 					cancel()
+					if h.requestCanceledByDrain(clientCtx) {
+						requestLogger.Warn("server draining during gemini stream",
+							"model", model.ModelID,
+							"active_requests", h.lifecycle.ActiveRequests(),
+						)
+						logStreamingResponse("server_draining")
+						return
+					}
 					if clientCtx.Err() == context.Canceled {
 						requestLogger.Info("client disconnected during gemini stream")
 						logStreamingResponse("client_disconnected")
 						return
 					}
-					requestLogger.Warn("gemini streaming failed", "model", model.ModelID, "error", err)
+					h.logModelFailure(requestLogger, "gemini streaming failed", model.ModelID, err)
 					continue
 				}
 				cancel()
@@ -468,12 +505,20 @@ func (h *MessagesHandler) handleStreaming(
 			modelBody := replaceModelInRawBody(rawBody, model.ModelID)
 			if err := h.handleAnthropicStreaming(ctx, rw, modelBody, model.ModelID, model); err != nil {
 				cancel()
+				if h.requestCanceledByDrain(clientCtx) {
+					requestLogger.Warn("server draining during anthropic stream",
+						"model", model.ModelID,
+						"active_requests", h.lifecycle.ActiveRequests(),
+					)
+					logStreamingResponse("server_draining")
+					return
+				}
 				if clientCtx.Err() == context.Canceled {
 					requestLogger.Info("client disconnected during anthropic stream")
 					logStreamingResponse("client_disconnected")
 					return
 				}
-				requestLogger.Warn("anthropic streaming failed", "model", model.ModelID, "error", err)
+				h.logModelFailure(requestLogger, "anthropic streaming failed", model.ModelID, err)
 				continue
 			}
 			cancel()
@@ -495,12 +540,20 @@ func (h *MessagesHandler) handleStreaming(
 		streamBody, err := h.client.GetStreamingBody(ctx, model.ModelID, openaiReq, model)
 		if err != nil {
 			cancel()
+			if h.requestCanceledByDrain(clientCtx) {
+				requestLogger.Warn("server draining during upstream request",
+					"model", model.ModelID,
+					"active_requests", h.lifecycle.ActiveRequests(),
+				)
+				logStreamingResponse("server_draining")
+				return
+			}
 			if clientCtx.Err() == context.Canceled {
 				requestLogger.Info("client disconnected during upstream request")
 				logStreamingResponse("client_disconnected")
 				return
 			}
-			requestLogger.Warn("streaming request failed", "model", model.ModelID, "error", err)
+			h.logModelFailure(requestLogger, "streaming request failed", model.ModelID, err)
 			continue
 		}
 
@@ -508,8 +561,24 @@ func (h *MessagesHandler) handleStreaming(
 			_ = streamBody.Close()
 			cancel()
 			if err == transformer.ErrClientDisconnected {
+				if h.requestCanceledByDrain(clientCtx) {
+					requestLogger.Warn("server draining during stream",
+						"model", model.ModelID,
+						"active_requests", h.lifecycle.ActiveRequests(),
+					)
+					logStreamingResponse("server_draining")
+					return
+				}
 				requestLogger.Info("client disconnected during stream")
 				logStreamingResponse("client_disconnected")
+				return
+			}
+			if h.requestCanceledByDrain(clientCtx) {
+				requestLogger.Warn("server draining during stream",
+					"model", model.ModelID,
+					"active_requests", h.lifecycle.ActiveRequests(),
+				)
+				logStreamingResponse("server_draining")
 				return
 			}
 			if clientCtx.Err() == context.Canceled {
@@ -517,7 +586,7 @@ func (h *MessagesHandler) handleStreaming(
 				logStreamingResponse("client_disconnected")
 				return
 			}
-			requestLogger.Warn("stream proxy failed", "model", model.ModelID, "error", err)
+			h.logModelFailure(requestLogger, "stream proxy failed", model.ModelID, err)
 			continue
 		}
 
@@ -706,6 +775,11 @@ func (h *MessagesHandler) handleNonStreaming(
 
 	if err != nil {
 		h.metrics.RecordFailure()
+		if h.requestCanceledByDrain(ctx) {
+			w.Header().Set("Retry-After", "5")
+			h.sendError(requestLogger, w, http.StatusServiceUnavailable, "server is restarting, please retry", err)
+			return
+		}
 		h.sendError(requestLogger, w, http.StatusBadGateway, "all models failed", err)
 		return
 	}
@@ -847,13 +921,25 @@ func extractTextFromBlocks(blocks []types.ContentBlock) string {
 	return content
 }
 
+func (h *MessagesHandler) requestCanceledByDrain(ctx context.Context) bool {
+	return ctx.Err() == context.Canceled && h.lifecycle != nil && h.lifecycle.IsDraining()
+}
+
+func (h *MessagesHandler) logModelFailure(logger *slog.Logger, message string, modelID string, err error) {
+	fields := []any{"model", modelID, "error", err}
+	fields = append(fields, client.ErrorAttrs(err)...)
+	logger.Warn(message, fields...)
+}
+
 // sendError sends an error response in Anthropic format.
 func (h *MessagesHandler) sendError(logger *slog.Logger, w http.ResponseWriter, statusCode int, message string, err error) {
-	logger.Error("request error",
+	fields := []any{
 		"status", statusCode,
 		"message", message,
 		"error", err,
-	)
+	}
+	fields = append(fields, client.ErrorAttrs(err)...)
+	logger.Error("request error", fields...)
 
 	if rw, ok := w.(*responseWriter); ok && rw.wroteHeader {
 		return

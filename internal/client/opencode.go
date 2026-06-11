@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -20,6 +22,9 @@ const (
 	ProviderOpenCodeGo  = "opencode-go"
 	ProviderOpenCodeZen = "opencode-zen"
 	defaultTimeout      = 5 * time.Minute
+	maxRequestAttempts  = 2
+	retryBackoff        = 250 * time.Millisecond
+	maxErrorBodyBytes   = 16 * 1024
 )
 
 // OpenCodeClient handles communication with OpenCode Go and Zen APIs.
@@ -27,6 +32,45 @@ type OpenCodeClient struct {
 	atomic     *config.AtomicConfig
 	httpClient *http.Client
 	keyCounter atomic.Uint64
+}
+
+// UpstreamError captures a non-2xx upstream HTTP response with retry hints.
+type UpstreamError struct {
+	StatusCode              int
+	Body                    string
+	Retryable               bool
+	Cloudflare              bool
+	CloudflareOriginInvalid bool
+}
+
+func (e *UpstreamError) Error() string {
+	msg := fmt.Sprintf("upstream API error %d", e.StatusCode)
+	switch {
+	case e.CloudflareOriginInvalid:
+		msg += " (cloudflare origin invalid response)"
+	case e.Cloudflare:
+		msg += " (cloudflare)"
+	}
+	if e.Body != "" {
+		msg += ": " + e.Body
+	}
+	return msg
+}
+
+// ErrorAttrs returns structured slog fields for a wrapped upstream error.
+func ErrorAttrs(err error) []any {
+	var upstreamErr *UpstreamError
+	if !errors.As(err, &upstreamErr) {
+		return nil
+	}
+
+	return []any{
+		"upstream_status", upstreamErr.StatusCode,
+		"retryable", upstreamErr.Retryable,
+		"cloudflare", upstreamErr.Cloudflare,
+		"cloudflare_origin_invalid", upstreamErr.CloudflareOriginInvalid,
+		"upstream_body", upstreamErr.Body,
+	}
 }
 
 // nextAPIKey returns the next API key in round-robin order from the given key pool.
@@ -91,6 +135,109 @@ func (c *OpenCodeClient) contextWithTimeout(
 	modelConfig config.ModelConfig,
 ) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, c.RequestTimeout(modelConfig))
+}
+
+func compactErrorBody(body []byte) string {
+	s := strings.TrimSpace(string(body))
+	if s == "" {
+		return ""
+	}
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 512 {
+		return s[:512] + "..."
+	}
+	return s
+}
+
+func isRetryableStatus(statusCode int) bool {
+	return statusCode == http.StatusTooManyRequests || statusCode >= http.StatusInternalServerError
+}
+
+func newUpstreamError(statusCode int, body []byte) error {
+	message := compactErrorBody(body)
+	lower := strings.ToLower(message)
+	return &UpstreamError{
+		StatusCode:              statusCode,
+		Body:                    message,
+		Retryable:               isRetryableStatus(statusCode),
+		Cloudflare:              strings.Contains(lower, "cloudflare"),
+		CloudflareOriginInvalid: strings.Contains(lower, "origin web server returned an invalid or incomplete response to cloudflare"),
+	}
+}
+
+func shouldRetryTransportError(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+
+	errStr := strings.ToLower(err.Error())
+	retryable := []string{
+		"connection reset",
+		"connection refused",
+		"unexpected eof",
+		"broken pipe",
+		"tls handshake timeout",
+		"server closed idle connection",
+	}
+	for _, token := range retryable {
+		if strings.Contains(errStr, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *OpenCodeClient) doRequestWithRetry(
+	ctx context.Context,
+	modelConfig config.ModelConfig,
+	buildRequest func(context.Context) (*http.Request, error),
+) (*http.Response, error) {
+	var lastErr error
+
+	for attempt := 1; attempt <= maxRequestAttempts; attempt++ {
+		reqCtx, cancel := c.contextWithTimeout(ctx, modelConfig)
+		httpReq, err := buildRequest(reqCtx)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+
+		resp, err := c.httpClient.Do(httpReq)
+		if err != nil {
+			cancel()
+			lastErr = fmt.Errorf("request failed: %w", err)
+			if attempt < maxRequestAttempts && shouldRetryTransportError(ctx, err) {
+				time.Sleep(retryBackoff * time.Duration(attempt))
+				continue
+			}
+			return nil, lastErr
+		}
+		resp.Body = &cancelOnCloseReadCloser{ReadCloser: resp.Body, cancel: cancel}
+
+		if resp.StatusCode < http.StatusBadRequest {
+			return resp, nil
+		}
+
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+		upstreamErr := newUpstreamError(resp.StatusCode, bodyBytes)
+		_ = resp.Body.Close()
+		lastErr = upstreamErr
+		if attempt < maxRequestAttempts && isRetryableStatus(resp.StatusCode) && ctx.Err() == nil {
+			time.Sleep(retryBackoff * time.Duration(attempt))
+			continue
+		}
+		return nil, upstreamErr
+	}
+
+	return nil, lastErr
 }
 
 // IsAnthropicModel returns true if the model requires the Anthropic endpoint.
@@ -219,46 +366,31 @@ func (c *OpenCodeClient) ChatCompletion(
 	modelConfig config.ModelConfig,
 ) (*http.Response, error) {
 	endpoint := c.getEndpoint(modelID, modelConfig)
-	reqCtx, cancel := c.contextWithTimeout(ctx, modelConfig)
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		cancel()
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
+	return c.doRequestWithRetry(ctx, modelConfig, func(reqCtx context.Context) (*http.Request, error) {
+		httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
 
-	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
+		httpReq.Header.Set("Content-Type", "application/json")
+		// Anthropic endpoint uses x-api-key; OpenAI endpoint uses Bearer
+		if IsAnthropicModel(modelID) {
+			httpReq.Header.Set("x-api-key", endpoint.APIKey)
+		} else {
+			httpReq.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
+		}
 
-	httpReq.Header.Set("Content-Type", "application/json")
-	// Anthropic endpoint uses x-api-key; OpenAI endpoint uses Bearer
-	if IsAnthropicModel(modelID) {
-		httpReq.Header.Set("x-api-key", endpoint.APIKey)
-	} else {
-		httpReq.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
-	}
+		if req.Stream != nil && *req.Stream {
+			httpReq.Header.Set("Accept", "text/event-stream")
+		}
 
-	if req.Stream != nil && *req.Stream {
-		httpReq.Header.Set("Accept", "text/event-stream")
-	}
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	resp.Body = &cancelOnCloseReadCloser{ReadCloser: resp.Body, cancel: cancel}
-
-	if resp.StatusCode >= http.StatusBadRequest {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	return resp, nil
+		return httpReq, nil
+	})
 }
 
 // ChatCompletionNonStreaming sends a non-streaming request and returns the full parsed response.
@@ -317,7 +449,6 @@ func (c *OpenCodeClient) SendAnthropicRequest(
 ) (*http.Response, error) {
 	cfg := c.atomic.Get()
 	var baseURL string
-	reqCtx, cancel := c.contextWithTimeout(ctx, modelConfig)
 	apiKey := c.nextAPIKey(cfg.EffectiveAPIKeys())
 
 	if IsZen(modelConfig) {
@@ -325,35 +456,22 @@ func (c *OpenCodeClient) SendAnthropicRequest(
 	} else {
 		baseURL = cfg.OpenCodeGo.AnthropicBaseURL
 	}
+	return c.doRequestWithRetry(ctx, modelConfig, func(reqCtx context.Context) (*http.Request, error) {
+		httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, baseURL, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
 
-	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, baseURL, bytes.NewReader(body))
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+		httpReq.Header.Set("x-api-key", apiKey)
 
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-	httpReq.Header.Set("x-api-key", apiKey)
+		if stream {
+			httpReq.Header.Set("Accept", "text/event-stream")
+		}
 
-	if stream {
-		httpReq.Header.Set("Accept", "text/event-stream")
-	}
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	resp.Body = &cancelOnCloseReadCloser{ReadCloser: resp.Body, cancel: cancel}
-
-	if resp.StatusCode >= http.StatusBadRequest {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	return resp, nil
+		return httpReq, nil
+	})
 }
 
 // ResponsesCompletion sends a request to the OpenAI Responses endpoint.
@@ -364,37 +482,21 @@ func (c *OpenCodeClient) ResponsesCompletion(
 	modelConfig config.ModelConfig,
 ) (*http.Response, error) {
 	endpoint := c.getEndpoint(modelID, modelConfig)
-	reqCtx, cancel := c.contextWithTimeout(ctx, modelConfig)
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		cancel()
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
+	return c.doRequestWithRetry(ctx, modelConfig, func(reqCtx context.Context) (*http.Request, error) {
+		httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
 
-	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	resp.Body = &cancelOnCloseReadCloser{ReadCloser: resp.Body, cancel: cancel}
-
-	if resp.StatusCode >= http.StatusBadRequest {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	return resp, nil
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
+		return httpReq, nil
+	})
 }
 
 // ResponsesCompletionNonStreaming sends a non-streaming Responses request.
@@ -450,37 +552,21 @@ func (c *OpenCodeClient) GeminiCompletion(
 	modelConfig config.ModelConfig,
 ) (*http.Response, error) {
 	endpoint := c.getEndpoint(modelID, modelConfig)
-	reqCtx, cancel := c.contextWithTimeout(ctx, modelConfig)
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		cancel()
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
+	return c.doRequestWithRetry(ctx, modelConfig, func(reqCtx context.Context) (*http.Request, error) {
+		httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
 
-	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	resp.Body = &cancelOnCloseReadCloser{ReadCloser: resp.Body, cancel: cancel}
-
-	if resp.StatusCode >= http.StatusBadRequest {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	return resp, nil
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
+		return httpReq, nil
+	})
 }
 
 // GeminiCompletionNonStreaming sends a non-streaming Gemini request.

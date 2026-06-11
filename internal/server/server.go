@@ -16,17 +16,22 @@ import (
 	"oc-go-cc/internal/client"
 	"oc-go-cc/internal/config"
 	"oc-go-cc/internal/handlers"
+	"oc-go-cc/internal/lifecycle"
 	"oc-go-cc/internal/metrics"
 	"oc-go-cc/internal/router"
 	"oc-go-cc/internal/token"
 )
 
+const defaultShutdownTimeout = 10 * time.Minute
+
 // Server represents the proxy server.
 type Server struct {
-	atomic   *config.AtomicConfig
-	httpSrv  *http.Server
-	logger   *slog.Logger
-	levelVar *slog.LevelVar
+	atomic          *config.AtomicConfig
+	httpSrv         *http.Server
+	logger          *slog.Logger
+	levelVar        *slog.LevelVar
+	lifecycle       *lifecycle.State
+	shutdownTimeout time.Duration
 }
 
 // NewServer creates a new proxy server.
@@ -48,6 +53,7 @@ func NewServer(atomic *config.AtomicConfig) (*Server, error) {
 
 	// Create metrics
 	metrics := metrics.New()
+	lifecycleState := lifecycle.NewState()
 
 	openCodeClient := client.NewOpenCodeClient(atomic)
 	modelRouter := router.NewModelRouter(atomic)
@@ -61,8 +67,9 @@ func NewServer(atomic *config.AtomicConfig) (*Server, error) {
 		fallbackHandler,
 		tokenCounter,
 		metrics,
+		lifecycleState,
 	)
-	healthHandler := handlers.NewHealthHandler(tokenCounter, fallbackHandler, metrics)
+	healthHandler := handlers.NewHealthHandler(tokenCounter, fallbackHandler, metrics, lifecycleState)
 
 	// Setup router.
 	mux := http.NewServeMux()
@@ -130,11 +137,17 @@ func NewServer(atomic *config.AtomicConfig) (*Server, error) {
 		w.Write([]byte(`{"service":"oc-go-cc","status":"ok","endpoints":{"/v1/messages":"Anthropic Messages API proxy","/v1/models":"OpenCode Go model list","/v1/messages/count_tokens":"tiktoken counter","/health":"health + metrics"}}`))
 	})
 
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		done := lifecycleState.BeginRequest()
+		defer done()
+		mux.ServeHTTP(w, r)
+	})
+
 	// Create HTTP server.
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	httpSrv := &http.Server{
 		Addr:        addr,
-		Handler:     mux,
+		Handler:     handler,
 		ReadTimeout: 30 * time.Second,
 		// SSE responses can run for several minutes; a write deadline would
 		// terminate healthy streams mid-response.
@@ -143,10 +156,12 @@ func NewServer(atomic *config.AtomicConfig) (*Server, error) {
 	}
 
 	srv := &Server{
-		atomic:   atomic,
-		httpSrv:  httpSrv,
-		logger:   logger,
-		levelVar: levelVar,
+		atomic:          atomic,
+		httpSrv:         httpSrv,
+		logger:          logger,
+		levelVar:        levelVar,
+		lifecycle:       lifecycleState,
+		shutdownTimeout: defaultShutdownTimeout,
 	}
 
 	// Register callback to update log level on config reload
@@ -167,27 +182,45 @@ func (s *Server) Start() error {
 		"base_url", cfg.OpenCodeGo.BaseURL,
 	)
 
-	// Graceful shutdown.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	serverErrCh := make(chan error, 1)
 	go func() {
-		<-ctx.Done()
-		s.logger.Info("shutting down server...")
-
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		if err := s.httpSrv.Shutdown(shutdownCtx); err != nil {
-			s.logger.Error("server shutdown failed", "error", err)
-		}
+		serverErrCh <- s.httpSrv.ListenAndServe()
 	}()
 
-	if err := s.httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		return fmt.Errorf("server failed: %w", err)
+	select {
+	case <-ctx.Done():
+		s.lifecycle.BeginDrain()
+		s.logger.Info("shutting down server...",
+			"reason", "shutdown_signal_received",
+			"active_requests", s.lifecycle.ActiveRequests(),
+			"timeout", s.shutdownTimeout,
+		)
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), s.shutdownTimeout)
+		shutdownErr := s.httpSrv.Shutdown(shutdownCtx)
+		cancel()
+		if shutdownErr != nil {
+			s.logger.Error("server shutdown failed",
+				"error", shutdownErr,
+				"active_requests", s.lifecycle.ActiveRequests(),
+			)
+			_ = s.httpSrv.Close()
+		}
+
+		if err := <-serverErrCh; err != nil && err != http.ErrServerClosed {
+			return fmt.Errorf("server failed: %w", err)
+		}
+
+	case err := <-serverErrCh:
+		if err != nil && err != http.ErrServerClosed {
+			return fmt.Errorf("server failed: %w", err)
+		}
 	}
 
-	s.logger.Info("server stopped")
+	s.logger.Info("server stopped", "active_requests", s.lifecycle.ActiveRequests())
 	return nil
 }
 

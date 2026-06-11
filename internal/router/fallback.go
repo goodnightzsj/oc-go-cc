@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"oc-go-cc/internal/client"
 	"oc-go-cc/internal/config"
 )
 
@@ -223,12 +224,14 @@ func (h *FallbackHandler) ExecuteWithFallback(
 		}
 
 		cb.RecordFailure()
-		h.logger.Warn("model failed, trying fallback",
+		fields := []any{
 			"model", model.ModelID,
 			"error", err,
-			"remaining", totalModels-i-1,
+			"remaining", totalModels - i - 1,
 			"circuit_state", cb.State(),
-		)
+		}
+		fields = append(fields, client.ErrorAttrs(err)...)
+		h.logger.Warn("model failed, trying fallback", fields...)
 	}
 
 	h.ResetAll()

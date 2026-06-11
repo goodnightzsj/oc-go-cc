@@ -10,6 +10,7 @@ WorkingDirectory=/root/oc-go-cc
 ExecStart=/root/oc-go-cc/.tmp/prod/current/oc-go-cc serve
 Restart=always
 RestartSec=5
+TimeoutStopSec=630
 Environment=HOME=/root
 EnvironmentFile=-/root/oc-go-cc/.env
 NoNewPrivileges=yes

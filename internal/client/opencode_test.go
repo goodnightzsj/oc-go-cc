@@ -1,11 +1,36 @@
 package client
 
 import (
+	"errors"
 	"testing"
 	"time"
 
 	"oc-go-cc/internal/config"
 )
+
+func TestNewUpstreamErrorClassifiesCloudflare502(t *testing.T) {
+	err := newUpstreamError(502, []byte("Upstream returned HTTP 502: The origin web server returned an invalid or incomplete response to Cloudflare."))
+
+	var upstreamErr *UpstreamError
+	if !errors.As(err, &upstreamErr) {
+		t.Fatalf("expected UpstreamError, got %T", err)
+	}
+	if !upstreamErr.Retryable {
+		t.Fatal("expected 502 to be retryable")
+	}
+	if !upstreamErr.Cloudflare {
+		t.Fatal("expected Cloudflare classification")
+	}
+	if !upstreamErr.CloudflareOriginInvalid {
+		t.Fatal("expected Cloudflare origin invalid classification")
+	}
+}
+
+func TestErrorAttrsIgnoresNonUpstreamErrors(t *testing.T) {
+	if attrs := ErrorAttrs(errors.New("plain error")); attrs != nil {
+		t.Fatalf("ErrorAttrs() = %v, want nil", attrs)
+	}
+}
 
 func TestIsAnthropicModelOnlyRoutesNativeAnthropicModels(t *testing.T) {
 	tests := []struct {

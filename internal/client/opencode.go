@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"oc-go-cc/internal/config"
@@ -25,6 +26,19 @@ const (
 type OpenCodeClient struct {
 	atomic     *config.AtomicConfig
 	httpClient *http.Client
+	keyCounter atomic.Uint64
+}
+
+// nextAPIKey returns the next API key in round-robin order from the given key pool.
+// The caller provides keys from a single config read so baseURL and apiKey
+// always come from the same snapshot.
+func (c *OpenCodeClient) nextAPIKey(keys []string) string {
+	if len(keys) == 0 {
+		return ""
+	}
+	n := uint64(len(keys))
+	old := c.keyCounter.Add(1)
+	return keys[(old-1)%n]
 }
 
 // NewOpenCodeClient creates a new OpenCode client.
@@ -80,10 +94,11 @@ func (c *OpenCodeClient) contextWithTimeout(
 }
 
 // IsAnthropicModel returns true if the model requires the Anthropic endpoint.
-// This includes both Go models (minimax) and Zen models (claude, qwen).
+// This includes both Go models (minimax, all qwen) and Zen models (claude, qwen3.7-max).
 func IsAnthropicModel(modelID string) bool {
 	switch modelID {
-	case "minimax-m2.5", "minimax-m2.7", "qwen3.7-max":
+	case "minimax-m2.5", "minimax-m2.7", "minimax-m3",
+		"qwen3.5-plus", "qwen3.6-plus", "qwen3.7-plus", "qwen3.7-max":
 		return true
 	default:
 		return isZenAnthropicModel(modelID)
@@ -92,6 +107,10 @@ func IsAnthropicModel(modelID string) bool {
 
 // isZenAnthropicModel returns true for models on Zen that use the Anthropic endpoint.
 func isZenAnthropicModel(modelID string) bool {
+	// Claude models on Zen use the Anthropic endpoint
+	if strings.HasPrefix(modelID, "claude-") {
+		return true
+	}
 	// Qwen models on Zen use the Anthropic endpoint
 	if strings.HasPrefix(modelID, "qwen") {
 		return true
@@ -124,9 +143,11 @@ const (
 )
 
 // ClassifyEndpoint determines the endpoint type for a model on Zen.
+// This is Zen-specific: minimax models use chat completions on Zen
+// (they use Anthropic only on the Go provider).
 func ClassifyEndpoint(modelID string) EndpointType {
 	switch {
-	case IsAnthropicModel(modelID):
+	case isZenAnthropicModel(modelID):
 		return EndpointAnthropic
 	case isGeminiModel(modelID):
 		return EndpointGemini
@@ -161,26 +182,27 @@ func isResponsesModel(modelID string) bool {
 // getEndpoint returns the appropriate endpoint config for a model.
 func (c *OpenCodeClient) getEndpoint(modelID string, modelConfig config.ModelConfig) endpointConfig {
 	cfg := c.atomic.Get()
+	apiKey := c.nextAPIKey(cfg.EffectiveAPIKeys())
 
 	if IsZen(modelConfig) {
 		zen := cfg.OpenCodeZen
 		switch ClassifyEndpoint(modelID) {
 		case EndpointAnthropic:
-			return endpointConfig{BaseURL: zen.AnthropicBaseURL, APIKey: cfg.APIKey}
+			return endpointConfig{BaseURL: zen.AnthropicBaseURL, APIKey: apiKey}
 		case EndpointResponses:
-			return endpointConfig{BaseURL: zen.ResponsesBaseURL, APIKey: cfg.APIKey}
+			return endpointConfig{BaseURL: zen.ResponsesBaseURL, APIKey: apiKey}
 		case EndpointGemini:
-			return endpointConfig{BaseURL: zen.GeminiBaseURL + "/" + modelID, APIKey: cfg.APIKey}
+			return endpointConfig{BaseURL: zen.GeminiBaseURL + "/" + modelID, APIKey: apiKey}
 		default:
-			return endpointConfig{BaseURL: zen.BaseURL, APIKey: cfg.APIKey}
+			return endpointConfig{BaseURL: zen.BaseURL, APIKey: apiKey}
 		}
 	}
 
 	// Default: OpenCode Go
 	if IsAnthropicModel(modelID) {
-		return endpointConfig{BaseURL: cfg.OpenCodeGo.AnthropicBaseURL, APIKey: cfg.APIKey}
+		return endpointConfig{BaseURL: cfg.OpenCodeGo.AnthropicBaseURL, APIKey: apiKey}
 	}
-	return endpointConfig{BaseURL: cfg.OpenCodeGo.BaseURL, APIKey: cfg.APIKey}
+	return endpointConfig{BaseURL: cfg.OpenCodeGo.BaseURL, APIKey: apiKey}
 }
 
 // endpointConfig holds configuration for a specific API endpoint.
@@ -296,13 +318,13 @@ func (c *OpenCodeClient) SendAnthropicRequest(
 	cfg := c.atomic.Get()
 	var baseURL string
 	reqCtx, cancel := c.contextWithTimeout(ctx, modelConfig)
+	apiKey := c.nextAPIKey(cfg.EffectiveAPIKeys())
 
 	if IsZen(modelConfig) {
 		baseURL = cfg.OpenCodeZen.AnthropicBaseURL
 	} else {
 		baseURL = cfg.OpenCodeGo.AnthropicBaseURL
 	}
-	apiKey := cfg.APIKey
 
 	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, baseURL, bytes.NewReader(body))
 	if err != nil {

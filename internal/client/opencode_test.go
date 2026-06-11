@@ -2,6 +2,7 @@ package client
 
 import (
 	"testing"
+	"time"
 
 	"oc-go-cc/internal/config"
 )
@@ -254,5 +255,38 @@ func TestIsResponsesModel(t *testing.T) {
 				t.Fatalf("isResponsesModel(%q) = %v, want %v", tt.modelID, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRequestTimeout_UsesProviderSpecificConfig(t *testing.T) {
+	cfg := &config.Config{
+		APIKey: "test-key",
+		OpenCodeGo: config.OpenCodeGoConfig{
+			TimeoutMs: 180000,
+		},
+		OpenCodeZen: config.OpenCodeZenConfig{
+			TimeoutMs: 420000,
+		},
+	}
+	client := NewOpenCodeClient(config.NewAtomicConfig(cfg, "/tmp/test-config.json"))
+
+	if got := client.RequestTimeout(config.ModelConfig{Provider: ProviderOpenCodeGo}); got != 180*time.Second {
+		t.Fatalf("go timeout = %v, want %v", got, 180*time.Second)
+	}
+	if got := client.RequestTimeout(config.ModelConfig{Provider: ProviderOpenCodeZen}); got != 420*time.Second {
+		t.Fatalf("zen timeout = %v, want %v", got, 420*time.Second)
+	}
+}
+
+func TestRequestTimeout_FallsBackToDefault(t *testing.T) {
+	cfg := &config.Config{
+		APIKey:      "test-key",
+		OpenCodeGo:  config.OpenCodeGoConfig{},
+		OpenCodeZen: config.OpenCodeZenConfig{},
+	}
+	client := NewOpenCodeClient(config.NewAtomicConfig(cfg, "/tmp/test-config.json"))
+
+	if got := client.RequestTimeout(config.ModelConfig{Provider: ProviderOpenCodeGo}); got != defaultTimeout {
+		t.Fatalf("timeout = %v, want %v", got, defaultTimeout)
 	}
 }

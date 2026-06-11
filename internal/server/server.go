@@ -3,13 +3,13 @@ package server
 
 import (
 	"context"
-	"strings"
-	"io"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -133,10 +133,12 @@ func NewServer(atomic *config.AtomicConfig) (*Server, error) {
 	// Create HTTP server.
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	httpSrv := &http.Server{
-		Addr:         addr,
-		Handler:      mux,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 5 * time.Minute,
+		Addr:        addr,
+		Handler:     mux,
+		ReadTimeout: 30 * time.Second,
+		// SSE responses can run for several minutes; a write deadline would
+		// terminate healthy streams mid-response.
+		WriteTimeout: 0,
 		IdleTimeout:  120 * time.Second,
 	}
 

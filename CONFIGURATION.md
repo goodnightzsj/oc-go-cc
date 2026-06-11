@@ -96,6 +96,8 @@ Override with `OC_GO_CC_CONFIG` environment variable.
 }
 ```
 
+`opencode_go.timeout_ms` and `opencode_zen.timeout_ms` control the upstream request deadline for that provider, including streaming requests.
+
 ## Providers
 
 oc-go-cc supports two providers for upstream API calls:

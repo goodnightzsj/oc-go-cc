@@ -108,6 +108,7 @@ func interpolateEnvVars(s string) string {
 func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("OC_GO_CC_API_KEY"); v != "" {
 		cfg.APIKey = v
+		cfg.APIKeys = nil // env var overrides both api_key and api_keys
 	}
 	if v := os.Getenv("OC_GO_CC_HOST"); v != "" {
 		cfg.Host = v
@@ -173,12 +174,31 @@ func applyDefaults(cfg *Config) {
 
 // validate checks that all required configuration fields are present.
 func validate(cfg *Config) error {
-	if cfg.APIKey == "" {
-		return fmt.Errorf("api_key is required (set via config file or OC_GO_CC_API_KEY env var)")
+	if cfg.APIKey == "" && len(cfg.APIKeys) == 0 {
+		return fmt.Errorf("api_key or api_keys is required (set via config file or OC_GO_CC_API_KEY env var)")
+	}
+
+	if err := validateAPIKeys(cfg.APIKeys); err != nil {
+		return err
 	}
 
 	if err := validateModelOverrides(cfg.ModelOverrides); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateAPIKeys ensures no api_keys entries contain unresolved ${VAR} placeholders.
+// Unresolved placeholders indicate the user did not set the corresponding env vars,
+// and the literal placeholder string would be sent as a bearer token.
+func validateAPIKeys(keys []string) error {
+	for i, key := range keys {
+		if key == "" {
+			return fmt.Errorf("api_keys[%d] is empty — each key must be a non-empty string", i)
+		}
+		if envVarPattern.MatchString(key) {
+			return fmt.Errorf("api_keys[%d] contains unresolved env var %q — set the corresponding environment variable or remove this entry", i, key)
+		}
 	}
 	return nil
 }

@@ -71,7 +71,24 @@ Override with `OC_GO_CC_CONFIG` environment variable.
       "provider": "opencode-zen",
       "model_id": "claude-sonnet-4.5",
       "temperature": 0.7,
-      "max_tokens": 8192
+      "max_tokens": 8192,
+      "vision": true
+    },
+    "deepseek-v4-pro": {
+      "provider": "opencode-zen",
+      "model_id": "deepseek-v4-pro",
+      "temperature": 0.7,
+      "max_tokens": 8192,
+      "reasoning_effort": "max",
+      "thinking": {
+        "type": "enabled"
+      }
+    },
+    "deepseek-v4-flash-free": {
+      "provider": "opencode-zen",
+      "model_id": "deepseek-v4-flash-free",
+      "temperature": 0.7,
+      "max_tokens": 4096
     }
   },
 
@@ -198,13 +215,26 @@ When a request arrives, the proxy checks `model_overrides[<model>]` **first**. I
       "provider": "opencode-zen",
       "model_id": "claude-sonnet-4.5",
       "temperature": 0.7,
-      "max_tokens": 8192
+      "max_tokens": 8192,
+      "vision": true
+    },
+    "deepseek-v4-pro": {
+      "provider": "opencode-zen",
+      "model_id": "deepseek-v4-pro",
+      "temperature": 0.7,
+      "max_tokens": 8192,
+      "reasoning_effort": "max",
+      "thinking": {
+        "type": "enabled"
+      }
     }
   }
 }
 ```
 
 Each entry accepts the same fields as a `ModelConfig` (`provider`, `model_id`, `temperature`, `max_tokens`, `reasoning_effort`, `thinking`, etc.). `model_id` is required; `provider` must be `"opencode-go"` or `"opencode-zen"` (or omitted to inherit the default).
+
+See `oc-go-cc models` for the complete list of available Zen models across all endpoint types (Claude, GPT, Gemini, and free-tier).
 
 ### Routing precedence
 

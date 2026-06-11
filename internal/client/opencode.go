@@ -18,6 +18,7 @@ import (
 const (
 	ProviderOpenCodeGo  = "opencode-go"
 	ProviderOpenCodeZen = "opencode-zen"
+	defaultTimeout      = 5 * time.Minute
 )
 
 // OpenCodeClient handles communication with OpenCode Go and Zen APIs.
@@ -28,13 +29,16 @@ type OpenCodeClient struct {
 
 // NewOpenCodeClient creates a new OpenCode client.
 func NewOpenCodeClient(atomic *config.AtomicConfig) *OpenCodeClient {
-	cfg := atomic.Get()
-	timeout := time.Duration(cfg.OpenCodeGo.TimeoutMs) * time.Millisecond
-	if timeout == 0 {
-		timeout = 5 * time.Minute
+	return &OpenCodeClient{
+		atomic: atomic,
+		httpClient: &http.Client{
+			Transport: newHTTPTransport(),
+		},
 	}
+}
 
-	transport := &http.Transport{
+func newHTTPTransport() *http.Transport {
+	return &http.Transport{
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 20,
 		IdleConnTimeout:     90 * time.Second,
@@ -42,14 +46,37 @@ func NewOpenCodeClient(atomic *config.AtomicConfig) *OpenCodeClient {
 		DisableKeepAlives:   false,
 		Proxy:               http.ProxyFromEnvironment,
 	}
+}
 
-	return &OpenCodeClient{
-		atomic: atomic,
-		httpClient: &http.Client{
-			Timeout:   timeout,
-			Transport: transport,
-		},
+type cancelOnCloseReadCloser struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (r *cancelOnCloseReadCloser) Close() error {
+	err := r.ReadCloser.Close()
+	r.cancel()
+	return err
+}
+
+// RequestTimeout returns the provider-specific upstream timeout for a model.
+func (c *OpenCodeClient) RequestTimeout(modelConfig config.ModelConfig) time.Duration {
+	cfg := c.atomic.Get()
+	timeoutMs := cfg.OpenCodeGo.TimeoutMs
+	if IsZen(modelConfig) {
+		timeoutMs = cfg.OpenCodeZen.TimeoutMs
 	}
+	if timeoutMs <= 0 {
+		return defaultTimeout
+	}
+	return time.Duration(timeoutMs) * time.Millisecond
+}
+
+func (c *OpenCodeClient) contextWithTimeout(
+	ctx context.Context,
+	modelConfig config.ModelConfig,
+) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, c.RequestTimeout(modelConfig))
 }
 
 // IsAnthropicModel returns true if the model requires the Anthropic endpoint.
@@ -170,14 +197,17 @@ func (c *OpenCodeClient) ChatCompletion(
 	modelConfig config.ModelConfig,
 ) (*http.Response, error) {
 	endpoint := c.getEndpoint(modelID, modelConfig)
+	reqCtx, cancel := c.contextWithTimeout(ctx, modelConfig)
 
 	body, err := json.Marshal(req)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
@@ -195,8 +225,10 @@ func (c *OpenCodeClient) ChatCompletion(
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
+	resp.Body = &cancelOnCloseReadCloser{ReadCloser: resp.Body, cancel: cancel}
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -263,6 +295,7 @@ func (c *OpenCodeClient) SendAnthropicRequest(
 ) (*http.Response, error) {
 	cfg := c.atomic.Get()
 	var baseURL string
+	reqCtx, cancel := c.contextWithTimeout(ctx, modelConfig)
 
 	if IsZen(modelConfig) {
 		baseURL = cfg.OpenCodeZen.AnthropicBaseURL
@@ -271,8 +304,9 @@ func (c *OpenCodeClient) SendAnthropicRequest(
 	}
 	apiKey := cfg.APIKey
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, baseURL, bytes.NewReader(body))
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
@@ -286,8 +320,10 @@ func (c *OpenCodeClient) SendAnthropicRequest(
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
+	resp.Body = &cancelOnCloseReadCloser{ReadCloser: resp.Body, cancel: cancel}
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -306,14 +342,17 @@ func (c *OpenCodeClient) ResponsesCompletion(
 	modelConfig config.ModelConfig,
 ) (*http.Response, error) {
 	endpoint := c.getEndpoint(modelID, modelConfig)
+	reqCtx, cancel := c.contextWithTimeout(ctx, modelConfig)
 
 	body, err := json.Marshal(req)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
@@ -322,8 +361,10 @@ func (c *OpenCodeClient) ResponsesCompletion(
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
+	resp.Body = &cancelOnCloseReadCloser{ReadCloser: resp.Body, cancel: cancel}
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -387,14 +428,17 @@ func (c *OpenCodeClient) GeminiCompletion(
 	modelConfig config.ModelConfig,
 ) (*http.Response, error) {
 	endpoint := c.getEndpoint(modelID, modelConfig)
+	reqCtx, cancel := c.contextWithTimeout(ctx, modelConfig)
 
 	body, err := json.Marshal(req)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
@@ -403,8 +447,10 @@ func (c *OpenCodeClient) GeminiCompletion(
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
+	resp.Body = &cancelOnCloseReadCloser{ReadCloser: resp.Body, cancel: cancel}
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		bodyBytes, _ := io.ReadAll(resp.Body)

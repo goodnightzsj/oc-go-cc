@@ -397,7 +397,7 @@ func (h *MessagesHandler) handleStreaming(
 
 		requestLogger.Info("attempting streaming model", "model", model.ModelID, "provider", model.Provider)
 
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		ctx, cancel := context.WithCancel(clientCtx)
 
 		// Check if this is an Anthropic-native model (MiniMax)
 		if client.IsAnthropicModel(model.ModelID) {

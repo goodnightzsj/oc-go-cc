@@ -45,11 +45,6 @@ func (a *AtomicConfig) Reload() error {
 				"old_host", old.Host, "new_host", cfg.Host,
 				"old_port", old.Port, "new_port", cfg.Port)
 		}
-		if old.OpenCodeGo.TimeoutMs != cfg.OpenCodeGo.TimeoutMs {
-			slog.Warn("timeout_ms changed but requires server restart to take effect",
-				"old_timeout", old.OpenCodeGo.TimeoutMs,
-				"new_timeout", cfg.OpenCodeGo.TimeoutMs)
-		}
 	}
 
 	// Copy callbacks to avoid holding lock during invocation

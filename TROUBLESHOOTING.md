@@ -50,6 +50,23 @@ The proxy transforms OpenAI SSE to Anthropic SSE in real-time. If streaming appe
 2. Check that no proxy or firewall is buffering the connection
 3. Try a non-streaming request first to verify the model works
 
+## Stream Dies Around 120 Seconds
+
+Older builds hard-coded a 2 minute upstream streaming timeout. Current builds use the configured provider timeout instead:
+
+```json
+{
+  "opencode_go": {
+    "timeout_ms": 300000
+  },
+  "opencode_zen": {
+    "timeout_ms": 300000
+  }
+}
+```
+
+If your streams are legitimately long-running, increase the relevant `timeout_ms` and restart the proxy if you're running an older binary.
+
 ## Debug Mode
 
 For maximum logging, run with debug level:

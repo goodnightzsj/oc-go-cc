@@ -72,11 +72,17 @@ func NewServer(atomic *config.AtomicConfig) (*Server, error) {
 	// Create HTTP server.
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	httpSrv := &http.Server{
-		Addr:         addr,
-		Handler:      mux,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 5 * time.Minute,
-		IdleTimeout:  120 * time.Second,
+		Addr:        addr,
+		Handler:     mux,
+		ReadTimeout: 120 * time.Second,
+		// WriteTimeout is disabled (zero). Long-running SSE streams must not be
+		// killed mid-flight. Stuck upstream connections are handled by the
+		// per-stream idle watchdog (transformer/idle.go) which cancels the
+		// upstream context when no bytes arrive within the model's idle timeout.
+		// IdleTimeout here governs keep-alive between separate HTTP requests on
+		// the same TCP connection; it does NOT affect in-stream byte gaps.
+		WriteTimeout: 0,
+		IdleTimeout:  300 * time.Second,
 	}
 
 	srv := &Server{

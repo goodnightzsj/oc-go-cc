@@ -4,11 +4,12 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -39,12 +40,19 @@ type MessagesHandler struct {
 }
 
 // responseWriter wraps http.ResponseWriter to track if headers were written.
+// It is safe for concurrent use: Write, WriteHeader, and Flush are serialized
+// via an internal mutex so that concurrent goroutines (e.g. heartbeat and
+// stream proxy) don't interleave SSE frames.
 type responseWriter struct {
 	http.ResponseWriter
-	wroteHeader bool
+	mu                sync.Mutex
+	wroteHeader       bool
+	ssePayloadWritten bool
 }
 
 func (w *responseWriter) WriteHeader(code int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if !w.wroteHeader {
 		w.wroteHeader = true
 		w.ResponseWriter.WriteHeader(code)
@@ -52,14 +60,45 @@ func (w *responseWriter) WriteHeader(code int) {
 }
 
 func (w *responseWriter) Write(b []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if !w.wroteHeader {
-		w.WriteHeader(http.StatusOK)
+		w.wroteHeader = true
+		w.ResponseWriter.WriteHeader(http.StatusOK)
+	}
+	if len(b) > 0 {
+		w.ssePayloadWritten = true
 	}
 	return w.ResponseWriter.Write(b)
 }
 
+// headerWritten returns true if headers have been written to the response.
+// Safe for concurrent use.
+func (w *responseWriter) headerWritten() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.wroteHeader
+}
+
 // Flush implements http.Flusher for SSE streaming support.
+// The mutex is held across the flush call to ensure Write, WriteHeader, and
+// Flush remain serialized. Without this, a concurrent Flush and Write on the
+// underlying http.ResponseWriter's *bufio.Writer would be a data race.
 func (w *responseWriter) Flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// WriteKeepalive writes a keepalive comment frame (":keepalive\n\n") to the
+// response. Unlike Write, it does NOT set ssePayloadWritten — keepalives are
+// not real SSE events and should not block fallback logic on idle timeout.
+func (w *responseWriter) WriteKeepalive() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_, _ = fmt.Fprintf(w.ResponseWriter, ":keepalive\n\n")
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
@@ -83,7 +122,7 @@ func NewMessagesHandler(
 		tokenCounter:        tokenCounter,
 		logger:              slog.Default(),
 		rateLimiter:         middleware.NewRateLimiter(100, time.Minute),
-		requestDedup:        middleware.NewRequestDeduplicator(500 * time.Millisecond),
+		requestDedup:        nil,
 		requestIDGen:        middleware.NewRequestIDGenerator(),
 		metrics:             metrics,
 	}
@@ -112,18 +151,28 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Read the raw request body for debug logging
+	// Read the raw request body with a size limit to prevent memory exhaustion.
+	const maxBodySize = 104857600 // 100 MB
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 	var rawBody json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&rawBody); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			h.sendError(w, http.StatusRequestEntityTooLarge, "request body too large", err)
+			return
+		}
 		h.sendError(w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
 
-	// Deduplicate - skip duplicate requests
-	if _, ok := h.requestDedup.TryAcquire(rawBody); !ok {
-		h.metrics.RecordDeduplicated()
-		h.logger.Info("duplicate request skipped", "request_id", requestID)
-		return
+	// Deduplicate - skip duplicate requests. Skip when the deduplicator is
+	// not configured (nil requestDedup) — it is an optional component.
+	if h.requestDedup != nil {
+		if _, ok := h.requestDedup.TryAcquire(rawBody); !ok {
+			h.metrics.RecordDeduplicated()
+			h.logger.Info("duplicate request skipped", "request_id", requestID)
+			return
+		}
 	}
 
 	// Parse into Anthropic request
@@ -246,7 +295,7 @@ func (h *MessagesHandler) routeOnce(
 ) (router.RouteResult, error) {
 	if isStreaming && !h.modelRouter.IsStreamingScenarioRoutingEnabled() {
 		// Streaming: use faster models to minimize TTFT (time-to-first-token)
-		return h.modelRouter.RouteForStreaming(routerMessages, tokenCount, requestedModel), nil
+		return h.modelRouter.RouteForStreaming(routerMessages, tokenCount, requestedModel)
 	}
 	return h.modelRouter.Route(routerMessages, tokenCount, requestedModel)
 }
@@ -290,9 +339,7 @@ func (h *MessagesHandler) handleStreaming(
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 	rw.WriteHeader(http.StatusOK)
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
+	rw.Flush()
 
 	// Start heartbeat
 	var finished int32
@@ -307,10 +354,7 @@ func (h *MessagesHandler) handleStreaming(
 				if atomic.LoadInt32(&finished) == 1 {
 					return
 				}
-				_, _ = fmt.Fprintf(rw, ":keepalive\n\n")
-				if f, ok := w.(http.Flusher); ok {
-					f.Flush()
-				}
+				rw.WriteKeepalive()
 			case <-heartbeatDone:
 				return
 			case <-clientCtx.Done():
@@ -328,71 +372,124 @@ func (h *MessagesHandler) handleStreaming(
 	for _, model := range modelChain {
 		select {
 		case <-clientCtx.Done():
-			h.logger.Info("client disconnected, stopping streaming fallbacks")
+			h.logger.Debug("client disconnected, stopping streaming fallbacks")
 			return
 		default:
 		}
 
 		h.logger.Info("attempting streaming model", "model", model.ModelID, "provider", model.Provider)
 
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		// Upstream context: no total deadline. The stream lives as long as
+		// data keeps flowing. Per-Read idle deadline is enforced in stream.go
+		// via http.ResponseController, so a stuck stream is still caught.
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			<-clientCtx.Done()
+			cancel()
+		}()
+		idleTimeout := h.client.StreamIdleTimeout(model)
+
+		// recordStreamSuccess records a successful stream completion and
+		// marks the model attempt as done.
+		recordStreamSuccess := func(model config.ModelConfig) {
+			cancel()
+			latency := time.Since(streamStart)
+			h.metrics.RecordSuccess(model.ModelID, latency)
+			h.logger.Info("streaming completed", "model", model.ModelID, "latency", latency)
+		}
+
+		// handleStreamError checks the error from a streaming attempt and
+		// decides whether to retry the next model or abort. It returns true
+		// if the caller should continue (fallback to next model), or false
+		// if it should return.
+		handleStreamError := func(err error, model config.ModelConfig, action string) bool {
+			cancel()
+			if clientCtx.Err() == context.Canceled {
+				h.logger.Debug("client disconnected during " + action + " stream")
+				return false // abort
+			}
+			if err == transformer.ErrStreamIdle {
+				h.logger.Warn("upstream "+action+" stream idle, trying next model",
+					"model", model.ModelID, "idle_timeout", idleTimeout)
+				if rw.ssePayloadWritten {
+					h.sendStreamError(rw, "stream idle after SSE payload started")
+					h.metrics.RecordFailure()
+					return false // abort
+				}
+				return true // continue to next model
+			}
+			h.logger.Warn(action+" streaming failed", "model", model.ModelID, "error", err)
+			if rw.ssePayloadWritten {
+				h.sendStreamError(rw, fmt.Sprintf("all upstream models failed after SSE payload started: %v", err))
+				h.metrics.RecordFailure()
+				return false // abort — cannot fallback after SSE payload started
+			}
+			return true // continue to next model
+		}
 
 		// Zen models use their own endpoint classification
 		if client.IsZen(model) {
 			endpointType := client.ClassifyEndpoint(model.ModelID)
 			switch endpointType {
 			case client.EndpointAnthropic:
-				modelBody := replaceModelInRawBody(rawBody, model.ModelID)
-				if err := h.handleAnthropicStreaming(ctx, rw, modelBody, model.ModelID, model); err != nil {
-					cancel()
-					if clientCtx.Err() == context.Canceled {
-						h.logger.Info("client disconnected during anthropic stream")
-						return
+				if model.AnthropicToolsDisabled {
+					// Fall through to OpenAI-compatible transform path below.
+				} else {
+					modelBody := replaceModelInRawBody(rawBody, model.ModelID)
+					if err := h.handleAnthropicStreaming(ctx, rw, modelBody, model.ModelID, model, idleTimeout, cancel, clientCtx); err != nil {
+						if !handleStreamError(err, model, "anthropic") {
+							return
+						}
+						continue
 					}
-					h.logger.Warn("anthropic streaming failed", "model", model.ModelID, "error", err)
-					continue
+					recordStreamSuccess(model)
+					return
 				}
-				cancel()
-				latency := time.Since(streamStart)
-				h.metrics.RecordSuccess(model.ModelID, latency)
-				h.logger.Info("streaming completed", "model", model.ModelID, "latency", latency)
-				return
 
 			case client.EndpointResponses:
-				if err := h.handleResponsesStreaming(ctx, rw, anthropicReq, model, clientCtx); err != nil {
-					cancel()
-					if clientCtx.Err() == context.Canceled {
-						h.logger.Info("client disconnected during responses stream")
+				if err := h.handleResponsesStreaming(ctx, rw, anthropicReq, model, clientCtx, idleTimeout, cancel); err != nil {
+					if !handleStreamError(err, model, "responses") {
 						return
 					}
-					h.logger.Warn("responses streaming failed", "model", model.ModelID, "error", err)
 					continue
 				}
-				cancel()
-				latency := time.Since(streamStart)
-				h.metrics.RecordSuccess(model.ModelID, latency)
-				h.logger.Info("streaming completed", "model", model.ModelID, "latency", latency)
+				recordStreamSuccess(model)
 				return
 
 			case client.EndpointGemini:
-				if err := h.handleGeminiStreaming(ctx, rw, anthropicReq, model, clientCtx); err != nil {
-					cancel()
-					if clientCtx.Err() == context.Canceled {
-						h.logger.Info("client disconnected during gemini stream")
+				if err := h.handleGeminiStreaming(ctx, rw, anthropicReq, model, clientCtx, idleTimeout, cancel); err != nil {
+					if !handleStreamError(err, model, "gemini") {
 						return
 					}
-					h.logger.Warn("gemini streaming failed", "model", model.ModelID, "error", err)
 					continue
 				}
-				cancel()
-				latency := time.Since(streamStart)
-				h.metrics.RecordSuccess(model.ModelID, latency)
-				h.logger.Info("streaming completed", "model", model.ModelID, "latency", latency)
+				recordStreamSuccess(model)
 				return
 
 			default:
 				// Fall through to OpenAI-compatible handling
 			}
+		}
+
+		// Go provider Anthropic-native models (qwen3.7-max) that require raw
+		// Anthropic format rather than the OpenAI Chat Completions transform.
+		if !client.IsZen(model) && client.IsAnthropicModel(model.ModelID) {
+			modelBody := replaceModelInRawBody(rawBody, model.ModelID)
+			if err := h.handleAnthropicStreaming(ctx, rw, modelBody, model.ModelID, model, idleTimeout, cancel, clientCtx); err != nil {
+				if !handleStreamError(err, model, "anthropic") {
+					return
+				}
+				// For non-idle errors after SSE payload started, send a more
+				// specific error message since this is the last attempt.
+				if err != transformer.ErrStreamIdle && rw.ssePayloadWritten {
+					h.sendStreamError(rw, fmt.Sprintf("all upstream models failed after SSE payload started: %v", err))
+					h.metrics.RecordFailure()
+					return
+				}
+				continue
+			}
+			recordStreamSuccess(model)
+			return
 		}
 
 		// OpenAI-compatible models (both Go and Zen)
@@ -407,37 +504,36 @@ func (h *MessagesHandler) handleStreaming(
 		if err != nil {
 			cancel()
 			if clientCtx.Err() == context.Canceled {
-				h.logger.Info("client disconnected during upstream request")
+				h.logger.Debug("client disconnected during upstream request")
 				return
 			}
 			h.logger.Warn("streaming request failed", "model", model.ModelID, "error", err)
 			continue
 		}
 
-		if err := h.streamHandler.ProxyStream(rw, streamBody, model.ModelID, clientCtx); err != nil {
+		if err := h.streamHandler.ProxyStream(rw, streamBody, model.ModelID, clientCtx, idleTimeout, cancel); err != nil {
 			_ = streamBody.Close()
-			cancel()
 			if err == transformer.ErrClientDisconnected {
-				h.logger.Info("client disconnected during stream")
+				h.logger.Debug("client disconnected during stream")
 				return
 			}
-			if clientCtx.Err() == context.Canceled {
-				h.logger.Info("client disconnected during stream (context canceled)")
+			if !handleStreamError(err, model, "openai") {
 				return
 			}
-			h.logger.Warn("stream proxy failed", "model", model.ModelID, "error", err)
 			continue
 		}
 
 		_ = streamBody.Close()
-		cancel()
-		latency := time.Since(streamStart)
-		h.metrics.RecordSuccess(model.ModelID, latency)
-		h.logger.Info("streaming completed", "model", model.ModelID, "latency", latency)
+		recordStreamSuccess(model)
 		return
 	}
 
 	h.metrics.RecordFailure()
+	if rw.ssePayloadWritten {
+		// SSE payload was already sent — do not attempt further writes
+		// beyond the error event.  The client has a partial stream.
+		return
+	}
 	if !rw.wroteHeader {
 		h.sendError(w, http.StatusBadGateway, "all streaming models failed", nil)
 	} else {
@@ -452,6 +548,8 @@ func (h *MessagesHandler) handleResponsesStreaming(
 	anthropicReq *types.MessageRequest,
 	model config.ModelConfig,
 	clientCtx context.Context,
+	idleTimeout time.Duration,
+	cancel context.CancelFunc,
 ) error {
 	req, err := h.requestTransformer.TransformToResponses(anthropicReq, model)
 	if err != nil {
@@ -463,7 +561,7 @@ func (h *MessagesHandler) handleResponsesStreaming(
 		return err
 	}
 
-	if err := h.streamHandler.ProxyResponsesStream(w, streamBody, model.ModelID, clientCtx); err != nil {
+	if err := h.streamHandler.ProxyResponsesStream(w, streamBody, model.ModelID, clientCtx, idleTimeout, cancel); err != nil {
 		_ = streamBody.Close()
 		return err
 	}
@@ -479,6 +577,8 @@ func (h *MessagesHandler) handleGeminiStreaming(
 	anthropicReq *types.MessageRequest,
 	model config.ModelConfig,
 	clientCtx context.Context,
+	idleTimeout time.Duration,
+	cancel context.CancelFunc,
 ) error {
 	req, err := h.requestTransformer.TransformToGemini(anthropicReq, model)
 	if err != nil {
@@ -490,7 +590,7 @@ func (h *MessagesHandler) handleGeminiStreaming(
 		return err
 	}
 
-	if err := h.streamHandler.ProxyGeminiStream(w, streamBody, model.ModelID, clientCtx); err != nil {
+	if err := h.streamHandler.ProxyGeminiStream(w, streamBody, model.ModelID, clientCtx, idleTimeout, cancel); err != nil {
 		_ = streamBody.Close()
 		return err
 	}
@@ -499,26 +599,75 @@ func (h *MessagesHandler) handleGeminiStreaming(
 	return nil
 }
 
-// replaceModelInRawBody replaces the model field in raw JSON body with the actual model ID.
-func replaceModelInRawBody(rawBody json.RawMessage, modelID string) json.RawMessage {
-	bodyStr := string(rawBody)
+// sanitizeAnthropicBody removes the "type" field from tools whose value is
+// "custom" (server-tool shorthands used by Claude Code for MCP tools that some
+// upstream models don't understand). The upstream treats the tool as absent
+// when type is missing rather than rejecting type:"custom".
+// Returns the original body unchanged if no tools array is present or if no
+// tool has type:"custom".
+func sanitizeAnthropicBody(rawBody json.RawMessage) json.RawMessage {
+	var body map[string]any
+	if err := json.Unmarshal(rawBody, &body); err != nil {
+		return rawBody
+	}
 
-	if idx := strings.Index(bodyStr, `"model":"`); idx != -1 {
-		start := idx + len(`"model":"`)
-		if end := strings.Index(bodyStr[start:], `"`); end != -1 {
-			oldModel := bodyStr[start : start+end]
-			newBody := bodyStr[:start] + modelID + bodyStr[start+end:]
-			slog.Debug("replaced model in request body",
-				"old_model", oldModel,
-				"new_model", modelID,
-				"success", true)
-			return json.RawMessage(newBody)
+	tools, ok := body["tools"].([]any)
+	if !ok || len(tools) == 0 {
+		return rawBody
+	}
+
+	modified := false
+	for _, tool := range tools {
+		toolMap, ok := tool.(map[string]any)
+		if !ok {
+			continue
+		}
+		if toolType, ok := toolMap["type"].(string); ok && toolType == "custom" {
+			delete(toolMap, "type")
+			modified = true
 		}
 	}
 
-	slog.Warn("could not find model field in request body, using original",
-		"body_preview", bodyStr[:min(len(bodyStr), 200)])
-	return rawBody
+	if !modified {
+		return rawBody
+	}
+
+	result, err := json.Marshal(body)
+	if err != nil {
+		return rawBody
+	}
+	return json.RawMessage(result)
+}
+
+// replaceModelInRawBody replaces the top-level "model" field in raw JSON body
+// with the actual model ID.  Uses JSON unmarshal/marshal rather than string
+// search so that nested occurrences of "model" in user content, tool schemas,
+// or escaped strings are never touched.
+func replaceModelInRawBody(rawBody json.RawMessage, modelID string) json.RawMessage {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(rawBody, &obj); err != nil {
+		slog.Error("could not parse request body for model replacement, using original",
+			"error", err)
+		return rawBody
+	}
+	encoded, err := json.Marshal(modelID)
+	if err != nil {
+		// json.Marshal on a string should never fail, but guard anyway.
+		slog.Error("failed to marshal model ID for body replacement",
+			"error", err, "model_id", modelID)
+		return rawBody
+	}
+	obj["model"] = encoded
+	result, err := json.Marshal(obj)
+	if err != nil {
+		slog.Error("could not marshal request body after model replacement, using original",
+			"error", err)
+		return rawBody
+	}
+	slog.Debug("replaced model in request body",
+		"new_model", modelID,
+		"success", true)
+	return json.RawMessage(result)
 }
 
 // handleAnthropicStreaming sends a raw Anthropic request to the Anthropic endpoint.
@@ -528,7 +677,14 @@ func (h *MessagesHandler) handleAnthropicStreaming(
 	rawBody json.RawMessage,
 	modelID string,
 	model config.ModelConfig,
+	idleTimeout time.Duration,
+	cancel context.CancelFunc,
+	clientCtx context.Context,
 ) error {
+	// Sanitize Anthropic-specific fields (e.g., tool type shorthands) that
+	// upstream models may not understand.
+	rawBody = sanitizeAnthropicBody(rawBody)
+
 	h.logger.Debug("sending anthropic streaming request",
 		"model_id", modelID,
 		"body_preview", string(rawBody)[:min(len(rawBody), 200)])
@@ -538,16 +694,50 @@ func (h *MessagesHandler) handleAnthropicStreaming(
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	defer cancel()
 
-	_, err = io.Copy(w, resp.Body)
-	if err != nil {
-		if ctx.Err() == context.Canceled {
+	// Stream the body chunk-by-chunk with an idle watchdog. The stream lives
+	// as long as data keeps flowing and is aborted when no byte arrives
+	// within idleTimeout.
+	buf := make([]byte, 4096)
+	ping := transformer.StartIdleWatchdog(ctx, cancel, idleTimeout)
+	for {
+		select {
+		case <-ctx.Done():
+			// ctx is canceled by either the idle watchdog or client disconnect.
+			// Distinguish: watchdog fires while client is still connected.
+			if clientCtx.Err() == nil {
+				return transformer.ErrStreamIdle
+			}
 			return transformer.ErrClientDisconnected
+		default:
 		}
-		return fmt.Errorf("failed to copy response: %w", err)
+		n, rerr := resp.Body.Read(buf)
+		if n > 0 {
+			ping()
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return transformer.ErrClientDisconnected
+			}
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+		if rerr == io.EOF {
+			return nil
+		}
+		if rerr != nil {
+			if transformer.IsIdleTimeout(rerr) {
+				return transformer.ErrStreamIdle
+			}
+			if errors.Is(rerr, context.Canceled) || ctx.Err() == context.Canceled {
+				if clientCtx.Err() == nil {
+					return transformer.ErrStreamIdle
+				}
+				return transformer.ErrClientDisconnected
+			}
+			return fmt.Errorf("failed to copy response: %w", rerr)
+		}
 	}
-
-	return nil
 }
 
 // sendStreamError sends an error event in the SSE stream.
@@ -563,7 +753,9 @@ func (h *MessagesHandler) sendStreamError(w http.ResponseWriter, message string)
 	}
 
 	data, _ := json.Marshal(errorEvent)
-	_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", string(data))
+	if _, err := fmt.Fprintf(w, "event: error\ndata: %s\n\n", string(data)); err != nil {
+		h.logger.Debug("failed to write stream error event", "error", err, "message", message)
+	}
 
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
@@ -590,7 +782,11 @@ func (h *MessagesHandler) handleNonStreaming(
 				endpointType := client.ClassifyEndpoint(model.ModelID)
 				switch endpointType {
 				case client.EndpointAnthropic:
-					return h.executeAnthropicRequest(ctx, rawBody, model)
+					if model.AnthropicToolsDisabled {
+						// Fall through to OpenAI-compatible handling below.
+					} else {
+						return h.executeAnthropicRequest(ctx, replaceModelInRawBody(rawBody, model.ModelID), model)
+					}
 				case client.EndpointResponses:
 					return h.executeResponsesRequest(ctx, anthropicReq, model)
 				case client.EndpointGemini:
@@ -600,7 +796,7 @@ func (h *MessagesHandler) handleNonStreaming(
 				}
 			} else if client.IsAnthropicModel(model.ModelID) {
 				// Go provider Anthropic-native models (MiniMax, Qwen)
-				return h.executeAnthropicRequest(ctx, rawBody, model)
+				return h.executeAnthropicRequest(ctx, replaceModelInRawBody(rawBody, model.ModelID), model)
 			}
 
 			// OpenAI-compatible models (both Go and Zen)
@@ -634,6 +830,10 @@ func (h *MessagesHandler) executeAnthropicRequest(
 	rawBody json.RawMessage,
 	model config.ModelConfig,
 ) ([]byte, error) {
+	// Sanitize Anthropic-specific fields (e.g., tool type shorthands) that
+	// upstream models may not understand.
+	rawBody = sanitizeAnthropicBody(rawBody)
+
 	resp, err := h.client.SendAnthropicRequest(ctx, rawBody, false, model)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic request failed: %w", err)
@@ -750,7 +950,7 @@ func (h *MessagesHandler) sendError(w http.ResponseWriter, statusCode int, messa
 		"error", err,
 	)
 
-	if rw, ok := w.(*responseWriter); ok && rw.wroteHeader {
+	if rw, ok := w.(*responseWriter); ok && rw.headerWritten() {
 		return
 	}
 

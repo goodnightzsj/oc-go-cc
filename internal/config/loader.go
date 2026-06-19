@@ -146,6 +146,9 @@ func applyDefaults(cfg *Config) {
 	if cfg.OpenCodeGo.TimeoutMs == 0 {
 		cfg.OpenCodeGo.TimeoutMs = defaultTimeoutMs
 	}
+	if cfg.OpenCodeGo.StreamTimeoutMs == 0 {
+		cfg.OpenCodeGo.StreamTimeoutMs = cfg.OpenCodeGo.TimeoutMs
+	}
 	if cfg.OpenCodeZen.BaseURL == "" {
 		cfg.OpenCodeZen.BaseURL = defaultZenBaseURL
 	}
@@ -160,6 +163,9 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.OpenCodeZen.TimeoutMs == 0 {
 		cfg.OpenCodeZen.TimeoutMs = defaultTimeoutMs
+	}
+	if cfg.OpenCodeZen.StreamTimeoutMs == 0 {
+		cfg.OpenCodeZen.StreamTimeoutMs = cfg.OpenCodeZen.TimeoutMs
 	}
 	if cfg.Logging.Level == "" {
 		cfg.Logging.Level = defaultLogLevel
@@ -184,6 +190,33 @@ func validate(cfg *Config) error {
 
 	if err := validateModelOverrides(cfg.ModelOverrides); err != nil {
 		return err
+	}
+
+	if err := validateAnthropicToolsDisabled(cfg); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateAnthropicToolsDisabled checks that models with anthropic_tools_disabled
+// set are configured correctly. This field only applies to models that route to
+// the Anthropic endpoint; enabling it on an OpenAI Chat Completions model has no
+// effect and likely indicates a misconfiguration.
+func validateAnthropicToolsDisabled(cfg *Config) error {
+	for key, mc := range cfg.Models {
+		if mc.AnthropicToolsDisabled {
+			// Models in cfg.Models are selectable by scenario routing. The flag
+			// is only meaningful on models that go through the Anthropic endpoint.
+			// Log a warning since the config system can't resolve the endpoint
+			// without the client package.
+			fmt.Fprintf(os.Stderr, "WARNING: config: models[%q] has anthropic_tools_disabled=true — this is only effective on models routing to the Anthropic endpoint\n", key)
+		}
+	}
+	for key, mc := range cfg.ModelOverrides {
+		if mc.AnthropicToolsDisabled {
+			fmt.Fprintf(os.Stderr, "WARNING: config: model_overrides[%q] has anthropic_tools_disabled=true — this is only effective on models routing to the Anthropic endpoint\n", key)
+		}
 	}
 	return nil
 }

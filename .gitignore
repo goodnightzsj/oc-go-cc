@@ -7,3 +7,4 @@ configs/config.json
 oc-go-cc
 routatic-proxy
 .trunk
+dist/

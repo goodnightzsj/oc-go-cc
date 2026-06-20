@@ -3,12 +3,14 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
 )
 
@@ -175,6 +177,13 @@ func (h *FallbackHandler) ExecuteWithFallback(
 	totalModels := len(models)
 
 	for i, model := range models {
+		if err := ctx.Err(); err != nil {
+			h.logger.Info("request context canceled, stopping fallback attempts",
+				"error", err,
+			)
+			return nil, nil, err
+		}
+
 		cb := h.getCircuitBreaker(model.ModelID)
 
 		// Skip models with open circuit breakers
@@ -206,6 +215,14 @@ func (h *FallbackHandler) ExecuteWithFallback(
 				Attempted:   i + 1,
 				TotalModels: totalModels,
 			}, body, nil
+		}
+
+		if errCtx := ctx.Err(); errCtx != nil {
+			h.logger.Info("request context canceled after model attempt, stopping fallback",
+				"model", model.ModelID,
+				"error", errCtx,
+			)
+			return nil, nil, errCtx
 		}
 
 		if IsRetryableError(err) {
@@ -250,18 +267,21 @@ func IsRetryableError(err error) bool {
 		return false
 	}
 
-	errStr := err.Error()
-
-	// 4xx client errors are not retryable — the request format itself is invalid
-	// for that model, and retrying won't fix it.
-	if strings.Contains(errStr, "API error 4") {
-		return false
+	// APIError from the client carries the HTTP status code — use it directly
+	// instead of string matching, so error format changes upstream can't
+	// silently break the classification.
+	var apiErr *client.APIError
+	if errors.As(err, &apiErr) {
+		// 4xx client errors are not retryable — the request format itself is
+		// invalid for that model, and retrying won't fix it. This includes 429
+		// (rate limit) so the circuit breaker doesn't open for rate limits.
+		return apiErr.StatusCode >= 500
 	}
 
-	// Retry on network errors, timeouts, rate limits (from non-4xx paths),
-	// and server errors (5xx). 4xx client errors are already excluded by
-	// the "API error 4" check above — 429 is correctly non-retryable, so
-	// the circuit breaker doesn't open for rate limits.
+	// For non-API errors (network errors, timeouts, etc.), fall back to
+	// pattern matching on the error string.
+	errStr := err.Error()
+
 	retryable := []string{
 		"timeout",
 		"connection refused",

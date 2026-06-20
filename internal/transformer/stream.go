@@ -55,7 +55,8 @@ func NewStreamHandler() *StreamHandler {
 
 // ProxyStream takes an OpenAI streaming response and writes Anthropic-format SSE to the writer.
 // It reads OpenAI ChatCompletionChunk SSE events and transforms them into Anthropic MessageEvent SSE events.
-// The clientCtx is used to detect client disconnection and abort early.
+// The streamCtx is the per-model attempt context (carries streaming_timeout_ms); the caller
+// should wrap openaiResp with NewCtxReadCloser so the body read also respects the deadline.
 //
 // CRITICAL: This function reads directly from resp.Body without buffering to minimize latency.
 // Per deep research: "Don't use bufio.Scanner or bufio.Reader on the response body - it adds buffering"
@@ -72,6 +73,7 @@ func (h *StreamHandler) ProxyStream(
 	idleTimeout time.Duration,
 	cancel context.CancelFunc,
 ) error {
+	defer func() { _ = openaiResp.Close() }()
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return fmt.Errorf("streaming not supported by response writer")
@@ -164,7 +166,7 @@ func (h *StreamHandler) ProxyStream(
 			// When the idle watchdog fires, it cancels the upstream context
 			// which produces context.Canceled on Read. Distinguish that
 			// from a client disconnect by checking clientCtx.
-			if errors.Is(err, context.Canceled) && clientCtx.Err() == nil {
+			if (errors.Is(err, context.Canceled) || errors.Is(err, ErrStreamReadCanceled)) && clientCtx.Err() == nil {
 				return ErrStreamIdle
 			}
 			return fmt.Errorf("failed to read stream: %w", err)
@@ -679,6 +681,8 @@ func generateID() string {
 }
 
 // ProxyResponsesStream takes an OpenAI Responses streaming response and writes Anthropic-format SSE.
+// streamCtx is the per-model attempt context (carries streaming_timeout_ms); the caller should
+// wrap responsesResp with NewCtxReadCloser so the body read also respects the deadline.
 func (h *StreamHandler) ProxyResponsesStream(
 	w http.ResponseWriter,
 	responsesResp io.ReadCloser,
@@ -687,6 +691,7 @@ func (h *StreamHandler) ProxyResponsesStream(
 	idleTimeout time.Duration,
 	cancel context.CancelFunc,
 ) error {
+	defer func() { _ = responsesResp.Close() }()
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return fmt.Errorf("streaming not supported by response writer")
@@ -753,7 +758,7 @@ func (h *StreamHandler) ProxyResponsesStream(
 			if IsIdleTimeout(err) {
 				return ErrStreamIdle
 			}
-			if errors.Is(err, context.Canceled) && clientCtx.Err() == nil {
+			if (errors.Is(err, context.Canceled) || errors.Is(err, ErrStreamReadCanceled)) && clientCtx.Err() == nil {
 				return ErrStreamIdle
 			}
 			return fmt.Errorf("failed to read stream: %w", err)
@@ -868,6 +873,8 @@ func (h *StreamHandler) processResponsesSSELine(
 }
 
 // ProxyGeminiStream takes a Gemini streaming response and writes Anthropic-format SSE.
+// streamCtx is the per-model attempt context (carries streaming_timeout_ms); the caller should
+// wrap geminiResp with NewCtxReadCloser so the body read also respects the deadline.
 func (h *StreamHandler) ProxyGeminiStream(
 	w http.ResponseWriter,
 	geminiResp io.ReadCloser,
@@ -876,6 +883,7 @@ func (h *StreamHandler) ProxyGeminiStream(
 	idleTimeout time.Duration,
 	cancel context.CancelFunc,
 ) error {
+	defer func() { _ = geminiResp.Close() }()
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return fmt.Errorf("streaming not supported by response writer")
@@ -942,7 +950,7 @@ func (h *StreamHandler) ProxyGeminiStream(
 			if IsIdleTimeout(err) {
 				return ErrStreamIdle
 			}
-			if errors.Is(err, context.Canceled) && clientCtx.Err() == nil {
+			if (errors.Is(err, context.Canceled) || errors.Is(err, ErrStreamReadCanceled)) && clientCtx.Err() == nil {
 				return ErrStreamIdle
 			}
 			return fmt.Errorf("failed to read stream: %w", err)

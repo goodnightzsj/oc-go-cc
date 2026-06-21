@@ -35,6 +35,13 @@ Comprehensive guide to OpenCode Go and Zen models with capabilities, costs, and 
 - Additional endpoint formats: Responses (GPT), Gemini
 - Best for: GPT models, Gemini models, premium Anthropic models
 
+### AWS Bedrock (`aws-bedrock`)
+
+- Models hosted on AWS Bedrock Mantle
+- Supports OpenAI Chat Completions (default) and Anthropic Messages formats
+- Set `wire_format: "anthropic"` for Claude and other Anthropic-native models
+- Best for: Models deployed on your own AWS infrastructure
+
 ## Important: API Endpoints
 
 ⚠️ **Critical:** Not all models use the same API endpoint! routatic-proxy handles this automatically, but you should know:

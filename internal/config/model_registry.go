@@ -18,6 +18,7 @@ var modelMetadata = map[string]ModelMetadata{
 	"kimi-k2.7-code":    {ContextWindow: 256000, MaxOutputTokens: 32768, Vision: true, SupportsTools: true},
 	"kimi-k2.6":         {ContextWindow: 256000, MaxOutputTokens: 8192, Vision: true, SupportsTools: true},
 	"kimi-k2.5":         {ContextWindow: 256000, MaxOutputTokens: 8192, Vision: true, SupportsTools: true},
+	"mimo-v2-omni":      {ContextWindow: 1000000, MaxOutputTokens: 8192, Vision: true, SupportsTools: true},
 	"mimo-v2.5-pro":     {ContextWindow: 1000000, MaxOutputTokens: 16384, Vision: false, SupportsTools: true},
 	"mimo-v2.5":         {ContextWindow: 1000000, MaxOutputTokens: 8192, Vision: false, SupportsTools: true},
 	"minimax-m3":        {ContextWindow: 1000000, MaxOutputTokens: 128000, Vision: false, SupportsTools: true},

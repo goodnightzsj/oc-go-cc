@@ -33,11 +33,11 @@ jobs:
       - name: Build (sanity check)
         run: go build -o /dev/null ./cmd/routatic-proxy
 
-  # ── Stage 2: Create Release ──────────────────────────────────────
+  # ── Stage 2: Build & Release (macOS runner for DMG support) ──────
   release:
-    name: Create Release
+    name: Build & Release
     needs: validate
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     outputs:
       tag: ${{ steps.version.outputs.tag }}
     steps:
@@ -48,6 +48,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0      - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
+          cache: true
 
       - name: Determine version
         id: version
@@ -116,6 +117,19 @@ jobs:
           sha256sum routatic-proxy_* > checksums.txt
           cat checksums.txt
 
+      - name: Build CGO-enabled binary (for DMG)
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          CGO_ENABLED=1 go build -tags darwin -ldflags "-X main.version=${VERSION}" -o bin/routatic-proxy ./cmd/routatic-proxy
+
+      - name: Build macOS DMG
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+        run: |
+          brew install create-dmg
+          make dmg VERSION=${{ env.VERSION }}
+
       - name: Generate AI Changelog
         id: changelog
         env:
@@ -124,7 +138,7 @@ jobs:
           OPENROUTER_TEMPERATURE: ${{ secrets.OPENROUTER_TEMPERATURE }}
           OPENROUTER_MAX_TOKENS: ${{ secrets.OPENROUTER_MAX_TOKENS }}
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq jq curl
+          brew install jq
 
           # Configuration with defaults
           MODEL="${OPENROUTER_MODEL:-openai/gpt-4o-mini}"
@@ -217,41 +231,7 @@ jobs:
           files: |
             dist/routatic-proxy_*
             dist/checksums.txt
-
-  # ── Stage 2.5: Build macOS DMG ──────────────────────────────────
-  release-macos:
-    name: Build & Release macOS DMG
-    needs: release
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.25"
-          cache: true
-
-      - name: Install create-dmg
-        run: brew install create-dmg
-
-      - name: Build CGO-enabled binary
-        env:
-          VERSION: ${{ needs.release.outputs.tag }}
-        run: |
-          VERSION_NO_V="${VERSION#v}"
-          CGO_ENABLED=1 go build -tags darwin -ldflags "-X main.version=${VERSION_NO_V}" -o bin/routatic-proxy ./cmd/routatic-proxy
-
-      - name: Build macOS DMG
-        env:
-          VERSION: ${{ needs.release.outputs.tag }}
-        run: |
-          make dmg VERSION=${{ env.VERSION }}
-
-      - name: Upload DMG to Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.release.outputs.tag }}
-          files: bin/RoutaticProxy.dmg
+            bin/RoutaticProxy.dmg
 
   # ── Stage 3: Publish Docker Image ───────────────────────────────
   docker:

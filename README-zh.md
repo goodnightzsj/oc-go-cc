@@ -158,10 +158,10 @@ routatic-proxy --version          显示版本
 
 | 文档 | 描述 |
 |------|------|
-| [docs/zh/INSTALLATION.md](docs/zh/INSTALLATION.md) | Homebrew、Scoop、从源码构建、发布二进制 |
-| [docs/zh/CONFIGURATION.md](docs/zh/CONFIGURATION.md) | 配置文件参考、环境变量、模型路由、降级链 |
-| [docs/zh/MODELS.md](docs/zh/MODELS.md) | 模型能力、成本和路由建议 |
-| [docs/zh/TROUBLESHOOTING.md](docs/zh/TROUBLESHOOTING.md) | 常见问题和调试模式 |
+| [docs/zh/INSTALLATION.md](docs/zh/INSTALLATION.md) | 安装指南 - Homebrew、Scoop、从源码构建、发布二进制 |
+| [docs/zh/CONFIGURATION.md](docs/zh/CONFIGURATION.md) | 配置指南 - 配置文件参考、环境变量、模型路由、降级链 |
+| [docs/zh/MODELS.md](docs/zh/MODELS.md) | 模型指南 - 模型能力、成本和路由建议 |
+| [docs/zh/TROUBLESHOOTING.md](docs/zh/TROUBLESHOOTING.md) | 故障排除 - 常见问题和调试模式 |
 
 ## 许可证
 

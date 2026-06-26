@@ -1,4 +1,8 @@
-# routatic-proxy (prev OC-GO-CC) [Join us on Discord](https://discord.gg/pUrfwfTFxM)
+# routatic-proxy
+
+[Join us on Discord](https://discord.gg/pUrfwfTFxM)
+
+**[English](./README.md)** | [中文](./README-zh.md)
 
 A Go CLI proxy that lets you route [Claude Code](https://docs.anthropic.com/en/docs/claude-code) requests through multiple upstream providers — [OpenCode Go](https://opencode.ai/docs/go/), [OpenCode Zen](https://opencode.ai/docs/zen/), and [AWS Bedrock](https://aws.amazon.com/bedrock/) — with automatic model selection and format transformation.
 
@@ -8,22 +12,20 @@ A Go CLI proxy that lets you route [Claude Code](https://docs.anthropic.com/en/d
 
 ---
 
-## ✨ macOS GUI Version / macOS GUI 图形界面版
+## macOS GUI Version
 
-This fork repository provides a native macOS GUI (System Tray + Console Dashboard) for `routatic-proxy`.
-本 Fork 仓库为 `routatic-proxy` 额外提供了 macOS 原生图形界面支持（系统托盘 + 内嵌控制台面板）。
+This repository provides a native macOS GUI (System Tray + Console Dashboard) for `routatic-proxy`.
 
-### Features / 功能特点
-- **System Tray Icon (系统托盘)** — Control the proxy server directly from the macOS status bar (Start, Stop, Autostart, Quit).
-  **系统托盘图标** — 直接在 macOS 顶部状态栏中快捷控制代理服务的启动、停止、开机自启和退出。
-- **Interactive Dashboard (内嵌控制台)** — A beautiful native console window to view real-time request history, model usage metrics, and easily edit/save your API keys without editing JSON files.
-  **交互式控制台** — 原生窗口控制台，支持查看实时历史请求、模型调用分布，并且无需手动编辑 JSON 配置文件，即可直接在界面中修改和保存 API Key。
-- **App DMG Installer (DMG 一键安装)** — Package into a standard macOS app with custom icons and launch support.
-  **DMG 一键安装包** — 提供标准的 macOS 应用程序打包，带有关机自启与双击运行托盘支持。
+### Features
 
-### How to Run / 如何运行
-You can download the compiled `.dmg` from the **Releases** page of this repository, or run the following command directly:
-您可以直接在此仓库的 **Releases** 页面下载编译好的 `.dmg` 安装包，或者在终端运行以下命令启动：
+- **System Tray Icon** — Control the proxy server directly from the macOS status bar (Start, Stop, Autostart, Quit)
+- **Interactive Dashboard** — A beautiful native console window to view real-time request history, model usage metrics, and easily edit/save your API keys without editing JSON files
+- **App DMG Installer** — Package into a standard macOS app with custom icons and launch support
+
+### How to Run
+
+Download the compiled `.dmg` from the **Releases** page of this repository, or run the following command directly:
+
 ```bash
 # Launch with native macOS GUI
 routatic-proxy ui
@@ -55,12 +57,12 @@ OpenCode Go gives you access to powerful open coding models for **$5/month** (th
 
 ### OpenCode Go Models
 
-| Model | Context | Best For |
-|-------|---------|----------|
-| **GLM-5.2** | ~200K tokens | Critical architecture, production code review |
-| **Kimi K2.7 Code** | ~256K tokens | Large code generation, 32K max output |
-| **Qwen3.7 Plus** | ~128K tokens | General coding, better quality than Qwen3.6 |
-| **Qwen3.7 Max** | ~128K tokens | Complex coding, Qwen's best quality |
+| Model              | Context      | Best For                                      |
+| ------------------ | ------------ | --------------------------------------------- |
+| **GLM-5.2**        | ~200K tokens | Critical architecture, production code review |
+| **Kimi K2.7 Code** | ~256K tokens | Large code generation, 32K max output         |
+| **Qwen3.7 Plus**   | ~128K tokens | General coding, better quality than Qwen3.6   |
+| **Qwen3.7 Max**    | ~128K tokens | Complex coding, Qwen's best quality           |
 
 See [MODELS.md](MODELS.md) for the complete model list including costs and routing recommendations.
 
@@ -78,6 +80,7 @@ See [MODELS.md](MODELS.md#opencodes-zen) for the full Zen model list.
 ### Deprecated Models
 
 The following models are deprecated and will be removed:
+
 - GPT 5.2/5.1/5 Codex variants (replaced by GPT 5.3 Codex)
 - Claude Sonnet 4 (replaced by Claude Sonnet 4.5/4.6)
 - GLM 5/4.7/4.6 (replaced by GLM 5.1/5.2)

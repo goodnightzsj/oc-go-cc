@@ -8,7 +8,9 @@ const TRANSLATIONS = {
     'status.connected': 'Connected',
     'tab.overview': 'Overview',
     'tab.history': 'History',
+    'tab.performance': 'Performance',
     'tab.fallback': 'Fallback',
+    'tab.analytics': 'Analytics',
     'tab.settings': 'Settings',
     'metric.total': 'Total Requests',
     'metric.success': 'Success',
@@ -382,7 +384,11 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
     tab.classList.add('active');
-    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+    const contentId = 'tab-' + tab.dataset.tab;
+    document.getElementById(contentId).classList.add('active');
+    if (tab.dataset.tab === 'analytics') {
+      AnalyticsModule.load(true);
+    }
   });
 });
 
@@ -942,7 +948,7 @@ function showHistoryDetail(record) {
     </div>
     <div class="detail-row">
       <span class="detail-label">Status</span>
-      <span class="detail-value" style="color: var(--${record.success ? 'success' : 'error'})">${record.success ? 'Success' : 'Failed'}</span>
+      <span class="detail-value" style="color: ${record.success ? '#30d158' : '#ff453a'}">${record.success ? 'Success' : 'Failed'}</span>
     </div>
   `;
   modal.classList.add('visible');
@@ -1075,7 +1081,7 @@ document.addEventListener('keydown', function(e) {
   // Tab shortcuts: Cmd/Ctrl + 1/2/3/4/5/6
   if ((e.metaKey || e.ctrlKey) && ['1', '2', '3', '4', '5', '6'].includes(e.key)) {
     e.preventDefault();
-    const tabs = ['overview', 'history', 'performance', 'fallback', 'settings'];
+    const tabs = ['overview', 'history', 'performance', 'fallback', 'analytics', 'settings'];
     document.querySelector(`[data-tab="${tabs[parseInt(e.key) - 1]}"]`)?.click();
   }
   // Escape to close modals (use if-else to ensure only one action)
@@ -1169,14 +1175,14 @@ async function handleConfigImport(file) {
       <div class="detail-row">
         <span class="detail-label">${t('modal.importConfirm')}</span>
       </div>
-      <pre style="max-height: 300px; overflow: auto; background: var(--surface2); padding: 12px; border-radius: var(--radius-sm); font-size: 11px; white-space: pre-wrap; word-break: break-all;">${escapeHtml(JSON.stringify(config, null, 2))}</pre>
+      <pre style="max-height: 300px; overflow: auto; background: #3a3a3c; padding: 12px; border-radius: 4px; font-size: 11px; white-space: pre-wrap; word-break: break-all;">${escapeHtml(JSON.stringify(config, null, 2))}</pre>
     `;
 
     modalBody.innerHTML = previewHtml;
     document.getElementById('modal-title').textContent = t('modal.importPreview');
 
     const footerHtml = `
-      <div style="padding: 12px 16px; display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid var(--border);">
+      <div style="padding: 12px 16px; display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid #48484a;">
         <button class="btn btn-small" id="btn-import-cancel">${t('btn.cancel')}</button>
         <button class="btn btn-small btn-primary" id="btn-import-apply">${t('btn.apply')}</button>
       </div>
@@ -1239,11 +1245,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 /* ── Fallback Chain Editor ─────────────────────────────────────── */
 const FallbackModule = {
-  chains: {
-    default: [],
-    streaming: [],
-    'long-context': []
-  },
+  chains: {},
   currentScenario: 'default',
   originalChains: null,
   availableModels: [],
@@ -1258,14 +1260,44 @@ const FallbackModule = {
       if (!r.ok) return;
       const config = await r.json();
 
-      this.availableModels = config.models || [];
+      // Build model list from scenario models + fallback entries
+      const modelMap = new Map();
+      if (config.models) {
+        for (const [, m] of Object.entries(config.models)) {
+          if (m.model_id && !modelMap.has(m.model_id)) {
+            modelMap.set(m.model_id, { id: m.model_id, display_name: m.model_id, provider: m.provider || 'unknown' });
+          }
+        }
+      }
+      if (config.fallbacks) {
+        for (const models of Object.values(config.fallbacks)) {
+          for (const m of models) {
+            if (m.model_id && !modelMap.has(m.model_id)) {
+              modelMap.set(m.model_id, { id: m.model_id, display_name: m.model_id, provider: m.provider || 'unknown' });
+            }
+          }
+        }
+      }
+      this.availableModels = [...modelMap.values()];
 
-      this.chains = {
-        default: this.parseFallbackChain(config, 'default'),
-        streaming: this.parseFallbackChain(config, 'streaming'),
-        'long-context': this.parseFallbackChain(config, 'long_context')
-      };
+      // Discover all scenario keys from config.models
+      const scenarioKeys = Object.keys(config.models || {});
+      this.chains = {};
+      for (const key of scenarioKeys) {
+        this.chains[key] = this.parseFallbackChain(config, key);
+      }
 
+      // Populate scenario dropdown
+      const sel = document.getElementById('fallback-scenario');
+      if (sel) {
+        sel.innerHTML = scenarioKeys.map(k =>
+          `<option value="${k}">${k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>`
+        ).join('');
+        this.currentScenario = scenarioKeys[0] || 'default';
+        sel.value = this.currentScenario;
+      }
+
+      this.populateAddSelect();
       this.originalChains = JSON.parse(JSON.stringify(this.chains));
       this.renderChain();
     } catch (e) {
@@ -1274,11 +1306,36 @@ const FallbackModule = {
   },
 
   parseFallbackChain(config, scenario) {
-    const key = scenario === 'long-context' ? 'long_context' : scenario;
-    if (config.router_config && config.router_config.scenario_fallbacks && config.router_config.scenario_fallbacks[key]) {
-      return [...config.router_config.scenario_fallbacks[key]];
+    if (config.fallbacks && config.fallbacks[scenario]) {
+      return config.fallbacks[scenario].map(m => ({...m}));
     }
     return [];
+  },
+
+  populateAddSelect() {
+    const addSel = document.getElementById('fallback-add-model');
+    if (!addSel) return;
+    const chain = this.chains[this.currentScenario] || [];
+    const available = this.availableModels
+      .filter(m => !chain.some(e => (e.model_id || e) === m.id));
+    addSel.innerHTML = '<option value="">' + t('fallback.selectModel') + '</option>' +
+      available.map(m =>
+        `<option value="${escapeHtml(m.id)}">${escapeHtml(m.display_name || m.id)} (${escapeHtml(m.provider)})</option>`
+      ).join('');
+    addSel.disabled = available.length === 0;
+  },
+
+  onAddSelectChange() {
+    const addSel = document.getElementById('fallback-add-model');
+    const modelId = addSel.value;
+    if (!modelId) return;
+    const model = this.availableModels.find(m => m.id === modelId);
+    if (model) {
+      (this.chains[this.currentScenario] || []).push({ model_id: modelId, provider: model.provider, temperature: 0, max_tokens: 0 });
+      this.renderChain();
+    }
+    addSel.value = '';
+    this.populateAddSelect();
   },
 
   renderChain() {
@@ -1288,14 +1345,16 @@ const FallbackModule = {
     if (!chain || chain.length === 0) {
       list.innerHTML = '<li class="empty-state">' + t('fallback.empty') + '</li>';
       list.classList.remove('has-items');
+      this.populateAddSelect();
       return;
     }
 
     list.classList.add('has-items');
-    list.innerHTML = chain.map((modelId, index) => {
+    list.innerHTML = chain.map((entry, index) => {
+      const modelId = entry.model_id || entry;
       const model = this.availableModels.find(m => m.id === modelId);
       const displayName = model ? (model.display_name || model.id) : modelId;
-      const provider = model ? model.provider : '';
+      const provider = entry.provider || (model ? model.provider : '');
       return `
         <li class="fallback-item" draggable="true" data-index="${index}" role="option">
           <span class="handle">⋮⋮</span>
@@ -1306,6 +1365,7 @@ const FallbackModule = {
       `;
     }).join('');
 
+    this.populateAddSelect();
     this.setupDragDrop();
   },
 
@@ -1366,48 +1426,16 @@ const FallbackModule = {
     const select = document.getElementById('fallback-scenario');
     this.currentScenario = select.value;
     this.renderChain();
+    this.populateAddSelect();
     document.getElementById('fallback-preview').style.display = 'none';
   },
 
-  addModel() {
-    const modelOptions = this.availableModels
-      .filter(m => !this.chains[this.currentScenario].includes(m.id))
-      .map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.display_name || m.id)} (${escapeHtml(m.provider)})</option>`)
-      .join('');
-
-    if (!modelOptions) {
-      alert(currentLang === 'zh' ? '没有可用模型' : 'No available models');
-      return;
-    }
-
-    const selectHtml = `<select id="new-model-select" class="filter-select">${modelOptions}</select>`;
-    const confirmed = confirm(
-      (currentLang === 'zh' ? '选择模型添加到降级链:\n\n' : 'Select a model to add:\n\n') +
-      this.availableModels.filter(m => !this.chains[this.currentScenario].includes(m.id))
-        .map(m => `${m.display_name || m.id} (${m.provider})`).join('\n')
-    );
-
-    if (confirmed) {
-      const modelId = prompt(
-        currentLang === 'zh' ? '输入模型ID:' : 'Enter model ID:',
-        this.availableModels.filter(m => !this.chains[this.currentScenario].includes(m.id))[0]?.id || ''
-      );
-
-      if (modelId && !this.chains[this.currentScenario].includes(modelId)) {
-        const model = this.availableModels.find(m => m.id === modelId);
-        if (model) {
-          this.chains[this.currentScenario].push(modelId);
-          this.renderChain();
-        } else {
-          alert(currentLang === 'zh' ? '无效的模型ID' : 'Invalid model ID');
-        }
-      }
-    }
-  },
-
   removeModel(index) {
-    this.chains[this.currentScenario].splice(index, 1);
-    this.renderChain();
+    const chain = this.chains[this.currentScenario];
+    if (chain) {
+      chain.splice(index, 1);
+      this.renderChain();
+    }
   },
 
   preview() {
@@ -1419,7 +1447,8 @@ const FallbackModule = {
       contentEl.innerHTML = '<div class="empty-state">' + t('fallback.empty') + '</div>';
     } else {
       contentEl.innerHTML = '<div class="fallback-preview-chain">' +
-        chain.map((modelId, i) => {
+        chain.map((entry, i) => {
+          const modelId = entry.model_id || entry;
           const model = this.availableModels.find(m => m.id === modelId);
           const displayName = model ? (model.display_name || model.id) : modelId;
           return `
@@ -1450,16 +1479,7 @@ const FallbackModule = {
     }
 
     try {
-      const patch = {
-        router_config: {
-          scenario_fallbacks: {
-            default: this.chains.default,
-            streaming: this.chains.streaming,
-            long_context: this.chains['long-context']
-          }
-        }
-      };
-
+      const patch = { fallbacks: { ...this.chains } };
       const r = await fetch('/api/proxy/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1706,4 +1726,192 @@ const TestModule = {
 };
 
 document.addEventListener('DOMContentLoaded', () => TestModule.init());
+
+/* ── Analytics Tab (minimal, vanilla JS + SVG/CSS) ─────────────── */
+const AnalyticsModule = {
+  palette: ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6'],
+
+  init() {
+    const daysSel = document.getElementById('analytics-days');
+    const refreshBtn = document.getElementById('btn-refresh-analytics');
+    if (daysSel) daysSel.addEventListener('change', () => this.load(true));
+    if (refreshBtn) refreshBtn.addEventListener('click', () => this.load(true));
+  },
+
+  loadingHtml() {
+    return '<div class="flex items-center justify-center py-12"><svg class="animate-spin h-6 w-6 text-[#98989d]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg><span class="ml-2 text-xs text-[#98989d]">Loading analytics…</span></div>';
+  },
+
+  async load(force) {
+    const daysEl = document.getElementById('analytics-days');
+    const days = daysEl ? daysEl.value : 30;
+    const genEl = document.getElementById('analytics-generated');
+    if (genEl) genEl.textContent = '';
+    ['kpi-requests','kpi-tokens','kpi-tokens-in','kpi-tokens-out','kpi-cost','kpi-p95'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = '…';
+    });
+
+    this.showLoading();
+
+    try {
+      const [summaryRes, trendRes, latencyRes] = await Promise.all([
+        fetch(`/api/analytics/summary?days=${days}`),
+        fetch(`/api/analytics/tokens/trend?days=${days}`),
+        fetch(`/api/analytics/latency?days=${days}`)
+      ]);
+      if (!summaryRes.ok) throw new Error('summary fetch failed');
+      const summary = await summaryRes.json();
+      const trend = trendRes.ok ? await trendRes.json() : { trend: [] };
+      const latencyData = latencyRes.ok ? await latencyRes.json() : { stats: [] };
+
+      summary.latency = latencyData;
+
+      this.renderKPIs(summary);
+      this.renderDonuts(summary);
+      this.renderTrend(trend.trend || []);
+      if (genEl) {
+        const ts = summary.generated_at ? new Date(summary.generated_at) : new Date();
+        genEl.textContent = '· ' + ts.toLocaleDateString(undefined, {month:'short', day:'numeric'});
+      }
+    } catch (e) {
+      console.error('Analytics error:', e);
+      this.renderEmpty('Failed to load analytics');
+      if (genEl) genEl.textContent = 'Error';
+    }
+  },
+
+  showLoading() {
+    ['model-donut','provider-donut','token-trend'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = this.loadingHtml();
+    });
+  },
+
+  renderKPIs(data) {
+    const s = data.summary || {};
+    const fmt = (n) => n != null ? Number(n).toLocaleString() : '—';
+    document.getElementById('kpi-requests').textContent = fmt(s.total_requests);
+    const totTok = (s.input_tokens||0) + (s.output_tokens||0);
+    document.getElementById('kpi-tokens').textContent = fmt(totTok);
+    document.getElementById('kpi-tokens-in').textContent = fmt(s.input_tokens);
+    document.getElementById('kpi-tokens-out').textContent = fmt(s.output_tokens);
+    const cost = s.est_cost_usd != null ? '$' + Number(s.est_cost_usd).toFixed(2) : '—';
+    document.getElementById('kpi-cost').textContent = cost;
+
+    const stats = (data.latency && data.latency.stats) || [];
+    let p95Val = '—';
+    if (stats.length) {
+      const avg = stats.reduce((a, st) => a + (st.p95_ms || 0), 0) / stats.length;
+      p95Val = Math.round(avg) + ' ms';
+    }
+    document.getElementById('kpi-p95').textContent = p95Val;
+  },
+
+  renderDonuts(summary) {
+    this.renderDonutChart('model-donut', summary.models || [], 'requests');
+    this.renderDonutChart('provider-donut', summary.providers || [], 'requests');
+  },
+
+  renderDonutChart(containerId, items, valKey) {
+    const wrap = document.getElementById(containerId);
+    if (!wrap) return;
+    wrap.innerHTML = '';
+
+    if (!items.length) {
+      wrap.innerHTML = '<div class="empty-state">No usage data yet</div>';
+      return;
+    }
+
+    const sorted = [...items].sort((a,b) => (b[valKey]||0) - (a[valKey]||0));
+    let top = sorted.slice(0,5);
+    const rest = sorted.slice(5);
+    const otherVal = rest.reduce((sum,i) => sum + (i[valKey]||0), 0);
+    if (otherVal > 0) top.push({name: 'Other', [valKey]: otherVal});
+
+    const total = top.reduce((sum,i) => sum + (i[valKey]||0), 0) || 1;
+    let segs = '';
+    let off = 0;
+    const legend = [];
+    top.forEach((it, idx) => {
+      const v = it[valKey] || 0;
+      const pct = v / total * 100;
+      const col = this.palette[idx % this.palette.length];
+      segs += `${col} ${off.toFixed(1)}% ${(off + pct).toFixed(1)}%, `;
+      off += pct;
+      const label = it.model || it.provider || it.name || 'Unknown';
+      legend.push(`<div class="legend-item"><span class="legend-swatch" style="background:${col}"></span><span class="legend-label">${this.escapeHtml(label)}</span><span class="legend-value">${v}</span></div>`);
+    });
+
+    const html = `<div class="donut-wrapper"><div class="donut" style="--donut-segments: ${segs.slice(0,-2)}"></div><div class="donut-legend">${legend.join('')}</div></div>`;
+    wrap.innerHTML = html;
+  },
+
+  renderTrend(points) {
+    const wrap = document.getElementById('token-trend');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    if (!points.length) {
+      wrap.innerHTML = '<div class="empty-state">No trend data yet. Run some requests to see analytics.</div>';
+      return;
+    }
+
+    const w = 620, h = 188, pad = 30;
+    const maxV = Math.max(1, ...points.map(p => Math.max(p.input_tokens||0, p.output_tokens||0)));
+    const stepX = (w - pad*2) / Math.max(1, points.length - 1);
+
+    const ptsIn = points.map((p,i) => {
+      const x = pad + i*stepX;
+      const y = h - pad - (p.input_tokens||0)/maxV * (h - pad*2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    const ptsOut = points.map((p,i) => {
+      const x = pad + i*stepX;
+      const y = h - pad - (p.output_tokens||0)/maxV * (h - pad*2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+
+    const pathIn = 'M' + ptsIn.join(' L');
+    const pathOut = 'M' + ptsOut.join(' L');
+    const areaIn = pathIn + ` L${(pad + (points.length-1)*stepX).toFixed(1)},${h-pad} L${pad},${h-pad} Z`;
+    const areaOut = pathOut + ` L${(pad + (points.length-1)*stepX).toFixed(1)},${h-pad} L${pad},${h-pad} Z`;
+
+    const dots = points.map((p,i) => {
+      const x = (pad + i*stepX).toFixed(1);
+      const yIn = (h - pad - (p.input_tokens||0)/maxV*(h-pad*2)).toFixed(1);
+      const yOut = (h - pad - (p.output_tokens||0)/maxV*(h-pad*2)).toFixed(1);
+      return `<circle cx="${x}" cy="${yIn}" r="2.2" fill="#3b82f6"/><circle cx="${x}" cy="${yOut}" r="2.2" fill="#10b981"/>`;
+    }).join('');
+
+    const svg = `
+      <svg class="trend-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+        <path d="${areaIn}" fill="#3b82f6" fill-opacity="0.12"/>
+        <path d="${areaOut}" fill="#10b981" fill-opacity="0.12"/>
+        <path d="${pathIn}" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round"/>
+        <path d="${pathOut}" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round"/>
+        ${dots}
+      </svg>
+      <div class="trend-legend">
+        <span><span class="swatch" style="background:#3b82f6;height:3px;width:14px;display:inline-block;border-radius:2px;margin-right:4px;"></span>Input tokens</span>
+        <span><span class="swatch" style="background:#10b981;height:3px;width:14px;display:inline-block;border-radius:2px;margin-right:4px;"></span>Output tokens</span>
+      </div>`;
+    wrap.innerHTML = svg;
+  },
+
+  renderEmpty(msg = 'No usage data yet. Run some requests or configure a model to see analytics.') {
+    ['model-donut','provider-donut','token-trend'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = `<div class="empty-state">${msg}</div>`;
+    });
+  },
+
+  escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  }
+};
+
+// Boot analytics module (listeners only; data loads when tab is clicked)
+setTimeout(() => {
+  AnalyticsModule.init();
+}, 250);
 

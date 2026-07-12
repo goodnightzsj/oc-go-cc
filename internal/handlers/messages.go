@@ -59,8 +59,8 @@ type responseWriter struct {
 	mu                sync.Mutex
 	wroteHeader       bool
 	ssePayloadWritten bool
-	// usage tracks token usage from message_delta events for logging
-	usage struct {
+	contentWritten    bool
+	usage             struct {
 		inputTokens              int
 		outputTokens             int
 		cacheReadInputTokens     int
@@ -86,8 +86,8 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 	}
 	if len(b) > 0 {
 		w.ssePayloadWritten = true
-		// Extract usage from message_delta events
 		w.extractUsageFromSSE(b)
+		w.detectContentInSSE(b)
 	}
 	return w.ResponseWriter.Write(b)
 }
@@ -127,6 +127,47 @@ func (w *responseWriter) extractUsageFromSSE(b []byte) {
 			w.usage.cacheCreationInputTokens = val
 		}
 	}
+
+	// OpenAI-compatible usage keys (used by Bedrock Mantle and direct OpenAI streams)
+	if idx := strings.Index(data, `"prompt_tokens":`); idx != -1 {
+		if val, err := parseIntAfter(data, idx+len(`"prompt_tokens":`)); err == nil {
+			// Only set if not already set by Anthropic keys to avoid overwriting
+			if w.usage.inputTokens == 0 {
+				w.usage.inputTokens = val
+			}
+		}
+	}
+	if idx := strings.Index(data, `"completion_tokens":`); idx != -1 {
+		if val, err := parseIntAfter(data, idx+len(`"completion_tokens":`)); err == nil {
+			if w.usage.outputTokens == 0 {
+				w.usage.outputTokens = val
+			}
+		}
+	}
+}
+
+func (w *responseWriter) detectContentInSSE(b []byte) {
+	data := string(b)
+	if strings.Contains(data, `"content_block_start"`) ||
+		strings.Contains(data, `"content_block_delta"`) ||
+		strings.Contains(data, `"text_delta"`) ||
+		strings.Contains(data, `"content":"`) ||
+		strings.Contains(data, `"tool_use"`) ||
+		strings.Contains(data, `"thinking_delta"`) {
+		w.contentWritten = true
+	}
+}
+
+func (w *responseWriter) hasContent() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.contentWritten
+}
+
+func (w *responseWriter) getOutputTokens() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.usage.outputTokens
 }
 
 // parseIntAfter parses an integer value starting at the given position in the string.
@@ -162,6 +203,24 @@ func parseIntAfter(s string, start int) (int, error) {
 		return 0, fmt.Errorf("no digits found")
 	}
 	return sign * val, nil
+}
+
+// isLowValueResponse decides whether a completed stream should be treated as a
+// failure and trigger fallback. Currently this applies to long_context and
+// complex scenarios when the model produced very little output.
+func isLowValueResponse(scenario router.Scenario, outputTokens int, hasContent bool) bool {
+	if outputTokens >= 64 {
+		return false
+	}
+	if hasContent {
+		return false
+	}
+	switch scenario {
+	case router.ScenarioLongContext, router.ScenarioComplex:
+		return true
+	default:
+		return false
+	}
 }
 
 // headerWritten returns true if headers have been written to the response.
@@ -559,6 +618,7 @@ func (h *MessagesHandler) handleStreaming(
 				OutputTokens: rw.usage.outputTokens,
 				Streaming:    true,
 				Success:      true,
+				Attempt:      1, // streaming fallback attempts not yet tracked in record; treat as primary
 			}
 			if h.history != nil {
 				h.history.Add(rec)
@@ -588,6 +648,16 @@ func (h *MessagesHandler) handleStreaming(
 					"model", model.ModelID, "idle_timeout", idleTimeout)
 				if rw.ssePayloadWritten {
 					h.sendStreamError(rw, "stream idle after SSE payload started")
+					h.metrics.RecordFailureForModel(model.ModelID)
+					return false // abort
+				}
+				return true // continue to next model
+			}
+			if err == transformer.ErrEmptyStream {
+				h.logger.Warn("upstream "+action+" stream empty, trying next model",
+					"model", model.ModelID)
+				if rw.ssePayloadWritten {
+					h.sendStreamError(rw, "empty stream after SSE payload started")
 					h.metrics.RecordFailureForModel(model.ModelID)
 					return false // abort
 				}
@@ -646,6 +716,16 @@ func (h *MessagesHandler) handleStreaming(
 						errProxy = fmt.Errorf("streaming timeout (%v) exceeded", timeout)
 					}
 					if !handleStreamError(errProxy, model, wireFormat.String()) {
+						return
+					}
+					continue
+				}
+
+				if isLowValueResponse(scenario, rw.getOutputTokens(), rw.hasContent()) {
+					h.logger.Warn("upstream returned low-value response, triggering fallback",
+						"model", model.ModelID, "provider", model.Provider,
+						"scenario", scenario, "output_tokens", rw.getOutputTokens())
+					if !handleStreamError(transformer.ErrEmptyStream, model, wireFormat.String()) {
 						return
 					}
 					continue
@@ -1136,6 +1216,7 @@ func (h *MessagesHandler) handleNonStreaming(
 		OutputTokens: outputTokens,
 		Streaming:    false,
 		Success:      true,
+		Attempt:      result.Attempted,
 	}
 	if h.history != nil {
 		h.history.Add(rec)

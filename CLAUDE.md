@@ -13,24 +13,22 @@ make clean   # Remove build artifacts
 make install # Build and install to $GOPATH/bin
 make dist    # Cross-compile for all platforms
 
-## Build with tray support (Linux/macOS)
-# Linux: sudo dnf install libappindicator-gtk3-devel  # Fedora/RHEL
-# Linux: sudo apt install libayatana-appindicator3-dev  # Ubuntu/Debian
-CGO_ENABLED=1 make build
+# Start proxy with dashboard (recommended)
+./bin/routatic-proxy start
 
-## The 'ui' command opens the GUI dashboard
-./bin/routatic-proxy ui  # Browser-based on Linux, native window on macOS
+# Start proxy only (headless)
+./bin/routatic-proxy serve
 ```
 
-### Platform-specific notes
+### Architecture
 
-**Linux:** The default build uses `CGO_ENABLED=0` and opens the GUI in your default browser via `xdg-open`. For system tray support, build with `CGO_ENABLED=1` after installing the `libappindicator-gtk3-devel` (Fedora/RHEL) or `libayatana-appindicator3-dev` (Ubuntu/Debian) package.
+**routatic-proxy start** runs both the proxy server and GUI dashboard:
+- Proxy listens on `127.0.0.1:3456` (configurable)
+- Dashboard at `http://127.0.0.1:3445`
+- Usage data persists to SQLite (`~/.local/share/routatic-proxy/data.db`) regardless of dashboard state
+- Press Ctrl+C to stop both servers
 
-**macOS:** The `ui` command opens a native window with system tray integration. Requires CGO with Cocoa headers. For builds without CGO, use `CGO_ENABLED=0 make build` which opens the browser-based GUI.
-
-**Windows:** The `ui` command is not supported. Use CLI only or run the proxy with `make run`.
-
-Run a single test: `go test ./internal/router/ -v`
+**routatic-proxy serve** runs headless (no dashboard).
 
 ## Architecture
 
@@ -112,16 +110,15 @@ Precedence: `*_API_KEYS` → `*_API_KEY` → global `API_KEYS` → global `API_K
 ## Key Files
 
 - `cmd/routatic-proxy/main.go` — CLI entry point (cobra). Default config template is generated here.
-- `cmd/routatic-proxy/ui_darwin.go` — macOS GUI entry point (`routatic-proxy ui`), webview + tray integration (darwin-only build tag).
 - `internal/config/` — Config types and JSON loader with `${VAR}` env interpolation.
 - `internal/transformer/` — Request/response format conversion (Anthropic ↔ OpenAI).
 - `internal/router/fallback.go` — Circuit breaker per model (3 failures = 30s skip).
 - `configs/config.example.json` — Reference config with all options documented.
-- `internal/gui/` — Embedded HTTP server for the webview dashboard (serves static assets + API endpoints).
-- `internal/gui/assets/` — HTML/CSS/JS for the dashboard (Overview, History, Settings tabs).
-- `internal/tray/` — macOS system tray icon and menu (darwin-only build tag).
+- `internal/gui/` — Embedded HTTP server for the dashboard (serves static assets + API endpoints).
+- `internal/gui/assets/` — HTML/CSS/JS for the dashboard (Overview, History, Analytics, Settings tabs).
 - `internal/history/` — In-memory ring buffer (1000 entries, O(1) insert, thread-safe).
 - `internal/metrics/` — In-process request counters (received, streamed, success, failed, model distribution).
+- `internal/storage/` — SQLite persistence layer for request history, latency samples, and analytics.
 
 ### GUI Config Editing
 
@@ -135,6 +132,68 @@ The Settings tab exposes all config fields as editable form inputs. On save, onl
 5. Backend writes merged config to disk and calls `atomicCfg.Reload()`
 
 **Nil safety:** The `/api/metrics` and `/api/history` handlers handle nil dependencies gracefully — they return zero values instead of panicking if the history or metrics instance is unavailable.
+
+## Dual Release Channel System
+
+This project uses a dual release channel system for separating beta and production releases:
+
+### Beta Channel (Automatic)
+- **Trigger:** Every push to `main` branch (see `.github/workflows/beta-release.yml`)
+- **Version format:** `v{UPCOMING}.beta.{YYYYMMDD.HHMMSS}` (e.g., `v1.3.0-beta.20260712.143015`)
+- **GitHub release:** Marked as `prerelease: true`
+- **Docker tags:** `v{UPCOMING}.beta.{YYYYMMDD.HHMMSS}` and `beta-{UPCOMING}`
+
+Beta releases are fully automated and include:
+- Test suite validation
+- Cross-platform binary builds (darwin-amd64/arm64, linux-amd64/arm64, windows-amd64/arm64)
+- macOS DMG with CGO-enabled binary
+- AI-generated changelog from commits
+- Docker images for linux/amd64 and linux/arm64
+
+### Production Channel (Manual)
+- **Trigger:** Manual `workflow_dispatch` on `releases` branch (see `.github/workflows/release.yml`)
+- **Version format:** `vX.Y.Z` (semantic versioning)
+- **GitHub release:** Marked as `prerelease: false` (stable)
+- **Docker tags:** `vX.Y.Z`, `vX.Y`, `vX`, `latest`
+
+Production releases include all beta features plus:
+- Homebrew tap update (requires `HOMEBREW_PAT` secret)
+- Scoop bucket update (requires `SCOOP_PAT` secret)
+
+### Version Detection Script
+
+`.github/scripts/get-versions.sh` is used by the beta workflow to:
+1. Fetch tags from the `origin/releases` branch to get current production version (e.g., `v1.2.3`)
+2. Increment to the next version (e.g., `v1.3.0`) - **beta is based on upcoming release**
+3. Generate beta version by appending `.beta.{YYYYMMDD.HHMMSS}` - **timestamp ensures uniqueness even with multiple releases per day**
+4. Output both versions as JSON for CI consumption
+
+
+**Version Format Explanation:**
+- `v1.3.0` = The upcoming production version (minor incremented from latest production)
+- `beta.20260712.143015` = Timestamp-based prerelease tag
+- Full example: `v1.3.0-beta.20260712.143015`
+
+### Creating a Production Release
+
+1. Merge all changes to `main` and verify via beta
+2. Ensure `releases` branch exists and is up-to-date
+3. Go to GitHub Actions → Release workflow
+4. Click "Run workflow"
+5. Enter version (must follow `vX.Y.Z` format)
+6. Workflow validates, builds, and releases
+
+### Release Workflow Stages
+
+Both workflows share the same stages:
+
+1. **validate** — Run `go vet`, `go test -race`, and build sanity check on ubuntu-latest
+2. **release** — Build cross-platform binaries and macOS DMG on macos-latest
+3. **docker** — Publish multi-arch Docker images on ubuntu-latest
+
+Production adds:
+4. **homebrew** — Update the homebrew-tap formula
+5. **scoop** — Update the scoop-bucket manifest
 
 ## Skill routing
 

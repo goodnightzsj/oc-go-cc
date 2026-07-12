@@ -16,6 +16,7 @@ import (
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/internal/debug"
+	"github.com/routatic/proxy/internal/gui"
 	"github.com/routatic/proxy/internal/handlers"
 	"github.com/routatic/proxy/internal/history"
 	"github.com/routatic/proxy/internal/metrics"
@@ -134,6 +135,14 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 	mux.HandleFunc("/v1/messages/count_tokens", healthHandler.HandleCountTokens)
 	mux.HandleFunc("/health", healthHandler.HandleHealth)
 	mux.HandleFunc("/statusline", healthHandler.HandleStatusline)
+
+	// Analytics endpoints (only when SQLite storage is available)
+	if db != nil {
+		analyticsHandler := gui.NewAnalyticsHandler(db)
+		mux.HandleFunc("/api/analytics/summary", analyticsHandler.Summary)
+		mux.HandleFunc("/api/analytics/tokens/trend", analyticsHandler.TokenTrend)
+		mux.HandleFunc("/api/analytics/latency", analyticsHandler.LatencyStats)
+	}
 
 	// Create HTTP server.
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)

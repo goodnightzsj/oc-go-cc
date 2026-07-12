@@ -19,3 +19,6 @@ brag-output-**
 .claude
 
 router.test
+.playwright-mcp
+.gstack/
+node_modules/

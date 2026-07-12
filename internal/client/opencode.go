@@ -51,6 +51,7 @@ const (
 	ProviderOpenCodeGo  = "opencode-go"
 	ProviderOpenCodeZen = "opencode-zen"
 	ProviderAWSBedrock  = "aws-bedrock"
+	ProviderOpenRouter  = "openrouter"
 )
 
 // APIError represents an HTTP API error returned by an upstream provider.
@@ -99,6 +100,10 @@ func (c *OpenCodeClient) getProviderAPIKeys(modelConfig config.ModelConfig) []st
 		if keys := cfg.OpenCodeZen.EffectiveAPIKeys(); len(keys) > 0 {
 			return keys
 		}
+	case IsOpenRouter(modelConfig):
+		if keys := cfg.OpenRouter.EffectiveAPIKeys(); len(keys) > 0 {
+			return keys
+		}
 	default:
 		if keys := cfg.OpenCodeGo.EffectiveAPIKeys(); len(keys) > 0 {
 			return keys
@@ -126,6 +131,8 @@ func ProviderKeyCount(atomicCfg *config.AtomicConfig, provider string) int {
 		keys = cfg.OpenCodeZen.EffectiveAPIKeys()
 	case ProviderAWSBedrock:
 		keys = cfg.AWSBedrock.EffectiveAPIKeys()
+	case ProviderOpenRouter:
+		keys = cfg.OpenRouter.EffectiveAPIKeys()
 	default:
 		// Unknown provider - default to global keys
 		keys = cfg.EffectiveAPIKeys()
@@ -185,6 +192,11 @@ func (c *OpenCodeClient) StreamIdleTimeout(modelConfig config.ModelConfig) time.
 		if ms <= 0 {
 			ms = cfg.OpenCodeZen.TimeoutMs
 		}
+	case IsOpenRouter(modelConfig):
+		ms = cfg.OpenRouter.StreamTimeoutMs
+		if ms <= 0 {
+			ms = cfg.OpenRouter.TimeoutMs
+		}
 	default:
 		ms = cfg.OpenCodeGo.StreamTimeoutMs
 		if ms <= 0 {
@@ -209,6 +221,8 @@ func (c *OpenCodeClient) RequestTimeout(model config.ModelConfig) time.Duration 
 		timeoutMs = cfg.AWSBedrock.TimeoutMs
 	case IsZen(model):
 		timeoutMs = cfg.OpenCodeZen.TimeoutMs
+	case IsOpenRouter(model):
+		timeoutMs = cfg.OpenRouter.TimeoutMs
 	default:
 		timeoutMs = cfg.OpenCodeGo.TimeoutMs
 	}
@@ -235,6 +249,11 @@ func (c *OpenCodeClient) StreamingTimeout(model config.ModelConfig) time.Duratio
 		timeoutMs = cfg.OpenCodeZen.StreamingTimeoutMs
 		if timeoutMs <= 0 {
 			timeoutMs = cfg.OpenCodeZen.TimeoutMs
+		}
+	case IsOpenRouter(model):
+		timeoutMs = cfg.OpenRouter.StreamingTimeoutMs
+		if timeoutMs <= 0 {
+			timeoutMs = cfg.OpenRouter.TimeoutMs
 		}
 	default:
 		timeoutMs = cfg.OpenCodeGo.StreamingTimeoutMs
@@ -298,6 +317,11 @@ func IsBedrock(model config.ModelConfig) bool {
 	return Provider(model) == ProviderAWSBedrock
 }
 
+// IsOpenRouter returns true if the model uses the OpenRouter provider.
+func IsOpenRouter(model config.ModelConfig) bool {
+	return Provider(model) == ProviderOpenRouter
+}
+
 // EndpointType determines which Zen endpoint format to use.
 type EndpointType int
 
@@ -357,6 +381,10 @@ func (c *OpenCodeClient) getEndpoint(modelID string, modelConfig config.ModelCon
 		default:
 			return endpointConfig{BaseURL: zen.BaseURL, APIKey: apiKey}
 		}
+	}
+
+	if IsOpenRouter(modelConfig) {
+		return endpointConfig{BaseURL: cfg.OpenRouter.BaseURL, APIKey: apiKey}
 	}
 
 	// Default: OpenCode Go

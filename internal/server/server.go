@@ -22,19 +22,22 @@ import (
 	"github.com/routatic/proxy/internal/provider"
 	"github.com/routatic/proxy/internal/router"
 	"github.com/routatic/proxy/internal/status"
+	"github.com/routatic/proxy/internal/storage"
 	"github.com/routatic/proxy/internal/token"
 )
 
 // Server represents the proxy server.
 type Server struct {
-	atomic   *config.AtomicConfig
-	httpSrv  *http.Server
-	mux      http.Handler
-	mu       sync.Mutex
-	logger   *slog.Logger
-	levelVar *slog.LevelVar
-	History  *history.History // exported so the ui command can read it
-	metrics  *metrics.Metrics // stored for Metrics() getter
+	atomic    *config.AtomicConfig
+	httpSrv   *http.Server
+	mux       http.Handler
+	mu        sync.Mutex
+	logger    *slog.Logger
+	levelVar  *slog.LevelVar
+	History   *history.History // exported so the ui command can read it
+	metrics   *metrics.Metrics // stored for Metrics() getter
+	storage   *storage.Database
+	retention *storage.Retention
 }
 
 // NewServer creates a new proxy server.
@@ -58,7 +61,6 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 	metrics := metrics.New()
 
 	openCodeClient := client.NewOpenCodeClient(atomic, captureLogger)
-	modelRouter := router.NewModelRouter(atomic)
 	fallbackHandler := router.NewFallbackHandler(logger, 3, 30*time.Second)
 	fallbackHandler.SetAtomicConfig(atomic)
 
@@ -74,7 +76,43 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 	// Create history ring buffer (1000 entries, in-memory).
 	hist := history.New(1000)
 
+	// Initialize SQLite storage first so catalog can use it.
+	var db *storage.Database
+	var retention *storage.Retention
+	storageCfg := storage.DefaultConfig
+	if cfg.Storage != nil {
+		storageCfg = storage.Config{
+			DatabasePath:    cfg.Storage.DatabasePath,
+			RetentionDays:   cfg.Storage.RetentionDays,
+			VacuumOnStartup: cfg.Storage.VacuumOnStartup,
+			WALEnabled:      cfg.Storage.WALEnabled,
+		}
+	}
+	if storageCfg.DatabasePath != "" {
+		db, err = storage.Open(storageCfg)
+		if err != nil {
+			logger.Warn("failed to open storage database, falling back to in-memory", "error", err)
+		} else {
+			logger.Info("storage database opened", "path", db.Path())
+			retention = storage.NewRetention(db, storageCfg.RetentionDays)
+			retention.Start()
+		}
+	}
+
+	// Create model router with SQLite catalog support.
+	var modelRouter *router.ModelRouter
+	if db != nil {
+		modelRouter = router.NewModelRouterWithDB(atomic, db)
+	} else {
+		modelRouter = router.NewModelRouter(atomic)
+	}
+
 	// Create handlers.
+	var storageWriter handlers.StorageWriter
+	if db != nil {
+		storageWriter = handlers.NewStorageAdapter(db)
+	}
+
 	messagesHandler := handlers.NewMessagesHandler(
 		openCodeClient,
 		providerRegistry,
@@ -84,6 +122,7 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 		metrics,
 		captureLogger,
 		hist,
+		storageWriter,
 	)
 	healthHandler := handlers.NewHealthHandler(tokenCounter, fallbackHandler, metrics, statusStore)
 
@@ -113,13 +152,15 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 	}
 
 	srv := &Server{
-		atomic:   atomic,
-		httpSrv:  httpSrv,
-		mux:      mux,
-		logger:   logger,
-		levelVar: levelVar,
-		History:  hist,
-		metrics:  metrics,
+		atomic:    atomic,
+		httpSrv:   httpSrv,
+		mux:       mux,
+		logger:    logger,
+		levelVar:  levelVar,
+		History:   hist,
+		metrics:   metrics,
+		storage:   db,
+		retention: retention,
 	}
 
 	// Register callback to update log level on config reload
@@ -134,6 +175,11 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 // Metrics returns the in-process metrics collector.
 func (s *Server) Metrics() *metrics.Metrics {
 	return s.metrics
+}
+
+// Storage returns the SQLite storage instance.
+func (s *Server) Storage() *storage.Database {
+	return s.storage
 }
 
 // Start starts the server with graceful shutdown.
@@ -163,6 +209,14 @@ func (s *Server) Start() error {
 	go func() {
 		<-ctx.Done()
 		s.logger.Info("shutting down server...")
+
+		if s.retention != nil {
+			s.retention.Stop()
+		}
+
+		if s.storage != nil {
+			_ = s.storage.Close()
+		}
 
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()

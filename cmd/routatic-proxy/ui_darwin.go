@@ -36,14 +36,12 @@ static inline void makeWindowKeyAndActive(void* windowPtr) {
 static inline void setupMacMenus() {
     NSMenu *mainMenu = [[NSMenu alloc] init];
 
-    // 1. Application Menu
     NSMenuItem *appMenuItem = [[NSMenuItem alloc] init];
     [mainMenu addItem:appMenuItem];
     NSMenu *appMenu = [[NSMenu alloc] init];
     [appMenu addItemWithTitle:@"Quit RoutaticProxy" action:@selector(terminate:) keyEquivalent:@"q"];
     [appMenuItem setSubmenu:appMenu];
 
-    // 2. Edit Menu (Critical for Copy/Paste)
     NSMenuItem *editMenuItem = [[NSMenuItem alloc] init];
     [mainMenu addItem:editMenuItem];
     NSMenu *editMenu = [[NSMenu alloc] initWithTitle:@"Edit"];
@@ -124,12 +122,10 @@ func openWebview() {
 	currentWv.SetTitle("routatic-proxy Console")
 	currentWv.SetSize(860, 560, webview.HintNone)
 
-	// Setup Mac copy/paste menu bar
 	setupMenusOnce.Do(func() {
 		C.setupMacMenus()
 	})
 
-	// Register window close observer
 	winPtr := currentWv.Window()
 	C.registerWindowCloseObserver(winPtr)
 	C.makeWindowKeyAndActive(winPtr)
@@ -138,9 +134,6 @@ func openWebview() {
 	wvMu.Unlock()
 }
 
-// uiCmd is the "routatic-proxy ui" command (macOS only).
-// It starts the proxy in the same process, then opens a webview dashboard
-// with a system tray icon.
 var uiCmd = &cobra.Command{
 	Use:   "ui",
 	Short: "Launch GUI dashboard (macOS only)",
@@ -148,7 +141,6 @@ var uiCmd = &cobra.Command{
 The proxy runs in the background; closing the window keeps it running.
 Use the tray icon to reopen the window or quit entirely.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// ── 1. Load config ──────────────────────────────────────────
 		configPath, _ := cmd.Flags().GetString("config")
 		if configPath == "" {
 			configPath = config.ResolveConfigPath()
@@ -156,7 +148,6 @@ Use the tray icon to reopen the window or quit entirely.`,
 			_ = os.Setenv("ROUTATIC_PROXY_CONFIG", configPath)
 		}
 
-		// Auto-initialize config file if it does not exist.
 		if _, err := os.Stat(configPath); os.IsNotExist(err) {
 			slog.Info("Config file not found, auto-initializing default config", "path", configPath)
 			configDir := filepath.Dir(configPath)
@@ -173,7 +164,6 @@ Use the tray icon to reopen the window or quit entirely.`,
 		if err != nil {
 			initialConfigValid = false
 			slog.Warn("Failed to load config (will require GUI configuration)", "error", err)
-			// Construct a valid default config so the proxy structure and GUI can start
 			cfg = &config.Config{
 				Host: "127.0.0.1",
 				Port: 3456,
@@ -195,19 +185,15 @@ Use the tray icon to reopen the window or quit entirely.`,
 			}
 		}
 
-		if initialConfigValid {
-			// Check if keys are placeholders or empty
-			if cfg.APIKey == "" && len(cfg.APIKeys) == 0 &&
-				(cfg.OpenCodeGo.APIKey == "" || strings.Contains(cfg.OpenCodeGo.APIKey, "${")) &&
-				(cfg.OpenCodeZen.APIKey == "" || strings.Contains(cfg.OpenCodeZen.APIKey, "${")) {
-				initialConfigValid = false
-				slog.Info("Config has no valid API keys set yet, waiting for GUI configuration")
-			}
+		if initialConfigValid && cfg.APIKey == "" && len(cfg.APIKeys) == 0 &&
+			(cfg.OpenCodeGo.APIKey == "" || strings.Contains(cfg.OpenCodeGo.APIKey, "${")) &&
+			(cfg.OpenCodeZen.APIKey == "" || strings.Contains(cfg.OpenCodeZen.APIKey, "${")) {
+			initialConfigValid = false
+			slog.Info("Config has no valid API keys set yet, waiting for GUI configuration")
 		}
 
 		atomic := config.NewAtomicConfig(cfg, config.ResolveConfigPath())
 
-		// ── 2. Debug capture (optional) ─────────────────────────────
 		var captureLogger *debug.CaptureLogger
 		if cfg.Logging.DebugCapture != nil && cfg.Logging.DebugCapture.Enabled {
 			storage, err := debug.NewStorage(*cfg.Logging.DebugCapture)
@@ -218,13 +204,11 @@ Use the tray icon to reopen the window or quit entirely.`,
 			defer func() { _ = captureLogger.Close() }()
 		}
 
-		// ── 3. Create proxy server (does not Start() yet) ───────────
 		proxySrv, err := server.NewServer(atomic, captureLogger)
 		if err != nil {
 			return fmt.Errorf("create proxy server: %w", err)
 		}
 
-		// ── 4. Context + signals ────────────────────────────────────
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -239,11 +223,10 @@ Use the tray icon to reopen the window or quit entirely.`,
 			if stopProxy != nil {
 				_ = stopProxy()
 			}
-			cancel() // trigger context cancellation so deferred cleanup runs
+			cancel()
 			tray.Quit()
 		}()
 
-		// ── 5. Start proxy ──────────────────────────────────────────
 		proxyErrCh := make(chan error, 1)
 		var isProxyRunning bool
 		var connectedToExisting bool
@@ -258,7 +241,6 @@ Use the tray icon to reopen the window or quit entirely.`,
 				return nil
 			}
 
-			// Validate key presence dynamically
 			currentCfg := atomic.Get()
 			if currentCfg.APIKey == "" && len(currentCfg.APIKeys) == 0 &&
 				(currentCfg.OpenCodeGo.APIKey == "" || strings.Contains(currentCfg.OpenCodeGo.APIKey, "${")) &&
@@ -266,7 +248,6 @@ Use the tray icon to reopen the window or quit entirely.`,
 				return fmt.Errorf("API Key is empty. Please set it in Settings first")
 			}
 
-			// Probe for existing proxy instance before starting a new one.
 			healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", currentCfg.Port)
 			client := &http.Client{Timeout: 2 * time.Second}
 			resp, probeErr := client.Get(healthURL)
@@ -274,7 +255,6 @@ Use the tray icon to reopen the window or quit entirely.`,
 				_, _ = io.Copy(io.Discard, resp.Body)
 				_ = resp.Body.Close()
 				if resp.StatusCode == http.StatusOK {
-					// External proxy already running — connect to it instead of starting a new one.
 					slog.Info("Existing proxy detected on port, connecting to it", "port", currentCfg.Port)
 					isProxyRunning = true
 					connectedToExisting = true
@@ -286,7 +266,6 @@ Use the tray icon to reopen the window or quit entirely.`,
 				}
 			}
 
-			// No existing proxy found — start a local instance.
 			isProxyRunning = true
 			connectedToExisting = false
 			if guiSrv != nil {
@@ -310,7 +289,6 @@ Use the tray icon to reopen the window or quit entirely.`,
 					select {
 					case proxyErrCh <- err:
 					default:
-						// Channel already full or nobody listening — error was already logged above.
 					}
 				}
 			}()
@@ -332,7 +310,6 @@ Use the tray icon to reopen the window or quit entirely.`,
 			}
 			tray.SetRunning(false)
 
-			// Only shut down if we own the server (not connected to an external one).
 			if !wasConnected {
 				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer shutdownCancel()
@@ -350,14 +327,15 @@ Use the tray icon to reopen the window or quit entirely.`,
 			}
 		}
 
-		// ── 6. Start GUI HTTP server ────────────────────────────────
 		guiSrv = gui.New(gui.Options{
-			History:      proxySrv.History,
-			Metrics:      proxySrv.Metrics(),
-			AtomicConfig: atomic,
-			ProxyPort:    cfg.Port,
-			StartProxy:   startProxy,
-			StopProxy:    stopProxy,
+			History:          proxySrv.History,
+			Metrics:          proxySrv.Metrics(),
+			AtomicConfig:     atomic,
+			ProxyPort:        cfg.Port,
+			StartProxy:       startProxy,
+			StopProxy:        stopProxy,
+			CatalogDir:       resolveCatalogDir(configPath),
+			CatalogSourceURL: cfg.Catalog.SourceURL,
 		})
 		guiSrv.SetProxyRunning(proxyInitiallyStarted)
 
@@ -366,10 +344,8 @@ Use the tray icon to reopen the window or quit entirely.`,
 			return fmt.Errorf("start gui server: %w", err)
 		}
 
-		// Save parameters globally for the main-thread CGO callbacks
 		globalGUIURL = guiURL
 
-		// ── 7. System tray (runs on main thread to prevent Cocoa crashes) ──
 		autostartEnabled := false
 		if home, err := os.UserHomeDir(); err == nil {
 			plistPath := filepath.Join(home, "Library", "LaunchAgents", daemon.LaunchAgent+".plist")
@@ -377,7 +353,6 @@ Use the tray icon to reopen the window or quit entirely.`,
 			autostartEnabled = (err == nil)
 		}
 
-		// Open webview asynchronously after a short delay on the main thread
 		go func() {
 			time.Sleep(500 * time.Millisecond)
 			C.DispatchOpenWindow()
@@ -394,7 +369,6 @@ Use the tray icon to reopen the window or quit entirely.`,
 					guiSrv.SetProxyRunning(true)
 					tray.SetRunning(true)
 				} else {
-					// Toggle back off in gui if starting failed
 					guiSrv.SetProxyRunning(false)
 					tray.SetRunning(false)
 				}

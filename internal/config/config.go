@@ -15,6 +15,8 @@ type Config struct {
 	Port                           int                      `json:"port"`
 	HotReload                      bool                     `json:"hot_reload"`
 	EnableStreamingScenarioRouting bool                     `json:"enable_streaming_scenario_routing"`
+	EnableCostBasedRouting         bool                     `json:"enable_cost_based_routing"`
+	CostRouting                    *CostRoutingConfig       `json:"cost_routing,omitempty"`
 	RespectRequestedModel          *bool                    `json:"respect_requested_model,omitempty"`
 	Models                         map[string]ModelConfig   `json:"models"`
 	Fallbacks                      map[string][]ModelConfig `json:"fallbacks"`
@@ -22,15 +24,49 @@ type Config struct {
 	AWSBedrock                     AWSBedrockConfig         `json:"aws_bedrock"`
 	OpenCodeGo                     OpenCodeGoConfig         `json:"opencode_go"`
 	OpenCodeZen                    OpenCodeZenConfig        `json:"opencode_zen"`
+	OpenRouter                     OpenRouterConfig         `json:"openrouter"`
 	AnthropicFirst                 AnthropicFirstConfig     `json:"anthropic_first"`
 	Logging                        LoggingConfig            `json:"logging"`
 	Debug                          DebugConfig              `json:"debug"`
+	Catalog                        CatalogConfig            `json:"catalog"`
+	Storage                        *StorageConfig           `json:"storage,omitempty"`
+}
+
+// CostRoutingConfig controls cost-aware model selection.
+type CostRoutingConfig struct {
+	Enabled            bool               `json:"enabled"`
+	PreferProviders    []string           `json:"prefer_providers,omitempty"`
+	MaxContextWindow   int64              `json:"max_context_window,omitempty"`
+	PenaltyPerProvider map[string]float64 `json:"penalty_per_provider,omitempty"`
+}
+
+// CostBasedRoutingEnabled reports whether cost-aware routing should be active.
+// It is enabled when either the legacy top-level flag is set or the nested
+// cost_routing block explicitly enables it.
+func (c *Config) CostBasedRoutingEnabled() bool {
+	if c == nil {
+		return false
+	}
+	if c.EnableCostBasedRouting {
+		return true
+	}
+	if c.CostRouting != nil && c.CostRouting.Enabled {
+		return true
+	}
+	return false
 }
 
 // AnthropicFirstConfig controls direct Anthropic passthrough with OpenCode fallback.
 type AnthropicFirstConfig struct {
 	Enabled bool   `json:"enabled"`
 	BaseURL string `json:"base_url"`
+}
+
+// CatalogConfig controls automatic syncing of the models.dev catalog.
+type CatalogConfig struct {
+	MaxAgeHours int    `json:"max_age_hours"`
+	SourceURL   string `json:"source_url"`
+	Enabled     *bool  `json:"enabled,omitempty"`
 }
 
 // DebugConfig holds debug-related configuration.
@@ -43,6 +79,7 @@ type DebugConfig struct {
 type ModelConfig struct {
 	Provider               string          `json:"provider"`
 	ModelID                string          `json:"model_id"`
+	ModelRef               string          `json:"model_ref,omitempty"`
 	WireFormat             string          `json:"wire_format,omitempty"` // "auto" (default), "openai", "anthropic", "responses", "gemini"
 	Temperature            float64         `json:"temperature"`
 	MaxTokens              int             `json:"max_tokens"`
@@ -109,6 +146,28 @@ func (c *OpenCodeGoConfig) EffectiveAPIKeys() []string {
 	return nil
 }
 
+// OpenRouterConfig holds the upstream OpenRouter API settings.
+type OpenRouterConfig struct {
+	BaseURL            string   `json:"base_url"`
+	APIKey             string   `json:"api_key,omitempty"`
+	APIKeys            []string `json:"api_keys,omitempty"`
+	TimeoutMs          int      `json:"timeout_ms"`
+	StreamTimeoutMs    int      `json:"stream_timeout_ms"`
+	StreamingTimeoutMs int      `json:"streaming_timeout_ms,omitempty"`
+}
+
+// EffectiveAPIKeys returns the pool of API keys for OpenRouter.
+// APIKeys takes precedence; falls back to the single APIKey field.
+func (c *OpenRouterConfig) EffectiveAPIKeys() []string {
+	if len(c.APIKeys) > 0 {
+		return c.APIKeys
+	}
+	if c.APIKey != "" {
+		return []string{c.APIKey}
+	}
+	return nil
+}
+
 // OpenCodeZenConfig holds the upstream OpenCode Zen API settings.
 type OpenCodeZenConfig struct {
 	BaseURL            string   `json:"base_url"`
@@ -141,6 +200,14 @@ type LoggingConfig struct {
 	Level        string        `json:"level"`
 	Requests     bool          `json:"requests"`
 	DebugCapture *DebugCapture `json:"debug_capture,omitempty"`
+}
+
+// StorageConfig controls persistent storage settings.
+type StorageConfig struct {
+	DatabasePath    string `json:"database_path"`
+	RetentionDays   int    `json:"retention_days"`
+	VacuumOnStartup bool   `json:"vacuum_on_startup"`
+	WALEnabled      bool   `json:"wal_enabled"`
 }
 
 // DebugCapture controls request/response capture for debugging.

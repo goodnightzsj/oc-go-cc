@@ -1,19 +1,66 @@
 package router
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"strings"
+	"sync"
+	"time"
 
+	"github.com/routatic/proxy/internal/catalog"
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/storage"
 )
 
-// ModelRouter handles model selection based on scenarios.
+var ErrUnknownProvider = errors.New("unknown provider")
+
 type ModelRouter struct {
-	atomic *config.AtomicConfig
+	atomic      *config.AtomicConfig
+	db          *storage.Database
+	catalogPath string
+	catMu       sync.Mutex
+	cat         *catalog.IndexedCatalog
+	catErr      error
+	catCache    time.Time
 }
 
-// NewModelRouter creates a new model router.
 func NewModelRouter(atomic *config.AtomicConfig) *ModelRouter {
 	return &ModelRouter{atomic: atomic}
+}
+
+func NewModelRouterWithDB(atomic *config.AtomicConfig, db *storage.Database) *ModelRouter {
+	return &ModelRouter{atomic: atomic, db: db}
+}
+
+func NewModelRouterWithCatalog(atomic *config.AtomicConfig, catalogPath string) *ModelRouter {
+	return &ModelRouter{atomic: atomic, catalogPath: catalogPath}
+}
+
+func (r *ModelRouter) catalog() (*catalog.IndexedCatalog, error) {
+	if r.db == nil && r.catalogPath == "" {
+		return nil, nil
+	}
+
+	r.catMu.Lock()
+	defer r.catMu.Unlock()
+
+	if r.cat != nil && time.Since(r.catCache) < 30*time.Second {
+		return r.cat, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if r.db != nil {
+		r.cat, r.catErr = catalog.LoadFromSQLite(ctx, r.db)
+	} else if r.catalogPath != "" {
+		r.cat, r.catErr = catalog.Load(r.catalogPath)
+	}
+	if r.catErr == nil {
+		r.catCache = time.Now()
+	}
+	return r.cat, r.catErr
 }
 
 // isRespectRequestedModel returns true when the client-specified model should be
@@ -44,14 +91,26 @@ func (r *ModelRouter) resolveRequestedModel(cfg *config.Config, requestedModel s
 	// Look up the requested model in config to inherit its settings
 	primary, ok := cfg.Models[requestedModel]
 	if !ok {
-		// Unknown model — create a bare config and inherit defaults
-		primary = config.ModelConfig{
-			Provider: "opencode-go",
-			ModelID:  requestedModel,
-		}
-		if def, ok := cfg.Models["default"]; ok {
-			primary.Temperature = def.Temperature
-			primary.MaxTokens = def.MaxTokens
+		// Not in legacy config — try the catalog before falling back to the
+		// legacy unknown-model behavior. Provider-qualified references that
+		// fail catalog resolution are rejected with a clear error instead of
+		// silently falling back to a bogus provider.
+		sel, parseErr := catalog.ParseModelRef(requestedModel)
+		providerQualified := parseErr == nil && sel.Provider != ""
+
+		cat, _ := r.catalog()
+		if cat != nil {
+			if catalogPrimary, catalogOk := r.resolveFromCatalog(cat, requestedModel, sel); catalogOk {
+				primary = catalogPrimary
+			} else if providerQualified {
+				return RouteResult{}, false, fmt.Errorf("model reference %q uses unknown provider %q: %w", requestedModel, sel.Provider, ErrUnknownProvider)
+			} else {
+				primary = r.legacyUnknownModelConfig(cfg, requestedModel)
+			}
+		} else if providerQualified {
+			return RouteResult{}, false, fmt.Errorf("model reference %q uses unknown provider %q: %w", requestedModel, sel.Provider, ErrUnknownProvider)
+		} else {
+			primary = r.legacyUnknownModelConfig(cfg, requestedModel)
 		}
 	}
 	primary = config.ResolveModelConfig(primary)
@@ -68,6 +127,92 @@ func (r *ModelRouter) resolveRequestedModel(cfg *config.Config, requestedModel s
 	}, true, nil
 }
 
+// resolvedModelToConfig converts a catalog resolved model into a runtime
+// ModelConfig used by the router.
+func resolvedModelToConfig(resolved catalog.ResolvedModel) config.ModelConfig {
+	supportsTools := resolved.Tools
+	return config.ModelConfig{
+		Provider:      resolved.Provider,
+		ModelID:       resolved.ModelID,
+		ModelRef:      resolved.CanonicalName,
+		Vision:        resolved.Vision,
+		ContextWindow: int(resolved.ContextWindow),
+		SupportsTools: &supportsTools,
+	}
+}
+
+// requestConstraints maps request-level requirements to scenario constraints
+// used by the cost-based selector.
+func requestConstraints(messages []MessageContent, tokenCount int) ScenarioConstraints {
+	facts := AnalyzeRequestFacts(messages)
+	constraints := ScenarioConstraints{
+		Vision:  facts.NeedsVision,
+		Context: int64(tokenCount),
+	}
+	latest := latestUserMessages(messages)
+	if hasThinkingPattern(latest) {
+		constraints.Reasoning = true
+	}
+	if hasToolUsage(messages) {
+		constraints.Tools = true
+	}
+	return constraints
+}
+
+// hasToolUsage reports whether the request likely requires tool support based
+// on message roles or tool-related keywords.
+func hasToolUsage(messages []MessageContent) bool {
+	toolKeywords := []string{
+		"tool", "function", "execute", "run command",
+		"bash", "shell", "python",
+	}
+	for _, msg := range messages {
+		if msg.Role == "tool" || msg.Role == "function" {
+			return true
+		}
+		lower := strings.ToLower(msg.Content)
+		for _, kw := range toolKeywords {
+			if strings.Contains(lower, kw) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// resolveFromCatalog attempts to resolve a requested model string through the
+// catalog. It returns the model config and true on success, otherwise false.
+func (r *ModelRouter) resolveFromCatalog(cat *catalog.IndexedCatalog, requestedModel string, sel catalog.Selector) (config.ModelConfig, bool) {
+	var resolved catalog.ResolvedModel
+	var err error
+	if sel.Provider != "" {
+		resolved, err = cat.Resolve(sel)
+	} else {
+		resolved, err = cat.ResolveShort(requestedModel)
+	}
+	if err != nil {
+		return config.ModelConfig{}, false
+	}
+
+	cfg := resolvedModelToConfig(resolved)
+	cfg.ModelRef = requestedModel
+	return cfg, true
+}
+
+// legacyUnknownModelConfig builds a bare config for an unknown model and
+// inherits Temperature and MaxTokens from the default model when available.
+func (r *ModelRouter) legacyUnknownModelConfig(cfg *config.Config, requestedModel string) config.ModelConfig {
+	primary := config.ModelConfig{
+		Provider: "opencode-go",
+		ModelID:  requestedModel,
+	}
+	if def, ok := cfg.Models["default"]; ok {
+		primary.Temperature = def.Temperature
+		primary.MaxTokens = def.MaxTokens
+	}
+	return primary
+}
+
 // Route determines which model to use for a request.
 // If respect_requested_model is enabled and requestedModel is provided, it overrides scenario-based routing.
 func (r *ModelRouter) Route(messages []MessageContent, tokenCount int, requestedModel string) (RouteResult, error) {
@@ -82,9 +227,21 @@ func (r *ModelRouter) Route(messages []MessageContent, tokenCount int, requested
 
 	// Otherwise, use scenario-based routing
 	result := DetectScenario(messages, tokenCount, cfg)
+	scenarioKey := string(result.Scenario)
 
-	// Get primary model for scenario
-	primary, ok := cfg.Models[string(result.Scenario)]
+	// Get primary model for scenario. When cost-based routing is enabled and
+	// a non-empty catalog is available, prefer the cheapest matching catalog
+	// model while preserving the legacy fallback chain.
+	primary, ok := cfg.Models[scenarioKey]
+	if cat, catErr := r.catalog(); cfg.CostBasedRoutingEnabled() && cat != nil && catErr == nil && len(cat.Models) > 0 {
+		constraints := requestConstraints(messages, tokenCount)
+		selector := NewSelector(cat, cfg)
+		if resolved, err := selector.SelectCheapest(scenarioKey, constraints); err == nil {
+			primary = resolvedModelToConfig(resolved)
+			ok = true
+		}
+	}
+
 	if !ok {
 		if isVisionScenario(result.Scenario) {
 			return RouteResult{}, fmt.Errorf("vision scenario %s is not configured", result.Scenario)
@@ -97,7 +254,7 @@ func (r *ModelRouter) Route(messages []MessageContent, tokenCount int, requested
 	}
 
 	// Get fallbacks for scenario
-	fallbacks := cfg.Fallbacks[string(result.Scenario)]
+	fallbacks := cfg.Fallbacks[scenarioKey]
 	if len(fallbacks) == 0 {
 		if isVisionScenario(result.Scenario) {
 			return RouteResult{}, fmt.Errorf("vision scenario %s has no configured vision fallbacks", result.Scenario)
@@ -162,15 +319,28 @@ func (rr *RouteResult) GetModelChain() []config.ModelConfig {
 func (r *ModelRouter) RouteForStreaming(messages []MessageContent, tokenCount int, requestedModel string) (RouteResult, error) {
 	cfg := r.atomic.Get()
 
-	if result, ok, err := r.resolveRequestedModel(cfg, requestedModel, false); err == nil && ok {
+	if result, ok, err := r.resolveRequestedModel(cfg, requestedModel, false); err != nil {
+		return RouteResult{}, err
+	} else if ok {
 		return result, nil
 	}
 
 	// Otherwise, use scenario-based routing for streaming
 	result := RouteForStreaming(messages, tokenCount, cfg)
+	scenarioKey := string(result.Scenario)
 
-	// Get primary model for scenario
-	primary, ok := cfg.Models[string(result.Scenario)]
+	// Get primary model for scenario. When cost-based routing is enabled and
+	// a non-empty catalog is available, prefer the cheapest matching catalog
+	// model while preserving the legacy fallback chain.
+	primary, ok := cfg.Models[scenarioKey]
+	if cat, catErr := r.catalog(); cfg.CostBasedRoutingEnabled() && cat != nil && catErr == nil && len(cat.Models) > 0 {
+		constraints := requestConstraints(messages, tokenCount)
+		selector := NewSelector(cat, cfg)
+		if resolved, err := selector.SelectCheapest(scenarioKey, constraints); err == nil {
+			primary = resolvedModelToConfig(resolved)
+			ok = true
+		}
+	}
 	if !ok {
 		if isVisionScenario(result.Scenario) {
 			return RouteResult{Scenario: result.Scenario}, fmt.Errorf("vision scenario %s is not configured", result.Scenario)
@@ -187,7 +357,7 @@ func (r *ModelRouter) RouteForStreaming(messages []MessageContent, tokenCount in
 	}
 
 	// Get fallbacks for scenario
-	fallbacks := cfg.Fallbacks[string(result.Scenario)]
+	fallbacks := cfg.Fallbacks[scenarioKey]
 	if len(fallbacks) == 0 {
 		if isVisionScenario(result.Scenario) {
 			fallbacks = nil

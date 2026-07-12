@@ -5,14 +5,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-make build   # Build binary to bin/routatic-proxy
+make build   # Build binary to bin/routatic-proxy (CGO disabled by default)
 make run     # Run without building
 make test    # Run tests with race detector
 make lint    # go vet + test
 make clean   # Remove build artifacts
 make install # Build and install to $GOPATH/bin
 make dist    # Cross-compile for all platforms
+
+## Build with tray support (Linux/macOS)
+# Linux: sudo dnf install libappindicator-gtk3-devel  # Fedora/RHEL
+# Linux: sudo apt install libayatana-appindicator3-dev  # Ubuntu/Debian
+CGO_ENABLED=1 make build
+
+## The 'ui' command opens the GUI dashboard
+./bin/routatic-proxy ui  # Browser-based on Linux, native window on macOS
 ```
+
+### Platform-specific notes
+
+**Linux:** The default build uses `CGO_ENABLED=0` and opens the GUI in your default browser via `xdg-open`. For system tray support, build with `CGO_ENABLED=1` after installing the `libappindicator-gtk3-devel` (Fedora/RHEL) or `libayatana-appindicator3-dev` (Ubuntu/Debian) package.
+
+**macOS:** The `ui` command opens a native window with system tray integration. Requires CGO with Cocoa headers. For builds without CGO, use `CGO_ENABLED=0 make build` which opens the browser-based GUI.
+
+**Windows:** The `ui` command is not supported. Use CLI only or run the proxy with `make run`.
 
 Run a single test: `go test ./internal/router/ -v`
 
@@ -54,6 +70,21 @@ If a model's upstream doesn't support Anthropic tool format (`type: "custom"` se
 3. Think (reasoning keywords in system prompt) → GLM-5.1
 4. Background (simple read-only ops, no tools) → Qwen3.7 Max
 5. Default → Kimi K2.6
+
+**Cost-based routing:** when `cost_routing.enabled` is set, `Selector` in `internal/router/selector.go` replaces the static primary model with automatic cheapest-model selection from the catalog. It applies `max_context_window` (hard cap on context window), `prefer_providers` (global provider filter, intersected with per-scenario preferences), and `penalty_per_provider` (per-provider cost penalty added during sort). Enabled via `cost_routing.enabled` or the legacy `enable_cost_based_routing` flag.
+
+**Catalog schema:** Models are keyed as `provider/model-name` (e.g., `opencode-go/glm-5.2`). The catalog (`~/.config/routatic-proxy/catalog/catalog.json`) contains:
+- `providers` — Provider definitions with `name`, `base_url`, `enabled`
+- `models` — Model definitions keyed by full key with fields:
+  - `id` — Full key (matches the map key)
+  - `name` — Display name
+  - `limit.context` — Context window size
+  - `rates.input`/`rates.output` — Cost per million tokens
+  - `tool_call` — Whether tools are supported
+  - `modalities.input`/`output` — Input/output types (`["text"]` or `["text", "image"]` for vision)
+  - `reasoning` — Whether reasoning mode is supported
+
+Resolution functions in `internal/catalog/resolve.go` extract the provider from the key prefix. `ResolvedModel.ModelID` is the model name only (without provider prefix); `ResolvedModel.CanonicalName` is the full key.
 
 For streaming, the router downgrades to fast models (Qwen3.7 Plus) for better TTFT.
 

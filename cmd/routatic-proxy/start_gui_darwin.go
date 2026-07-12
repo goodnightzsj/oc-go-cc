@@ -5,8 +5,8 @@ package main
 import (
 	"fmt"
 
-	"github.com/energye/systray"
-	"github.com/webview/webview"
+	"github.com/getlantern/systray"
+	"github.com/webview/webview_go"
 )
 
 func openGUI(guiURL string) error {

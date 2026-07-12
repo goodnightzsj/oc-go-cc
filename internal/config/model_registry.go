@@ -44,19 +44,21 @@ var modelMetadata = map[string]ModelMetadata{
 // a ModelConfig so capacity filtering and scenario routing see accurate
 // per-model limits.
 func ResolveModelConfig(model ModelConfig) ModelConfig {
-	if meta, ok := modelMetadata[model.ModelID]; ok {
-		if model.ContextWindow == 0 {
-			model.ContextWindow = meta.ContextWindow
-		}
-		if model.MaxOutputTokens == 0 {
-			model.MaxOutputTokens = meta.MaxOutputTokens
-		}
-		if !model.Vision {
-			model.Vision = meta.Vision
-		}
-		if model.SupportsTools == nil {
-			v := meta.SupportsTools
-			model.SupportsTools = &v
+	if model.ModelRef == "" {
+		if meta, ok := modelMetadata[model.ModelID]; ok {
+			if model.ContextWindow == 0 {
+				model.ContextWindow = meta.ContextWindow
+			}
+			if model.MaxOutputTokens == 0 {
+				model.MaxOutputTokens = meta.MaxOutputTokens
+			}
+			if !model.Vision {
+				model.Vision = meta.Vision
+			}
+			if model.SupportsTools == nil {
+				v := meta.SupportsTools
+				model.SupportsTools = &v
+			}
 		}
 	}
 	if model.ContextMargin == 0 {

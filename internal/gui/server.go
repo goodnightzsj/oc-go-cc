@@ -16,11 +16,14 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/routatic/proxy/internal/catalog"
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/daemon"
 	"github.com/routatic/proxy/internal/history"
 	"github.com/routatic/proxy/internal/metrics"
+	"github.com/routatic/proxy/internal/storage"
 )
 
 //go:embed assets/*
@@ -44,19 +47,27 @@ type Server struct {
 	proxyPort         int
 	startProxy        func() error
 	stopProxy         func() error
+	catalogDir        string
+	catalogSourceURL  string
 	srv               *http.Server
 	logger            *slog.Logger
+	catalogMu         sync.Mutex
+
+	storage *storage.Database
 }
 
 // Options configures the GUI server.
 type Options struct {
-	History      *history.History
-	Metrics      *metrics.Metrics
-	AtomicConfig *config.AtomicConfig
-	ProxyPort    int
-	StartProxy   func() error
-	StopProxy    func() error
-	Logger       *slog.Logger
+	History          *history.History
+	Metrics          *metrics.Metrics
+	AtomicConfig     *config.AtomicConfig
+	ProxyPort        int
+	StartProxy       func() error
+	StopProxy        func() error
+	CatalogDir       string
+	CatalogSourceURL string
+	Logger           *slog.Logger
+	Storage          *storage.Database
 }
 
 // New creates a new GUI server.
@@ -65,31 +76,45 @@ func New(opts Options) *Server {
 		opts.Logger = slog.Default()
 	}
 	s := &Server{
-		hist:       opts.History,
-		met:        opts.Metrics,
-		atomicCfg:  opts.AtomicConfig,
-		proxyPort:  opts.ProxyPort,
-		startProxy: opts.StartProxy,
-		stopProxy:  opts.StopProxy,
-		logger:     opts.Logger,
+		hist:             opts.History,
+		met:              opts.Metrics,
+		atomicCfg:        opts.AtomicConfig,
+		proxyPort:        opts.ProxyPort,
+		startProxy:       opts.StartProxy,
+		stopProxy:        opts.StopProxy,
+		catalogDir:       opts.CatalogDir,
+		catalogSourceURL: opts.CatalogSourceURL,
+		logger:           opts.Logger,
+
+		storage: opts.Storage,
 	}
 	// Check initial autostart state.
 	s.cfg.Autostart = isAutostartEnabled()
 	return s
 }
 
-// isAutostartEnabled checks whether autostart is currently enabled on macOS.
+// isAutostartEnabled checks whether autostart is currently enabled.
+// On macOS it checks ~/Library/LaunchAgents/{LaunchAgent}.plist.
+// On Linux it checks ~/.config/autostart/{LaunchAgent}.desktop.
 func isAutostartEnabled() bool {
-	if runtime.GOOS != "darwin" {
-		return false
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return false
 	}
-	plist := filepath.Join(home, "Library", "LaunchAgents", daemon.LaunchAgent+".plist")
-	_, err = os.Stat(plist)
-	return err == nil
+
+	if runtime.GOOS == "darwin" {
+		plist := filepath.Join(home, "Library", "LaunchAgents", daemon.LaunchAgent+".plist")
+		_, err = os.Stat(plist)
+		return err == nil
+	}
+
+	if runtime.GOOS == "linux" {
+		desktop := filepath.Join(home, ".config", "autostart", daemon.LaunchAgent+".desktop")
+		_, err = os.Stat(desktop)
+		return err == nil
+	}
+
+	return false
 }
 
 // SetProxyRunning updates the running state (called by the proxy lifecycle).
@@ -130,6 +155,16 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 	mux.HandleFunc("/api/proxy/config", s.handleProxyConfig)
 	mux.HandleFunc("/api/proxy/start", s.handleProxyStart)
 	mux.HandleFunc("/api/proxy/stop", s.handleProxyStop)
+	mux.HandleFunc("/api/catalog/lock", s.handleCatalogLock)
+	mux.HandleFunc("/api/catalog/sync", s.handleCatalogSync)
+
+	// New endpoints for advanced GUI features
+
+	mux.HandleFunc("/api/config/export", s.handleConfigExport)
+	mux.HandleFunc("/api/config/import", s.handleConfigImport)
+	mux.HandleFunc("/api/perf/models", s.handlePerformance)
+	mux.HandleFunc("/api/perf/aggregate", s.handlePerformanceAggregate)
+	mux.HandleFunc("/api/catalog/stats", s.handleCatalogStats)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -367,6 +402,146 @@ func (s *Server) handleProxyConfig(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+type catalogLockResponse struct {
+	SyncedAt   *time.Time `json:"synced_at,omitempty"`
+	SHA256     string     `json:"sha256,omitempty"`
+	Bytes      int64      `json:"bytes,omitempty"`
+	TTLHours   int        `json:"ttl_hours,omitempty"`
+	AgeSeconds int64      `json:"age_seconds"`
+	Synced     bool       `json:"synced"`
+}
+
+func (s *Server) handleCatalogLock(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	lock, err := catalog.ReadLock(s.catalogDir)
+	if err != nil {
+		writeJSON(w, catalogLockResponse{Synced: false, AgeSeconds: -1})
+		return
+	}
+
+	age := time.Since(lock.SyncedAt)
+	resp := catalogLockResponse{
+		SyncedAt:   &lock.SyncedAt,
+		SHA256:     lock.SHA256,
+		Bytes:      lock.Bytes,
+		TTLHours:   lock.TTLHours,
+		AgeSeconds: int64(age.Seconds()),
+		Synced:     true,
+	}
+	writeJSON(w, resp)
+}
+
+func (s *Server) handleCatalogSync(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.catalogSourceURL == "" || s.catalogDir == "" {
+		http.Error(w, "catalog sync is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Serialize manual syncs so the lock file and on-disk catalog stay consistent.
+	s.catalogMu.Lock()
+	defer s.catalogMu.Unlock()
+
+	lock, err := catalog.Sync(s.catalogSourceURL, s.catalogDir)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("catalog sync failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	age := time.Since(lock.SyncedAt)
+	writeJSON(w, catalogLockResponse{
+		SyncedAt:   &lock.SyncedAt,
+		SHA256:     lock.SHA256,
+		Bytes:      lock.Bytes,
+		TTLHours:   lock.TTLHours,
+		AgeSeconds: int64(age.Seconds()),
+		Synced:     true,
+	})
+}
+
+func (s *Server) handleCatalogStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.storage == nil {
+		writeJSON(w, map[string]any{
+			"available": false,
+			"error":     "storage not configured",
+		})
+		return
+	}
+
+	repo := storage.NewCatalogRepo(s.storage)
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	idx, err := repo.Load(ctx)
+	if err != nil {
+		writeJSON(w, map[string]any{
+			"available": false,
+			"error":     err.Error(),
+		})
+		return
+	}
+
+	lastSync, _ := repo.LastSync(ctx)
+
+	providersByEnabled := make(map[string]int)
+	for _, p := range idx.Providers {
+		enabled := "disabled"
+		if p.Enabled != nil && *p.Enabled {
+			enabled = "enabled"
+		}
+		providersByEnabled[enabled]++
+	}
+
+	modelsByProvider := make(map[string]int)
+	for prov := range idx.Providers {
+		modelsByProvider[prov] = len(idx.ProviderModels[prov])
+	}
+
+	totalModels := len(idx.Models)
+	modelsWithTools := 0
+	modelsWithVision := 0
+	modelsWithReasoning := 0
+	for _, m := range idx.Models {
+		if m.ToolCall {
+			modelsWithTools++
+		}
+		if m.Vision {
+			modelsWithVision++
+		}
+		if m.Reasoning {
+			modelsWithReasoning++
+		}
+	}
+
+	resp := map[string]any{
+		"available":             true,
+		"last_sync":             lastSync,
+		"total_providers":       len(idx.Providers),
+		"providers_enabled":     providersByEnabled["enabled"],
+		"providers_disabled":    providersByEnabled["disabled"],
+		"total_models":          totalModels,
+		"models_with_tools":     modelsWithTools,
+		"models_with_vision":    modelsWithVision,
+		"models_with_reasoning": modelsWithReasoning,
+		"models_by_provider":    modelsByProvider,
+	}
+
+	writeJSON(w, resp)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

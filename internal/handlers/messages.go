@@ -47,6 +47,7 @@ type MessagesHandler struct {
 	metrics             *metrics.Metrics
 	captureLogger       *debug.CaptureLogger
 	history             *history.History // optional: nil means no GUI history
+	storage             StorageWriter    // optional: SQLite persistence for requests/latency
 }
 
 // responseWriter wraps http.ResponseWriter to track if headers were written.
@@ -205,6 +206,7 @@ func NewMessagesHandler(
 	metrics *metrics.Metrics,
 	captureLogger *debug.CaptureLogger,
 	hist *history.History,
+	storage StorageWriter,
 ) *MessagesHandler {
 	return &MessagesHandler{
 		client:              openCodeClient,
@@ -223,6 +225,7 @@ func NewMessagesHandler(
 		metrics:             metrics,
 		captureLogger:       captureLogger,
 		history:             hist,
+		storage:             storage,
 	}
 }
 
@@ -340,7 +343,13 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 	needsTools := len(anthropicReq.Tools) > 0
 	modelChain, routeResult, err := h.buildModelChain(anthropicReq.Model, routerMessages, tokenCount, isStreaming, anthropicReq.MaxTokens, facts.NeedsVision, needsTools)
 	if err != nil {
-		h.sendError(w, http.StatusInternalServerError, "routing failed", err)
+		status := http.StatusInternalServerError
+		message := "routing failed"
+		if errors.Is(err, router.ErrUnknownProvider) {
+			status = http.StatusBadRequest
+			message = err.Error()
+		}
+		h.sendError(w, status, message, err)
 		return
 	}
 
@@ -361,9 +370,9 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 	}
 
 	if isStreaming {
-		h.handleStreaming(w, r, &anthropicReq, normalizedReq, modelChain, rawBody, routeResult.Scenario)
+		h.handleStreaming(w, r, &anthropicReq, normalizedReq, modelChain, rawBody, routeResult.Scenario, requestID)
 	} else {
-		h.handleNonStreaming(w, r, &anthropicReq, normalizedReq, modelChain, rawBody, routeResult.Scenario)
+		h.handleNonStreaming(w, r, &anthropicReq, normalizedReq, modelChain, rawBody, routeResult.Scenario, requestID)
 	}
 }
 
@@ -466,6 +475,7 @@ func (h *MessagesHandler) handleStreaming(
 	modelChain []config.ModelConfig,
 	rawBody json.RawMessage,
 	scenario router.Scenario,
+	requestID string,
 ) {
 	clientCtx := r.Context()
 
@@ -538,18 +548,28 @@ func (h *MessagesHandler) handleStreaming(
 				"cache_read_input_tokens", rw.usage.cacheReadInputTokens,
 				"cache_creation_input_tokens", rw.usage.cacheCreationInputTokens,
 			)
+			rec := history.RequestRecord{
+				ID:           requestID,
+				Model:        model.ModelID,
+				Provider:     model.Provider,
+				Scenario:     string(scenario),
+				StartTime:    streamStart,
+				Duration:     latency,
+				InputTokens:  rw.usage.inputTokens,
+				OutputTokens: rw.usage.outputTokens,
+				Streaming:    true,
+				Success:      true,
+			}
 			if h.history != nil {
-				h.history.Add(history.RequestRecord{
-					Model:        model.ModelID,
-					Provider:     model.Provider,
-					Scenario:     string(scenario),
-					StartTime:    streamStart,
-					Duration:     latency,
-					InputTokens:  rw.usage.inputTokens,
-					OutputTokens: rw.usage.outputTokens,
-					Streaming:    true,
-					Success:      true,
-				})
+				h.history.Add(rec)
+			}
+			if h.storage != nil {
+				if err := h.storage.InsertRequest(rec); err != nil {
+					h.logger.Warn("failed to insert request into storage", "error", err)
+				}
+				if err := h.storage.InsertLatency(model.ModelID, latency); err != nil {
+					h.logger.Warn("failed to insert latency sample into storage", "error", err)
+				}
 			}
 		}
 
@@ -568,7 +588,7 @@ func (h *MessagesHandler) handleStreaming(
 					"model", model.ModelID, "idle_timeout", idleTimeout)
 				if rw.ssePayloadWritten {
 					h.sendStreamError(rw, "stream idle after SSE payload started")
-					h.metrics.RecordFailure()
+					h.metrics.RecordFailureForModel(model.ModelID)
 					return false // abort
 				}
 				return true // continue to next model
@@ -576,7 +596,7 @@ func (h *MessagesHandler) handleStreaming(
 			h.logger.Warn(action+" streaming failed", "model", model.ModelID, "error", err)
 			if rw.ssePayloadWritten {
 				h.sendStreamError(rw, "all upstream models failed after SSE payload started")
-				h.metrics.RecordFailure()
+				h.metrics.RecordFailureForModel(model.ModelID)
 				return false // abort — cannot fallback after SSE payload started
 			}
 			return true // continue to next model
@@ -1017,6 +1037,7 @@ func (h *MessagesHandler) handleNonStreaming(
 	modelChain []config.ModelConfig,
 	rawBody json.RawMessage,
 	scenario router.Scenario,
+	requestID string,
 ) {
 	ctx := r.Context()
 	startTime := time.Now()
@@ -1075,7 +1096,7 @@ func (h *MessagesHandler) handleNonStreaming(
 			h.logger.Info("request context canceled during non-streaming fallback", "error", err)
 			return
 		}
-		h.metrics.RecordFailure()
+		h.metrics.RecordFailureForModel(result.ModelID)
 		h.sendError(w, http.StatusBadGateway, "all models failed", err)
 		return
 	}
@@ -1104,18 +1125,28 @@ func (h *MessagesHandler) handleNonStreaming(
 		outputTokens = msgResp.Usage.OutputTokens
 	}
 
+	rec := history.RequestRecord{
+		ID:           requestID,
+		Model:        result.ModelID,
+		Provider:     provider,
+		Scenario:     string(scenario),
+		StartTime:    startTime,
+		Duration:     latency,
+		InputTokens:  inputTokens,
+		OutputTokens: outputTokens,
+		Streaming:    false,
+		Success:      true,
+	}
 	if h.history != nil {
-		h.history.Add(history.RequestRecord{
-			Model:        result.ModelID,
-			Provider:     provider,
-			Scenario:     string(scenario),
-			StartTime:    startTime,
-			Duration:     latency,
-			InputTokens:  inputTokens,
-			OutputTokens: outputTokens,
-			Streaming:    false,
-			Success:      true,
-		})
+		h.history.Add(rec)
+	}
+	if h.storage != nil {
+		if err := h.storage.InsertRequest(rec); err != nil {
+			h.logger.Warn("failed to insert request into storage", "error", err)
+		}
+		if err := h.storage.InsertLatency(result.ModelID, latency); err != nil {
+			h.logger.Warn("failed to insert latency sample into storage", "error", err)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

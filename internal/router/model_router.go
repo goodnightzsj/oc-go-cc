@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -38,7 +39,7 @@ func NewModelRouterWithCatalog(atomic *config.AtomicConfig, catalogPath string) 
 	return &ModelRouter{atomic: atomic, catalogPath: catalogPath}
 }
 
-func (r *ModelRouter) catalog() (*catalog.IndexedCatalog, error) {
+func (r *ModelRouter) catalog(ctx context.Context) (*catalog.IndexedCatalog, error) {
 	if r.db == nil && r.catalogPath == "" {
 		slog.Warn("catalog not available — model resolution falling back to legacy config")
 		return nil, nil
@@ -51,7 +52,7 @@ func (r *ModelRouter) catalog() (*catalog.IndexedCatalog, error) {
 		return r.cat, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	if r.db != nil {
@@ -100,7 +101,7 @@ func (r *ModelRouter) resolveRequestedModel(cfg *config.Config, requestedModel s
 		sel, parseErr := catalog.ParseModelRef(requestedModel)
 		providerQualified := parseErr == nil && sel.Provider != ""
 
-		cat, _ := r.catalog()
+		cat, _ := r.catalog(context.Background())
 		if cat != nil {
 			if catalogPrimary, catalogOk := r.resolveFromCatalog(cat, requestedModel, sel); catalogOk {
 				primary = catalogPrimary
@@ -234,7 +235,7 @@ func (r *ModelRouter) Route(messages []MessageContent, tokenCount int, requested
 	// a non-empty catalog is available, prefer the cheapest matching catalog
 	// model while preserving the legacy fallback chain.
 	primary, ok := cfg.Models[scenarioKey]
-	if cat, catErr := r.catalog(); cfg.CostBasedRoutingEnabled() && cat != nil && catErr == nil && len(cat.Models) > 0 {
+	if cat, catErr := r.catalog(context.Background()); cfg.CostBasedRoutingEnabled() && cat != nil && catErr == nil && len(cat.Models) > 0 {
 		constraints := requestConstraints(messages, tokenCount)
 		selector := NewSelector(cat, cfg)
 		if resolved, err := selector.SelectCheapest(scenarioKey, constraints); err == nil {
@@ -307,6 +308,78 @@ func (r *ModelRouter) RouteWithOverride(requestedModel string) (RouteResult, boo
 	}, true
 }
 
+// ModelInfo describes a model that clients can request by name. It is the
+// data source for the OpenAI-compatible /v1/models listing consumed by tools
+// such as CC-Switch's "Fetch Models" button.
+type ModelInfo struct {
+	// ID is the string a client puts in the request "model" field.
+	ID string
+	// DisplayName is a human-readable label when available.
+	DisplayName string
+	// Provider is the upstream provider that serves the model, when known.
+	Provider string
+}
+
+// ListModels returns the set of model identifiers a client may request,
+// deduplicated and sorted by ID. The list is assembled from:
+//
+//   - legacy config "models" aliases,
+//   - "model_overrides" keys (the Claude aliases users pin),
+//   - catalog canonical names (provider/model), when a catalog is available.
+//
+// Any of these is a valid value for the request "model" field, so surfacing
+// all of them lets a picker present every route the proxy understands.
+//
+// ctx bounds the catalog load; when the caller (e.g. an HTTP handler) cancels
+// it, an in-flight catalog read is abandoned rather than churning to completion.
+func (r *ModelRouter) ListModels(ctx context.Context) []ModelInfo {
+	cfg := r.atomic.Get()
+	seen := make(map[string]ModelInfo)
+
+	add := func(id, name, provider string) {
+		if id == "" {
+			return
+		}
+		existing, ok := seen[id]
+		if !ok {
+			seen[id] = ModelInfo{ID: id, DisplayName: name, Provider: provider}
+			return
+		}
+		// Fill in missing fields from later sources without overwriting.
+		if existing.DisplayName == "" {
+			existing.DisplayName = name
+		}
+		if existing.Provider == "" {
+			existing.Provider = provider
+		}
+		seen[id] = existing
+	}
+
+	// ModelOverrides is walked before Models so that, for a key present in
+	// both, the override's provider is what surfaces in the listing — matching
+	// the routing precedence (model_overrides wins). add() keeps the first
+	// source's fields, so first-write must be the winning source.
+	for alias, mc := range cfg.ModelOverrides {
+		add(alias, "", mc.Provider)
+	}
+	for alias, mc := range cfg.Models {
+		add(alias, "", mc.Provider)
+	}
+
+	if cat, err := r.catalog(ctx); err == nil && cat != nil {
+		for key, model := range cat.Models {
+			add(key, model.DisplayName(), catalog.ProviderFromModelKey(key))
+		}
+	}
+
+	result := make([]ModelInfo, 0, len(seen))
+	for _, info := range seen {
+		result = append(result, info)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result
+}
+
 // GetModelChain returns the full chain of models to try (primary + fallbacks).
 func (rr *RouteResult) GetModelChain() []config.ModelConfig {
 	chain := []config.ModelConfig{rr.Primary}
@@ -334,7 +407,7 @@ func (r *ModelRouter) RouteForStreaming(messages []MessageContent, tokenCount in
 	// a non-empty catalog is available, prefer the cheapest matching catalog
 	// model while preserving the legacy fallback chain.
 	primary, ok := cfg.Models[scenarioKey]
-	if cat, catErr := r.catalog(); cfg.CostBasedRoutingEnabled() && cat != nil && catErr == nil && len(cat.Models) > 0 {
+	if cat, catErr := r.catalog(context.Background()); cfg.CostBasedRoutingEnabled() && cat != nil && catErr == nil && len(cat.Models) > 0 {
 		constraints := requestConstraints(messages, tokenCount)
 		selector := NewSelector(cat, cfg)
 		if resolved, err := selector.SelectCheapest(scenarioKey, constraints); err == nil {

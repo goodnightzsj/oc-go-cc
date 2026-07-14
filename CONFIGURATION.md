@@ -622,3 +622,87 @@ Recommended setup for Claude Code review workflows:
 ```
 
 Use the `fast` scenario for short/simple requests. Use `complex` or `long_context` for code review, multi-agent dispatch, large diffs, many tools, or long-context Claude Code sessions.
+
+## Claude Code Model Picker
+
+You can select proxy models from Claude Code's `/model` picker in two ways.
+
+### Type any model name (always works)
+
+Claude Code's `/model` picker also accepts a free-form model name. Type any value the proxy understands — a scenario alias (`default`, `fast`, `complex`, …), a `model_overrides` key, or a catalog canonical name like `opencode-go/kimi-k2.6` — and the proxy routes it. No extra configuration is needed; this works regardless of Claude Code version.
+
+### Gateway model discovery (opt-in, adds entries to the picker)
+
+Recent Claude Code versions can auto-populate the picker by querying the proxy's [`GET /v1/models`](docs/reference-api.md#get-v1models) endpoint. When enabled, discovered models appear in `/model` labeled **"From gateway"** alongside the built-in entries (Sonnet, Opus, …).
+
+Enable it by setting, alongside `ANTHROPIC_BASE_URL`:
+
+```bash
+export ANTHROPIC_BASE_URL=http://127.0.0.1:3456
+export ANTHROPIC_AUTH_TOKEN=unused
+export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
+```
+
+Discovery only runs when all of these hold: `ANTHROPIC_BASE_URL` is set, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, no `CLAUDE_CODE_USE_*` provider variable is set, the base URL is not `api.anthropic.com`, and the Claude Code version supports it (≥ 2.1.129). Results are cached to `~/.claude/cache/gateway-models.json`.
+
+> **Important — Claude Code filters discovered model IDs.** Claude Code only shows discovered models whose `id` begins with **`claude`** or **`anthropic`**. The proxy's scenario aliases (`default`, `fast`, …) and catalog names (`opencode-go/kimi-k2.6`) are therefore **filtered out of the picker**. To make a proxy model appear via discovery, give it a `claude-*` name — the natural fit is a [`model_overrides`](#model-overrides-model_overrides) key:
+>
+> ```json
+> {
+>   "model_overrides": {
+>     "claude-glm-5.2": { "provider": "opencode-go", "model_id": "glm-5.2" }
+>   }
+> }
+> ```
+>
+> `claude-glm-5.2` then appears in the picker (labeled "From gateway"), and selecting it routes to GLM-5.2. Models with non-`claude`/`anthropic` IDs remain fully usable — just type them into `/model` directly.
+
+## Using with CC-Switch
+
+[CC-Switch](https://github.com/farion1231/cc-switch) is a desktop app for managing and hot-switching Claude Code providers. routatic-proxy works with it out of the box — the proxy speaks the Anthropic API that Claude Code (and therefore CC-Switch) already expects, so you add it like any other custom provider.
+
+### Add routatic-proxy as a custom provider
+
+1. Start the proxy: `routatic-proxy serve` (default listen address `http://127.0.0.1:3456`).
+2. In CC-Switch, click **Add Provider → Custom** and fill in:
+
+   | CC-Switch field | Value |
+   |-----------------|-------|
+   | **Name** | `routatic-proxy` (any label) |
+   | **Endpoint URL** | `http://127.0.0.1:3456` |
+   | **API Key** | any non-empty value (e.g. `unused`) — see note below |
+
+   CC-Switch writes these into Claude Code's config as:
+
+   ```json
+   {
+     "env": {
+       "ANTHROPIC_BASE_URL": "http://127.0.0.1:3456",
+       "ANTHROPIC_AUTH_TOKEN": "unused"
+     }
+   }
+   ```
+
+   These are the exact two environment variables the proxy relies on — the same ones from the manual quickstart in the [README](README.md).
+3. **Enable** the provider. Claude Code hot-reloads it, so no restart is needed.
+
+> **About the API Key field:** the token in `ANTHROPIC_AUTH_TOKEN` is what Claude Code sends to the *proxy*, not what the proxy sends upstream. Your real upstream keys live in the proxy's own config (`opencode_go.api_key`, `openrouter.api_key`, etc.) or environment (`ROUTATIC_PROXY_*`). If you set `api_key` / `api_keys` in the proxy config, that value must match what CC-Switch sends; if you leave proxy auth unset, any non-empty token works.
+
+### Configure specific models
+
+You have two ways to control which model a CC-Switch-selected request runs on:
+
+- **Let Claude Code pick, and honor it** — with `respect_requested_model: true` (the default), the proxy uses whatever model string Claude Code sends, resolving it against your `models` config and the catalog. Set it to `false` to force scenario-based routing regardless of the requested model.
+- **Pin a model alias** — use [`model_overrides`](#model-overrides-model_overrides) to map a client-visible model name to a fixed upstream model. For example, requesting `claude-sonnet-4.5` can be routed to any provider/model you choose.
+
+### CC-Switch "Fetch Models" button
+
+CC-Switch's custom-provider form has a **Fetch Models** button that calls the OpenAI-style `GET /v1/models` endpoint to populate a model dropdown. The proxy implements this endpoint: it returns every model identifier you can request — config `models` aliases, `model_overrides` keys, and catalog canonical names (`provider/model`). See [docs/reference-api.md](docs/reference-api.md#get-v1models).
+
+If the dropdown looks short, it usually means the model catalog has not synced into local storage yet; the scenario aliases (`default`, `fast`, `complex`, …) and any `model_overrides` keys always appear.
+
+### Troubleshooting
+
+- **CC-Switch reports the provider is unreachable** — confirm the proxy is running (`routatic-proxy status`) and the endpoint URL/port match `host`/`port` in your proxy config.
+- **401 / auth errors from the proxy** — the token CC-Switch sends must satisfy the proxy's `api_key` / `api_keys` (or those must be unset). This is proxy-side auth, unrelated to your upstream provider keys.
+- **Wrong model runs** — check routing precedence: `model_overrides` wins, then `respect_requested_model`, then scenario routing. See [Routing precedence](#routing-precedence).

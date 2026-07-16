@@ -243,15 +243,79 @@ func (w *responseWriter) Flush() {
 	}
 }
 
+const (
+	defaultKeepaliveInterval = 3 * time.Second
+	keepaliveWriteTimeout    = 5 * time.Second
+)
+
 // WriteKeepalive writes a keepalive comment frame (":keepalive\n\n") to the
 // response. Unlike Write, it does NOT set ssePayloadWritten — keepalives are
 // not real SSE events and should not block fallback logic on idle timeout.
-func (w *responseWriter) WriteKeepalive() {
+func (w *responseWriter) WriteKeepalive(writeTimeout time.Duration) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	_, _ = fmt.Fprintf(w.ResponseWriter, ":keepalive\n\n")
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
+
+	controller := http.NewResponseController(w.ResponseWriter)
+	if err := controller.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+		return fmt.Errorf("set keepalive write deadline: %w", err)
+	}
+	if _, err := io.WriteString(w.ResponseWriter, ":keepalive\n\n"); err != nil {
+		return fmt.Errorf("write keepalive: %w", err)
+	}
+	if err := controller.Flush(); err != nil {
+		return fmt.Errorf("flush keepalive: %w", err)
+	}
+
+	// Clear the heartbeat-specific deadline after a successful flush. On error,
+	// leave it in place so later response writes fail instead of blocking on the
+	// same stalled client indefinitely.
+	if err := controller.SetWriteDeadline(time.Time{}); err != nil {
+		return fmt.Errorf("clear keepalive write deadline: %w", err)
+	}
+	return nil
+}
+
+// startKeepaliveHeartbeat starts the streaming keepalive loop and returns a
+// stop function that waits for the loop to exit. Waiting is important: canceling
+// the context alone can race with a ticker event that is already flushing the
+// response after the handler returns.
+func startKeepaliveHeartbeat(ctx context.Context, rw *responseWriter, paused *int32, interval, writeTimeout time.Duration, logger *slog.Logger) func() {
+	if interval <= 0 {
+		interval = defaultKeepaliveInterval
+	}
+	if writeTimeout <= 0 {
+		writeTimeout = keepaliveWriteTimeout
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	heartbeatCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				if atomic.LoadInt32(paused) == 0 {
+					if err := rw.WriteKeepalive(writeTimeout); err != nil {
+						logger.Debug("keepalive stopped after write failure", "error", err)
+						return
+					}
+				}
+			case <-heartbeatCtx.Done():
+				return
+			}
+		}
+	}()
+
+	return func() {
+		cancel()
+		<-done
 	}
 }
 
@@ -554,27 +618,11 @@ func (h *MessagesHandler) handleStreaming(
 	rw.WriteHeader(http.StatusOK)
 	rw.Flush()
 
-	// Start heartbeat. Use a child context that is canceled when the handler
-	// returns, ensuring the goroutine stops before the HTTP server finalizes
-	// the response writer.
+	// Start heartbeat and wait for it to stop before the handler returns so the
+	// HTTP server cannot finalize the response writer during a keepalive flush.
 	var heartbeatPaused int32
-	heartbeatCtx, heartbeatCancel := context.WithCancel(clientCtx)
-	go func() {
-		ticker := time.NewTicker(3 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				if atomic.LoadInt32(&heartbeatPaused) == 0 {
-					rw.WriteKeepalive()
-				}
-			case <-heartbeatCtx.Done():
-				return
-			}
-		}
-	}()
-	defer heartbeatCancel()
+	stopHeartbeat := startKeepaliveHeartbeat(clientCtx, rw, &heartbeatPaused, defaultKeepaliveInterval, keepaliveWriteTimeout, h.logger)
+	defer stopHeartbeat()
 
 	streamStart := time.Now()
 	blockedProviders := make(map[string]bool)

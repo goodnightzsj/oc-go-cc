@@ -49,6 +49,12 @@ jobs:
           go-version: "1.25"
           cache: true
 
+      - name: Check signing availability
+        id: signing
+        env:
+          USE_SIGNPATH: ${{ vars.USE_SIGNPATH }}
+        run: echo "enabled=$([ "$USE_SIGNPATH" = "true" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
       - name: Get versions
         id: version
         run: |
@@ -73,7 +79,7 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          go install github.com/tc-hib/go-winres@latest
+          go install github.com/tc-hib/go-winres@v0.3.3
 
           # Parse version components (e.g., "0.5.3-beta.1" → "0.5.3.0")
           CLEAN_VER=$(echo "$VERSION" | sed 's/-.*//')
@@ -125,16 +131,23 @@ jobs:
           echo "Built binaries:"
           ls -lh dist/
 
-      - name: Package Windows binaries for signing
-        if: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+      - name: Stage Windows binaries for signing
+        if: ${{ steps.signing.outputs.enabled == 'true' }}
         run: |
           mkdir -p signing
           cp dist/routatic-proxy_windows-amd64.exe signing/
           cp dist/routatic-proxy_windows-arm64.exe signing/
-          cd signing && zip ../windows-binaries.zip *.exe
+
+      - name: Upload unsigned Windows binaries
+        id: upload-unsigned
+        if: ${{ steps.signing.outputs.enabled == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-binaries-unsigned
+          path: signing/
 
       - name: Sign Windows binaries (SignPath)
-        if: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+        if: ${{ steps.signing.outputs.enabled == 'true' }}
         uses: signpath/github-action-submit-signing-request@ced31329c0317e779dad2eec2a7c3bb46ea1343e # v1
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -142,19 +155,17 @@ jobs:
           project-slug: 'routatic-proxy'
           signing-policy-slug: 'release-signing'
           artifact-configuration-slug: 'windows-exe'
-          github-artifact-id: 'windows-binaries'
-          input-artifact-path: 'windows-binaries.zip'
-          output-artifact-path: 'windows-binaries-signed.zip'
+          github-artifact-id: '${{ steps.upload-unsigned.outputs.artifact-id }}'
           wait-for-completion: true
+          output-artifact-directory: 'signed'
           wait-for-completion-timeout-in-seconds: 300
 
       - name: Replace with signed Windows binaries
-        if: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+        if: ${{ steps.signing.outputs.enabled == 'true' }}
         run: |
-          unzip -o windows-binaries-signed.zip -d signed/
           cp signed/routatic-proxy_windows-amd64.exe dist/routatic-proxy_windows-amd64.exe
           cp signed/routatic-proxy_windows-arm64.exe dist/routatic-proxy_windows-arm64.exe
-          rm -rf signing signed windows-binaries.zip windows-binaries-signed.zip
+          rm -rf signing signed
 
       - name: Generate checksums
         run: |
@@ -255,7 +266,7 @@ jobs:
             if [ -z "$CHANGELOG" ] || [ "$CHANGELOG" = "null" ]; then
               echo "Warning: AI changelog generation failed, using commit list instead" >&2
               echo "API response: $RESPONSE" >&2
-              CHANGELOG="## Commits\n\n$(git log \"${PREVIOUS_TAG}..HEAD\" --pretty=format:'- %s')"
+              CHANGELOG="## Commits\n\n$(git log "${PREVIOUS_TAG}..HEAD" --pretty=format:'- %s')"
             fi
           else
             echo "No previous tag found, using commit list"

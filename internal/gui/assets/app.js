@@ -1,28 +1,3 @@
-/* ── API helper (unified fetch with optional GUI token) ──────────── */
-// Reads the GUI token from localStorage (set by the user in Settings) and
-// attaches it to every /api request as X-GUI-Token. The server only enforces
-// it when ROUTATIC_PROXY_GUI_TOKEN is configured; otherwise the header is
-// ignored, so this is transparent to existing localhost-only installs.
-const GUI_TOKEN_KEY = 'routatic-proxy-gui-token';
-function getGuiToken() { return localStorage.getItem(GUI_TOKEN_KEY) || ''; }
-function setGuiToken(token) { localStorage.setItem(GUI_TOKEN_KEY, token || ''); }
-
-async function api(path, options) {
-  options = options || {};
-  const token = getGuiToken();
-  if (token) {
-    if (!options.headers) options.headers = {};
-    options.headers['X-GUI-Token'] = token;
-  }
-  const r = await fetch(path, options);
-  if (r.status === 401) {
-    // Token required/mismatch — surface a clear error so the user knows to
-    // set the token rather than silently seeing empty data.
-    throw new Error('GUI auth required: set the GUI token (ROUTATIC_PROXY_GUI_TOKEN)');
-  }
-  return r;
-}
-
 /* ── i18n ────────────────────────────────────────────────────────── */
 const TRANSLATIONS = {
   en: {
@@ -145,7 +120,6 @@ const TRANSLATIONS = {
     'toast.catalogSynced': 'Catalog synced',
     'toast.catalogSyncFailed': 'Catalog sync failed: ',
     'toast.catalogNetworkError': 'Catalog sync network error',
-    'toast.guiTokenRequired': 'GUI token required (check server ROUTATIC_PROXY_GUI_TOKEN)',
     'toast.proxyStarted': 'Proxy started',
     'toast.proxyStopped': 'Proxy stopped',
     'toast.proxyActionFailed': 'Action failed',
@@ -225,7 +199,6 @@ const TRANSLATIONS = {
     'toast.catalogSynced': '模型目录已同步',
     'toast.catalogSyncFailed': '目录同步失败：',
     'toast.catalogNetworkError': '目录同步网络错误',
-    'toast.guiTokenRequired': '需要 GUI Token（请检查服务器 ROUTATIC_PROXY_GUI_TOKEN）',
     'toast.proxyStarted': '代理已启动',
     'toast.proxyStopped': '代理已停止',
     'toast.proxyActionFailed': '操作失败',
@@ -319,24 +292,7 @@ function toggleLanguage() {
 document.addEventListener('DOMContentLoaded', () => {
   document.documentElement.lang = currentLang;
   applyTranslations();
-  initGuiTokenInput();
 });
-
-// Saves the GUI token (when present) to localStorage and re-fetches the
-// active tab so the data surface reflects the newly-applied token.
-function initGuiTokenInput() {
-  const input = document.getElementById('cfg-gui-token');
-  if (!input) return;
-  input.value = getGuiToken();
-  let timer = null;
-  input.addEventListener('input', () => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => {
-      setGuiToken(input.value.trim());
-      refreshAll();
-    }, 400);
-  });
-}
 
 /* global state */
 let allHistory = [];
@@ -381,7 +337,7 @@ const PerfModule = {
 
   async refresh() {
     try {
-      const r = await api('/api/perf/models?range=' + encodeURIComponent(this.timeRange));
+      const r = await fetch('/api/perf/models?range=' + encodeURIComponent(this.timeRange));
       if (!r.ok) return;
       this.data = await r.json() || [];
       this.render();
@@ -525,7 +481,7 @@ function debouncedRefresh() {
 /* ── /api/metrics ──────────────────────────────────────────────── */
 async function refreshMetrics() {
   try {
-    const r = await api('/api/metrics');
+    const r = await fetch('/api/metrics');
     if (!r.ok) return;
     const d = await r.json();
 
@@ -562,16 +518,7 @@ async function refreshMetrics() {
     // proxy toggle sync
     const proxyToggle = document.getElementById('toggle-proxy');
     if (proxyToggle && !proxyToggle._changing) proxyToggle.checked = running;
-  } catch(e) {
-    // Stay quiet while the server is still coming up on first load, but
-    // surface auth failures so a missing/mismatched GUI token is obvious
-    // instead of looking like an empty dashboard.
-    if (String(e && e.message).indexOf('GUI auth required') !== -1) {
-      toast(t('toast.guiTokenRequired'), 'error');
-      return;
-    }
-    /* server may not be ready yet */
-  }
+  } catch(e) { /* server may not be ready yet */ }
 }
 
 function renderModelList(counts) {
@@ -597,7 +544,7 @@ function renderModelList(counts) {
 /* ── /api/history ──────────────────────────────────────────────── */
 async function refreshHistory() {
   try {
-    const r = await api('/api/history');
+    const r = await fetch('/api/history');
     if (!r.ok) return;
     allHistory = await r.json() || [];
     renderHistory();
@@ -686,7 +633,7 @@ document.getElementById('model-filter').addEventListener('change', function() {
 /* ── /api/config ───────────────────────────────────────────────── */
 async function refreshConfig() {
   try {
-    const r = await api('/api/config');
+    const r = await fetch('/api/config');
     if (!r.ok) return;
     const d = await r.json();
     const autostartToggle = document.getElementById('toggle-autostart');
@@ -699,7 +646,7 @@ async function refreshConfig() {
 /* ── /api/catalog/lock & /api/catalog/sync ─────────────────────── */
 async function refreshCatalogAge() {
   try {
-    const r = await api('/api/catalog/lock');
+    const r = await fetch('/api/catalog/lock');
     if (!r.ok) return;
     const d = await r.json();
     const el = document.getElementById('catalog-age');
@@ -719,7 +666,7 @@ async function refreshCatalog() {
     btn.textContent = currentLang === 'zh' ? '同步中…' : 'Syncing…';
   }
   try {
-    const r = await api('/api/catalog/sync', { method: 'POST' });
+    const r = await fetch('/api/catalog/sync', { method: 'POST' });
     if (r.ok) {
       await refreshCatalogAge();
       toast(t('toast.catalogSynced'), 'success');
@@ -744,7 +691,7 @@ async function toggleProxy(el) {
   el._changing = true;
   try {
     const action = el.checked ? 'start' : 'stop';
-    const r = await api('/api/proxy/' + action, { method: 'POST' });
+    const r = await fetch('/api/proxy/' + action, { method: 'POST' });
     if (r.ok) {
       toast(el.checked ? t('toast.proxyStarted') : t('toast.proxyStopped'), 'success');
     } else {
@@ -761,7 +708,7 @@ async function toggleProxy(el) {
 async function toggleAutostart(el) {
   el._changing = true;
   try {
-    const r = await api('/api/config', {
+    const r = await fetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ autostart: el.checked })
@@ -774,7 +721,7 @@ async function toggleAutostart(el) {
 async function toggleNotify(el) {
   el._changing = true;
   try {
-    const r = await api('/api/config', {
+    const r = await fetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ notify: el.checked })
@@ -900,7 +847,7 @@ function readFieldValue(field) {
 
 async function loadProxyConfig() {
   try {
-    const r = await api('/api/proxy/config');
+    const r = await fetch('/api/proxy/config');
     if (!r.ok) return;
     currentProxyConfig = await r.json();
     if (!currentProxyConfig) return;
@@ -950,7 +897,7 @@ async function saveProxyConfig() {
   }
 
   try {
-    const r = await api('/api/proxy/config', {
+    const r = await fetch('/api/proxy/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch)
@@ -1274,7 +1221,7 @@ async function exportConfig() {
 
   try {
     const url = '/api/config/export?anonymize=' + anonymize;
-    const response = await api(url);
+    const response = await fetch(url);
     if (!response.ok) {
       throw new Error(await response.text());
     }
@@ -1349,7 +1296,7 @@ async function handleConfigImport(file) {
 
     document.getElementById('btn-import-apply').onclick = async () => {
       try {
-        const response = await api('/api/config/import', {
+        const response = await fetch('/api/config/import', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ config: config, apply: true })
@@ -1402,7 +1349,7 @@ const FallbackModule = {
 
   async loadConfig() {
     try {
-      const r = await api('/api/proxy/config');
+      const r = await fetch('/api/proxy/config');
       if (!r.ok) return;
       const config = await r.json();
 
@@ -1626,7 +1573,7 @@ const FallbackModule = {
 
     try {
       const patch = { fallbacks: { ...this.chains } };
-      const r = await api('/api/proxy/config', {
+      const r = await fetch('/api/proxy/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch)
@@ -1721,7 +1668,7 @@ const TestModule = {
     this.testModelSelect.innerHTML = '<option value="">Select a model...</option>';
 
     try {
-      const r = await api('/api/proxy/config');
+      const r = await fetch('/api/proxy/config');
       if (!r.ok) return;
       const data = await r.json();
       const modelIds = new Set();
@@ -1768,7 +1715,7 @@ const TestModule = {
 
     const start = performance.now();
     try {
-      const r = await api('/api/test/send', {
+      const r = await fetch('/api/test/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1907,9 +1854,9 @@ const AnalyticsModule = {
 
     try {
       const [summaryRes, trendRes, latencyRes] = await Promise.all([
-        api(`/api/analytics/summary?days=${days}`),
-        api(`/api/analytics/tokens/trend?days=${days}`),
-        api(`/api/analytics/latency?days=${days}`)
+        fetch(`/api/analytics/summary?days=${days}`),
+        fetch(`/api/analytics/tokens/trend?days=${days}`),
+        fetch(`/api/analytics/latency?days=${days}`)
       ]);
       if (!summaryRes.ok) throw new Error('summary fetch failed');
       const summary = await summaryRes.json();

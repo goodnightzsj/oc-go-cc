@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"oc-go-cc/internal/lifecycle"
-	"oc-go-cc/internal/metrics"
-	"oc-go-cc/internal/router"
-	"oc-go-cc/internal/token"
-	"oc-go-cc/pkg/types"
+	"github.com/routatic/proxy/internal/buildinfo"
+	"github.com/routatic/proxy/internal/metrics"
+	"github.com/routatic/proxy/internal/router"
+	"github.com/routatic/proxy/internal/status"
+	"github.com/routatic/proxy/internal/token"
+	"github.com/routatic/proxy/pkg/types"
 )
 
 // HealthHandler handles health checks and token counting endpoints.
@@ -16,16 +17,16 @@ type HealthHandler struct {
 	tokenCounter    *token.Counter
 	fallbackHandler *router.FallbackHandler
 	metrics         *metrics.Metrics
-	lifecycle       *lifecycle.State
+	statusStore     *status.Store
 }
 
 // NewHealthHandler creates a new health handler.
-func NewHealthHandler(tokenCounter *token.Counter, fallbackHandler *router.FallbackHandler, metrics *metrics.Metrics, lifecycleState *lifecycle.State) *HealthHandler {
+func NewHealthHandler(tokenCounter *token.Counter, fallbackHandler *router.FallbackHandler, metrics *metrics.Metrics, statusStore *status.Store) *HealthHandler {
 	return &HealthHandler{
 		tokenCounter:    tokenCounter,
 		fallbackHandler: fallbackHandler,
 		metrics:         metrics,
-		lifecycle:       lifecycleState,
+		statusStore:     statusStore,
 	}
 }
 
@@ -40,20 +41,13 @@ func (h *HealthHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 		cbStates = h.fallbackHandler.GetCircuitStates()
 	}
 
-	statusCode := http.StatusOK
-	statusText := "ok"
-	activeRequests := int64(0)
-	if h.lifecycle != nil {
-		activeRequests = h.lifecycle.ActiveRequests()
-		if h.lifecycle.IsDraining() {
-			statusCode = http.StatusServiceUnavailable
-			statusText = "draining"
-		}
-	}
-
 	response := map[string]interface{}{
-		"status":  statusText,
-		"service": "oc-go-cc",
+		"status":     "ok",
+		"service":    "routatic-proxy",
+		"version":    buildinfo.Version,
+		"build_time": buildinfo.Date,
+		"pid":        buildinfo.PID(),
+		"binary":     buildinfo.BinaryPath(),
 		"metrics": map[string]interface{}{
 			"requests_received": snapshot.RequestsReceived,
 			"requests_success":  snapshot.RequestsSuccess,
@@ -64,7 +58,6 @@ func (h *HealthHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 			"deduplicated":      snapshot.Deduplicated,
 			"p95_latency_ms":    snapshot.CalculateP95().Milliseconds(),
 			"p99_latency_ms":    snapshot.CalculateP99().Milliseconds(),
-			"active_requests":   activeRequests,
 		},
 		"circuit_breakers": cbStates,
 		"models":           snapshot.ModelCounts,
@@ -72,8 +65,27 @@ func (h *HealthHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.WriteHeader(statusCode)
+	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(response)
+}
+
+// HandleStatusline serves the current proxy status snapshot as JSON for
+// consumption by the CLI status-line feature. It returns a status.Snapshot
+// (with schema version, source label, and staleness flag) so the CLI can
+// display real-time proxy health without polling the full /health endpoint.
+func (h *HealthHandler) HandleStatusline(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	if h.statusStore == nil {
+		_ = json.NewEncoder(w).Encode(status.Snapshot{SchemaVersion: 1, Source: "empty", Stale: true})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(h.statusStore.Snapshot())
 }
 
 // HandleCountTokens handles POST /v1/messages/count_tokens.

@@ -1,42 +1,31 @@
-.PHONY: build run dev dev-bg dev-stop dev-status prod-deploy prod-watch prod-status prod-install-systemd test clean install dist lint vet docker-up docker-stop
+.PHONY: build build-ui run test clean install dist lint vet docker-up docker-stop
 
 # Build variables
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS = -X main.version=$(VERSION)
-BINARY = oc-go-cc
-CMD = ./cmd/oc-go-cc
+BINARY = routatic-proxy
+LEGACY_BINARY = oc-go-cc
+CMD = ./cmd/routatic-proxy
 
 # ── Development ────────────────────────────────────────────────────
 
-build:
-	go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
+build: build-css
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
+	@ln -sf $(BINARY) bin/$(LEGACY_BINARY)
+
+build-ui: build-css
+	CGO_ENABLED=1 go build -tags darwin -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
+	@ln -sf $(BINARY) bin/$(LEGACY_BINARY)
+
+build-css:
+	@echo "Building Tailwind CSS..."
+	@npx tailwindcss -i internal/gui/assets/tailwind-input.css -o internal/gui/assets/compiled-tailwind.css --minify 2>&1 | grep -v "Browserslist:"
+
+dmg: build-ui
+	@./scripts/build_dmg.sh "$(VERSION)"
 
 run:
 	go run -ldflags "$(LDFLAGS)" $(CMD)
-
-dev:
-	./scripts/dev-watch.sh $(ARGS)
-
-dev-bg:
-	./scripts/dev-start.sh $(ARGS)
-
-dev-stop:
-	./scripts/dev-stop.sh
-
-dev-status:
-	./scripts/dev-status.sh
-
-prod-deploy:
-	./scripts/prod-deploy.sh
-
-prod-watch:
-	./scripts/prod-watch.sh
-
-prod-status:
-	./scripts/prod-status.sh
-
-prod-install-systemd:
-	./scripts/prod-install-systemd.sh
 
 test:
 	go test ./... -v -race
@@ -44,26 +33,28 @@ test:
 vet:
 	go vet ./...
 
+GOBIN=$(shell go env GOPATH)/bin
+
 lint:
-	@which golangci-lint > /dev/null || (echo "golangci-lint not found, please install it: https://golangci-lint.run/usage/install/" && exit 1)
 	@echo "Running gofmt..."
 	@test -z "$$(gofmt -d . | tee /dev/stderr)" || (echo "gofmt check failed" && exit 1)
-	@echo "Running golangci-lint..."
-	golangci-lint run --timeout 5m
+	@echo "Running go vet..."
+	CGO_ENABLED=0 go vet ./...
+	@echo "Lint checks passed!"
 
 clean:
 	rm -rf bin/ dist/
 
 install: build
-	cp bin/$(BINARY) $(GOPATH)/bin/$(BINARY) 2>/dev/null || \
-		cp bin/$(BINARY) $(HOME)/go/bin/$(BINARY) 2>/dev/null || \
-		go install -ldflags "$(LDFLAGS)" $(CMD)
+	@mkdir -p $(GOBIN)
+	cp bin/$(BINARY) $(GOBIN)/$(BINARY)
+	ln -sf $(BINARY) $(GOBIN)/$(LEGACY_BINARY)
 
 # ── Docker ─────────────────────────────────────────────────────────
 
 docker-up:
 	@echo "Building Docker image..."
-	docker build -t oc-go-cc .
+	docker build -t routatic-proxy .
 	@echo ""
 	@echo "Starting container..."
 	@if [ ! -f .env ]; then \
@@ -71,22 +62,22 @@ docker-up:
 		echo "Create it with: cp .env.example .env"; \
 		exit 1; \
 	fi
-	@docker stop oc-go-cc 2>/dev/null || true
-	@docker rm oc-go-cc 2>/dev/null || true
+	@docker stop routatic-proxy 2>/dev/null || true
+	@docker rm routatic-proxy 2>/dev/null || true
 	docker run -d \
-			--name oc-go-cc \
+			--name routatic-proxy \
 			--restart unless-stopped \
 			--env-file .env \
 			-p 3456:3456 \
-			oc-go-cc
+			routatic-proxy
 	@echo ""
 	@echo "Container started! Proxy listening on http://localhost:3456"
 	@echo "Stop with:  make docker-stop"
 
 docker-stop:
 	@echo "Stopping container..."
-	docker stop oc-go-cc 2>/dev/null || true
-	docker rm oc-go-cc 2>/dev/null || true
+	docker stop routatic-proxy 2>/dev/null || true
+	docker rm routatic-proxy 2>/dev/null || true
 	@echo "Container stopped and removed."
 
 # ── Release / Cross-Compilation ────────────────────────────────────

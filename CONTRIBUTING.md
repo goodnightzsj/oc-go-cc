@@ -1,5 +1,102 @@
 # Contributing
 
+## Prerequisites
+
+- [Go](https://go.dev/dl/) 1.25.0 or later
+- [golangci-lint](https://golangci-lint.run/usage/install/) (for linting)
+- [Git](https://git-scm.com/)
+- [Make](https://www.gnu.org/software/make/) (build automation)
+
+## Getting Started
+
+1. Fork and clone the repository:
+   ```bash
+   git clone https://github.com/<your-username>/routatic-proxy.git
+   cd routatic-proxy
+   ```
+
+2. Build the binary:
+   ```bash
+   make build
+   ```
+
+3. Run tests:
+   ```bash
+   make test
+   ```
+
+4. Run the proxy:
+   ```bash
+   make run
+   ```
+
+## Pull Request Process
+
+1. Create a feature branch from `main`: `git checkout -b feature/your-feature-name`
+2. Make your changes and ensure tests pass: `make test && make lint`
+3. Commit with a descriptive message explaining what changed and why
+4. Push to your fork and open a pull request against `main`
+5. Describe what your PR does and link any related issues
+
+### Beta Releases
+
+When your PR is merged to `main`, a beta release is automatically created:
+
+- **Trigger:** Push to `main` branch
+- **Version:** `vX.Y.Z-beta-YYYYMMDD-HHMMSS` (auto-generated)
+- **GitHub Release:** Marked as prerelease
+- **Testing:** Download and test before reporting issues
+
+Beta releases allow users to test new features immediately while maintaining a separate stable release channel.
+
+### Production Releases
+
+Production releases are manual and require careful testing:
+
+1. Ensure all changes are merged to `main` and tested via beta
+2. Update the `releases` branch from `main`: `git checkout releases && git merge main`
+3. Push to `releases` branch
+4. Go to GitHub Actions → Release workflow
+5. Click "Run workflow" and specify version (e.g., `v1.2.3`)
+6. The workflow will:
+   - Run full test suite
+   - Build cross-platform binaries
+   - Generate AI-powered changelog
+   - Create GitHub release
+   - Publish Docker images
+   - Update Homebrew tap and Scoop bucket
+
+See [README.md](README.md#release-channels) for more details on the dual release channel system.
+
+### Pre-push Hooks
+
+This repository uses git hooks to ensure code quality. Install them once after cloning:
+
+```bash
+./scripts/install-hooks.sh
+```
+
+The pre-push hook runs these checks before allowing a push:
+- **Code formatting** (`gofmt`) — ensures consistent formatting
+- **Linting** (`go vet`) — catches common errors
+- **Tests** (`make test`) — runs all tests with race detector
+- **Build** (`make build`) — verifies the project compiles
+
+To bypass hooks temporarily (not recommended):
+```bash
+git push --no-verify
+```
+
+## Code Style
+
+This project follows standard Go conventions:
+- Format code with `gofmt` (run `make lint` to check)
+- Follow [Effective Go](https://go.dev/doc/effective_go) guidelines
+- Add doc comments to all exported functions, types, and methods
+- Write tests for new functionality
+
+---
+
 ## Development
 
 ```bash
@@ -31,14 +128,14 @@ Run a single test: `go test ./internal/router/ -v`
 
 ```
 ┌─────────────┐     Anthropic API      ┌─────────────┐     OpenAI/Gemini/Responses  ┌─────────────┐
-│  Claude Code ├──────────────────────►│  oc-go-cc    ├─────────────────────────────►│  OpenCode   │
+│  Claude Code ├──────────────────────►│  routatic-proxy    ├─────────────────────────────►│  OpenCode   │
 │  (CLI)       │  POST /v1/messages   │  (Proxy)     │  Multiple endpoint formats   │  (Upstream) │
 │              │◄──────────────────────┤              │◄─────────────────────────────┤              │
 └─────────────┘   Anthropic SSE        └─────────────┘   Format-appropriate SSE      └─────────────┘
 ```
 
 1. Claude Code sends a request in [Anthropic Messages API](https://docs.anthropic.com/en/api/messages) format
-2. oc-go-cc parses the request, counts tokens, and selects a model via routing rules
+2. routatic-proxy parses the request, counts tokens, and selects a model via routing rules
 3. Based on the model's provider and endpoint type, the request is transformed to the appropriate format:
    - **OpenAI Chat Completions** — for most OpenCode Go and Zen models
    - **Anthropic Messages** — for MiniMax models (sent directly without transformation)
@@ -79,7 +176,7 @@ For Claude Code and other agentic coding workflows, configure DeepSeek V4 models
 }
 ```
 
-`oc-go-cc` forwards these fields to OpenCode Go as OpenAI Chat Completions parameters:
+`routatic-proxy` forwards these fields to OpenCode Go as OpenAI Chat Completions parameters:
 
 - `reasoning_effort`: controls DeepSeek V4 thinking effort (`high` or `max`)
 - `thinking`: enables or disables DeepSeek V4 thinking mode
@@ -89,7 +186,7 @@ DeepSeek V4 thinking responses are returned as OpenAI `reasoning_content` and tr
 ## Architecture
 
 ```
-cmd/oc-go-cc/main.go           CLI entry point (cobra commands)
+cmd/routatic-proxy/main.go           CLI entry point (cobra commands)
 internal/
 ├── config/
 │   ├── config.go               Config types (OpenCodeGoConfig, OpenCodeZenConfig)
@@ -130,8 +227,8 @@ configs/
 - **Polymorphic field handling**: Anthropic's `system` and `content` fields accept both strings and arrays. We use `json.RawMessage` with accessor methods (`SystemText()`, `ContentBlocks()`) to handle both formats correctly.
 - **Real-time stream proxying**: SSE events are transformed in-flight, not buffered. This means Claude Code sees responses as they arrive from upstream.
 - **Circuit breaker per model**: Each model gets its own circuit breaker. After 3 consecutive failures, the model is skipped for 30 seconds, then tested again.
-- **Environment variable interpolation**: Config values like `"${OC_GO_CC_API_KEY}"` are resolved at load time, so you never need to put secrets in the config file.
-- **Provider-aware routing**: The `provider` field in model config determines which upstream service to use (Go or Zen). Zen models are further classified by endpoint type (Chat Completions, Anthropic, Responses, Gemini).
+- **Environment variable interpolation**: Config values like `"${ROUTATIC_PROXY_API_KEY}"` are resolved at load time, so you never need to put secrets in the config file.
+- **Provider-aware routing**: The `provider` field in model config determines which upstream service to use (Go, Zen, or Bedrock). Zen models are further classified by endpoint type (Chat Completions, Anthropic, Responses, Gemini). Bedrock models use OpenAI Chat Completions format.
 
 ## API Endpoints
 

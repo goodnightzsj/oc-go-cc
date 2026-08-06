@@ -1,22 +1,79 @@
-// Package router defines HTTP route registration and middleware chaining,
-// as well as model selection based on request scenarios.
 package router
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"sort"
 	"strings"
+	"sync"
+	"time"
 
-	"oc-go-cc/internal/config"
+	"github.com/routatic/proxy/internal/catalog"
+	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/storage"
 )
 
-// ModelRouter handles model selection based on scenarios.
+var ErrUnknownProvider = errors.New("unknown provider")
+
 type ModelRouter struct {
-	atomic *config.AtomicConfig
+	atomic      *config.AtomicConfig
+	db          *storage.Database
+	catalogPath string
+	catMu       sync.Mutex
+	cat         *catalog.IndexedCatalog
+	catErr      error
+	catCache    time.Time
 }
 
-// NewModelRouter creates a new model router.
 func NewModelRouter(atomic *config.AtomicConfig) *ModelRouter {
 	return &ModelRouter{atomic: atomic}
+}
+
+func NewModelRouterWithDB(atomic *config.AtomicConfig, db *storage.Database) *ModelRouter {
+	return &ModelRouter{atomic: atomic, db: db}
+}
+
+func NewModelRouterWithCatalog(atomic *config.AtomicConfig, catalogPath string) *ModelRouter {
+	return &ModelRouter{atomic: atomic, catalogPath: catalogPath}
+}
+
+func (r *ModelRouter) catalog(ctx context.Context) (*catalog.IndexedCatalog, error) {
+	if r.db == nil && r.catalogPath == "" {
+		slog.Warn("catalog not available — model resolution falling back to legacy config")
+		return nil, nil
+	}
+
+	r.catMu.Lock()
+	defer r.catMu.Unlock()
+
+	if r.cat != nil && time.Since(r.catCache) < 30*time.Second {
+		return r.cat, nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if r.db != nil {
+		r.cat, r.catErr = catalog.LoadFromSQLite(ctx, r.db)
+	} else if r.catalogPath != "" {
+		r.cat, r.catErr = catalog.Load(r.catalogPath)
+	}
+	if r.catErr == nil {
+		r.catCache = time.Now()
+	}
+	return r.cat, r.catErr
+}
+
+// isRespectRequestedModel returns true when the client-specified model should be
+// used as the primary routing target.  nil (unset in config) defaults to true;
+// an explicit *false from the user config is honoured.
+func isRespectRequestedModel(cfg *config.Config) bool {
+	if cfg.RespectRequestedModel == nil {
+		return true // default when not explicitly set
+	}
+	return *cfg.RespectRequestedModel
 }
 
 // RouteResult contains the selected model and fallback chain.
@@ -26,44 +83,42 @@ type RouteResult struct {
 	Scenario  Scenario
 }
 
-// stripContextSuffix removes [1m] / [256k] / [128k] context-window suffixes
-// that Claude Code appends to model names so that model matching works correctly.
-func stripContextSuffix(modelName string) string {
-	s := modelName
-	for {
-		before := s
-		s = strings.TrimSuffix(s, "[1m]")
-		s = strings.TrimSuffix(s, "[256k]")
-		s = strings.TrimSuffix(s, "[128k]")
-		if s == before {
-			break
-		}
-	}
-	return s
-}
-
 // resolveRequestedModel checks if the user-specified model should override
 // scenario-based routing. Returns the route result and true if it matched,
 // or zero value and false if scenario routing should proceed normally.
-func (r *ModelRouter) resolveRequestedModel(cfg *config.Config, requestedModel string) (RouteResult, bool) {
-	if !cfg.RespectRequestedModel || requestedModel == "" {
-		return RouteResult{}, false
+func (r *ModelRouter) resolveRequestedModel(cfg *config.Config, requestedModel string, needsVision bool) (RouteResult, bool, error) {
+	if !isRespectRequestedModel(cfg) || requestedModel == "" {
+		return RouteResult{}, false, nil
 	}
 
-	normalizedModel := stripContextSuffix(requestedModel)
-
 	// Look up the requested model in config to inherit its settings
-	primary, ok := cfg.Models[normalizedModel]
+	primary, ok := cfg.Models[requestedModel]
 	if !ok {
-		// Unknown model: create a bare config and inherit defaults.
-		primary = config.ModelConfig{
-			Provider: "opencode-go",
-			ModelID:  normalizedModel,
+		// Not in legacy config — try the catalog before falling back to the
+		// legacy unknown-model behavior. Provider-qualified references that
+		// fail catalog resolution are rejected with a clear error instead of
+		// silently falling back to a bogus provider.
+		sel, parseErr := catalog.ParseModelRef(requestedModel)
+		providerQualified := parseErr == nil && sel.Provider != ""
+
+		cat, _ := r.catalog(context.Background())
+		if cat != nil {
+			if catalogPrimary, catalogOk := r.resolveFromCatalog(cat, requestedModel, sel); catalogOk {
+				primary = catalogPrimary
+			} else if providerQualified {
+				return RouteResult{}, false, fmt.Errorf("model reference %q uses unknown provider %q: %w", requestedModel, sel.Provider, ErrUnknownProvider)
+			} else {
+				primary = r.legacyUnknownModelConfig(cfg, requestedModel)
+			}
+		} else if providerQualified {
+			return RouteResult{}, false, fmt.Errorf("model reference %q uses unknown provider %q: %w", requestedModel, sel.Provider, ErrUnknownProvider)
+		} else {
+			primary = r.legacyUnknownModelConfig(cfg, requestedModel)
 		}
-		if def, ok := cfg.Models["default"]; ok {
-			primary.Temperature = def.Temperature
-			primary.MaxTokens = def.MaxTokens
-		}
+	}
+	primary = config.ResolveModelConfig(primary)
+	if needsVision && !primary.Vision {
+		return RouteResult{}, false, fmt.Errorf("requested model %s does not support vision", primary.ModelID)
 	}
 
 	fallbacks := cfg.Fallbacks["default"]
@@ -72,24 +127,127 @@ func (r *ModelRouter) resolveRequestedModel(cfg *config.Config, requestedModel s
 		Primary:   primary,
 		Fallbacks: fallbacks,
 		Scenario:  ScenarioDefault,
-	}, true
+	}, true, nil
+}
+
+// resolvedModelToConfig converts a catalog resolved model into a runtime
+// ModelConfig used by the router.
+func resolvedModelToConfig(resolved catalog.ResolvedModel) config.ModelConfig {
+	supportsTools := resolved.Tools
+	return config.ModelConfig{
+		Provider:      resolved.Provider,
+		ModelID:       resolved.ModelID,
+		ModelRef:      resolved.CanonicalName,
+		Vision:        resolved.Vision,
+		ContextWindow: int(resolved.ContextWindow),
+		SupportsTools: &supportsTools,
+	}
+}
+
+// requestConstraints maps request-level requirements to scenario constraints
+// used by the cost-based selector.
+func requestConstraints(messages []MessageContent, tokenCount int) ScenarioConstraints {
+	facts := AnalyzeRequestFacts(messages)
+	constraints := ScenarioConstraints{
+		Vision:  facts.NeedsVision,
+		Context: int64(tokenCount),
+	}
+	latest := latestUserMessages(messages)
+	if hasThinkingPattern(latest) {
+		constraints.Reasoning = true
+	}
+	if hasToolUsage(messages) {
+		constraints.Tools = true
+	}
+	return constraints
+}
+
+// hasToolUsage reports whether the request likely requires tool support based
+// on message roles or tool-related keywords.
+func hasToolUsage(messages []MessageContent) bool {
+	toolKeywords := []string{
+		"tool", "function", "execute", "run command",
+	}
+	for _, msg := range messages {
+		if msg.Role == "tool" || msg.Role == "function" {
+			return true
+		}
+		lower := strings.ToLower(msg.Content)
+		for _, kw := range toolKeywords {
+			if strings.Contains(lower, kw) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// resolveFromCatalog attempts to resolve a requested model string through the
+// catalog. It returns the model config and true on success, otherwise false.
+func (r *ModelRouter) resolveFromCatalog(cat *catalog.IndexedCatalog, requestedModel string, sel catalog.Selector) (config.ModelConfig, bool) {
+	var resolved catalog.ResolvedModel
+	var err error
+	if sel.Provider != "" {
+		resolved, err = cat.Resolve(sel)
+	} else {
+		resolved, err = cat.ResolveShort(requestedModel)
+	}
+	if err != nil {
+		return config.ModelConfig{}, false
+	}
+
+	cfg := resolvedModelToConfig(resolved)
+	cfg.ModelRef = requestedModel
+	return cfg, true
+}
+
+// legacyUnknownModelConfig builds a bare config for an unknown model and
+// inherits Temperature and MaxTokens from the default model when available.
+func (r *ModelRouter) legacyUnknownModelConfig(cfg *config.Config, requestedModel string) config.ModelConfig {
+	primary := config.ModelConfig{
+		Provider: "opencode-go",
+		ModelID:  requestedModel,
+	}
+	if def, ok := cfg.Models["default"]; ok {
+		primary.Temperature = def.Temperature
+		primary.MaxTokens = def.MaxTokens
+	}
+	return primary
 }
 
 // Route determines which model to use for a request.
 // If respect_requested_model is enabled and requestedModel is provided, it overrides scenario-based routing.
 func (r *ModelRouter) Route(messages []MessageContent, tokenCount int, requestedModel string) (RouteResult, error) {
 	cfg := r.atomic.Get()
+	facts := AnalyzeRequestFacts(messages)
 
-	if result, ok := r.resolveRequestedModel(cfg, requestedModel); ok {
+	if result, ok, err := r.resolveRequestedModel(cfg, requestedModel, facts.NeedsVision); err != nil {
+		return RouteResult{}, err
+	} else if ok {
 		return result, nil
 	}
 
 	// Otherwise, use scenario-based routing
 	result := DetectScenario(messages, tokenCount, cfg)
+	scenarioKey := string(result.Scenario)
 
-	// Get primary model for scenario
-	primary, ok := cfg.Models[string(result.Scenario)]
+	// Get primary model for scenario. When cost-based routing is enabled and
+	// a non-empty catalog is available, prefer the cheapest matching catalog
+	// model while preserving the legacy fallback chain.
+	primary, ok := cfg.Models[scenarioKey]
+	if cat, catErr := r.catalog(context.Background()); cfg.CostBasedRoutingEnabled() && cat != nil && catErr == nil && len(cat.Models) > 0 {
+		constraints := requestConstraints(messages, tokenCount)
+		selector := NewSelector(cat, cfg)
+		if resolved, err := selector.SelectCheapest(scenarioKey, constraints); err == nil {
+			primary = resolvedModelToConfig(resolved)
+			ok = true
+		}
+	}
+
 	if !ok {
+		if isVisionScenario(result.Scenario) {
+			return RouteResult{}, fmt.Errorf("vision scenario %s is not configured", result.Scenario)
+		}
 		// Fall back to default if scenario model not configured
 		primary, ok = cfg.Models["default"]
 		if !ok {
@@ -98,8 +256,11 @@ func (r *ModelRouter) Route(messages []MessageContent, tokenCount int, requested
 	}
 
 	// Get fallbacks for scenario
-	fallbacks := cfg.Fallbacks[string(result.Scenario)]
+	fallbacks := cfg.Fallbacks[scenarioKey]
 	if len(fallbacks) == 0 {
+		if isVisionScenario(result.Scenario) {
+			return RouteResult{}, fmt.Errorf("vision scenario %s has no configured vision fallbacks", result.Scenario)
+		}
 		// Fall back to default fallbacks
 		fallbacks = cfg.Fallbacks["default"]
 	}
@@ -132,12 +293,60 @@ func (r *ModelRouter) RouteWithOverride(requestedModel string) (RouteResult, boo
 	if cfg.ModelOverrides == nil {
 		return RouteResult{}, false
 	}
-	normalizedModel := stripContextSuffix(requestedModel)
-	override, ok := cfg.ModelOverrides[normalizedModel]
+	override, ok := cfg.ModelOverrides[requestedModel]
 	if !ok {
 		return RouteResult{}, false
 	}
-	fallbacks := cfg.Fallbacks[normalizedModel]
+	return buildOverrideResult(cfg, override, requestedModel), true
+}
+
+// RouteWithFamilyOverride checks whether the requested model string contains a
+// Claude family keyword configured in model_family_overrides (e.g. "opus",
+// "sonnet", "haiku"). Matching is a case-insensitive substring test, so it maps
+// the versioned model IDs Claude Code sends (claude-opus-4-20250514) without
+// requiring cc-switch to rewrite the model to an exact string.
+//
+// Family keys are evaluated longest-first so that overlapping keys resolve
+// deterministically to the most specific match. The fallback chain is
+// fallbacks[<family>], falling back to fallbacks["default"] when the family key
+// has no entry (matching RouteWithOverride behavior).
+//
+// Returns the RouteResult and true if matched, or a zero value and false when
+// no family keyword appears in the requested model.
+func (r *ModelRouter) RouteWithFamilyOverride(requestedModel string) (RouteResult, bool) {
+	cfg := r.atomic.Get()
+	if len(cfg.ModelFamilyOverrides) == 0 || requestedModel == "" {
+		return RouteResult{}, false
+	}
+
+	families := make([]string, 0, len(cfg.ModelFamilyOverrides))
+	for family := range cfg.ModelFamilyOverrides {
+		families = append(families, family)
+	}
+	sort.Slice(families, func(i, j int) bool {
+		if len(families[i]) != len(families[j]) {
+			return len(families[i]) > len(families[j])
+		}
+		return families[i] < families[j]
+	})
+
+	lower := strings.ToLower(requestedModel)
+	for _, family := range families {
+		if family == "" {
+			continue
+		}
+		if strings.Contains(lower, strings.ToLower(family)) {
+			return buildOverrideResult(cfg, cfg.ModelFamilyOverrides[family], family), true
+		}
+	}
+	return RouteResult{}, false
+}
+
+// buildOverrideResult constructs a RouteResult for an override match. The
+// fallback chain is fallbacks[fallbackKey], falling back to fallbacks["default"]
+// when the key has no entry.
+func buildOverrideResult(cfg *config.Config, override config.ModelConfig, fallbackKey string) RouteResult {
+	fallbacks := cfg.Fallbacks[fallbackKey]
 	if len(fallbacks) == 0 {
 		fallbacks = cfg.Fallbacks["default"]
 	}
@@ -145,7 +354,79 @@ func (r *ModelRouter) RouteWithOverride(requestedModel string) (RouteResult, boo
 		Primary:   override,
 		Fallbacks: fallbacks,
 		Scenario:  ScenarioOverride,
-	}, true
+	}
+}
+
+// ModelInfo describes a model that clients can request by name. It is the
+// data source for the OpenAI-compatible /v1/models listing consumed by tools
+// such as CC-Switch's "Fetch Models" button.
+type ModelInfo struct {
+	// ID is the string a client puts in the request "model" field.
+	ID string
+	// DisplayName is a human-readable label when available.
+	DisplayName string
+	// Provider is the upstream provider that serves the model, when known.
+	Provider string
+}
+
+// ListModels returns the set of model identifiers a client may request,
+// deduplicated and sorted by ID. The list is assembled from:
+//
+//   - legacy config "models" aliases,
+//   - "model_overrides" keys (the Claude aliases users pin),
+//   - catalog canonical names (provider/model), when a catalog is available.
+//
+// Any of these is a valid value for the request "model" field, so surfacing
+// all of them lets a picker present every route the proxy understands.
+//
+// ctx bounds the catalog load; when the caller (e.g. an HTTP handler) cancels
+// it, an in-flight catalog read is abandoned rather than churning to completion.
+func (r *ModelRouter) ListModels(ctx context.Context) []ModelInfo {
+	cfg := r.atomic.Get()
+	seen := make(map[string]ModelInfo)
+
+	add := func(id, name, provider string) {
+		if id == "" {
+			return
+		}
+		existing, ok := seen[id]
+		if !ok {
+			seen[id] = ModelInfo{ID: id, DisplayName: name, Provider: provider}
+			return
+		}
+		// Fill in missing fields from later sources without overwriting.
+		if existing.DisplayName == "" {
+			existing.DisplayName = name
+		}
+		if existing.Provider == "" {
+			existing.Provider = provider
+		}
+		seen[id] = existing
+	}
+
+	// ModelOverrides is walked before Models so that, for a key present in
+	// both, the override's provider is what surfaces in the listing — matching
+	// the routing precedence (model_overrides wins). add() keeps the first
+	// source's fields, so first-write must be the winning source.
+	for alias, mc := range cfg.ModelOverrides {
+		add(alias, "", mc.Provider)
+	}
+	for alias, mc := range cfg.Models {
+		add(alias, "", mc.Provider)
+	}
+
+	if cat, err := r.catalog(ctx); err == nil && cat != nil {
+		for key, model := range cat.Models {
+			add(key, model.DisplayName(), catalog.ProviderFromModelKey(key))
+		}
+	}
+
+	result := make([]ModelInfo, 0, len(seen))
+	for _, info := range seen {
+		result = append(result, info)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result
 }
 
 // GetModelChain returns the full chain of models to try (primary + fallbacks).
@@ -158,19 +439,35 @@ func (rr *RouteResult) GetModelChain() []config.ModelConfig {
 // RouteForStreaming determines which model to use for streaming requests.
 // Prioritizes fast TTFT (time-to-first-token) over capability.
 // If respect_requested_model is enabled and requestedModel is provided, it overrides scenario-based routing.
-func (r *ModelRouter) RouteForStreaming(messages []MessageContent, tokenCount int, requestedModel string) RouteResult {
+func (r *ModelRouter) RouteForStreaming(messages []MessageContent, tokenCount int, requestedModel string) (RouteResult, error) {
 	cfg := r.atomic.Get()
 
-	if result, ok := r.resolveRequestedModel(cfg, requestedModel); ok {
-		return result
+	if result, ok, err := r.resolveRequestedModel(cfg, requestedModel, false); err != nil {
+		return RouteResult{}, err
+	} else if ok {
+		return result, nil
 	}
 
 	// Otherwise, use scenario-based routing for streaming
 	result := RouteForStreaming(messages, tokenCount, cfg)
+	scenarioKey := string(result.Scenario)
 
-	// Get primary model for scenario
-	primary, ok := cfg.Models[string(result.Scenario)]
+	// Get primary model for scenario. When cost-based routing is enabled and
+	// a non-empty catalog is available, prefer the cheapest matching catalog
+	// model while preserving the legacy fallback chain.
+	primary, ok := cfg.Models[scenarioKey]
+	if cat, catErr := r.catalog(context.Background()); cfg.CostBasedRoutingEnabled() && cat != nil && catErr == nil && len(cat.Models) > 0 {
+		constraints := requestConstraints(messages, tokenCount)
+		selector := NewSelector(cat, cfg)
+		if resolved, err := selector.SelectCheapest(scenarioKey, constraints); err == nil {
+			primary = resolvedModelToConfig(resolved)
+			ok = true
+		}
+	}
 	if !ok {
+		if isVisionScenario(result.Scenario) {
+			return RouteResult{Scenario: result.Scenario}, fmt.Errorf("vision scenario %s is not configured", result.Scenario)
+		}
 		// Fall back to fast scenario if not configured
 		primary, ok = cfg.Models["fast"]
 		if !ok {
@@ -178,17 +475,28 @@ func (r *ModelRouter) RouteForStreaming(messages []MessageContent, tokenCount in
 			primary = cfg.Models["default"]
 		}
 	}
+	if primary.ModelID == "" {
+		return RouteResult{}, fmt.Errorf("no model configured for streaming; neither scenario %q, \"fast\", nor \"default\" exist in models map", result.Scenario)
+	}
 
 	// Get fallbacks for scenario
-	fallbacks := cfg.Fallbacks[string(result.Scenario)]
+	fallbacks := cfg.Fallbacks[scenarioKey]
 	if len(fallbacks) == 0 {
-		// Fall back to fast fallbacks
-		fallbacks = cfg.Fallbacks["fast"]
+		if isVisionScenario(result.Scenario) {
+			fallbacks = nil
+		} else {
+			// Fall back to fast fallbacks
+			fallbacks = cfg.Fallbacks["fast"]
+		}
 	}
 
 	return RouteResult{
 		Primary:   primary,
 		Fallbacks: fallbacks,
 		Scenario:  result.Scenario,
-	}
+	}, nil
+}
+
+func isVisionScenario(s Scenario) bool {
+	return s == ScenarioVision || s == ScenarioVisionComplex || s == ScenarioVisionLongContext
 }

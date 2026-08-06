@@ -1,0 +1,186 @@
+/* ── Donut Chart ──────────────────────────────────────────── */
+.donut-wrapper { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.donut { width: 160px; height: 160px; border-radius: 50%; position: relative; background: conic-gradient(var(--donut-segments)); box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+.donut::after { content: ''; position: absolute; top: 22px; left: 22px; width: 116px; height: 116px; background: #1c1c1e; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; color: #f5f5f7; }
+.donut-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 12px; max-width: 220px; justify-content: center; }
+.legend-item { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.legend-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+.legend-label { color: #f5f5f7; }
+.legend-value { color: #98989d; font-variant-numeric: tabular-nums; }
+
+/* ── Trend Chart ──────────────────────────────────────────── */
+.trend-svg { width: 100%; height: 200px; overflow: visible; }
+.trend-legend { display: flex; gap: 16px; font-size: 12px; margin-top: 8px; justify-content: center; }
+.trend-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.trend-legend .swatch { display: inline-block; width: 12px; height: 3px; border-radius: 2px; }
+
+/* ── Modal ────────────────────────────────────────────────── */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100; opacity: 0; visibility: hidden; transition: opacity 0.2s, visibility 0.2s; }
+.modal-overlay.visible { opacity: 1; visibility: visible; }
+.modal-content { background: #2c2c2e; border-radius: 10px; width: 90%; max-width: 500px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 2px 8px rgba(0,0,0,0.3); transform: scale(0.95); transition: transform 0.2s; }
+.modal-overlay.visible .modal-content { transform: scale(1); }
+.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #48484a; }
+.modal-title { font-size: 14px; font-weight: 600; }
+.modal-close { background: none; border: none; padding: 8px; cursor: pointer; color: #98989d; border-radius: 4px; }
+.modal-close:hover { background: #3a3a3c; }
+.modal-body { padding: 16px; overflow-y: auto; flex: 1; }
+
+/* ── Status Dot ───────────────────────────────────────────── */
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #98989d; transition: background 0.3s; }
+.status-dot.running { background: #30d158; box-shadow: 0 0 6px #30d158; }
+.status-dot.stopped { background: #ff453a; }
+
+/* ── Toggle Switch ────────────────────────────────────────── */
+.toggle { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; cursor: pointer; }
+.toggle input { position: absolute; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+.toggle-slider { position: relative; width: 44px; height: 26px; background: #3a3a3c; border-radius: 13px; border: 1px solid #48484a; transition: background 0.2s, border-color 0.2s; }
+.toggle-slider::before { content: ""; position: absolute; left: 3px; top: 3px; width: 18px; height: 18px; border-radius: 50%; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.3); transition: transform 0.2s; }
+input:checked + .toggle-slider { background: #6366f1; border-color: #6366f1; }
+input:checked + .toggle-slider::before { transform: translateX(18px); }
+
+/* ── Empty State ──────────────────────────────────────────── */
+.empty-state { text-align: center; color: #98989d; padding: 24px; font-size: 13px; }
+
+/* ── Command Palette ──────────────────────────────────────── */
+.command-palette-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: flex-start; justify-content: center; padding-top: 15vh; z-index: 200; opacity: 0; visibility: hidden; transition: opacity 0.15s, visibility 0.15s; }
+.command-palette-overlay.visible { opacity: 1; visibility: visible; }
+.command-palette { background: #2c2c2e; border-radius: 10px; width: 90%; max-width: 400px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); overflow: hidden; }
+.command-palette-input { width: 100%; padding: 16px; border: none; background: transparent; color: #f5f5f7; font-size: 14px; outline: none; }
+.command-palette-input::placeholder { color: #98989d; }
+.command-palette-list { border-top: 1px solid #48484a; max-height: 250px; overflow-y: auto; }
+.command-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; cursor: pointer; transition: background 0.1s; }
+.command-item:hover, .command-item.selected { background: #3a3a3c; }
+.command-item-label { font-size: 13px; }
+.command-item-shortcut { display: flex; gap: 4px; }
+.command-item-shortcut kbd { padding: 2px 6px; background: #3a3a3c; border-radius: 4px; font-size: 11px; font-family: monospace; color: #98989d; }
+.command-item.hidden { display: none; }
+
+/* ── Fallback Chain ───────────────────────────────────────── */
+.fallback-chain { list-style: none; padding: 0; margin: 0; min-height: 60px; border: 1px dashed #48484a; border-radius: 4px; background: #1c1c1e; }
+.fallback-chain.has-items { border-style: solid; background: transparent; }
+.fallback-item { display: flex; align-items: center; padding: 12px; margin: 4px 0; background: #3a3a3c; border: 1px solid #48484a; border-radius: 4px; cursor: grab; transition: background 0.15s, box-shadow 0.15s; }
+.fallback-item:first-child { margin-top: 0; }
+.fallback-item:last-child { margin-bottom: 0; }
+.fallback-item:hover { background: #2c2c2e; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+.fallback-item:active { cursor: grabbing; }
+.fallback-item.dragging { opacity: 0.5; background: #2c2c2e; }
+.fallback-item.drag-over { border-top: 2px solid #6366f1; }
+.handle { margin-right: 8px; color: #98989d; font-size: 14px; }
+.fallback-item .model-name { flex: 1; font-size: 13px; font-weight: 500; }
+.model-meta { font-size: 11px; color: #98989d; margin-left: 8px; }
+.remove-btn { opacity: 0; transition: opacity 0.2s; background: none; border: none; padding: 4px; cursor: pointer; color: #ff453a; font-size: 16px; border-radius: 4px; }
+.fallback-item:hover .remove-btn { opacity: 1; }
+.remove-btn:hover { background: rgba(255,69,58,0.1); }
+
+/* ── Fallback Preview ─────────────────────────────────────── */
+.fallback-preview { margin-top: 16px; background: #2c2c2e; border: 1px solid #48484a; border-radius: 10px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+.fallback-preview-header { font-size: 14px; font-weight: 600; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #48484a; }
+.fallback-preview-chain { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.fallback-preview-model { display: inline-flex; align-items: center; padding: 8px 12px; background: #3a3a3c; border: 1px solid #48484a; border-radius: 4px; font-size: 13px; }
+.fallback-preview-model.primary { background: #6366f1; color: white; border-color: #6366f1; }
+.fallback-preview-arrow { color: #98989d; font-size: 18px; }
+
+/* ── Sort ─────────────────────────────────────────────────── */
+.sortable { cursor: pointer; user-select: none; }
+.sortable:hover { color: #f5f5f7; }
+.sort-icon { display: inline-block; margin-left: 4px; opacity: 0.4; }
+.sortable.asc .sort-icon, .sortable.desc .sort-icon { opacity: 1; color: #6366f1; }
+
+/* ── Save Status ──────────────────────────────────────────── */
+.save-status { margin-top: 10px; font-size: 12px; text-align: center; }
+.save-status.success { color: #30d158; }
+.save-status.error { color: #ff453a; }
+
+/* ── Tab System ───────────────────────────────────────────── */
+.tab.active { color: #6366f1; background: #2c2c2e; border-bottom: 2px solid #6366f1; font-weight: 500; }
+.tab-content { display: none; }
+.tab-content.active { display: block; flex: 1; overflow-y: auto; }
+
+/* ── Badges ───────────────────────────────────────────────── */
+.badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+.badge-success { background: rgba(48,209,88,0.15); color: #30d158; }
+.badge-error { background: rgba(255,69,58,0.15); color: #ff453a; }
+.badge-scene { background: #3a3a3c; color: #98989d; }
+
+/* ── Filter Select ────────────────────────────────────────── */
+.filter-select { background: #2c2c2e; border: 1px solid #48484a; color: #f5f5f7; padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+
+/* ── Buttons ──────────────────────────────────────────────── */
+.btn { display: inline-block; padding: 8px 16px; border: none; border-radius: 4px; font-size: 13px; font-weight: 500; text-align: center; cursor: pointer; transition: background 0.2s; }
+.btn-primary { background: #6366f1; color: #ffffff; }
+.btn-primary:hover { background: #4f46e5; }
+.btn-small { padding: 4px 12px; font-size: 12px; background: #3a3a3c; color: #f5f5f7; border: 1px solid #48484a; border-radius: 4px; }
+.btn-small:hover { background: #48484a; }
+.btn-primary.btn-small { background: #6366f1; color: #ffffff; border-color: #6366f1; }
+.btn-primary.btn-small:hover { background: #4f46e5; border-color: #4f46e5; }
+
+/* ── Form Helpers ─────────────────────────────────────────── */
+.checkbox-group label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #f5f5f7; font-weight: 400; }
+.checkbox-group input[type="checkbox"] { margin: 0; }
+.checkbox-inline { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #98989d; cursor: pointer; }
+.checkbox-inline input[type="checkbox"] { margin: 0; cursor: pointer; }
+.input-with-btn { display: flex; gap: 4px; width: 100%; }
+.input-with-btn input { flex: 1; }
+.btn-show-hide { background: #3a3a3c; border: 1px solid #48484a; border-radius: 4px; color: #f5f5f7; padding: 0 10px; cursor: pointer; outline: none; }
+.btn-show-hide:hover { background: #48484a; }
+
+/* ── Detail Rows (JS template literals) ───────────────────── */
+.detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #48484a; }
+.detail-row:last-child { border-bottom: none; }
+.detail-label { color: #98989d; font-size: 12px; }
+.detail-value { font-size: 12px; font-weight: 500; text-align: right; }
+
+/* ── Model List (JS template literals) ────────────────────── */
+.model-row { display: flex; align-items: center; gap: 10px; }
+.model-name { flex: 0 0 160px; font-size: 12px; color: #f5f5f7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.model-bar-wrap { flex: 1; height: 6px; background: #3a3a3c; border-radius: 3px; overflow: hidden; }
+.model-bar { height: 100%; background: #6366f1; border-radius: 3px; transition: width 0.4s ease; }
+.model-count { flex: 0 0 40px; text-align: right; font-size: 12px; color: #98989d; font-variant-numeric: tabular-nums; }
+
+/* ── Performance Table (JS template literals) ─────────────── */
+.perf-model { font-weight: 500; }
+.success-rate { color: #30d158; font-weight: 500; }
+.error-rate { color: #ff453a; font-weight: 500; }
+.latency-cell { font-family: monospace; padding: 4px 8px; border-radius: 4px; }
+.latency-fast { background: rgba(48,209,88,0.15); color: #30d158; }
+.latency-medium { background: rgba(255,159,10,0.15); color: #ff9f0a; }
+.latency-slow { background: rgba(255,69,58,0.15); color: #ff453a; }
+
+/* ── Test Response ────────────────────────────────────────── */
+.test-response { background: #3a3a3c; border: 1px solid #48484a; border-radius: 6px; padding: 12px; min-height: 150px; max-height: 400px; overflow: auto; margin-bottom: 12px; }
+.test-response pre { margin: 0; font-family: 'SF Mono','Menlo','Monaco',monospace; font-size: 11px; color: #f5f5f7; white-space: pre-wrap; word-break: break-word; }
+.test-response.loading { opacity: 0.6; }
+.test-response.error pre { color: #ff453a; }
+#btn-test-copy.copied { background: #30d158; color: white; border-color: #30d158; }
+
+/* ── Table Cell Padding (for JS-generated cells) ──────────── */
+.history-table td { padding: 8px 10px; border-bottom: 1px solid #48484a; vertical-align: middle; white-space: nowrap; }
+.history-table tr:hover td { background: #3a3a3c; }
+.perf-table td { padding: 8px 12px; border-bottom: 1px solid #48484a; vertical-align: middle; white-space: nowrap; }
+.perf-table tr:hover td { background: #3a3a3c; }
+
+/* ── Test History Hint (JS-generated spans) ───────────────── */
+.test-history-hint span { padding: 2px 6px; background: #3a3a3c; border-radius: 4px; font-size: 11px; color: #98989d; cursor: pointer; transition: opacity 0.15s; }
+.test-history-hint span:hover { opacity: 1; background: #48484a; }
+
+/* ── Focus States (Accessibility) ─────────────────────────── */
+:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(99,102,241,0.35); }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(99,102,241,0.35); }
+.tab:focus-visible, .toggle:focus-within { outline: none; box-shadow: 0 0 0 3px rgba(99,102,241,0.35); }
+
+/* ── Accordion (not in current HTML but JS handles it) ────── */
+.accordion-section { border: 1px solid #48484a; border-radius: 6px; margin-bottom: 8px; background: #2c2c2e; overflow: hidden; }
+.accordion-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; cursor: pointer; user-select: none; transition: background 0.15s; }
+.accordion-header:hover { background: #3a3a3c; }
+.accordion-title { font-size: 14px; font-weight: 600; color: #f5f5f7; }
+.accordion-icon { width: 16px; height: 16px; color: #98989d; transition: transform 0.2s; }
+.accordion-section.expanded .accordion-icon { transform: rotate(180deg); }
+.accordion-content { max-height: 0; overflow: hidden; transition: max-height 0.25s ease-out; }
+.accordion-section.expanded .accordion-content { max-height: 1000px; transition: max-height 0.35s ease-in; }
+.accordion-inner { padding: 0 16px 16px; }
+
+/* ── Loading States ───────────────────────────────────────── */
+.loading-spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #3a3a3c; border-top-color: #6366f1; border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.skeleton { background: linear-gradient(90deg,#3a3a3c 25%,#2c2c2e 50%,#3a3a3c 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 4px; }
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }

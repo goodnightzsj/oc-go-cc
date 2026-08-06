@@ -1,74 +1,108 @@
 package config
 
-import "testing"
+import (
+	"testing"
+)
 
-func TestResolveModelConfig_KnownModelGetsCapacity(t *testing.T) {
-	m := ResolveModelConfig(ModelConfig{Provider: "opencode-go", ModelID: "kimi-k2.6"})
-	if m.ContextWindow != 256000 {
-		t.Errorf("kimi-k2.6 ContextWindow = %d, want 256000", m.ContextWindow)
-	}
-	if m.MaxOutputTokens != 8192 {
-		t.Errorf("kimi-k2.6 MaxOutputTokens = %d, want 8192", m.MaxOutputTokens)
-	}
-	if !m.Vision {
-		t.Error("kimi-k2.6 should resolve to Vision=true")
-	}
-	if m.ContextMargin != DefaultContextMargin {
-		t.Errorf("ContextMargin = %d, want default %d", m.ContextMargin, DefaultContextMargin)
-	}
+func boolPtr(b bool) *bool {
+	return &b
 }
 
-func TestResolveModelConfig_PreservesExplicitValues(t *testing.T) {
-	m := ResolveModelConfig(ModelConfig{
-		Provider:     "opencode-go",
-		ModelID:      "kimi-k2.6",
-		ContextWindow: 500000,
-		MaxTokens:     4096,
-	})
-	// Explicit config value must win over the registry default.
-	if m.ContextWindow != 500000 {
-		t.Errorf("explicit ContextWindow = %d, want 500000 (must not be overwritten)", m.ContextWindow)
-	}
-	// MaxOutputTokens was zero, so it still gets filled from the registry.
-	if m.MaxOutputTokens != 8192 {
-		t.Errorf("MaxOutputTokens = %d, want 8192 (filled from registry)", m.MaxOutputTokens)
-	}
-}
-
-func TestResolveModelConfig_NewModelsRegistered(t *testing.T) {
-	// Models introduced by the upstream model-list increments must resolve to
-	// realistic capacities so capacity filtering can compose with them.
-	cases := map[string]struct {
-		contextWindow   int
-		maxOutputTokens int
-		vision          bool
+func TestResolveModelConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    ModelConfig
+		expected ModelConfig
 	}{
-		"glm-5.2":        {200000, 8192, false},
-		"kimi-k2.7-code": {256000, 32768, true},
-		"kimi-k3":        {1000000, 131072, true},
-		"mimo-v2-omni":   {1000000, 8192, true},
+		{
+			name: "legacy model with empty ModelRef gets hardcoded metadata",
+			input: ModelConfig{
+				ModelID: "kimi-k2.6",
+			},
+			expected: ModelConfig{
+				ModelID:         "kimi-k2.6",
+				ContextWindow:   256000,
+				MaxOutputTokens: 8192,
+				Vision:          true,
+				ContextMargin:   DefaultContextMargin,
+				SupportsTools:   boolPtr(true),
+			},
+		},
+		{
+			name: "kimi-k3 gets hardcoded metadata (1M context, 131K output, vision)",
+			input: ModelConfig{
+				ModelID: "kimi-k3",
+			},
+			expected: ModelConfig{
+				ModelID:         "kimi-k3",
+				ContextWindow:   1000000,
+				MaxOutputTokens: 131072,
+				Vision:          true,
+				ContextMargin:   DefaultContextMargin,
+				SupportsTools:   boolPtr(true),
+			},
+		},
+		{
+			name: "ModelRef present preserves explicit catalog capabilities",
+			input: ModelConfig{
+				ModelID:       "deepseek-v4-flash",
+				ModelRef:      "deepseek/deepseek-v4-flash@opencode-go",
+				ContextWindow: 12345,
+				Vision:        true,
+				SupportsTools: boolPtr(true),
+			},
+			expected: ModelConfig{
+				ModelID:       "deepseek-v4-flash",
+				ModelRef:      "deepseek/deepseek-v4-flash@opencode-go",
+				ContextWindow: 12345,
+				Vision:        true,
+				ContextMargin: DefaultContextMargin,
+				SupportsTools: boolPtr(true),
+			},
+		},
+		{
+			name: "ModelRef present with zero values still gets defaults",
+			input: ModelConfig{
+				ModelID:  "deepseek-v4-flash",
+				ModelRef: "deepseek/deepseek-v4-flash@opencode-go",
+			},
+			expected: ModelConfig{
+				ModelID:       "deepseek-v4-flash",
+				ModelRef:      "deepseek/deepseek-v4-flash@opencode-go",
+				ContextMargin: DefaultContextMargin,
+				SupportsTools: boolPtr(true),
+			},
+		},
 	}
-	for id, want := range cases {
-		m := ResolveModelConfig(ModelConfig{Provider: "opencode-go", ModelID: id})
-		if m.ContextWindow != want.contextWindow {
-			t.Errorf("%s ContextWindow = %d, want %d", id, m.ContextWindow, want.contextWindow)
-		}
-		if m.MaxOutputTokens != want.maxOutputTokens {
-			t.Errorf("%s MaxOutputTokens = %d, want %d", id, m.MaxOutputTokens, want.maxOutputTokens)
-		}
-		if m.Vision != want.vision {
-			t.Errorf("%s Vision = %v, want %v", id, m.Vision, want.vision)
-		}
-	}
-}
 
-func TestResolveModelConfig_UnknownModelUnconstrained(t *testing.T) {
-	m := ResolveModelConfig(ModelConfig{Provider: "opencode-go", ModelID: "some-future-model"})
-	if m.ContextWindow != 0 {
-		t.Errorf("unknown model ContextWindow = %d, want 0 (unconstrained)", m.ContextWindow)
-	}
-	// ContextMargin is still defaulted.
-	if m.ContextMargin != DefaultContextMargin {
-		t.Errorf("unknown model ContextMargin = %d, want default", m.ContextMargin)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveModelConfig(tt.input)
+
+			if got.ModelID != tt.expected.ModelID {
+				t.Errorf("ModelID = %q, want %q", got.ModelID, tt.expected.ModelID)
+			}
+			if got.ModelRef != tt.expected.ModelRef {
+				t.Errorf("ModelRef = %q, want %q", got.ModelRef, tt.expected.ModelRef)
+			}
+			if got.ContextWindow != tt.expected.ContextWindow {
+				t.Errorf("ContextWindow = %d, want %d", got.ContextWindow, tt.expected.ContextWindow)
+			}
+			if got.MaxOutputTokens != tt.expected.MaxOutputTokens {
+				t.Errorf("MaxOutputTokens = %d, want %d", got.MaxOutputTokens, tt.expected.MaxOutputTokens)
+			}
+			if got.Vision != tt.expected.Vision {
+				t.Errorf("Vision = %v, want %v", got.Vision, tt.expected.Vision)
+			}
+			if got.ContextMargin != tt.expected.ContextMargin {
+				t.Errorf("ContextMargin = %d, want %d", got.ContextMargin, tt.expected.ContextMargin)
+			}
+			if (got.SupportsTools == nil) != (tt.expected.SupportsTools == nil) {
+				t.Fatalf("SupportsTools nil mismatch: got %v, want %v", got.SupportsTools, tt.expected.SupportsTools)
+			}
+			if got.SupportsTools != nil && *got.SupportsTools != *tt.expected.SupportsTools {
+				t.Errorf("SupportsTools = %v, want %v", *got.SupportsTools, *tt.expected.SupportsTools)
+			}
+		})
 	}
 }

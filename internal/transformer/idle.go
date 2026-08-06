@@ -1,4 +1,3 @@
-// Package transformer handles request/response transformation and token counting.
 package transformer
 
 import (
@@ -28,10 +27,6 @@ import (
 //	    ping()
 //	    // process bytes
 //	}
-//
-// When a stream is stuck and the watchdog fires (no bytes for idleTimeout), the
-// caller should cancel ctx and close the reader so a blocking Read() is
-// released. Use streamTimeout(ms) from config; to disable, pass 0.
 func StartIdleWatchdog(ctx context.Context, cancel context.CancelFunc, idleTimeout time.Duration) func() {
 	if idleTimeout <= 0 {
 		return func() {}

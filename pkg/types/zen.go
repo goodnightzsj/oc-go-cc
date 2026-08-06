@@ -40,7 +40,7 @@ type ResponsesResponse struct {
 	Created int64             `json:"created"`
 	Model   string            `json:"model"`
 	Output  []ResponsesOutput `json:"output"`
-	Usage   *ResponsesUsage   `json:"usage,omitempty"`
+	Usage   ResponsesUsage    `json:"usage"`
 }
 
 // ResponsesOutput represents a single output item.

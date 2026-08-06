@@ -5,72 +5,73 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	"oc-go-cc/internal/config"
-	"oc-go-cc/pkg/types"
+	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/debug"
+	"github.com/routatic/proxy/internal/models"
+	"github.com/routatic/proxy/pkg/types"
 )
 
+// extractRequestID converts a context value to a string request ID.
+func extractRequestID(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	switch s := v.(type) {
+	case string:
+		return s
+	case []byte:
+		return string(s)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// teeReadCloser wraps an io.ReadCloser with a TeeReader for capturing response data.
+type teeReadCloser struct {
+	io.ReadCloser
+	r io.Reader
+}
+
+func (t *teeReadCloser) Read(p []byte) (n int, err error) {
+	return t.r.Read(p)
+}
+
+// Provider constants identify the upstream API that handles a model's request.
+// These are used throughout the codebase for endpoint selection, timeout
+// configuration, and provider-specific error handling (e.g., auth error
+// short-circuit logic).
 const (
 	ProviderOpenCodeGo  = "opencode-go"
 	ProviderOpenCodeZen = "opencode-zen"
-	defaultTimeout      = 5 * time.Minute
-	maxRequestAttempts  = 2
-	retryBackoff        = 250 * time.Millisecond
-	maxErrorBodyBytes   = 16 * 1024
+	ProviderAWSBedrock  = "aws-bedrock"
+	ProviderOpenRouter  = "openrouter"
 )
+
+// APIError represents an HTTP API error returned by an upstream provider.
+// Callers should use errors.As to check for this type and inspect StatusCode
+// for classification (4xx non-retryable, 5xx retryable, etc.).
+type APIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("API error %d: %s", e.StatusCode, e.Body)
+}
 
 // OpenCodeClient handles communication with OpenCode Go and Zen APIs.
 type OpenCodeClient struct {
-	atomic     *config.AtomicConfig
-	httpClient *http.Client
-	keyCounter atomic.Uint64
-}
-
-// UpstreamError captures a non-2xx upstream HTTP response with retry hints.
-type UpstreamError struct {
-	StatusCode              int
-	Body                    string
-	Retryable               bool
-	Cloudflare              bool
-	CloudflareOriginInvalid bool
-}
-
-func (e *UpstreamError) Error() string {
-	msg := fmt.Sprintf("upstream API error %d", e.StatusCode)
-	switch {
-	case e.CloudflareOriginInvalid:
-		msg += " (cloudflare origin invalid response)"
-	case e.Cloudflare:
-		msg += " (cloudflare)"
-	}
-	if e.Body != "" {
-		msg += ": " + e.Body
-	}
-	return msg
-}
-
-// ErrorAttrs returns structured slog fields for a wrapped upstream error.
-func ErrorAttrs(err error) []any {
-	var upstreamErr *UpstreamError
-	if !errors.As(err, &upstreamErr) {
-		return nil
-	}
-
-	return []any{
-		"upstream_status", upstreamErr.StatusCode,
-		"retryable", upstreamErr.Retryable,
-		"cloudflare", upstreamErr.Cloudflare,
-		"cloudflare_origin_invalid", upstreamErr.CloudflareOriginInvalid,
-		"upstream_body", upstreamErr.Body,
-	}
+	atomic        *config.AtomicConfig
+	httpClient    *http.Client
+	keyCounter    atomic.Uint64
+	captureLogger *debug.CaptureLogger
 }
 
 // nextAPIKey returns the next API key in round-robin order from the given key pool.
@@ -85,18 +86,71 @@ func (c *OpenCodeClient) nextAPIKey(keys []string) string {
 	return keys[(old-1)%n]
 }
 
-// NewOpenCodeClient creates a new OpenCode client.
-func NewOpenCodeClient(atomic *config.AtomicConfig) *OpenCodeClient {
-	return &OpenCodeClient{
-		atomic: atomic,
-		httpClient: &http.Client{
-			Transport: newHTTPTransport(),
-		},
+// getProviderAPIKeys returns the API keys for a specific provider.
+// It checks provider-specific keys first, then falls back to global keys for backward compatibility.
+func (c *OpenCodeClient) getProviderAPIKeys(modelConfig config.ModelConfig) []string {
+	cfg := c.atomic.Get()
+
+	switch {
+	case IsBedrock(modelConfig):
+		if keys := cfg.AWSBedrock.EffectiveAPIKeys(); len(keys) > 0 {
+			return keys
+		}
+	case IsZen(modelConfig):
+		if keys := cfg.OpenCodeZen.EffectiveAPIKeys(); len(keys) > 0 {
+			return keys
+		}
+	case IsOpenRouter(modelConfig):
+		if keys := cfg.OpenRouter.EffectiveAPIKeys(); len(keys) > 0 {
+			return keys
+		}
+	default:
+		if keys := cfg.OpenCodeGo.EffectiveAPIKeys(); len(keys) > 0 {
+			return keys
+		}
 	}
+
+	// Fallback to global keys for backward compatibility
+	return cfg.EffectiveAPIKeys()
 }
 
-func newHTTPTransport() *http.Transport {
-	return &http.Transport{
+// ProviderKeyCount returns the number of API keys configured for a provider.
+// This is used to determine whether auth errors should short-circuit the fallback
+// chain (single key) or continue trying other models (multiple keys).
+func ProviderKeyCount(atomicCfg *config.AtomicConfig, provider string) int {
+	if atomicCfg == nil {
+		return 1 // Default to single-key behavior
+	}
+	cfg := atomicCfg.Get()
+
+	var keys []string
+	switch provider {
+	case ProviderOpenCodeGo:
+		keys = cfg.OpenCodeGo.EffectiveAPIKeys()
+	case ProviderOpenCodeZen:
+		keys = cfg.OpenCodeZen.EffectiveAPIKeys()
+	case ProviderAWSBedrock:
+		keys = cfg.AWSBedrock.EffectiveAPIKeys()
+	case ProviderOpenRouter:
+		keys = cfg.OpenRouter.EffectiveAPIKeys()
+	default:
+		// Unknown provider - default to global keys
+		keys = cfg.EffectiveAPIKeys()
+	}
+
+	if len(keys) == 0 {
+		return 1 // Default to single-key behavior
+	}
+	return len(keys)
+}
+
+// NewOpenCodeClient creates a client for sending requests to OpenCode Go,
+// OpenCode Zen, or AWS Bedrock endpoints. The client handles connection
+// pooling, API key rotation (round-robin across multiple keys when configured),
+// and request/response capture for debugging. Pass a non-nil captureLogger
+// to enable upstream traffic logging.
+func NewOpenCodeClient(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) *OpenCodeClient {
+	transport := &http.Transport{
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 20,
 		IdleConnTimeout:     90 * time.Second,
@@ -104,174 +158,153 @@ func newHTTPTransport() *http.Transport {
 		DisableKeepAlives:   false,
 		Proxy:               http.ProxyFromEnvironment,
 	}
+
+	return &OpenCodeClient{
+		atomic: atomic,
+		httpClient: &http.Client{
+			Transport: transport,
+		},
+		captureLogger: captureLogger,
+	}
 }
 
-type cancelOnCloseReadCloser struct {
-	io.ReadCloser
-	cancel context.CancelFunc
-}
-
-func (r *cancelOnCloseReadCloser) Close() error {
-	err := r.ReadCloser.Close()
-	r.cancel()
-	return err
-}
-
-// RequestTimeout returns the provider-specific upstream timeout for a model.
-func (c *OpenCodeClient) RequestTimeout(modelConfig config.ModelConfig) time.Duration {
+// StreamIdleTimeout returns the maximum gap between bytes on an active stream
+// for a model. The stream lives as long as data keeps flowing; only an idle
+// period longer than this value is treated as a stuck connection and aborted.
+// Go provider models use OpenCodeGo.StreamTimeoutMs; Zen models use
+// OpenCodeZen.StreamTimeoutMs; Bedrock models use AWSBedrock.StreamTimeoutMs.
+// Falls back to 5 minutes if the config is unavailable or the value is zero.
+func (c *OpenCodeClient) StreamIdleTimeout(modelConfig config.ModelConfig) time.Duration {
+	const fallback = 5 * time.Minute
+	if c == nil || c.atomic == nil {
+		return fallback
+	}
 	cfg := c.atomic.Get()
-	timeoutMs := cfg.OpenCodeGo.TimeoutMs
-	if IsZen(modelConfig) {
+	var ms int
+	switch {
+	case IsBedrock(modelConfig):
+		ms = cfg.AWSBedrock.StreamTimeoutMs
+		if ms <= 0 {
+			ms = cfg.AWSBedrock.TimeoutMs
+		}
+	case IsZen(modelConfig):
+		ms = cfg.OpenCodeZen.StreamTimeoutMs
+		if ms <= 0 {
+			ms = cfg.OpenCodeZen.TimeoutMs
+		}
+	case IsOpenRouter(modelConfig):
+		ms = cfg.OpenRouter.StreamTimeoutMs
+		if ms <= 0 {
+			ms = cfg.OpenRouter.TimeoutMs
+		}
+	default:
+		ms = cfg.OpenCodeGo.StreamTimeoutMs
+		if ms <= 0 {
+			ms = cfg.OpenCodeGo.TimeoutMs
+		}
+	}
+	if ms <= 0 {
+		return fallback
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+// RequestTimeout returns the provider timeout for a non-streaming attempt.
+func (c *OpenCodeClient) RequestTimeout(model config.ModelConfig) time.Duration {
+	if c == nil || c.atomic == nil {
+		return 5 * time.Minute
+	}
+	cfg := c.atomic.Get()
+	var timeoutMs int
+	switch {
+	case IsBedrock(model):
+		timeoutMs = cfg.AWSBedrock.TimeoutMs
+	case IsZen(model):
 		timeoutMs = cfg.OpenCodeZen.TimeoutMs
+	case IsOpenRouter(model):
+		timeoutMs = cfg.OpenRouter.TimeoutMs
+	default:
+		timeoutMs = cfg.OpenCodeGo.TimeoutMs
 	}
-	if timeoutMs <= 0 {
-		return defaultTimeout
+	if timeoutMs > 0 {
+		return time.Duration(timeoutMs) * time.Millisecond
 	}
-	return time.Duration(timeoutMs) * time.Millisecond
+	return 5 * time.Minute
 }
 
-func (c *OpenCodeClient) contextWithTimeout(
-	ctx context.Context,
-	modelConfig config.ModelConfig,
-) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(ctx, c.RequestTimeout(modelConfig))
-}
-
-func compactErrorBody(body []byte) string {
-	s := strings.TrimSpace(string(body))
-	if s == "" {
-		return ""
+// StreamingTimeout returns the provider timeout for a streaming attempt.
+func (c *OpenCodeClient) StreamingTimeout(model config.ModelConfig) time.Duration {
+	if c == nil || c.atomic == nil {
+		return 5 * time.Minute
 	}
-	s = strings.Join(strings.Fields(s), " ")
-	if len(s) > 512 {
-		return s[:512] + "..."
-	}
-	return s
-}
-
-func isRetryableStatus(statusCode int) bool {
-	return statusCode == http.StatusTooManyRequests || statusCode >= http.StatusInternalServerError
-}
-
-func newUpstreamError(statusCode int, body []byte) error {
-	message := compactErrorBody(body)
-	lower := strings.ToLower(message)
-	return &UpstreamError{
-		StatusCode:              statusCode,
-		Body:                    message,
-		Retryable:               isRetryableStatus(statusCode),
-		Cloudflare:              strings.Contains(lower, "cloudflare"),
-		CloudflareOriginInvalid: strings.Contains(lower, "origin web server returned an invalid or incomplete response to cloudflare"),
-	}
-}
-
-func shouldRetryTransportError(ctx context.Context, err error) bool {
-	if ctx.Err() != nil {
-		return false
-	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return false
-	}
-
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return true
-	}
-
-	errStr := strings.ToLower(err.Error())
-	retryable := []string{
-		"connection reset",
-		"connection refused",
-		"unexpected eof",
-		"broken pipe",
-		"tls handshake timeout",
-		"server closed idle connection",
-	}
-	for _, token := range retryable {
-		if strings.Contains(errStr, token) {
-			return true
+	cfg := c.atomic.Get()
+	var timeoutMs int
+	switch {
+	case IsBedrock(model):
+		timeoutMs = cfg.AWSBedrock.StreamingTimeoutMs
+		if timeoutMs <= 0 {
+			timeoutMs = cfg.AWSBedrock.TimeoutMs
+		}
+	case IsZen(model):
+		timeoutMs = cfg.OpenCodeZen.StreamingTimeoutMs
+		if timeoutMs <= 0 {
+			timeoutMs = cfg.OpenCodeZen.TimeoutMs
+		}
+	case IsOpenRouter(model):
+		timeoutMs = cfg.OpenRouter.StreamingTimeoutMs
+		if timeoutMs <= 0 {
+			timeoutMs = cfg.OpenRouter.TimeoutMs
+		}
+	default:
+		timeoutMs = cfg.OpenCodeGo.StreamingTimeoutMs
+		if timeoutMs <= 0 {
+			timeoutMs = cfg.OpenCodeGo.TimeoutMs
 		}
 	}
-	return false
-}
-
-func (c *OpenCodeClient) doRequestWithRetry(
-	ctx context.Context,
-	modelConfig config.ModelConfig,
-	buildRequest func(context.Context) (*http.Request, error),
-) (*http.Response, error) {
-	var lastErr error
-
-	for attempt := 1; attempt <= maxRequestAttempts; attempt++ {
-		reqCtx, cancel := c.contextWithTimeout(ctx, modelConfig)
-		httpReq, err := buildRequest(reqCtx)
-		if err != nil {
-			cancel()
-			return nil, err
-		}
-
-		resp, err := c.httpClient.Do(httpReq)
-		if err != nil {
-			cancel()
-			lastErr = fmt.Errorf("request failed: %w", err)
-			if attempt < maxRequestAttempts && shouldRetryTransportError(ctx, err) {
-				time.Sleep(retryBackoff * time.Duration(attempt))
-				continue
-			}
-			return nil, lastErr
-		}
-		resp.Body = &cancelOnCloseReadCloser{ReadCloser: resp.Body, cancel: cancel}
-
-		if resp.StatusCode < http.StatusBadRequest {
-			return resp, nil
-		}
-
-		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
-		upstreamErr := newUpstreamError(resp.StatusCode, bodyBytes)
-		_ = resp.Body.Close()
-		lastErr = upstreamErr
-		if attempt < maxRequestAttempts && isRetryableStatus(resp.StatusCode) && ctx.Err() == nil {
-			time.Sleep(retryBackoff * time.Duration(attempt))
-			continue
-		}
-		return nil, upstreamErr
+	if timeoutMs > 0 {
+		return time.Duration(timeoutMs) * time.Millisecond
 	}
-
-	return nil, lastErr
+	return 5 * time.Minute
 }
 
 // IsAnthropicModel returns true if the model requires the Anthropic endpoint.
-// This includes both Go models (minimax, all qwen) and Zen models (claude, qwen3.7-max).
+// Most Go provider models use the Chat Completions transform path for broader
+// compatibility (tool format, message roles, etc.). Exceptions are models whose
+// upstream backends don't support the OpenAI Chat Completions format and only
+// accept Anthropic Messages format.
+//
+// Only Zen models use the raw Anthropic endpoint via ClassifyEndpoint.
 func IsAnthropicModel(modelID string) bool {
 	switch modelID {
 	case "minimax-m2.5", "minimax-m2.7", "minimax-m3",
 		"qwen3.5-plus", "qwen3.6-plus", "qwen3.7-plus", "qwen3.7-max":
 		return true
 	default:
-		return isZenAnthropicModel(modelID)
+		return false
 	}
 }
 
 // isZenAnthropicModel returns true for models on Zen that use the Anthropic endpoint.
 func isZenAnthropicModel(modelID string) bool {
-	// Claude models on Zen use the Anthropic endpoint
-	if strings.HasPrefix(modelID, "claude-") {
-		return true
-	}
-	// Qwen models on Zen use the Anthropic endpoint
-	if strings.HasPrefix(modelID, "qwen") {
-		return true
-	}
-	return false
+	return models.IsZenAnthropicModel(modelID)
 }
 
 // Provider returns the provider string for a model config.
-// Defaults to ProviderOpenCodeGo if empty.
+// Normalizes underscores to hyphens so that both "aws_bedrock" and "aws-bedrock"
+// resolve to the same canonical form. Defaults to ProviderOpenCodeGo if empty.
 func Provider(model config.ModelConfig) string {
-	if model.Provider != "" {
-		return model.Provider
+	p := model.Provider
+	if p == "" {
+		return ProviderOpenCodeGo
 	}
-	return ProviderOpenCodeGo
+	// Normalize underscores to hyphens for consistent matching.
+	for i := range p {
+		if p[i] == '_' {
+			// strings.ReplaceAll would allocate; do an in-place scan + build only when needed.
+			return strings.ReplaceAll(p, "_", "-")
+		}
+	}
+	return p
 }
 
 // IsZen returns true if the model uses the OpenCode Zen provider.
@@ -279,9 +312,22 @@ func IsZen(model config.ModelConfig) bool {
 	return Provider(model) == ProviderOpenCodeZen
 }
 
+// IsBedrock returns true if the model uses the AWS Bedrock provider.
+func IsBedrock(model config.ModelConfig) bool {
+	return Provider(model) == ProviderAWSBedrock
+}
+
+// IsOpenRouter returns true if the model uses the OpenRouter provider.
+func IsOpenRouter(model config.ModelConfig) bool {
+	return Provider(model) == ProviderOpenRouter
+}
+
 // EndpointType determines which Zen endpoint format to use.
 type EndpointType int
 
+// EndpointType constants select the API format for a given model on Zen.
+// The proxy transforms requests to match the target endpoint's expected schema
+// (OpenAI Chat Completions, Anthropic Messages, OpenAI Responses, or Gemini).
 const (
 	EndpointChatCompletions EndpointType = iota // /v1/chat/completions (OpenAI-compatible)
 	EndpointAnthropic                           // /v1/messages (Anthropic format)
@@ -306,47 +352,43 @@ func ClassifyEndpoint(modelID string) EndpointType {
 }
 
 func isGeminiModel(modelID string) bool {
-	switch modelID {
-	case "gemini-3.5-flash", "gemini-3.1-pro", "gemini-3-flash":
-		return true
-	default:
-		return false
-	}
+	return models.IsGeminiModel(modelID)
 }
 
 func isResponsesModel(modelID string) bool {
-	switch modelID {
-	case "gpt-5.5", "gpt-5.5-pro", "gpt-5.4", "gpt-5.4-pro", "gpt-5.4-mini", "gpt-5.4-nano",
-		"gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2", "gpt-5.2-codex",
-		"gpt-5.1", "gpt-5.1-codex", "gpt-5.1-codex-max", "gpt-5.1-codex-mini",
-		"gpt-5", "gpt-5-codex", "gpt-5-nano":
-		return true
-	default:
-		return false
-	}
+	return models.IsResponsesModel(modelID)
 }
 
 // getEndpoint returns the appropriate endpoint config for a model.
 func (c *OpenCodeClient) getEndpoint(modelID string, modelConfig config.ModelConfig) endpointConfig {
 	cfg := c.atomic.Get()
-	apiKey := c.nextAPIKey(cfg.EffectiveAPIKeys())
+	apiKey := c.nextAPIKey(c.getProviderAPIKeys(modelConfig))
+
+	if IsBedrock(modelConfig) {
+		bedrock := cfg.AWSBedrock
+		return endpointConfig{BaseURL: bedrock.BaseURL, APIKey: apiKey}
+	}
 
 	if IsZen(modelConfig) {
 		zen := cfg.OpenCodeZen
-		switch ClassifyEndpoint(modelID) {
-		case EndpointAnthropic:
+		switch models.ClassifyEndpoint(modelID) {
+		case models.EndpointAnthropic:
 			return endpointConfig{BaseURL: zen.AnthropicBaseURL, APIKey: apiKey}
-		case EndpointResponses:
+		case models.EndpointResponses:
 			return endpointConfig{BaseURL: zen.ResponsesBaseURL, APIKey: apiKey}
-		case EndpointGemini:
+		case models.EndpointGemini:
 			return endpointConfig{BaseURL: zen.GeminiBaseURL + "/" + modelID, APIKey: apiKey}
 		default:
 			return endpointConfig{BaseURL: zen.BaseURL, APIKey: apiKey}
 		}
 	}
 
+	if IsOpenRouter(modelConfig) {
+		return endpointConfig{BaseURL: cfg.OpenRouter.BaseURL, APIKey: apiKey}
+	}
+
 	// Default: OpenCode Go
-	if IsAnthropicModel(modelID) {
+	if models.IsAnthropicModel(modelID) {
 		return endpointConfig{BaseURL: cfg.OpenCodeGo.AnthropicBaseURL, APIKey: apiKey}
 	}
 	return endpointConfig{BaseURL: cfg.OpenCodeGo.BaseURL, APIKey: apiKey}
@@ -371,26 +413,52 @@ func (c *OpenCodeClient) ChatCompletion(
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
-	return c.doRequestWithRetry(ctx, modelConfig, func(reqCtx context.Context) (*http.Request, error) {
-		httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create request: %w", err)
-		}
 
-		httpReq.Header.Set("Content-Type", "application/json")
-		// Anthropic endpoint uses x-api-key; OpenAI endpoint uses Bearer
-		if IsAnthropicModel(modelID) {
-			httpReq.Header.Set("x-api-key", endpoint.APIKey)
-		} else {
-			httpReq.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
-		}
+	// Capture upstream request before sending
+	if c.captureLogger != nil {
+		c.captureLogger.CaptureUpstreamRequest(extractRequestID(ctx.Value("requestID")), Provider(modelConfig), body)
+	}
 
-		if req.Stream != nil && *req.Stream {
-			httpReq.Header.Set("Accept", "text/event-stream")
-		}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
 
-		return httpReq, nil
-	})
+	httpReq.Header.Set("Content-Type", "application/json")
+	// Anthropic endpoint uses x-api-key; OpenAI endpoint uses Bearer
+	if models.IsAnthropicModel(modelID) {
+		httpReq.Header.Set("x-api-key", endpoint.APIKey)
+	} else {
+		httpReq.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
+	}
+
+	if req.Stream != nil && *req.Stream {
+		httpReq.Header.Set("Accept", "text/event-stream")
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return nil, &APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
+	}
+
+	// Capture upstream response by wrapping the body with a TeeReader
+	if c.captureLogger != nil {
+		pr, pw := io.Pipe()
+		resp.Body = &teeReadCloser{ReadCloser: resp.Body, r: io.TeeReader(resp.Body, pw)}
+		// Async copy to capture
+		go func() {
+			data, _ := io.ReadAll(pr)
+			c.captureLogger.CaptureUpstreamResponse(extractRequestID(ctx.Value("requestID")), Provider(modelConfig), data)
+		}()
+	}
+
+	return resp, nil
 }
 
 // ChatCompletionNonStreaming sends a non-streaming request and returns the full parsed response.
@@ -448,30 +516,40 @@ func (c *OpenCodeClient) SendAnthropicRequest(
 	modelConfig config.ModelConfig,
 ) (*http.Response, error) {
 	cfg := c.atomic.Get()
-	var baseURL string
-	apiKey := c.nextAPIKey(cfg.EffectiveAPIKeys())
+	apiKey := c.nextAPIKey(c.getProviderAPIKeys(modelConfig))
 
+	var baseURL string
 	if IsZen(modelConfig) {
 		baseURL = cfg.OpenCodeZen.AnthropicBaseURL
 	} else {
 		baseURL = cfg.OpenCodeGo.AnthropicBaseURL
 	}
-	return c.doRequestWithRetry(ctx, modelConfig, func(reqCtx context.Context) (*http.Request, error) {
-		httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, baseURL, bytes.NewReader(body))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create request: %w", err)
-		}
 
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-		httpReq.Header.Set("x-api-key", apiKey)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
 
-		if stream {
-			httpReq.Header.Set("Accept", "text/event-stream")
-		}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("x-api-key", apiKey)
 
-		return httpReq, nil
-	})
+	if stream {
+		httpReq.Header.Set("Accept", "text/event-stream")
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return nil, &APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
+	}
+
+	return resp, nil
 }
 
 // ResponsesCompletion sends a request to the OpenAI Responses endpoint.
@@ -487,16 +565,43 @@ func (c *OpenCodeClient) ResponsesCompletion(
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
-	return c.doRequestWithRetry(ctx, modelConfig, func(reqCtx context.Context) (*http.Request, error) {
-		httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create request: %w", err)
-		}
 
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
-		return httpReq, nil
-	})
+	// Capture upstream request before sending
+	if c.captureLogger != nil {
+		c.captureLogger.CaptureUpstreamRequest(extractRequestID(ctx.Value("requestID")), Provider(modelConfig), body)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return nil, &APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
+	}
+
+	// Capture upstream response by wrapping the body with a TeeReader
+	if c.captureLogger != nil {
+		pr, pw := io.Pipe()
+		resp.Body = &teeReadCloser{ReadCloser: resp.Body, r: io.TeeReader(resp.Body, pw)}
+		// Async copy to capture
+		go func() {
+			data, _ := io.ReadAll(pr)
+			c.captureLogger.CaptureUpstreamResponse(extractRequestID(ctx.Value("requestID")), Provider(modelConfig), data)
+		}()
+	}
+
+	return resp, nil
 }
 
 // ResponsesCompletionNonStreaming sends a non-streaming Responses request.
@@ -557,16 +662,43 @@ func (c *OpenCodeClient) GeminiCompletion(
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
-	return c.doRequestWithRetry(ctx, modelConfig, func(reqCtx context.Context) (*http.Request, error) {
-		httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create request: %w", err)
-		}
 
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
-		return httpReq, nil
-	})
+	// Capture upstream request before sending
+	if c.captureLogger != nil {
+		c.captureLogger.CaptureUpstreamRequest(extractRequestID(ctx.Value("requestID")), Provider(modelConfig), body)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return nil, &APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
+	}
+
+	// Capture upstream response by wrapping the body with a TeeReader
+	if c.captureLogger != nil {
+		pr, pw := io.Pipe()
+		resp.Body = &teeReadCloser{ReadCloser: resp.Body, r: io.TeeReader(resp.Body, pw)}
+		// Async copy to capture
+		go func() {
+			data, _ := io.ReadAll(pr)
+			c.captureLogger.CaptureUpstreamResponse(extractRequestID(ctx.Value("requestID")), Provider(modelConfig), data)
+		}()
+	}
+
+	return resp, nil
 }
 
 // GeminiCompletionNonStreaming sends a non-streaming Gemini request.

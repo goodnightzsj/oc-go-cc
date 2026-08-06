@@ -108,19 +108,18 @@ func (m *Message) ContentBlocks() []ContentBlock {
 //   - "thinking": Thinking, Signature are populated
 //   - "image": Source is populated
 type ContentBlock struct {
-	Type         string          `json:"type"`
-	Text         string          `json:"text"`
-	ID           string          `json:"id,omitempty"`          // For tool_use (the tool call ID)
-	ToolUseID    string          `json:"tool_use_id,omitempty"` // For tool_result (references the tool_use ID)
-	Name         string          `json:"name,omitempty"`
-	Input        json.RawMessage `json:"input,omitempty"`
-	Output       json.RawMessage `json:"output,omitempty"`        // Deprecated: use Content
-	Content      json.RawMessage `json:"content,omitempty"`       // For tool_result inner content
-	IsError      *bool           `json:"is_error,omitempty"`      // For tool_result
-	Thinking     string          `json:"thinking"`                // For thinking blocks
-	Signature    string          `json:"signature,omitempty"`     // For thinking blocks
-	Source       *ImageSource    `json:"source,omitempty"`        // For image blocks
-	CacheControl *CacheControl   `json:"cache_control,omitempty"` // Prompt caching marker
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`
+	ID        string          `json:"id,omitempty"`          // For tool_use (the tool call ID)
+	ToolUseID string          `json:"tool_use_id,omitempty"` // For tool_result (references the tool_use ID)
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	Output    json.RawMessage `json:"output,omitempty"`    // Deprecated: use Content
+	Content   json.RawMessage `json:"content,omitempty"`   // For tool_result inner content
+	IsError   *bool           `json:"is_error,omitempty"`  // For tool_result
+	Thinking  string          `json:"thinking"`            // For thinking blocks
+	Signature string          `json:"signature,omitempty"` // For thinking blocks
+	Source    *ImageSource    `json:"source,omitempty"`    // For image blocks
 }
 
 // GetToolID returns the appropriate tool ID for this block type.
@@ -237,6 +236,7 @@ type ImageSource struct {
 	Type      string `json:"type"`
 	MediaType string `json:"media_type"`
 	Data      string `json:"data"`
+	URL       string `json:"url,omitempty"`
 }
 
 // Tool represents a tool definition for function calling.
@@ -262,7 +262,7 @@ type MessageResponse struct {
 	Model        string         `json:"model"`
 	StopReason   string         `json:"stop_reason,omitempty"`
 	StopSequence string         `json:"stop_sequence,omitempty"`
-	Usage        *Usage         `json:"usage,omitempty"`
+	Usage        Usage          `json:"usage"`
 }
 
 // Usage represents token usage information.
@@ -285,7 +285,6 @@ type Delta struct {
 	Type        string `json:"type,omitempty"`
 	Text        string `json:"text,omitempty"`
 	Thinking    string `json:"thinking,omitempty"`
-	Signature   string `json:"signature,omitempty"`
 	PartialJSON string `json:"partial_json,omitempty"`
 	StopReason  string `json:"stop_reason,omitempty"`
 }

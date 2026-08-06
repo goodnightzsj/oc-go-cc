@@ -33,6 +33,7 @@ const TRANSLATIONS = {
     'analytics.last90d': 'Last 90 days',
     'analytics.inputTokens': 'Input tokens',
     'analytics.outputTokens': 'Output tokens',
+    'analytics.cacheTokens': 'Cache tokens',
     'cmd.startProxy': 'Start Proxy',
     'cmd.stopProxy': 'Stop Proxy',
     'cmd.gotoOverview': 'Go to Overview',
@@ -187,6 +188,8 @@ const TRANSLATIONS = {
     'analytics.last90d': '最近 90 天',
     'analytics.inputTokens': '输入 Token',
     'analytics.outputTokens': '输出 Token',
+    'analytics.cacheTokens': '缓存 Token',
+    'analytics.cacheTokensLegend': '缓存',
     'cmd.startProxy': '启动代理',
     'cmd.stopProxy': '停止代理',
     'cmd.gotoOverview': '前往概览',
@@ -2073,9 +2076,9 @@ const AnalyticsModule = {
     if (otherVal > 0) top.push({name: 'Other', [valKey]: otherVal});
     const total = top.reduce((sum,i) => sum + (i[valKey]||0), 0) || 1;
 
-    // SVG donut (drawn slices) so each sector can show a follow-cursor tooltip
-    // and a hover highlight, like a real usage dashboard.
-    const C = 120, R = 104, r = 68;
+    // SVG pie (solid slices with a tiny center label) so a 100% share visibly
+    // fills the circle — a thin ring made small-share models hard to see.
+    const C = 120, R = 104, r = 14;
     const px = (cx, cy, rad, ang) => [cx + rad * Math.cos(ang), cy + rad * Math.sin(ang)];
     const slicePath = (a0, a1) => {
       const [x0o, y0o] = px(C, C, R, a0);
@@ -2180,23 +2183,31 @@ const AnalyticsModule = {
       xGrid += `<text x="${lx}" y="${h-mb+14}" text-anchor="middle" font-size="9.5" fill="${TXT}">${fmtDay(points[points.length-1].date||'')}</text>`;
     }
 
-    // Grouped daily bars (input + output) like deepseek's usage chart. This
-    // renders visible bars even for a single day, with a native hover tooltip
-    // per bar.
+    // Deepseek-style STACKED daily bars: one column per day, segmented by
+    // output (bottom), cache (middle), and input (top) in distinct colors.
+    // A single day renders a full-height stacked column; each segment has its
+    // own native hover tooltip.
     const baseY = (h - mb);
-    const groupW = Math.max(6, (plotW / points.length) * 0.7);
-    const barW = groupW / 2 - 2;
+    const colW = Math.max(10, (plotW / points.length) * 0.55);
     const bars = points.map((p, i) => {
-      const cx = ml + i * (plotW / points.length) + (plotW / points.length) * 0.15;
+      const cx = ml + i * (plotW / points.length) + (plotW / points.length) * 0.225;
       const inV = p.input_tokens || 0;
+      const cacheV = (p.cache_read_tokens || 0) + (p.cache_creation_tokens || 0);
       const outV = p.output_tokens || 0;
-      const yIn = y(inV), yOut = y(outV);
-      const hIn = baseY - yIn, hOut = baseY - yOut;
-      const tip = `${p.date||''} · ${t('analytics.inputTokens')} ${inV.toLocaleString()} · ${t('analytics.outputTokens')} ${outV.toLocaleString()}`;
-      return (
-        `<rect x="${(cx).toFixed(1)}" y="${yIn.toFixed(1)}" width="${Math.max(2,(barW*0.9)).toFixed(1)}" height="${Math.max(0,hIn).toFixed(1)}" rx="2" fill="#3b82f6"><title>${tip}</title></rect>` +
-        `<rect x="${(cx+barW).toFixed(1)}" y="${yOut.toFixed(1)}" width="${Math.max(2,(barW*0.9)).toFixed(1)}" height="${Math.max(0,hOut).toFixed(1)}" rx="2" fill="#10b981"><title>${tip}</title></rect>`
-      );
+      const segs = [
+        { v: outV, col: '#10b981', label: t('analytics.outputTokens') },
+        { v: cacheV, col: '#f59e0b', label: t('analytics.cacheTokens') },
+        { v: inV, col: '#3b82f6', label: t('analytics.inputTokens') },
+      ];
+      let yy = baseY;
+      const rects = segs.map(s => {
+        const segH = (s.v || 0) / maxV * plotH;
+        const yTop = yy - segH;
+        const r = `<rect x="${(cx).toFixed(1)}" y="${yTop.toFixed(1)}" width="${colW.toFixed(1)}" height="${segH.toFixed(1)}" rx="1" fill="${s.col}"><title>${p.date||''} · ${s.label} ${(s.v||0).toLocaleString()}</title></rect>`;
+        yy = yTop;
+        return r;
+      }).join('');
+      return rects;
     }).join('');
 
     const svg = `

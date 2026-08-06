@@ -3,8 +3,10 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -131,6 +133,21 @@ type FallbackHandler struct {
 	cbThreshold     int
 	cbTimeout       time.Duration
 	mu              sync.Mutex
+	// authSingleKey, when non-nil, reports whether the deployment has only a
+	// single API key (no round-robin to fall back to). When true, an upstream
+	// authentication error (401/403) short-circuits the whole fallback chain —
+	// a bad key won't be fixed by trying another model, only by another key.
+	authSingleKey func() bool
+}
+
+// SetAuthSingleKey installs a predicate reporting whether the deployment uses a
+// single API key. When it returns true, auth errors short-circuit the fallback
+// chain. Default is nil (no short-circuit), preserving behavior for multi-key
+// round-robin deployments.
+func (h *FallbackHandler) SetAuthSingleKey(pred func() bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.authSingleKey = pred
 }
 
 // NewFallbackHandler creates a new fallback handler with circuit breakers.
@@ -231,6 +248,20 @@ func (h *FallbackHandler) ExecuteWithFallback(
 			"circuit_state", cb.State(),
 		}
 		fields = append(fields, client.ErrorAttrs(err)...)
+
+		// Short-circuit on authentication errors (401/403) for single-key
+		// deployments: every fallback model would hit the same bad key, so
+		// retrying the chain only burns attempts and opens every breaker.
+		if h.isAuthError(err) && h.singleKey() {
+			h.logger.Warn("auth error with single API key, short-circuiting fallback chain", fields...)
+			return &FallbackResult{
+				ModelID:     model.ModelID,
+				Success:     false,
+				Attempted:   i + 1,
+				TotalModels: totalModels,
+			}, nil, fmt.Errorf("authentication failed (single API key), all models skipped: %w", err)
+		}
+
 		h.logger.Warn("model failed, trying fallback", fields...)
 	}
 
@@ -243,6 +274,23 @@ func (h *FallbackHandler) ExecuteWithFallback(
 		Attempted:   totalModels,
 		TotalModels: totalModels,
 	}, nil, fmt.Errorf("all models failed (%d attempts)", totalModels)
+}
+
+// isAuthError reports whether err is an upstream authentication error (401/403).
+func (h *FallbackHandler) isAuthError(err error) bool {
+	var upstreamErr *client.UpstreamError
+	if !errors.As(err, &upstreamErr) {
+		return false
+	}
+	return upstreamErr.StatusCode == http.StatusUnauthorized ||
+		upstreamErr.StatusCode == http.StatusForbidden
+}
+
+// singleKey reports whether the deployment runs on a single API key.
+func (h *FallbackHandler) singleKey() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.authSingleKey != nil && h.authSingleKey()
 }
 
 // GetFallbackChain returns the fallback chain for a given primary model.

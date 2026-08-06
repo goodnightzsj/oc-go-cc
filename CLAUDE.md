@@ -32,12 +32,43 @@ Run a single test: `go test ./internal/router/ -v`
 **Scenario detection priority** (`internal/router/scenarios.go`):
 
 1. Long Context (>80K tokens, configurable) → MiniMax (1M context)
-2. Complex (architectural patterns, tool operations) → GLM-5.1
+2. Complex (architectural patterns, large-scale design) → GLM-5.1
 3. Think (reasoning keywords in system prompt) → GLM-5
 4. Background (simple read-only ops, no tools) → Qwen3.5 Plus
 5. Default → Kimi K2.6
 
+Note: `hasComplexPattern` is intentionally narrow — common coding/debugging words
+("build", "debug", "bash") do NOT route to Complex (upstream `889a758`).
+
 For streaming, the router downgrades to fast models (Qwen3.6 Plus) for better TTFT.
+
+**Capacity filtering** (`internal/router/capacity.go`, `internal/config/model_registry.go`):
+- A model chain is filtered by declared capacity only when some model has
+  `context_window` / `max_output_tokens` set (or resolves to one via the
+  built-in model registry). Otherwise the chain passes through unchanged
+  (zero regression).
+- `config.ResolveModelConfig` fills default ContextWindow/MaxOutputTokens/Vision
+  from `modelMetadata` (`internal/config/model_registry.go`) so known models get
+  capacity limits without per-model config.
+- A small client `max_tokens` (e.g. Claude Code's 64-token safety classifier)
+  does NOT cause a skip — only an exhausted context window does (upstream `0ef0705`).
+- Capacities are re-checked per request in `buildModelChain`
+  (`internal/handlers/messages.go`).
+
+**SSE idle watchguard** (`internal/transformer/idle.go`, `stream.go`):
+- `ProxyStream` runs a `StartIdleWatchdog`; if no upstream bytes arrive within
+  `client.RequestTimeout(model)` (default 5 min), the stuck stream is released
+  and reported as `ErrStreamIdle`, triggering the fallback chain instead of
+  holding the connection forever (upstream `3b7d987`).
+- DeepSeek mid-conversation `system` messages are rewritten to
+  `<system-reminder>` user messages so DeepSeek's system-reordering does not
+  invalidate the prefix KV cache (upstream `e3ba31b`).
+- Single-key deployments short-circuit the fallback chain on upstream auth
+  errors (401/403): a bad key fails every model identically, so trying each
+  fallback only burns attempts and opens every breaker. Multi-key deployments
+  skip the short-circuit so key rotation can still succeed
+  (`internal/server/server.go` wires the predicate via
+  `FallbackHandler.SetAuthSingleKey`; upstream `f5d7e79`).
 
 **Polymorphic field handling:** Anthropic's `system` and `content` fields accept both strings and arrays. `pkg/types/` uses `json.RawMessage` with accessor methods (`SystemText()`, `ContentBlocks()`) to handle both formats.
 

@@ -301,6 +301,11 @@ func buildHashedAssets() (*hashedAssets, error) {
 	html = strings.Replace(html, `href="compiled-tailwind.css"`, `href="`+twName+`"`, 1)
 	html = strings.Replace(html, `href="style.css"`, `href="`+styleName+`"`, 1)
 	html = strings.Replace(html, `src="app.js"`, `src="`+appName+`"`, 1)
+	// Expose the app.js content-hash in the served HTML so the user can see at
+	// a glance which UI build a browser actually loaded (diagnoses stale-cache).
+	build := shortHash(appJS)
+	uiBadge := `<div id="ui-build" class="ui-build" data-build="` + build + `" title="UI build ` + build + `">UI ` + build + `</div>`
+	html = strings.Replace(html, `<div id="ui-build" class="ui-build" title=""></div>`, uiBadge, 1)
 	h.index = []byte(html)
 
 	return h, nil

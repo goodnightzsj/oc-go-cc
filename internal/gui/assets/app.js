@@ -12,6 +12,34 @@ const TRANSLATIONS = {
     'tab.fallback': 'Fallback',
     'tab.analytics': 'Analytics',
     'tab.settings': 'Settings',
+    'analytics.title': 'Usage Analytics',
+    'analytics.refresh': 'Refresh',
+    'analytics.totalRequests': 'Total Requests',
+    'analytics.requestsUnit': 'requests',
+    'analytics.totalTokens': 'Total Tokens',
+    'analytics.inout': 'in / out',
+    'analytics.estCost': 'Est. Cost',
+    'analytics.costUnit': 'USD (est.)',
+    'analytics.p95Latency': 'p95 Latency',
+    'analytics.latencyUnit': 'ms across models',
+    'analytics.byModel': 'Requests by Model',
+    'analytics.byProvider': 'Requests by Provider',
+    'analytics.noData': 'No data',
+    'analytics.noTrend': 'No trend data',
+    'analytics.dailyTrend': 'Daily Token Trend',
+    'analytics.last7d': 'Last 7 days',
+    'analytics.last30d': 'Last 30 days',
+    'analytics.last90d': 'Last 90 days',
+    'analytics.inputTokens': 'Input tokens',
+    'analytics.outputTokens': 'Output tokens',
+    'cmd.startProxy': 'Start Proxy',
+    'cmd.stopProxy': 'Stop Proxy',
+    'cmd.gotoOverview': 'Go to Overview',
+    'cmd.gotoHistory': 'Go to History',
+    'cmd.gotoPerformance': 'Go to Performance',
+    'cmd.gotoFallback': 'Go to Fallback',
+    'cmd.gotoSettings': 'Go to Settings',
+    'cmd.refreshData': 'Refresh Data',
     'metric.total': 'Total Requests',
     'metric.success': 'Success',
     'metric.failed': 'Failed',
@@ -136,6 +164,35 @@ const TRANSLATIONS = {
     'tab.history': '历史请求',
     'tab.fallback': '降级策略',
     'tab.settings': '设置',
+    'tab.analytics': '用量分析',
+    'analytics.title': '用量分析',
+    'analytics.refresh': '刷新',
+    'analytics.totalRequests': '总请求数',
+    'analytics.requestsUnit': '次',
+    'analytics.totalTokens': '总 Token',
+    'analytics.inout': '输入 / 输出',
+    'analytics.estCost': '预估费用',
+    'analytics.costUnit': 'USD（预估）',
+    'analytics.p95Latency': 'p95 延迟',
+    'analytics.latencyUnit': '各模型 ms',
+    'analytics.byModel': '按模型请求量',
+    'analytics.byProvider': '按供应商请求量',
+    'analytics.noData': '暂无数据',
+    'analytics.noTrend': '暂无趋势数据',
+    'analytics.dailyTrend': '每日 Token 趋势',
+    'analytics.last7d': '最近 7 天',
+    'analytics.last30d': '最近 30 天',
+    'analytics.last90d': '最近 90 天',
+    'analytics.inputTokens': '输入 Token',
+    'analytics.outputTokens': '输出 Token',
+    'cmd.startProxy': '启动代理',
+    'cmd.stopProxy': '停止代理',
+    'cmd.gotoOverview': '前往概览',
+    'cmd.gotoHistory': '前往历史',
+    'cmd.gotoPerformance': '前往性能',
+    'cmd.gotoFallback': '前往降级策略',
+    'cmd.gotoSettings': '前往设置',
+    'cmd.refreshData': '刷新数据',
     'metric.total': '总请求数',
     'metric.success': '成功',
     'metric.failed': '失败',
@@ -270,6 +327,11 @@ function applyTranslations() {
     const key = el.getAttribute('data-i18n-placeholder');
     el.placeholder = t(key);
   });
+  // Update <option> labels (data-i18n-option)
+  document.querySelectorAll('[data-i18n-option]').forEach(el => {
+    const key = el.getAttribute('data-i18n-option');
+    el.textContent = t(key);
+  });
   // Update the language toggle text
   const langBtn = document.getElementById('btn-lang-toggle');
   if (langBtn) {
@@ -286,6 +348,9 @@ function toggleLanguage() {
   renderModelList(lastModelCounts);
   renderHistory();
   PerfModule.render();
+  // Analytics charts (trend legend, donuts) carry inline strings; reload them
+  // so they pick up the new language instead of keeping stale ones.
+  if (activeTab === 'analytics') AnalyticsModule.load(true);
 }
 
 // Apply translations on load
@@ -1990,8 +2055,8 @@ const AnalyticsModule = {
         ${dots}
       </svg>
       <div class="trend-legend">
-        <span><span class="swatch" style="background:#3b82f6;height:3px;width:14px;display:inline-block;border-radius:2px;margin-right:4px;"></span>Input tokens</span>
-        <span><span class="swatch" style="background:#10b981;height:3px;width:14px;display:inline-block;border-radius:2px;margin-right:4px;"></span>Output tokens</span>
+        <span><span class="swatch" style="background:#3b82f6;height:3px;width:14px;display:inline-block;border-radius:2px;margin-right:4px;"></span>${t('analytics.inputTokens')}</span>
+        <span><span class="swatch" style="background:#10b981;height:3px;width:14px;display:inline-block;border-radius:2px;margin-right:4px;"></span>${t('analytics.outputTokens')}</span>
       </div>`;
     wrap.innerHTML = svg;
   },

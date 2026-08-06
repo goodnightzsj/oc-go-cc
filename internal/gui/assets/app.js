@@ -2076,9 +2076,11 @@ const AnalyticsModule = {
     if (otherVal > 0) top.push({name: 'Other', [valKey]: otherVal});
     const total = top.reduce((sum,i) => sum + (i[valKey]||0), 0) || 1;
 
-    // SVG pie (solid slices with a tiny center label) so a 100% share visibly
-    // fills the circle — a thin ring made small-share models hard to see.
-    const C = 120, R = 104, r = 14;
+    // SVG pie (solid slices, no hole) so a 100% share visibly FILLS the whole
+    // circle — a thin ring (donut) made a dominant model look like it "only
+    // took a small slice". r = 0 => true pie; the percentage is in the legend
+    // beside each name, so nothing needs to overlay the solid fill.
+    const C = 120, R = 104, r = 0;
     const px = (cx, cy, rad, ang) => [cx + rad * Math.cos(ang), cy + rad * Math.sin(ang)];
     const slicePath = (a0, a1) => {
       const [x0o, y0o] = px(C, C, R, a0);
@@ -2121,12 +2123,11 @@ const AnalyticsModule = {
     const html = `
       <div class="donut-svg-wrap" style="position:relative;display:flex;justify-content:center;align-items:center;height:240px;">
         <svg width="240" height="240" viewBox="0 0 240 240">
-          <text x="120" y="116" text-anchor="middle" font-size="20" font-weight="600" fill="#f5f5f7">${total >= 1_000_000 ? (total/1_000_000).toFixed(1)+'M' : total >= 1000 ? (total/1000).toFixed(0)+'K' : total}</text>
-          <text x="120" y="134" text-anchor="middle" font-size="10" fill="#98989d">tokens</text>
           ${svgSlices}
         </svg>
         <div id="${tooltipId}" style="display:none;position:absolute;pointer-events:none;background:#2c2c2e;border:1px solid #48484a;border-radius:6px;padding:6px 9px;font-size:11px;color:#f5f5f7;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.4);z-index:10;"></div>
       </div>
+      <div class="donut-total" style="font-size:12px;color:#98989d;text-align:center;margin-bottom:6px;">${total >= 1_000_000 ? (total/1_000_000).toFixed(1)+'M' : total >= 1000 ? (total/1000).toFixed(0)+'K' : total} tokens</div>
       <div class="donut-legend">${legend.join('')}</div>`;
     wrap.innerHTML = html;
   },
@@ -2200,8 +2201,13 @@ const AnalyticsModule = {
         { v: inV, col: '#3b82f6', label: t('analytics.inputTokens') },
       ];
       let yy = baseY;
-      const rects = segs.map(s => {
-        const segH = (s.v || 0) / maxV * plotH;
+      const rects = segs.filter(s => (s.v || 0) > 0).map(s => {
+        // Enforce a ~2px floor so a tiny-but-real segment (e.g. output is 0.2%
+        // of a huge input day) stays visible instead of collapsing to a
+        // sub-pixel sliver that reads as "only one color". Auto-adjusts yy so
+        // the stacked column still sits on the baseline.
+        const rawH = (s.v || 0) / maxV * plotH;
+        const segH = Math.max(rawH, 2);
         const yTop = yy - segH;
         const r = `<rect x="${(cx).toFixed(1)}" y="${yTop.toFixed(1)}" width="${colW.toFixed(1)}" height="${segH.toFixed(1)}" rx="1" fill="${s.col}"><title>${p.date||''} · ${s.label} ${(s.v||0).toLocaleString()}</title></rect>`;
         yy = yTop;
@@ -2220,6 +2226,7 @@ const AnalyticsModule = {
       </svg>
       <div class="trend-legend">
         <span><span class="swatch" style="background:#3b82f6;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.inputTokens')}</span>
+        <span><span class="swatch" style="background:#f59e0b;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.cacheTokens')}</span>
         <span><span class="swatch" style="background:#10b981;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.outputTokens')}</span>
       </div>`;
     wrap.innerHTML = svg;

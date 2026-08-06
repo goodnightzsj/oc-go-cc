@@ -211,3 +211,17 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: none;
 .toast.success { border-color: #30d158; }
 .toast.error { border-color: #ff453a; }
 .toast.info { border-color: #6366f1; }
+
+/* UI build marker — lets you see at a glance which build the browser loaded. */
+.ui-build {
+  position: fixed;
+  right: 10px;
+  bottom: 6px;
+  font-size: 10px;
+  color: #48484a;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  z-index: 50;
+  cursor: help;
+}
+.ui-build:hover { color: #98989d; }

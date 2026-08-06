@@ -628,14 +628,53 @@ function renderModelList(counts) {
 }
 
 /* ── /api/history ──────────────────────────────────────────────── */
+// Pagination state for the request history table.
+let historyPage = 1;
+let historySize = 50;
+let historyTotal = 0;
+
 async function refreshHistory() {
   try {
-    const r = await fetch('/api/history');
+    const r = await fetch(`/api/history?page=${historyPage}&size=${historySize}`);
     if (!r.ok) return;
-    allHistory = await r.json() || [];
+    const data = await r.json();
+    // New paginated shape: { items, total, page, size }. Tolerate the old
+    // bare-array shape too.
+    if (Array.isArray(data)) {
+      allHistory = data;
+      historyTotal = data.length;
+      historyPage = 1;
+    } else {
+      allHistory = data.items || [];
+      historyTotal = data.total || 0;
+      // Clamp page if the dataset shrank after a delete.
+      const maxPage = Math.max(1, Math.ceil(historyTotal / historySize));
+      if (historyPage > maxPage) historyPage = maxPage;
+    }
     renderHistory();
     updateModelFilter();
+    renderHistoryPager();
   } catch(e) {}
+}
+
+function historyGoToPage(p) {
+  if (p < 1) p = 1;
+  const max = Math.max(1, Math.ceil(historyTotal / historySize));
+  if (p > max) p = max;
+  historyPage = p;
+  refreshHistory();
+}
+
+function renderHistoryPager() {
+  const max = Math.max(1, Math.ceil(historyTotal / historySize));
+  const pageInfo = document.getElementById('history-pageinfo');
+  const pageTotal = document.getElementById('history-pagetotal');
+  const prev = document.getElementById('btn-history-prev');
+  const next = document.getElementById('btn-history-next');
+  if (pageInfo) pageInfo.textContent = currentLang === 'zh' ? `第 ${historyPage} / ${max} 页` : `Page ${historyPage} / ${max}`;
+  if (pageTotal) pageTotal.textContent = currentLang === 'zh' ? `共 ${historyTotal} 条` : `${historyTotal} records`;
+  if (prev) prev.disabled = historyPage <= 1;
+  if (next) next.disabled = historyPage >= max;
 }
 
 function renderHistory() {
@@ -1699,6 +1738,12 @@ queueMicrotask(() => {
   activateTab((location.hash || '').replace(/^#/, '') || 'overview');
 });
 
+// History pagination controls.
+const btnHistPrev = document.getElementById('btn-history-prev');
+const btnHistNext = document.getElementById('btn-history-next');
+if (btnHistPrev) btnHistPrev.addEventListener('click', () => historyGoToPage(historyPage - 1));
+if (btnHistNext) btnHistNext.addEventListener('click', () => historyGoToPage(historyPage + 1));
+
 const TestModule = {
   testModal: null,
   testPrompt: null,
@@ -2000,8 +2045,14 @@ const AnalyticsModule = {
   },
 
   renderDonuts(summary) {
-    this.renderDonutChart('model-donut', summary.models || [], 'requests');
-    this.renderDonutChart('provider-donut', summary.providers || [], 'requests');
+    // Weight both ring charts by total tokens consumed (input + output +
+    // cache) rather than request count, which better reflects real usage.
+    const withTotal = (items) => (items || []).map(it => ({
+      ...it,
+      total_tokens: (it.input_tokens||0) + (it.output_tokens||0) + (it.cache_tokens||0),
+    }));
+    this.renderDonutChart('model-donut', withTotal(summary.models), 'total_tokens');
+    this.renderDonutChart('provider-donut', withTotal(summary.providers), 'total_tokens');
   },
 
   renderDonutChart(containerId, items, valKey) {
@@ -2114,20 +2165,27 @@ const AnalyticsModule = {
 
     const svg = `
       <svg class="trend-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <linearGradient id="gIn" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.45"/>
+            <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.04"/>
+          </linearGradient>
+          <linearGradient id="gOut" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#10b981" stop-opacity="0.45"/>
+            <stop offset="100%" stop-color="#10b981" stop-opacity="0.04"/>
+          </linearGradient>
+        </defs>
         ${yGrid}
         ${xGrid}
         <line x1="${ml}" y1="${mt}" x2="${ml}" y2="${h-mb}" stroke="${AXIS}" stroke-width="1"/>
         <line x1="${ml}" y1="${h-mb}" x2="${w-mr}" y2="${h-mb}" stroke="${AXIS}" stroke-width="1"/>
-        <path d="${areaIn}" fill="#3b82f6" fill-opacity="0.12"/>
-        <path d="${areaOut}" fill="#10b981" fill-opacity="0.12"/>
-        <path d="${pathIn}" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round"/>
-        <path d="${pathOut}" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round"/>
+        <path d="${areaIn}" fill="url(#gIn)"/>
+        <path d="${areaOut}" fill="url(#gOut)"/>
         ${dots}
       </svg>
       <div class="trend-legend">
-        <span><span class="swatch" style="background:#3b82f6;height:3px;width:14px;display:inline-block;border-radius:2px;margin-right:4px;"></span>${t('analytics.inputTokens')}</span>
-        <span><span class="swatch" style="background:#10b981;height:3px;width:14px;display:inline-block;border-radius:2px;margin-right:4px;"></span>${t('analytics.outputTokens')}</span>
-        ${points.length===1?'<span style="color:#98989d;font-size:11px;">'+t('analytics.singleDay')+'</span>':''}
+        <span><span class="swatch" style="background:#3b82f6;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.inputTokens')}</span>
+        <span><span class="swatch" style="background:#10b981;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.outputTokens')}</span>
       </div>`;
     wrap.innerHTML = svg;
   },

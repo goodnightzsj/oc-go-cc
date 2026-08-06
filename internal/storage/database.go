@@ -82,6 +82,9 @@ func Open(cfg Config) (*Database, error) {
 		// Non-fatal; log and continue so the proxy still works
 		slog.Warn("migration warning", "err", err)
 	}
+	if err := database.migrateAddCacheColumns(ctx); err != nil {
+		slog.Warn("migration warning", "err", err)
+	}
 
 	// Seed default model prices so analytics dashboard shows meaningful
 	// cost numbers immediately for new/existing installs. Idempotent.
@@ -108,6 +111,8 @@ func (d *Database) initSchema(ctx context.Context) error {
 		duration_ms INTEGER,
 		input_tokens INTEGER,
 		output_tokens INTEGER,
+		cache_read_tokens INTEGER DEFAULT 0,
+		cache_creation_tokens INTEGER DEFAULT 0,
 		streaming INTEGER,
 		success INTEGER,
 		error_msg TEXT,
@@ -211,6 +216,22 @@ func (d *Database) migrateAddAttemptColumn(ctx context.Context) error {
 	return nil
 }
 
+// migrateAddCacheColumns adds the prompt-cache token columns to existing
+// requests tables created before they existed. Idempotent: ignores duplicate
+// column errors.
+func (d *Database) migrateAddCacheColumns(ctx context.Context) error {
+	for _, alter := range []string{
+		`ALTER TABLE requests ADD COLUMN cache_read_tokens INTEGER DEFAULT 0`,
+		`ALTER TABLE requests ADD COLUMN cache_creation_tokens INTEGER DEFAULT 0`,
+	} {
+		_, err := d.db.ExecContext(ctx, alter)
+		if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return err
+		}
+	}
+	return nil
+}
+
 func (d *Database) Close() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -246,9 +267,10 @@ func expandPath(path string) string {
 // priceEntry defines a pricing rule for models whose id/name/display_name
 // contains the match substring. Applied only if current cost is 0/NULL.
 type priceEntry struct {
-	Match  string  `json:"match"`
-	Input  float64 `json:"input"`
-	Output float64 `json:"output"`
+	Match     string  `json:"match"`
+	Input     float64 `json:"input"`
+	Output    float64 `json:"output"`
+	CacheRead float64 `json:"cache_read,omitempty"`
 }
 
 //go:embed seed_prices.json
@@ -259,13 +281,13 @@ var defaultModelPrices []byte
 // This is independent of the catalog/models tables so cost figures are always
 // available even when a model is absent from the catalog sync. Returns ok=false
 // when no rule matches (or embedded data is unavailable).
-func PriceForModel(model string) (inputPerM, outputPerM float64, ok bool) {
+func PriceForModel(model string) (inputPerM, outputPerM, cacheReadPerM float64, ok bool) {
 	if model == "" || len(defaultModelPrices) == 0 {
-		return 0, 0, false
+		return 0, 0, 0, false
 	}
 	var entries []priceEntry
 	if err := json.Unmarshal(defaultModelPrices, &entries); err != nil {
-		return 0, 0, false
+		return 0, 0, 0, false
 	}
 	bestLen := -1
 	for _, e := range entries {
@@ -274,10 +296,10 @@ func PriceForModel(model string) (inputPerM, outputPerM float64, ok bool) {
 		}
 		if strings.Contains(strings.ToLower(model), strings.ToLower(e.Match)) && len(e.Match) > bestLen {
 			bestLen = len(e.Match)
-			inputPerM, outputPerM, ok = e.Input, e.Output, true
+			inputPerM, outputPerM, cacheReadPerM, ok = e.Input, e.Output, e.CacheRead, true
 		}
 	}
-	return inputPerM, outputPerM, ok
+	return inputPerM, outputPerM, cacheReadPerM, ok
 }
 
 // SeedDefaultModelPrices inserts realistic default pricing for common models

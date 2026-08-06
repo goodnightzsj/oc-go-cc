@@ -144,16 +144,6 @@ func (w *responseWriter) extractUsageFromSSE(b []byte) {
 			}
 		}
 	}
-
-	// Summarize the *full* input volume for analytics: many providers count
-	// prompt input as cache_creation/cache_read (e.g. deepseek-v4-flash frames
-	// all prompt tokens as cache_creation and reports input_tokens as 0). For
-	// storage/history we want the true input total, so fold cache fields into
-	// input_tokens. This affects analytics only, not the usage echoed to the
-	// client (which is produced separately by the response transformer).
-	if w.usage.cacheCreationInputTokens > 0 || w.usage.cacheReadInputTokens > 0 {
-		w.usage.inputTokens += w.usage.cacheCreationInputTokens + w.usage.cacheReadInputTokens
-	}
 }
 
 func (w *responseWriter) detectContentInSSE(b []byte) {
@@ -672,17 +662,19 @@ func (h *MessagesHandler) handleStreaming(
 				"cache_creation_input_tokens", rw.usage.cacheCreationInputTokens,
 			)
 			rec := history.RequestRecord{
-				ID:           requestID,
-				Model:        model.ModelID,
-				Provider:     model.Provider,
-				Scenario:     string(scenario),
-				StartTime:    streamStart,
-				Duration:     latency,
-				InputTokens:  rw.usage.inputTokens,
-				OutputTokens: rw.usage.outputTokens,
-				Streaming:    true,
-				Success:      true,
-				Attempt:      1, // streaming fallback attempts not yet tracked in record; treat as primary
+				ID:                 requestID,
+				Model:              model.ModelID,
+				Provider:           model.Provider,
+				Scenario:           string(scenario),
+				StartTime:          streamStart,
+				Duration:           latency,
+				InputTokens:        rw.usage.inputTokens,
+				OutputTokens:       rw.usage.outputTokens,
+				CacheReadTokens:     rw.usage.cacheReadInputTokens,
+				CacheCreationTokens: rw.usage.cacheCreationInputTokens,
+				Streaming:           true,
+				Success:            true,
+				Attempt:            1, // streaming fallback attempts not yet tracked in record; treat as primary
 			}
 			if h.history != nil {
 				h.history.Add(rec)

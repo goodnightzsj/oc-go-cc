@@ -31,8 +31,9 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 	_, err := r.db.DB().ExecContext(ctx, `
 		INSERT OR REPLACE INTO requests (
 			id, model, provider, scenario, start_time, duration_ms,
-			input_tokens, output_tokens, streaming, success, error_msg, attempt
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+			streaming, success, error_msg, attempt
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		rec.ID,
 		rec.Model,
@@ -42,6 +43,8 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 		rec.Duration.Milliseconds(),
 		rec.InputTokens,
 		rec.OutputTokens,
+		rec.CacheReadTokens,
+		rec.CacheCreationTokens,
 		boolToInt(rec.Streaming),
 		boolToInt(rec.Success),
 		rec.ErrorMsg,
@@ -62,7 +65,8 @@ func (r *Requests) Last(n int) ([]history.RequestRecord, error) {
 
 	rows, err := r.db.DB().QueryContext(ctx, `
 		SELECT id, model, provider, scenario, start_time, duration_ms,
-		       input_tokens, output_tokens, streaming, success, error_msg, attempt
+		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+		       streaming, success, error_msg, attempt
 		FROM requests
 		ORDER BY start_time DESC
 		LIMIT ?
@@ -82,7 +86,8 @@ func (r *Requests) Since(since time.Time) ([]history.RequestRecord, error) {
 
 	rows, err := r.db.DB().QueryContext(ctx, `
 		SELECT id, model, provider, scenario, start_time, duration_ms,
-		       input_tokens, output_tokens, streaming, success, error_msg, attempt
+		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+		       streaming, success, error_msg, attempt
 		FROM requests
 		WHERE start_time >= ?
 		ORDER BY start_time DESC
@@ -149,6 +154,8 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 			&rec.Duration,
 			&rec.InputTokens,
 			&rec.OutputTokens,
+			&rec.CacheReadTokens,
+			&rec.CacheCreationTokens,
 			&streaming,
 			&success,
 			&rec.ErrorMsg,

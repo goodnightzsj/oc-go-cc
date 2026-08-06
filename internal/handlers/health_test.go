@@ -7,9 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"oc-go-cc/internal/lifecycle"
-	"oc-go-cc/internal/metrics"
-	"oc-go-cc/internal/token"
+	"github.com/routatic/proxy/internal/metrics"
+	"github.com/routatic/proxy/internal/token"
 )
 
 func TestHandleCountTokensSupportsAnthropicContentBlocks(t *testing.T) {
@@ -40,6 +39,27 @@ func TestHandleCountTokensSupportsAnthropicContentBlocks(t *testing.T) {
 	}
 }
 
+func TestHandleHealthIncludesBuildInfo(t *testing.T) {
+	handler := newTestHealthHandler(t)
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+
+	handler.HandleHealth(recorder, req)
+
+	if got, want := recorder.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d; body: %s", got, want, recorder.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("response is invalid JSON: %v", err)
+	}
+	for _, key := range []string{"version", "build_time", "pid", "binary"} {
+		if _, ok := response[key]; !ok {
+			t.Fatalf("health response missing %s: %s", key, recorder.Body.String())
+		}
+	}
+}
+
 func TestHandleCountTokensIncludesSystemToolsAndThinking(t *testing.T) {
 	handler := newTestHealthHandler(t)
 
@@ -60,43 +80,6 @@ func TestHandleCountTokensIncludesSystemToolsAndThinking(t *testing.T) {
 
 	if withContext <= base {
 		t.Fatalf("context-rich count = %d, want greater than base %d", withContext, base)
-	}
-}
-
-func TestHandleHealthReportsDrainingState(t *testing.T) {
-	state := lifecycle.NewState()
-	done := state.BeginRequest()
-	state.BeginDrain()
-
-	counter, err := token.NewCounter()
-	if err != nil {
-		t.Fatalf("NewCounter() error = %v", err)
-	}
-	handler := NewHealthHandler(counter, nil, metrics.New(), state)
-
-	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	handler.HandleHealth(recorder, req)
-	done()
-
-	if got, want := recorder.Code, http.StatusServiceUnavailable; got != want {
-		t.Fatalf("status = %d, want %d; body: %s", got, want, recorder.Body.String())
-	}
-
-	var response map[string]any
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatalf("response is invalid JSON: %v", err)
-	}
-	if got := response["status"]; got != "draining" {
-		t.Fatalf("status = %v, want draining", got)
-	}
-
-	metricsMap, ok := response["metrics"].(map[string]any)
-	if !ok {
-		t.Fatalf("metrics missing from response: %v", response)
-	}
-	if got := metricsMap["active_requests"]; got != float64(1) {
-		t.Fatalf("active_requests = %v, want 1", got)
 	}
 }
 
@@ -125,5 +108,5 @@ func newTestHealthHandler(t *testing.T) *HealthHandler {
 	if err != nil {
 		t.Fatalf("NewCounter() error = %v", err)
 	}
-	return NewHealthHandler(counter, nil, metrics.New(), lifecycle.NewState())
+	return NewHealthHandler(counter, nil, metrics.New(), nil)
 }

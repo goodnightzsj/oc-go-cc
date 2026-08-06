@@ -1,8 +1,12 @@
 name: Release
 
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v1.2.3)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -13,9 +17,9 @@ jobs:
     name: Test & Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.25"
 
@@ -29,50 +33,71 @@ jobs:
         run: go test ./... -v -race
 
       - name: Build (sanity check)
-        run: go build -o /dev/null ./cmd/oc-go-cc
+        run: go build -o /dev/null ./cmd/routatic-proxy
 
-  # ── Stage 2: Create Release ──────────────────────────────────────
+  # ── Stage 2: Build & Release (macOS runner for DMG support) ──────
   release:
-    name: Create Release
+    name: Build & Release
     needs: validate
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     outputs:
       tag: ${{ steps.version.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.25"
+          cache: true
+
+      - name: Check signing availability
+        id: signing
+        env:
+          USE_SIGNPATH: ${{ vars.USE_SIGNPATH }}
+        run: echo "enabled=$([ "$USE_SIGNPATH" = "true" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       - name: Determine version
         id: version
         run: |
-          # Check if there's a tag on this commit
-          EXACT_TAG=$(git describe --tags --exact-match 2>/dev/null || echo "")
-          if [ -n "$EXACT_TAG" ]; then
-            TAG="$EXACT_TAG"
-          else
-            # Auto-increment with rollover (0-9 per segment)
-            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-            BASE=${LATEST_TAG#v}
-            IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
-            PATCH=$((PATCH + 1))
-            if [ "$PATCH" -gt 9 ]; then
-              PATCH=0
-              MINOR=$((MINOR + 1))
-              if [ "$MINOR" -gt 9 ]; then
-                MINOR=0
-                MAJOR=$((MAJOR + 1))
-              fi
-            fi
-            TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          # Version comes from the workflow_dispatch input
+          TAG="${{ github.event.inputs.version }}"
+
+          # Validate version format (must start with 'v' followed by semver)
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "Error: Version must follow semantic versioning with 'v' prefix (e.g., v1.2.3)"
+            exit 1
           fi
+
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "Releasing as $TAG"
+
+      - name: Generate Windows resource files
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          go install github.com/tc-hib/go-winres@v0.3.3
+
+          # Parse version components (e.g., "0.5.3" → "0.5.3.0")
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3)
+          FILE_VER="${MAJOR:-0}.${MINOR:-0}.${PATCH:-0}.0"
+
+          # Update version in winres.json
+          cd cmd/routatic-proxy
+          sed -i.bak "s/\"file_version\": \"0.0.0.0\"/\"file_version\": \"${FILE_VER}\"/" winres/winres.json
+          sed -i.bak "s/\"product_version\": \"0.0.0.0\"/\"product_version\": \"${FILE_VER}\"/" winres/winres.json
+          sed -i.bak "s/\"FileVersion\": \"0.0.0.0\"/\"FileVersion\": \"${VERSION}\"/" winres/winres.json
+          sed -i.bak "s/\"ProductVersion\": \"0.0.0.0\"/\"ProductVersion\": \"${VERSION}\"/" winres/winres.json
+          rm -f winres/winres.json.bak
+
+          # Generate .syso files for both Windows architectures
+          go-winres make --arch amd64 --out rsrc_windows_amd64.syso
+          go-winres make --arch arm64 --out rsrc_windows_arm64.syso
+          cd ../..
 
       - name: Build cross-platform binaries
         env:
@@ -82,37 +107,82 @@ jobs:
 
           LDFLAGS="-X main.version=${VERSION}"
 
-          # Define target platforms
-          declare -A TARGETS=(
-            ["darwin-amd64"]="darwin/amd64"
-            ["darwin-arm64"]="darwin/arm64"
-            ["linux-amd64"]="linux/amd64"
-            ["linux-arm64"]="linux/arm64"
-            ["windows-amd64"]="windows/amd64"
-            ["windows-arm64"]="windows/arm64"
-          )
+          # Define target platforms (bash 3 compatible — macOS default)
+          TARGETS="darwin-amd64:darwin/amd64 darwin-arm64:darwin/arm64 linux-amd64:linux/amd64 linux-arm64:linux/arm64 windows-amd64:windows/amd64 windows-arm64:windows/arm64"
 
-          for NAME in "${!TARGETS[@]}"; do
-            IFS='/' read -r GOOS GOARCH <<< "${TARGETS[$NAME]}"
+          for TARGET in $TARGETS; do
+            NAME="${TARGET%%:*}"
+            PAIR="${TARGET##*:}"
+            GOOS="${PAIR%/*}"
+            GOARCH="${PAIR#*/}"
             EXT=""
             [ "$GOOS" = "windows" ] && EXT=".exe"
 
             echo "Building ${NAME}..."
             CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
               go build -ldflags "$LDFLAGS -s -w" \
-                -o "dist/oc-go-cc_${NAME}${EXT}" \
-                ./cmd/oc-go-cc
+                -o "dist/routatic-proxy_${NAME}${EXT}" \
+                ./cmd/routatic-proxy
           done
 
           echo ""
           echo "Built binaries:"
           ls -lh dist/
 
+      - name: Stage Windows binaries for signing
+        if: ${{ steps.signing.outputs.enabled == 'true' }}
+        run: |
+          mkdir -p signing
+          cp dist/routatic-proxy_windows-amd64.exe signing/
+          cp dist/routatic-proxy_windows-arm64.exe signing/
+
+      - name: Upload unsigned Windows binaries
+        id: upload-unsigned
+        if: ${{ steps.signing.outputs.enabled == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-binaries-unsigned
+          path: signing/
+
+      - name: Sign Windows binaries (SignPath)
+        if: ${{ steps.signing.outputs.enabled == 'true' }}
+        uses: signpath/github-action-submit-signing-request@ced31329c0317e779dad2eec2a7c3bb46ea1343e # v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: '5c4d4e48-c428-4e10-ab07-8db7f46cbec9'
+          project-slug: 'routatic-proxy'
+          signing-policy-slug: 'release-signing'
+          artifact-configuration-slug: 'windows-exe'
+          github-artifact-id: '${{ steps.upload-unsigned.outputs.artifact-id }}'
+          wait-for-completion: true
+          output-artifact-directory: 'signed'
+          wait-for-completion-timeout-in-seconds: 300
+
+      - name: Replace with signed Windows binaries
+        if: ${{ steps.signing.outputs.enabled == 'true' }}
+        run: |
+          cp signed/routatic-proxy_windows-amd64.exe dist/routatic-proxy_windows-amd64.exe
+          cp signed/routatic-proxy_windows-arm64.exe dist/routatic-proxy_windows-arm64.exe
+          rm -rf signing signed
+
       - name: Generate checksums
         run: |
           cd dist
-          sha256sum oc-go-cc_* > checksums.txt
+          sha256sum routatic-proxy_* > checksums.txt
           cat checksums.txt
+
+      - name: Build CGO-enabled binary (for DMG)
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          CGO_ENABLED=1 go build -tags darwin -ldflags "-X main.version=${VERSION}" -o bin/routatic-proxy ./cmd/routatic-proxy
+
+      - name: Build macOS DMG
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+        run: |
+          brew install create-dmg
+          make dmg VERSION=${{ env.VERSION }}
 
       - name: Generate AI Changelog
         id: changelog
@@ -122,7 +192,7 @@ jobs:
           OPENROUTER_TEMPERATURE: ${{ secrets.OPENROUTER_TEMPERATURE }}
           OPENROUTER_MAX_TOKENS: ${{ secrets.OPENROUTER_MAX_TOKENS }}
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq jq curl
+          brew install jq
 
           # Configuration with defaults
           MODEL="${OPENROUTER_MODEL:-openai/gpt-4o-mini}"
@@ -131,8 +201,14 @@ jobs:
 
           echo "Using OpenRouter model: $MODEL"
 
-          # Generate changelog for commits since previous tag
-          PREVIOUS_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          # Generate changelog from the last stable (non-beta) release.
+          # Exclude prerelease/beta tags and the tag being released so notes
+          # reflect the full diff since the previous production release.
+          CURRENT_TAG="${{ steps.version.outputs.tag }}"
+          PREVIOUS_TAG=$(git tag --list --sort=-version:refname \
+            | grep -vi 'beta' \
+            | grep -v "^${CURRENT_TAG}$" \
+            | head -n 1)
 
           if [ -n "$PREVIOUS_TAG" ]; then
             echo "Generating AI changelog from $PREVIOUS_TAG to ${{ steps.version.outputs.tag }}"
@@ -140,7 +216,7 @@ jobs:
             COMMITS=$(git log "${PREVIOUS_TAG}..HEAD" --pretty=format:"%H%n%s%n%b%n---COMMIT_SEP---")
             FILE_CHANGES=$(git diff --stat "${PREVIOUS_TAG}..HEAD")
 
-            PROMPT="You are a technical writer generating release notes for a Go proxy server project (oc-go-cc).
+            PROMPT="You are a technical writer generating release notes for a Go proxy server project (routatic-proxy).
 
             Analyze the provided git commits and file changes, then generate a well-structured
             changelog in Markdown format. Follow these guidelines:
@@ -193,7 +269,7 @@ jobs:
             if [ -z "$CHANGELOG" ] || [ "$CHANGELOG" = "null" ]; then
               echo "Warning: AI changelog generation failed, using commit list instead" >&2
               echo "API response: $RESPONSE" >&2
-              CHANGELOG="## Commits\n\n$(git log \"${PREVIOUS_TAG}..HEAD\" --pretty=format:'- %s')"
+              CHANGELOG="## Commits\n\n$(git log "${PREVIOUS_TAG}..HEAD" --pretty=format:'- %s')"
             fi
           else
             echo "No previous tag found, using commit list"
@@ -204,26 +280,77 @@ jobs:
           cat changelog.md
 
       # GITHUB_TOKEN works here — same repo
+      # Use gh release create for atomic asset upload (immutable release support)
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: Release ${{ steps.version.outputs.tag }}
-          body_path: changelog.md
-          draft: false
-          prerelease: false
-          files: |
-            dist/oc-go-cc_*
-            dist/checksums.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "Release ${{ steps.version.outputs.tag }}" \
+            --notes-file changelog.md \
+            dist/routatic-proxy_* \
+            dist/checksums.txt \
+            bin/RoutaticProxy.dmg
 
-  # ── Stage 3: Update Homebrew Tap ─────────────────────────────────
+  # ── Stage 3: Publish Docker Image ───────────────────────────────
+  docker:
+    name: Publish Docker Image
+    needs: release
+    permissions:
+      contents: read
+      packages: write
+    if: github.repository == 'routatic/proxy'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ needs.release.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.release.outputs.tag }}
+            type=semver,pattern={{major}},value=${{ needs.release.outputs.tag }}
+            type=raw,value=latest
+
+      - name: Strip v prefix from version
+        id: version
+        env:
+          TAG: ${{ needs.release.outputs.tag }}
+        run: echo "value=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VERSION=${{ steps.version.outputs.value }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Stage 4: Update Homebrew Tap ─────────────────────────────────
   homebrew:
     name: Update Homebrew Tap
     needs: release
-    if: github.repository == 'samueltuyizere/oc-go-cc'
+    if: github.repository == 'routatic/proxy'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Download release assets
         env:
@@ -270,58 +397,59 @@ jobs:
           git clone "https://x-access-token:${PAT}@github.com/${TAP_REPO}.git" tap-repo
           cd tap-repo
 
-          mkdir -p Formula
+          mkdir -p Formula Aliases
 
-          cat > Formula/oc-go-cc.rb << RUBY
-          class OcGoCc < Formula
+          cat > Formula/routatic-proxy.rb << RUBY
+          class RoutaticProxy < Formula
             desc "Proxy Claude Code requests to OpenCode Go API"
             homepage "https://github.com/${REPO}"
             version "${VERSION}"
 
             on_macos do
               if Hardware::CPU.arm?
-                url "${BASE_URL}/oc-go-cc_darwin-arm64"
+                url "${BASE_URL}/routatic-proxy_darwin-arm64"
                 sha256 "${DARWIN_ARM64}"
               else
-                url "${BASE_URL}/oc-go-cc_darwin-amd64"
+                url "${BASE_URL}/routatic-proxy_darwin-amd64"
                 sha256 "${DARWIN_AMD64}"
               end
             end
 
             on_linux do
               if Hardware::CPU.intel?
-                url "${BASE_URL}/oc-go-cc_linux-amd64"
+                url "${BASE_URL}/routatic-proxy_linux-amd64"
                 sha256 "${LINUX_AMD64}"
               else
-                url "${BASE_URL}/oc-go-cc_linux-arm64"
+                url "${BASE_URL}/routatic-proxy_linux-arm64"
                 sha256 "${LINUX_ARM64}"
               end
             end
 
             def install
               if OS.mac? && Hardware::CPU.arm?
-                bin.install "oc-go-cc_darwin-arm64" => "oc-go-cc"
+                bin.install "routatic-proxy_darwin-arm64" => "routatic-proxy"
               elsif OS.mac?
-                bin.install "oc-go-cc_darwin-amd64" => "oc-go-cc"
+                bin.install "routatic-proxy_darwin-amd64" => "routatic-proxy"
               elsif OS.linux? && Hardware::CPU.intel?
-                bin.install "oc-go-cc_linux-amd64" => "oc-go-cc"
+                bin.install "routatic-proxy_linux-amd64" => "routatic-proxy"
               else
-                bin.install "oc-go-cc_linux-arm64" => "oc-go-cc"
+                bin.install "routatic-proxy_linux-arm64" => "routatic-proxy"
               end
+              bin.install_symlink bin/"routatic-proxy" => "oc-go-cc"
             end
 
             def caveats
               <<~EOS
-                To get started with oc-go-cc:
+                To get started with routatic-proxy:
 
                   1. Initialize configuration:
-                     oc-go-cc init
+                     routatic-proxy init
 
                   2. Set your OpenCode Go API key:
-                     export OC_GO_CC_API_KEY=sk-opencode-your-key
+                     export ROUTATIC_PROXY_API_KEY=sk-opencode-your-key
 
                   3. Start the proxy:
-                     oc-go-cc serve
+                     routatic-proxy serve
 
                   4. Configure Claude Code:
                      export ANTHROPIC_BASE_URL=http://127.0.0.1:3456
@@ -333,25 +461,28 @@ jobs:
             end
 
             test do
+              system "#{bin}/routatic-proxy", "--version"
               system "#{bin}/oc-go-cc", "--version"
             end
           end
           RUBY
 
-          git add Formula/oc-go-cc.rb
+          ln -sf ../Formula/routatic-proxy.rb Aliases/oc-go-cc
+
+          git add Formula/routatic-proxy.rb Aliases/oc-go-cc
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -m "Update oc-go-cc to ${VERSION}" || echo "No changes to commit"
+          git commit -m "Update routatic-proxy to ${VERSION}" || echo "No changes to commit"
           git push
 
-  # ── Stage 4: Update Scoop Bucket ──────────────────────────────────
+  # ── Stage 5: Update Scoop Bucket ──────────────────────────────────
   scoop:
     name: Update Scoop Bucket
     needs: release
-    if: github.repository == 'samueltuyizere/oc-go-cc'
+    if: github.repository == 'routatic/proxy'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Download release assets
         env:
@@ -394,7 +525,7 @@ jobs:
 
           mkdir -p bucket
 
-          cat > bucket/oc-go-cc.json << JSON
+          cat > bucket/routatic-proxy.json << JSON
           {
               "version": "${VERSION}",
               "description": "Proxy Claude Code requests to OpenCode Go API",
@@ -402,34 +533,39 @@ jobs:
               "license": "AGPL-3.0-only",
               "architecture": {
                   "64bit": {
-                      "url": "${BASE_URL}/oc-go-cc_windows-amd64.exe",
+                      "url": "${BASE_URL}/routatic-proxy_windows-amd64.exe",
                       "hash": "${WINDOWS_AMD64}"
                   },
                   "arm64": {
-                      "url": "${BASE_URL}/oc-go-cc_windows-arm64.exe",
+                      "url": "${BASE_URL}/routatic-proxy_windows-arm64.exe",
                       "hash": "${WINDOWS_ARM64}"
                   }
               },
-              "bin": "oc-go-cc.exe",
-              "post_install": "Get-ChildItem \$dir\\\\oc-go-cc_windows-*.exe | Rename-Item -NewName oc-go-cc.exe",
+              "bin": [
+                  ["routatic-proxy.exe", "routatic-proxy"],
+                  ["routatic-proxy.exe", "oc-go-cc"]
+              ],
+              "post_install": "Get-ChildItem \$dir\\\\routatic-proxy_windows-*.exe | Rename-Item -NewName routatic-proxy.exe",
               "checkver": {
                   "github": "https://github.com/${REPO}"
               },
               "autoupdate": {
                   "architecture": {
                       "64bit": {
-                          "url": "https://github.com/${REPO}/releases/download/v\$version/oc-go-cc_windows-amd64.exe"
+                          "url": "https://github.com/${REPO}/releases/download/v\$version/routatic-proxy_windows-amd64.exe"
                       },
                       "arm64": {
-                          "url": "https://github.com/${REPO}/releases/download/v\$version/oc-go-cc_windows-arm64.exe"
+                          "url": "https://github.com/${REPO}/releases/download/v\$version/routatic-proxy_windows-arm64.exe"
                       }
                   }
               }
           }
           JSON
 
-          git add bucket/oc-go-cc.json
+          cp bucket/routatic-proxy.json bucket/oc-go-cc.json
+
+          git add bucket/routatic-proxy.json bucket/oc-go-cc.json
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -m "Update oc-go-cc to ${VERSION}" || echo "No changes to commit"
+          git commit -m "Update routatic-proxy to ${VERSION}" || echo "No changes to commit"
           git push

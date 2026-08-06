@@ -1,5 +1,7 @@
 // Package transformer handles request and response format conversion
-// between Anthropic Messages API and OpenAI Chat Completions API.
+// between Anthropic Messages API and OpenAI Chat Completions API,
+// including streaming SSE transformation, token counting, and
+// protocol bridging for Responses and Gemini endpoints.
 package transformer
 
 import (
@@ -7,8 +9,8 @@ import (
 	"fmt"
 	"strings"
 
-	"oc-go-cc/internal/config"
-	"oc-go-cc/pkg/types"
+	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/pkg/types"
 )
 
 // contentText is a convenience wrapper around types.TextContent for brevity
@@ -26,16 +28,6 @@ func NewRequestTransformer() *RequestTransformer {
 }
 
 // isThinkingDisabled checks if the thinking JSON config explicitly sets type to "disabled".
-
-// assistantCacheCtrl returns a CacheControl pointer for ephemeral caching
-// when the assistant message contained cache_control markers.
-func assistantCacheCtrl(caching bool) *types.CacheControl {
-	if caching {
-		return &types.CacheControl{Type: "ephemeral"}
-	}
-	return nil
-}
-
 func isThinkingDisabled(thinking json.RawMessage) bool {
 	var m map[string]interface{}
 	if err := json.Unmarshal(thinking, &m); err != nil {
@@ -60,6 +52,17 @@ func isOpenAIReasoningModel(modelID string) bool {
 func needsPlaceholderReasoning(modelID string) bool {
 	// Moonshot's validator treats an empty string as missing.
 	return strings.HasPrefix(modelID, "kimi-")
+}
+
+// constrainTemperature overrides model-specific temperature constraints.
+// Some models require specific temperature values — return the constrained
+// value or the original if no constraint applies.
+func constrainTemperature(modelID string, temp float64) float64 {
+	// Moonshot AI (kimi-k2.7-code) only allows temperature=1.
+	if modelID == "kimi-k2.7-code" {
+		return 1.0
+	}
+	return temp
 }
 
 // stripCacheControl removes cache_control from all messages in the list.
@@ -110,9 +113,13 @@ func (t *RequestTransformer) TransformRequest(
 		openaiReq.MaxTokens = &maxTokens
 	}
 
-	// Apply model-specific overrides
+	// Apply model-specific overrides and temperature constraints
 	if model.Temperature > 0 {
 		openaiReq.Temperature = &model.Temperature
+	}
+	if openaiReq.Temperature != nil {
+		temp := constrainTemperature(model.ModelID, *openaiReq.Temperature)
+		openaiReq.Temperature = &temp
 	}
 	if model.MaxTokens > 0 {
 		maxTokens := model.MaxTokens
@@ -157,9 +164,6 @@ func HasThinkingBlocks(messages []types.Message) bool {
 			if block.Type == "thinking" {
 				return true
 			}
-			// Claude Code attaches thinking to tool_use blocks when the
-			// assistant turn ends in a tool call — both forms mark the
-			// conversation as having thinking history for continuity.
 			if block.Type == "tool_use" && block.Thinking != "" {
 				return true
 			}
@@ -173,14 +177,12 @@ func HasThinkingBlocks(messages []types.Message) bool {
 //
 //  1. Client request — anthropicReq.Thinking set and not disabled
 //     → forward thinking config; map budget_tokens to reasoning_effort.
-//  2. DeepSeek safety guard — prior assistant messages without thinking
-//     → disable thinking to avoid upstream reasoning_content validation errors.
-//  3. History continuity — a prior turn used thinking → keep it enabled.
-//  4. Explicit config — model.Thinking set → use it verbatim.
-//  5. Config intent — model.ReasoningEffort set without model.Thinking
+//  2. History continuity — a prior turn used thinking → keep it enabled.
+//  3. Explicit config — model.Thinking set → use it verbatim.
+//  4. Config intent — model.ReasoningEffort set without model.Thinking
 //     → enable on first turn (no assistant messages), disable only when
 //     safety guard fires (DeepSeek + history assistant msgs lack thinking).
-//  6. No config, no history → leave both unset.
+//  5. No config, no history → leave both unset (safety guard for DeepSeek).
 //
 // budgetTokensToEffort maps Anthropic budget_tokens to OpenAI reasoning_effort.
 func budgetTokensToEffort(budget int) string {
@@ -289,7 +291,7 @@ func resolveThinkingAndEffort(
 		}
 
 	default:
-		// No config and no thinking history: leave both unset.
+		// No config, no history: leave both unset.
 	}
 }
 
@@ -321,20 +323,22 @@ func (t *RequestTransformer) transformMessages(anthropicReq *types.MessageReques
 
 	var result []types.ChatMessage
 
-	// Add system message if present, preserving cache_control if available
+	// Add system message from top-level field if present, preserving cache_control.
+	// DeepSeek V3.x / V4 reorders all system-role messages to the front internally.
+	// When Claude Code injects periodic system reminders mid-conversation, any
+	// extra {"role": "system"} in the messages array would shift every subsequent
+	// user/assistant/tool message after the reorder, blowing the prefix cache.
 	systemText := anthropicReq.SystemText()
 	if systemText != "" {
 		systemMsg := types.ChatMessage{
 			Role:    "system",
 			Content: contentText(systemText),
 		}
-		// Try to extract cache_control from system array blocks
-		// Kimi models reject cache_control, skip for those.
 		if !strings.HasPrefix(modelID, "kimi-") && len(anthropicReq.System) > 0 {
 			var blocks []types.SystemContentBlock
 			if err := json.Unmarshal(anthropicReq.System, &blocks); err == nil {
 				for _, b := range blocks {
-					if b.Type == "text" && b.CacheControl != nil && isDeepSeekModel(modelID) {
+					if b.Type == "text" && b.CacheControl != nil {
 						systemMsg.CacheControl = b.CacheControl
 						break
 					}
@@ -347,14 +351,14 @@ func (t *RequestTransformer) transformMessages(anthropicReq *types.MessageReques
 	// Transform remaining messages.
 	//
 	// DeepSeek V3.x / V4 internally reorders all system-role messages to the
-	// front of the effective prompt. When Claude Code injects periodic system
+	// front of the effective prompt.  When Claude Code injects periodic system
 	// reminders mid-conversation (e.g. "task tools haven't been used recently"),
 	// forwarding them as {"role": "system"} would cause DeepSeek's reordering
 	// to shift every user/assistant/tool message, invalidating the prefix cache
 	// from the insertion point onward.
 	//
 	// For DeepSeek models only, convert non-top-level system messages into user
-	// messages wrapped in <system-reminder> tags. This preserves the semantic
+	// messages wrapped in <system-reminder> tags.  This preserves the semantic
 	// intent while preventing DeepSeek from reordering them past the
 	// conversational history.
 	rewriteSystem := isDeepSeekModel(modelID)
@@ -425,32 +429,21 @@ func (t *RequestTransformer) transformMessage(msg types.Message, modelID string,
 func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, vision bool) ([]types.ChatMessage, error) {
 	var result []types.ChatMessage
 	var textParts []string
-	var promptCaching bool
 	var imageParts []types.ChatContentPart
 	hasImage := false
 
 	for _, block := range blocks {
-		if block.CacheControl != nil && block.CacheControl.Type == "ephemeral" {
-			promptCaching = true
-		}
 		switch block.Type {
 		case "text":
-			if block.CacheControl != nil && block.CacheControl.Type == "ephemeral" {
-				promptCaching = true
-			}
 			textParts = append(textParts, block.Text)
 		case "tool_result":
 			// In OpenAI, tool results are separate messages with role "tool"
 			toolContent := block.TextContent()
-			toolMsg := types.ChatMessage{
+			result = append(result, types.ChatMessage{
 				Role:       "tool",
 				Content:    contentText(toolContent),
 				ToolCallID: block.GetToolID(),
-			}
-			if block.CacheControl != nil && block.CacheControl.Type == "ephemeral" {
-				toolMsg.CacheControl = &types.CacheControl{Type: "ephemeral"}
-			}
-			result = append(result, toolMsg)
+			})
 		case "image":
 			if block.Source != nil {
 				if vision {
@@ -487,11 +480,7 @@ func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, v
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal multimodal content: %w", err)
 			}
-			userMsg := types.ChatMessage{Role: "user", Content: contentJSON}
-			if promptCaching {
-				userMsg.CacheControl = &types.CacheControl{Type: "ephemeral"}
-			}
-			result = append(result, userMsg)
+			result = append(result, types.ChatMessage{Role: "user", Content: contentJSON})
 		} else {
 			// Text-only message (possibly with image placeholder for non-vision models)
 			text := strings.Join(textParts, "")
@@ -502,14 +491,10 @@ func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, v
 					text = "[Image]"
 				}
 			}
-			userMsg := types.ChatMessage{
+			result = append(result, types.ChatMessage{
 				Role:    "user",
 				Content: contentText(text),
-			}
-			if promptCaching {
-				userMsg.CacheControl = &types.CacheControl{Type: "ephemeral"}
-			}
-			result = append(result, userMsg)
+			})
 		}
 	}
 
@@ -521,28 +506,18 @@ func (t *RequestTransformer) transformAssistantMessage(blocks []types.ContentBlo
 	var textParts []string
 	var thinkingParts []string
 	var toolCalls []types.ToolCall
-	var assistantCaching bool
 
 	for _, block := range blocks {
 		switch block.Type {
 		case "text":
-			if block.CacheControl != nil && block.CacheControl.Type == "ephemeral" {
-				assistantCaching = true
-			}
 			textParts = append(textParts, block.Text)
 		case "thinking":
-			if block.CacheControl != nil && block.CacheControl.Type == "ephemeral" {
-				assistantCaching = true
-			}
 			// Preserve chain-of-thought so it can be forwarded back to providers
 			// that require reasoning_content to be preserved across turns.
 			if block.Thinking != "" {
 				thinkingParts = append(thinkingParts, block.Thinking)
 			}
 		case "tool_use":
-			if block.CacheControl != nil && block.CacheControl.Type == "ephemeral" {
-				assistantCaching = true
-			}
 			// Claude Code can attach reasoning directly to the tool_use block
 			// (instead of emitting a separate thinking-typed block) when the
 			// assistant turn ends in a tool call. Extract that here so it
@@ -604,7 +579,6 @@ func (t *RequestTransformer) transformAssistantMessage(blocks []types.ContentBlo
 	msg := types.ChatMessage{
 		Role:             "assistant",
 		Content:          contentText(content),
-		CacheControl:     assistantCacheCtrl(assistantCaching),
 		ReasoningContent: reasoningContentPtr,
 		ToolCalls:        toolCalls,
 	}
@@ -617,10 +591,47 @@ func (t *RequestTransformer) transformTools(tools []types.Tool) []types.ToolDef 
 	var result []types.ToolDef
 
 	for _, tool := range tools {
+		if strings.TrimSpace(tool.Name) == "" {
+			continue
+		}
 		// InputSchema is already json.RawMessage, use it directly
 		schema := tool.InputSchema
-		if len(schema) == 0 {
-			schema = []byte(`{"type":"object","properties":{}}`)
+		switch {
+		case len(schema) == 0, string(schema) == "null", string(schema) == "{}":
+			schema = []byte(`{"type":"object","properties":{},"additionalProperties":false}`)
+		default:
+			var schemaObj map[string]interface{}
+			if err := json.Unmarshal(schema, &schemaObj); err != nil {
+				schema = []byte(`{"type":"object","properties":{},"additionalProperties":false}`)
+			} else {
+				// Valid JSON " null " unmarshals to a nil map, which would panic
+				// on the field assignments below.
+				if schemaObj == nil {
+					schema = []byte(`{"type":"object","properties":{},"additionalProperties":false}`)
+				} else {
+					// Validate type field is "object" — otherwise OpenAI rejects the
+					// tool. A schema like {"type":"string"} passes unmarshal but
+					// produces a 400 from the upstream OpenAI-compatible endpoint.
+					schemaType, _ := schemaObj["type"].(string)
+					if schemaType != "object" {
+						schemaObj["type"] = "object"
+					}
+
+					// Validate properties is an object — wrong shapes like arrays
+					// or primitives also produce 400 errors upstream.
+					if props, ok := schemaObj["properties"]; ok {
+						if _, valid := props.(map[string]interface{}); !valid {
+							schemaObj["properties"] = map[string]interface{}{}
+						}
+					} else {
+						schemaObj["properties"] = map[string]interface{}{}
+					}
+
+					if fixed, err := json.Marshal(schemaObj); err == nil {
+						schema = fixed
+					}
+				}
+			}
 		}
 
 		result = append(result, types.ToolDef{
@@ -634,211 +645,4 @@ func (t *RequestTransformer) transformTools(tools []types.Tool) []types.ToolDef 
 	}
 
 	return result
-}
-
-// TransformToResponses converts an Anthropic MessageRequest to OpenAI ResponsesRequest.
-func (t *RequestTransformer) TransformToResponses(
-	anthropicReq *types.MessageRequest,
-	model config.ModelConfig,
-) (*types.ResponsesRequest, error) {
-	var input []types.ResponsesInput
-
-	// Add system message if present
-	systemText := anthropicReq.SystemText()
-	if systemText != "" {
-		content, _ := json.Marshal(systemText)
-		input = append(input, types.ResponsesInput{
-			Role:    "developer",
-			Content: content,
-		})
-	}
-
-	// Transform messages
-	for _, msg := range anthropicReq.Messages {
-		blocks := msg.ContentBlocks()
-		var textParts []string
-
-		for _, block := range blocks {
-			switch block.Type {
-			case "text":
-				textParts = append(textParts, block.Text)
-			case "image":
-				textParts = append(textParts, "[Image]")
-			case "tool_result":
-				// For Responses API, tool results are separate items
-				toolContent := block.TextContent()
-				content, _ := json.Marshal(toolContent)
-				input = append(input, types.ResponsesInput{
-					Role:    "tool",
-					Content: content,
-				})
-			}
-		}
-
-		if len(textParts) > 0 {
-			text := ""
-			for _, p := range textParts {
-				text += p
-			}
-			content, _ := json.Marshal(text)
-			input = append(input, types.ResponsesInput{
-				Role:    msg.Role,
-				Content: content,
-			})
-		}
-	}
-
-	req := &types.ResponsesRequest{
-		Model:  model.ModelID,
-		Input:  input,
-		Stream: anthropicReq.Stream != nil && *anthropicReq.Stream,
-	}
-
-	// Transform tools if present
-	if len(anthropicReq.Tools) > 0 {
-		req.Tools = t.transformToolsForResponses(anthropicReq.Tools)
-	}
-
-	// Add reasoning if model supports it
-	if model.ReasoningEffort != "" {
-		req.Reasoning = &types.ResponsesReasoning{
-			Effort: model.ReasoningEffort,
-		}
-	}
-
-	return req, nil
-}
-
-// transformToolsForResponses converts Anthropic tools to Responses tool format.
-func (t *RequestTransformer) transformToolsForResponses(tools []types.Tool) []types.ResponsesTool {
-	var result []types.ResponsesTool
-
-	for _, tool := range tools {
-		schema := tool.InputSchema
-		if len(schema) == 0 {
-			schema = []byte(`{"type":"object","properties":{}}`)
-		}
-
-		result = append(result, types.ResponsesTool{
-			Type:        "function",
-			Name:        tool.Name,
-			Description: tool.Description,
-			Parameters:  json.RawMessage(schema),
-		})
-	}
-
-	return result
-}
-
-// TransformToGemini converts an Anthropic MessageRequest to GeminiRequest.
-func (t *RequestTransformer) TransformToGemini(
-	anthropicReq *types.MessageRequest,
-	model config.ModelConfig,
-) (*types.GeminiRequest, error) {
-	var contents []types.GeminiContent
-
-	// Add system instruction via generation config (Gemini handles system separately)
-	// For now, prepend system as a user message if present
-	systemText := anthropicReq.SystemText()
-	if systemText != "" {
-		contents = append(contents, types.GeminiContent{
-			Role: "user",
-			Parts: []types.GeminiPart{
-				{Text: "[System Instruction] " + systemText},
-			},
-		})
-		contents = append(contents, types.GeminiContent{
-			Role: "model",
-			Parts: []types.GeminiPart{
-				{Text: "Understood. I will follow these instructions."},
-			},
-		})
-	}
-
-	// Transform messages
-	for _, msg := range anthropicReq.Messages {
-		blocks := msg.ContentBlocks()
-		var textParts []string
-
-		for _, block := range blocks {
-			switch block.Type {
-			case "text":
-				textParts = append(textParts, block.Text)
-			case "image":
-				textParts = append(textParts, "[Image]")
-			case "tool_result":
-				toolContent := block.TextContent()
-				contents = append(contents, types.GeminiContent{
-					Role: "user",
-					Parts: []types.GeminiPart{
-						{Text: fmt.Sprintf("[Tool Result for %s] %s", block.GetToolID(), toolContent)},
-					},
-				})
-			}
-		}
-
-		if len(textParts) > 0 {
-			text := ""
-			for _, p := range textParts {
-				text += p
-			}
-			role := "user"
-			if msg.Role == "assistant" {
-				role = "model"
-			}
-			contents = append(contents, types.GeminiContent{
-				Role: role,
-				Parts: []types.GeminiPart{
-					{Text: text},
-				},
-			})
-		}
-	}
-
-	req := &types.GeminiRequest{
-		Contents: contents,
-	}
-
-	// Set generation config
-	genConfig := &types.GeminiGenerationConfig{}
-	if anthropicReq.MaxTokens > 0 {
-		genConfig.MaxOutputTokens = anthropicReq.MaxTokens
-	}
-	if model.Temperature > 0 {
-		genConfig.Temperature = model.Temperature
-	} else if anthropicReq.Temperature != nil {
-		genConfig.Temperature = *anthropicReq.Temperature
-	}
-	if genConfig.MaxOutputTokens > 0 || genConfig.Temperature > 0 {
-		req.GenerationConfig = genConfig
-	}
-
-	// Transform tools if present
-	if len(anthropicReq.Tools) > 0 {
-		req.Tools = t.transformToolsForGemini(anthropicReq.Tools)
-	}
-
-	return req, nil
-}
-
-// transformToolsForGemini converts Anthropic tools to Gemini tool format.
-func (t *RequestTransformer) transformToolsForGemini(tools []types.Tool) []types.GeminiTool {
-	var decls []types.GeminiFunctionDeclaration
-
-	for _, tool := range tools {
-		schema := tool.InputSchema
-		if len(schema) == 0 {
-			schema = []byte(`{"type":"object","properties":{}}`)
-		}
-
-		decls = append(decls, types.GeminiFunctionDeclaration{
-			Name:        tool.Name,
-			Description: tool.Description,
-			Parameters:  json.RawMessage(schema),
-		})
-	}
-
-	return []types.GeminiTool{
-		{FunctionDeclarations: decls},
-	}
 }

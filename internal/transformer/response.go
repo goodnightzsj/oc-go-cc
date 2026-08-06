@@ -1,4 +1,3 @@
-// Package transformer handles request/response transformation and token counting.
 package transformer
 
 import (
@@ -6,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"oc-go-cc/pkg/types"
+	"github.com/routatic/proxy/pkg/types"
 )
 
 // ResponseTransformer converts OpenAI responses to Anthropic format.
@@ -56,8 +55,21 @@ func (t *ResponseTransformer) TransformResponse(
 		Model:        originalModel,
 		StopReason:   stopReason,
 		StopSequence: "",
+		Usage: types.Usage{
+			// Per Anthropic Messages API spec, `input_tokens` is the count of
+			// regular input tokens — i.e. tokens that were neither read from
+			// the cache nor written to the cache this turn. OpenAI's
+			// `prompt_tokens` is the *total* prompt size including both. When
+			// the upstream reports prompt-cache fields we have to subtract
+			// them out, otherwise Claude Code's local context counter sees an
+			// inflated input_tokens on every turn and trips auto-compact ~5x
+			// too early on long-prefix sessions.
+			InputTokens:              nonNegative(openaiResp.Usage.PromptTokens - openaiResp.Usage.PromptCacheHitTokens - openaiResp.Usage.PromptCacheMissTokens),
+			OutputTokens:             openaiResp.Usage.CompletionTokens,
+			CacheCreationInputTokens: openaiResp.Usage.PromptCacheMissTokens,
+			CacheReadInputTokens:     openaiResp.Usage.PromptCacheHitTokens,
+		},
 	}
-	anthropicResp.Usage = usageInfoToAnthropic(openaiResp.Usage)
 
 	return anthropicResp, nil
 }
@@ -207,13 +219,10 @@ func (t *ResponseTransformer) TransformResponsesResponse(
 		Content:    contentBlocks,
 		Model:      originalModel,
 		StopReason: "end_turn",
-	}
-
-	if responsesResp.Usage != nil {
-		anthropicResp.Usage = &types.Usage{
+		Usage: types.Usage{
 			InputTokens:  responsesResp.Usage.InputTokens,
 			OutputTokens: responsesResp.Usage.OutputTokens,
-		}
+		},
 	}
 
 	return anthropicResp, nil
@@ -263,7 +272,7 @@ func (t *ResponseTransformer) TransformGeminiResponse(
 	}
 
 	if geminiResp.UsageMetadata != nil {
-		anthropicResp.Usage = &types.Usage{
+		anthropicResp.Usage = types.Usage{
 			InputTokens:  geminiResp.UsageMetadata.PromptTokenCount,
 			OutputTokens: geminiResp.UsageMetadata.CandidatesTokenCount,
 		}

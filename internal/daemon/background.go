@@ -8,10 +8,11 @@ import (
 	"strconv"
 )
 
-// BackgroundOpts are the options passed from the serve command.
+// BackgroundOpts are the options passed from the start/serve command.
 type BackgroundOpts struct {
 	ConfigPath string // --config flag value, may be empty
 	Port       int    // --port flag value, 0 means default
+	Command    string // "start" or "serve", defaults to "serve"
 }
 
 // ForkIntoBackground starts the current binary as a detached background process.
@@ -24,14 +25,18 @@ func ForkIntoBackground(opts BackgroundOpts) error {
 		return fmt.Errorf("cannot create config directory: %w", err)
 	}
 	if pid, err := GetPID(paths.PIDFile); err == nil {
-		if IsProcessRunning(pid) {
+		if IsProcessRunning(pid) && IsAppProcess(pid, AppName) {
 			return fmt.Errorf("server is already running (PID %d)", pid)
 		}
 		_ = os.Remove(paths.PIDFile)
 	}
 
-	// Build args for the child process: oc-go-cc serve --_daemonize [--config X] [--port N]
-	args := []string{"serve", "--_daemonize"}
+	// Build args for the child process: routatic-proxy <command> --_daemonize [--config X] [--port N]
+	command := opts.Command
+	if command == "" {
+		command = "serve"
+	}
+	args := []string{command, "--_daemonize"}
 	if opts.ConfigPath != "" {
 		configPath, err := filepath.Abs(opts.ConfigPath)
 		if err != nil {
@@ -57,6 +62,8 @@ func ForkIntoBackground(opts BackgroundOpts) error {
 	cmd.Dir = paths.ConfigDir // Run from a stable directory to avoid caller cwd issues
 
 	if err := cmd.Start(); err != nil {
+		// Write the error to the log file so login-time failures are not lost.
+		_, _ = fmt.Fprintf(logFile, "failed to start background process: %v\n", err)
 		return fmt.Errorf("failed to start background process: %w", err)
 	}
 

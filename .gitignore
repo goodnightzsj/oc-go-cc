@@ -6,3 +6,23 @@ dist/
 configs/config.json
 .tmp/
 oc-go-cc
+/routatic-proxy
+/routatic-hosted
+.trunk
+dist/
+brag-output-**
+.DS_Store
+.kimchi
+.worktrees/
+.planning
+# Spartan AI config (contains API keys)
+.spartan/ai.env
+.claude
+
+router.test
+.playwright-mcp
+.gstack/
+node_modules/
+
+# Generated Windows resource files (built by go-winres in CI)
+*.syso

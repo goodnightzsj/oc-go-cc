@@ -1,36 +1,16 @@
 package client
 
 import (
-	"errors"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
-	"oc-go-cc/internal/config"
+	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/pkg/types"
 )
-
-func TestNewUpstreamErrorClassifiesCloudflare502(t *testing.T) {
-	err := newUpstreamError(502, []byte("Upstream returned HTTP 502: The origin web server returned an invalid or incomplete response to Cloudflare."))
-
-	var upstreamErr *UpstreamError
-	if !errors.As(err, &upstreamErr) {
-		t.Fatalf("expected UpstreamError, got %T", err)
-	}
-	if !upstreamErr.Retryable {
-		t.Fatal("expected 502 to be retryable")
-	}
-	if !upstreamErr.Cloudflare {
-		t.Fatal("expected Cloudflare classification")
-	}
-	if !upstreamErr.CloudflareOriginInvalid {
-		t.Fatal("expected Cloudflare origin invalid classification")
-	}
-}
-
-func TestErrorAttrsIgnoresNonUpstreamErrors(t *testing.T) {
-	if attrs := ErrorAttrs(errors.New("plain error")); attrs != nil {
-		t.Fatalf("ErrorAttrs() = %v, want nil", attrs)
-	}
-}
 
 func TestIsAnthropicModelOnlyRoutesNativeAnthropicModels(t *testing.T) {
 	tests := []struct {
@@ -39,17 +19,17 @@ func TestIsAnthropicModelOnlyRoutesNativeAnthropicModels(t *testing.T) {
 		want    bool
 	}{
 		{
-			name:    "minimax m2.5 uses anthropic endpoint",
+			name:    "minimax m2.5 uses anthropic endpoint on Go provider",
 			modelID: "minimax-m2.5",
 			want:    true,
 		},
 		{
-			name:    "minimax m2.7 uses anthropic endpoint",
+			name:    "minimax m2.7 uses anthropic endpoint on Go provider",
 			modelID: "minimax-m2.7",
 			want:    true,
 		},
 		{
-			name:    "minimax m3 uses anthropic endpoint",
+			name:    "minimax m3 uses anthropic endpoint on Go provider",
 			modelID: "minimax-m3",
 			want:    true,
 		},
@@ -69,8 +49,28 @@ func TestIsAnthropicModelOnlyRoutesNativeAnthropicModels(t *testing.T) {
 			want:    false,
 		},
 		{
+			name:    "kimi k2.7-code uses openai endpoint",
+			modelID: "kimi-k2.7-code",
+			want:    false,
+		},
+		{
+			name:    "kimi k3 uses openai endpoint",
+			modelID: "kimi-k3",
+			want:    false,
+		},
+		{
 			name:    "glm-5.1 uses openai endpoint",
 			modelID: "glm-5.1",
+			want:    false,
+		},
+		{
+			name:    "glm-5.2 uses openai endpoint",
+			modelID: "glm-5.2",
+			want:    false,
+		},
+		{
+			name:    "glm-5 uses openai endpoint",
+			modelID: "glm-5",
 			want:    false,
 		},
 		{
@@ -89,44 +89,44 @@ func TestIsAnthropicModelOnlyRoutesNativeAnthropicModels(t *testing.T) {
 			want:    false,
 		},
 		{
-			name:    "qwen3.5-plus uses anthropic endpoint",
+			name:    "qwen3.5-plus uses anthropic endpoint on Go provider",
 			modelID: "qwen3.5-plus",
 			want:    true,
 		},
 		{
-			name:    "qwen3.6-plus uses anthropic endpoint",
+			name:    "qwen3.6-plus uses anthropic endpoint on Go provider",
 			modelID: "qwen3.6-plus",
 			want:    true,
 		},
 		{
-			name:    "qwen3.7-plus uses anthropic endpoint",
+			name:    "qwen3.7-plus uses anthropic endpoint on Go provider",
 			modelID: "qwen3.7-plus",
 			want:    true,
 		},
 		{
-			name:    "qwen3.7-max uses anthropic endpoint",
+			name:    "qwen3.7-max uses anthropic endpoint (no oa-compat support)",
 			modelID: "qwen3.7-max",
 			want:    true,
 		},
 		{
-			name:    "claude-sonnet-4-5 uses anthropic endpoint",
+			name:    "claude models use openai endpoint on Go provider",
 			modelID: "claude-sonnet-4-5",
-			want:    true,
+			want:    false,
 		},
 		{
-			name:    "claude-opus-4-7 uses anthropic endpoint",
+			name:    "claude-opus-4-7 uses openai endpoint on Go provider",
 			modelID: "claude-opus-4-7",
-			want:    true,
+			want:    false,
 		},
 		{
-			name:    "claude-haiku-4-5 uses anthropic endpoint",
+			name:    "claude-haiku-4-5 uses openai endpoint on Go provider",
 			modelID: "claude-haiku-4-5",
-			want:    true,
+			want:    false,
 		},
 		{
-			name:    "claude-3-5-haiku uses anthropic endpoint",
+			name:    "claude-3-5-haiku uses openai endpoint on Go provider",
 			modelID: "claude-3-5-haiku",
-			want:    true,
+			want:    false,
 		},
 	}
 
@@ -280,6 +280,11 @@ func TestClassifyEndpoint(t *testing.T) {
 			expected: EndpointChatCompletions,
 		},
 		{
+			name:     "kimi-k2.7-code uses chat completions endpoint",
+			modelID:  "kimi-k2.7-code",
+			expected: EndpointChatCompletions,
+		},
+		{
 			name:     "kimi-k2.5 uses chat completions endpoint",
 			modelID:  "kimi-k2.5",
 			expected: EndpointChatCompletions,
@@ -297,6 +302,16 @@ func TestClassifyEndpoint(t *testing.T) {
 		{
 			name:     "glm-5.1 uses chat completions endpoint",
 			modelID:  "glm-5.1",
+			expected: EndpointChatCompletions,
+		},
+		{
+			name:     "glm-5.2 uses chat completions endpoint",
+			modelID:  "glm-5.2",
+			expected: EndpointChatCompletions,
+		},
+		{
+			name:     "glm-5 uses chat completions endpoint",
+			modelID:  "glm-5",
 			expected: EndpointChatCompletions,
 		},
 		{
@@ -360,12 +375,22 @@ func TestIsGeminiModel(t *testing.T) {
 		modelID string
 		want    bool
 	}{
+		// Gemini models
 		{"gemini-3.5-flash", true},
 		{"gemini-3.1-pro", true},
 		{"gemini-3-flash", true},
+		// Non-Gemini models
 		{"kimi-k2.6", false},
+		{"kimi-k2.7-code", false},
 		{"glm-5.1", false},
+		{"glm-5.2", false},
+		{"glm-5", false},
 		{"gpt-5.5", false},
+		{"gpt-5", false},
+		{"claude-sonnet-4-5", false},
+		{"qwen3.7-plus", false},
+		{"deepseek-v4-pro", false},
+		{"mimo-v2.5", false},
 	}
 
 	for _, tt := range tests {
@@ -382,32 +407,92 @@ func TestIsResponsesModel(t *testing.T) {
 		modelID string
 		want    bool
 	}{
+		// GPT 5.5 series
 		{"gpt-5.5", true},
 		{"gpt-5.5-pro", true},
+		{"gpt-5.5-mini", true},
+		{"gpt-5.5-nano", true},
+		// GPT 5.4 series
 		{"gpt-5.4", true},
 		{"gpt-5.4-pro", true},
 		{"gpt-5.4-mini", true},
 		{"gpt-5.4-nano", true},
+		// GPT 5.3 series
 		{"gpt-5.3-codex", true},
 		{"gpt-5.3-codex-spark", true},
+		// GPT 5.2 series
 		{"gpt-5.2", true},
 		{"gpt-5.2-codex", true},
+		// GPT 5.1 series
 		{"gpt-5.1", true},
 		{"gpt-5.1-codex", true},
 		{"gpt-5.1-codex-max", true},
 		{"gpt-5.1-codex-mini", true},
+		// GPT 5 series
 		{"gpt-5", true},
 		{"gpt-5-codex", true},
 		{"gpt-5-nano", true},
+		// Non-GPT models
 		{"kimi-k2.6", false},
+		{"kimi-k2.7-code", false},
 		{"glm-5.1", false},
+		{"glm-5.2", false},
+		{"glm-5", false},
 		{"gemini-3.5-flash", false},
+		{"gemini-3.1-pro", false},
+		{"gemini-3-flash", false},
+		{"claude-sonnet-4-5", false},
+		{"qwen3.7-plus", false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.modelID, func(t *testing.T) {
 			if got := isResponsesModel(tt.modelID); got != tt.want {
 				t.Fatalf("isResponsesModel(%q) = %v, want %v", tt.modelID, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsZenAnthropicModel(t *testing.T) {
+	tests := []struct {
+		modelID string
+		want    bool
+	}{
+		// Claude models on Zen use Anthropic endpoint
+		{"claude-sonnet-4-5", true},
+		{"claude-opus-4-7", true},
+		{"claude-haiku-4-5", true},
+		{"claude-3-5-haiku", true},
+		{"claude-3-5-sonnet", true},
+		{"claude-3-opus", true},
+		// Qwen models on Zen use Anthropic endpoint
+		{"qwen3.7-max", true},
+		{"qwen3.7-plus", true},
+		{"qwen3.6-plus", true},
+		{"qwen3.5-plus", true},
+		{"qwen3.5", true},
+		// Non-Anthropic models
+		{"kimi-k2.6", false},
+		{"kimi-k2.7-code", false},
+		{"glm-5.1", false},
+		{"glm-5.2", false},
+		{"glm-5", false},
+		{"gemini-3.5-flash", false},
+		{"gemini-3.1-pro", false},
+		{"gpt-5.5", false},
+		{"gpt-5", false},
+		{"minimax-m2.5", false},
+		{"minimax-m2.7", false},
+		{"minimax-m3", false},
+		{"deepseek-v4-pro", false},
+		{"mimo-v2.5", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.modelID, func(t *testing.T) {
+			if got := isZenAnthropicModel(tt.modelID); got != tt.want {
+				t.Fatalf("isZenAnthropicModel(%q) = %v, want %v", tt.modelID, got, tt.want)
 			}
 		})
 	}
@@ -488,35 +573,457 @@ func TestNextAPIKey_ConcurrentSafety(t *testing.T) {
 	}
 }
 
-func TestRequestTimeout_UsesProviderSpecificConfig(t *testing.T) {
-	cfg := &config.Config{
-		APIKey: "test-key",
-		OpenCodeGo: config.OpenCodeGoConfig{
-			TimeoutMs: 180000,
+func TestStreamIdleTimeout(t *testing.T) {
+	tests := []struct {
+		name     string
+		goMs     int
+		zenMs    int
+		provider string
+		wantDur  time.Duration
+	}{
+		{
+			name:     "Go provider uses OpenCodeGo.StreamTimeoutMs",
+			goMs:     120000, // 2 min
+			provider: "opencode-go",
+			wantDur:  120 * time.Second,
 		},
-		OpenCodeZen: config.OpenCodeZenConfig{
-			TimeoutMs: 420000,
+		{
+			name:     "Zen provider uses OpenCodeZen.StreamTimeoutMs",
+			goMs:     100000,
+			zenMs:    600000, // 10 min
+			provider: "opencode-zen",
+			wantDur:  10 * time.Minute,
+		},
+		{
+			name:     "falls back to OpenCodeGo.TimeoutMs when StreamTimeoutMs is zero",
+			goMs:     300000, // 5 min
+			provider: "opencode-go",
+			wantDur:  5 * time.Minute,
 		},
 	}
-	client := NewOpenCodeClient(config.NewAtomicConfig(cfg, "/tmp/test-config.json"))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				OpenCodeGo:  config.OpenCodeGoConfig{TimeoutMs: tt.goMs, StreamTimeoutMs: tt.goMs},
+				OpenCodeZen: config.OpenCodeZenConfig{TimeoutMs: tt.zenMs, StreamTimeoutMs: tt.zenMs},
+			}
+			// Fallback test: zero out StreamTimeoutMs for that provider.
+			if tt.name == "falls back to OpenCodeGo.TimeoutMs when StreamTimeoutMs is zero" {
+				cfg.OpenCodeGo.StreamTimeoutMs = 0
+			}
+			atomic := config.NewAtomicConfig(cfg, "/tmp/test-config.json")
+			c := &OpenCodeClient{atomic: atomic}
+			mc := config.ModelConfig{Provider: tt.provider, ModelID: "test-model"}
+			got := c.StreamIdleTimeout(mc)
+			if got != tt.wantDur {
+				t.Errorf("StreamIdleTimeout() = %v, want %v", got, tt.wantDur)
+			}
+		})
+	}
+}
 
-	if got := client.RequestTimeout(config.ModelConfig{Provider: ProviderOpenCodeGo}); got != 180*time.Second {
-		t.Fatalf("go timeout = %v, want %v", got, 180*time.Second)
+func TestRequestTimeout_UsesConfiguredTimeout(t *testing.T) {
+	cfg := &config.Config{
+		OpenCodeGo: config.OpenCodeGoConfig{
+			TimeoutMs: 120000,
+		},
 	}
-	if got := client.RequestTimeout(config.ModelConfig{Provider: ProviderOpenCodeZen}); got != 420*time.Second {
-		t.Fatalf("zen timeout = %v, want %v", got, 420*time.Second)
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := NewOpenCodeClient(atomicCfg, nil)
+
+	model := config.ModelConfig{Provider: ProviderOpenCodeGo, ModelID: "kimi-k2.6"}
+	timeout := c.RequestTimeout(model)
+	if timeout != 120*time.Second {
+		t.Errorf("RequestTimeout = %v, want 120s", timeout)
 	}
 }
 
 func TestRequestTimeout_FallsBackToDefault(t *testing.T) {
 	cfg := &config.Config{
-		APIKey:      "test-key",
-		OpenCodeGo:  config.OpenCodeGoConfig{},
-		OpenCodeZen: config.OpenCodeZenConfig{},
+		OpenCodeGo: config.OpenCodeGoConfig{
+			TimeoutMs: 0,
+		},
 	}
-	client := NewOpenCodeClient(config.NewAtomicConfig(cfg, "/tmp/test-config.json"))
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := NewOpenCodeClient(atomicCfg, nil)
 
-	if got := client.RequestTimeout(config.ModelConfig{Provider: ProviderOpenCodeGo}); got != defaultTimeout {
-		t.Fatalf("timeout = %v, want %v", got, defaultTimeout)
+	model := config.ModelConfig{Provider: ProviderOpenCodeGo, ModelID: "kimi-k2.6"}
+	timeout := c.RequestTimeout(model)
+	if timeout != 5*time.Minute {
+		t.Errorf("RequestTimeout = %v, want 5m", timeout)
+	}
+}
+
+func TestRequestTimeout_ZenProvider(t *testing.T) {
+	cfg := &config.Config{
+		OpenCodeZen: config.OpenCodeZenConfig{
+			TimeoutMs: 60000,
+		},
+	}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := NewOpenCodeClient(atomicCfg, nil)
+
+	model := config.ModelConfig{Provider: ProviderOpenCodeZen, ModelID: "claude-sonnet-4.5"}
+	timeout := c.RequestTimeout(model)
+	if timeout != 60*time.Second {
+		t.Errorf("RequestTimeout = %v, want 60s", timeout)
+	}
+}
+
+func TestStreamingTimeout_UsesStreamingTimeoutMs(t *testing.T) {
+	cfg := &config.Config{
+		OpenCodeGo: config.OpenCodeGoConfig{
+			TimeoutMs:          300000,
+			StreamingTimeoutMs: 600000,
+		},
+	}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := NewOpenCodeClient(atomicCfg, nil)
+
+	model := config.ModelConfig{Provider: ProviderOpenCodeGo, ModelID: "kimi-k2.6"}
+	timeout := c.StreamingTimeout(model)
+	if timeout != 600*time.Second {
+		t.Errorf("StreamingTimeout = %v, want 600s", timeout)
+	}
+}
+
+func TestStreamingTimeout_FallsBackToTimeoutMs(t *testing.T) {
+	cfg := &config.Config{
+		OpenCodeGo: config.OpenCodeGoConfig{
+			TimeoutMs:          300000,
+			StreamingTimeoutMs: 0,
+		},
+	}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := NewOpenCodeClient(atomicCfg, nil)
+
+	model := config.ModelConfig{Provider: ProviderOpenCodeGo, ModelID: "kimi-k2.6"}
+	timeout := c.StreamingTimeout(model)
+	if timeout != 300*time.Second {
+		t.Errorf("StreamingTimeout = %v, want 300s (fallback to timeout_ms)", timeout)
+	}
+}
+
+func TestStreamingTimeout_FallsBackToDefault(t *testing.T) {
+	cfg := &config.Config{
+		OpenCodeGo: config.OpenCodeGoConfig{
+			TimeoutMs:          0,
+			StreamingTimeoutMs: 0,
+		},
+	}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := NewOpenCodeClient(atomicCfg, nil)
+
+	model := config.ModelConfig{Provider: ProviderOpenCodeGo, ModelID: "kimi-k2.6"}
+	timeout := c.StreamingTimeout(model)
+	if timeout != 5*time.Minute {
+		t.Errorf("StreamingTimeout = %v, want 5m", timeout)
+	}
+}
+
+func TestStreamingTimeout_ZenProvider(t *testing.T) {
+	cfg := &config.Config{
+		OpenCodeZen: config.OpenCodeZenConfig{
+			TimeoutMs:          300000,
+			StreamingTimeoutMs: 600000,
+		},
+	}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := NewOpenCodeClient(atomicCfg, nil)
+
+	model := config.ModelConfig{Provider: ProviderOpenCodeZen, ModelID: "claude-sonnet-4.5"}
+	timeout := c.StreamingTimeout(model)
+	if timeout != 600*time.Second {
+		t.Errorf("StreamingTimeout = %v, want 600s", timeout)
+	}
+}
+
+func TestStreamingTimeout_SmallConfiguredValue(t *testing.T) {
+	cfg := &config.Config{
+		OpenCodeGo: config.OpenCodeGoConfig{
+			TimeoutMs:          300000,
+			StreamingTimeoutMs: 100,
+		},
+	}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := NewOpenCodeClient(atomicCfg, nil)
+
+	model := config.ModelConfig{Provider: ProviderOpenCodeGo, ModelID: "kimi-k2.6"}
+	timeout := c.StreamingTimeout(model)
+	if timeout != 100*time.Millisecond {
+		t.Errorf("StreamingTimeout = %v, want 100ms", timeout)
+	}
+}
+
+func TestGetProviderAPIKeys_ProviderSpecificKeys(t *testing.T) {
+	cfg := &config.Config{
+		OpenCodeGo: config.OpenCodeGoConfig{
+			APIKeys: []string{"go-key-1", "go-key-2"},
+		},
+		OpenCodeZen: config.OpenCodeZenConfig{
+			APIKey: "zen-specific-key",
+		},
+		AWSBedrock: config.AWSBedrockConfig{
+			APIKeys: []string{"bedrock-key-1", "bedrock-key-2"},
+		},
+	}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := NewOpenCodeClient(atomicCfg, nil)
+
+	tests := []struct {
+		name     string
+		provider string
+		want     []string
+	}{
+		{
+			name:     "OpenCode Go uses its own keys",
+			provider: ProviderOpenCodeGo,
+			want:     []string{"go-key-1", "go-key-2"},
+		},
+		{
+			name:     "OpenCode Zen uses its own key",
+			provider: ProviderOpenCodeZen,
+			want:     []string{"zen-specific-key"},
+		},
+		{
+			name:     "AWS Bedrock uses its own keys",
+			provider: ProviderAWSBedrock,
+			want:     []string{"bedrock-key-1", "bedrock-key-2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			model := config.ModelConfig{Provider: tt.provider, ModelID: "test-model"}
+			got := c.getProviderAPIKeys(model)
+			if len(got) != len(tt.want) {
+				t.Errorf("getProviderAPIKeys() = %v, want %v", got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("getProviderAPIKeys()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestGetProviderAPIKeys_FallbackToGlobal(t *testing.T) {
+	cfg := &config.Config{
+		APIKeys:    []string{"global-key-1", "global-key-2"},
+		OpenCodeGo: config.OpenCodeGoConfig{
+			// No provider-specific keys
+		},
+	}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := NewOpenCodeClient(atomicCfg, nil)
+
+	model := config.ModelConfig{Provider: ProviderOpenCodeGo, ModelID: "test-model"}
+	got := c.getProviderAPIKeys(model)
+
+	want := []string{"global-key-1", "global-key-2"}
+	if len(got) != len(want) {
+		t.Errorf("getProviderAPIKeys() = %v, want %v (fallback to global)", got, want)
+		return
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("getProviderAPIKeys()[%d] = %q, want %q (fallback to global)", i, got[i], want[i])
+		}
+	}
+}
+
+func TestGetProviderAPIKeys_ProviderKeysPrecedence(t *testing.T) {
+	cfg := &config.Config{
+		APIKeys: []string{"global-key"},
+		OpenCodeGo: config.OpenCodeGoConfig{
+			APIKeys: []string{"go-specific-key"},
+		},
+	}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := NewOpenCodeClient(atomicCfg, nil)
+
+	model := config.ModelConfig{Provider: ProviderOpenCodeGo, ModelID: "test-model"}
+	got := c.getProviderAPIKeys(model)
+
+	// Should use provider-specific keys, not global
+	want := []string{"go-specific-key"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("getProviderAPIKeys() = %v, want %v (provider keys should take precedence)", got, want)
+	}
+}
+
+func TestOpenRouterKeys(t *testing.T) {
+	cfg := &config.Config{
+		OpenRouter: config.OpenRouterConfig{
+			APIKey: "openrouter-specific-key",
+		},
+	}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := NewOpenCodeClient(atomicCfg, nil)
+
+	model := config.ModelConfig{Provider: ProviderOpenRouter, ModelID: "openrouter-model"}
+	got := c.getProviderAPIKeys(model)
+
+	want := []string{"openrouter-specific-key"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("getProviderAPIKeys() = %v, want %v", got, want)
+	}
+}
+
+func TestOpenRouterEndpoint(t *testing.T) {
+	cfg := &config.Config{
+		OpenRouter: config.OpenRouterConfig{
+			BaseURL: "https://openrouter.ai/api/v1",
+			APIKey:  "openrouter-key",
+		},
+	}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := NewOpenCodeClient(atomicCfg, nil)
+
+	model := config.ModelConfig{Provider: ProviderOpenRouter, ModelID: "openrouter-model"}
+	endpoint := c.getEndpoint("openrouter-model", model)
+
+	if endpoint.BaseURL != cfg.OpenRouter.BaseURL {
+		t.Errorf("getEndpoint BaseURL = %q, want %q", endpoint.BaseURL, cfg.OpenRouter.BaseURL)
+	}
+	if endpoint.APIKey != cfg.OpenRouter.APIKey {
+		t.Errorf("getEndpoint APIKey = %q, want %q", endpoint.APIKey, cfg.OpenRouter.APIKey)
+	}
+}
+
+func TestOpenRouterTimeout(t *testing.T) {
+	cfg := &config.Config{
+		OpenRouter: config.OpenRouterConfig{
+			TimeoutMs:          120000,
+			StreamTimeoutMs:    180000,
+			StreamingTimeoutMs: 240000,
+		},
+	}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := NewOpenCodeClient(atomicCfg, nil)
+
+	model := config.ModelConfig{Provider: ProviderOpenRouter, ModelID: "openrouter-model"}
+
+	if got := c.RequestTimeout(model); got != 120*time.Second {
+		t.Errorf("RequestTimeout = %v, want 120s", got)
+	}
+	if got := c.StreamIdleTimeout(model); got != 180*time.Second {
+		t.Errorf("StreamIdleTimeout = %v, want 180s", got)
+	}
+	if got := c.StreamingTimeout(model); got != 240*time.Second {
+		t.Errorf("StreamingTimeout = %v, want 240s", got)
+	}
+}
+
+func TestOpenRouterChatCompletion_UsesBearerAuth(t *testing.T) {
+	var gotURL string
+	var gotAuth string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURL = r.URL.String()
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp-1","object":"chat.completion","created":1,"model":"openrouter/model","choices":[],"usage":{}}`))
+	}))
+	defer ts.Close()
+
+	cfg := &config.Config{
+		OpenRouter: config.OpenRouterConfig{
+			BaseURL: ts.URL,
+			APIKey:  "openrouter-key",
+		},
+	}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := NewOpenCodeClient(atomicCfg, nil)
+
+	model := config.ModelConfig{Provider: ProviderOpenRouter, ModelID: "openrouter/model"}
+	req := &types.ChatCompletionRequest{
+		Model:    "openrouter/model",
+		Messages: []types.ChatMessage{{Role: "user", Content: json.RawMessage(`"hello"`)}},
+	}
+	_, err := c.ChatCompletionNonStreaming(context.Background(), "openrouter/model", req, model)
+	if err != nil {
+		t.Fatalf("ChatCompletionNonStreaming() error = %v", err)
+	}
+
+	if gotURL != "/" {
+		t.Errorf("request URL = %q, want %q", gotURL, "/")
+	}
+	if gotAuth != "Bearer openrouter-key" {
+		t.Errorf("Authorization header = %q, want %q", gotAuth, "Bearer openrouter-key")
+	}
+}
+
+func TestOpenRouterChatCompletion_UsesOpenRouterBaseURL(t *testing.T) {
+	var gotURL string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURL = r.URL.String()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp-2","object":"chat.completion","created":2,"model":"openrouter/model","choices":[],"usage":{}}`))
+	}))
+	defer ts.Close()
+
+	cfg := &config.Config{
+		OpenRouter: config.OpenRouterConfig{
+			BaseURL: ts.URL,
+			APIKey:  "openrouter-key",
+		},
+	}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := NewOpenCodeClient(atomicCfg, nil)
+
+	model := config.ModelConfig{Provider: ProviderOpenRouter, ModelID: "openrouter/model"}
+	req := &types.ChatCompletionRequest{
+		Model:    "openrouter/model",
+		Messages: []types.ChatMessage{{Role: "user", Content: json.RawMessage(`"hello"`)}},
+	}
+	_, err := c.ChatCompletionNonStreaming(context.Background(), "openrouter/model", req, model)
+	if err != nil {
+		t.Fatalf("ChatCompletionNonStreaming() error = %v", err)
+	}
+
+	if gotURL != "/" {
+		t.Errorf("request URL = %q, want %q", gotURL, "/")
+	}
+}
+
+func TestOpenRouterTimeout_FallsBackToTimeoutMs(t *testing.T) {
+	cfg := &config.Config{
+		OpenRouter: config.OpenRouterConfig{
+			TimeoutMs:          120000,
+			StreamTimeoutMs:    0,
+			StreamingTimeoutMs: 0,
+		},
+	}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := NewOpenCodeClient(atomicCfg, nil)
+
+	model := config.ModelConfig{Provider: ProviderOpenRouter, ModelID: "openrouter-model"}
+
+	if got := c.StreamIdleTimeout(model); got != 120*time.Second {
+		t.Errorf("StreamIdleTimeout = %v, want 120s", got)
+	}
+	if got := c.StreamingTimeout(model); got != 120*time.Second {
+		t.Errorf("StreamingTimeout = %v, want 120s", got)
+	}
+}
+
+func TestGetProviderAPIKeys_EmptyReturnsGlobal(t *testing.T) {
+	cfg := &config.Config{
+		APIKey:     "global-single-key",
+		OpenCodeGo: config.OpenCodeGoConfig{
+			// No keys configured
+		},
+	}
+	atomicCfg := config.NewAtomicConfig(cfg, "")
+	c := NewOpenCodeClient(atomicCfg, nil)
+
+	model := config.ModelConfig{Provider: ProviderOpenCodeGo, ModelID: "test-model"}
+	got := c.getProviderAPIKeys(model)
+
+	want := []string{"global-single-key"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("getProviderAPIKeys() = %v, want %v (should fallback to global)", got, want)
 	}
 }

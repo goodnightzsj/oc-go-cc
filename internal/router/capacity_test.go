@@ -3,83 +3,81 @@ package router
 import (
 	"testing"
 
-	"oc-go-cc/internal/config"
+	"github.com/routatic/proxy/internal/config"
 )
 
-func TestFilterByCapacity_SmallMaxTokens_NotSkipped(t *testing.T) {
-	// Claude Code's auto-mode safety classifier sends a tiny non-streaming
-	// request (max_tokens=64) to render a yes/no verdict. The model still has
-	// ample context room; only its requested output budget is small. This must
-	// NOT be treated as capacity-ineligible — otherwise auto mode can never
-	// determine safety ("model temporarily unavailable").
+func TestFilterByCapacitySkipsPrimaryAndUsesEligibleFallback(t *testing.T) {
 	chain := []config.ModelConfig{
-		{ModelID: "kimi-k2.6", Provider: "opencode-go", ContextWindow: 128000, ContextMargin: 4096},
+		{Provider: "opencode-go", ModelID: "glm-5.1", MaxTokens: 8192},
+		{Provider: "opencode-go", ModelID: "deepseek-v4-pro", MaxTokens: 8192},
 	}
 
-	decision, err := FilterByCapacity(chain, 1000, 64)
+	decision, err := FilterByCapacity(chain, 250000, 8192, false, false)
 	if err != nil {
-		t.Fatalf("small max_tokens request must not be rejected: %v", err)
+		t.Fatalf("FilterByCapacity() error = %v", err)
 	}
-	if len(decision.Models) != 1 {
-		t.Fatalf("got %d models, want 1 (small max_tokens must not cause a skip)", len(decision.Models))
-	}
-	// The clamp still applies to the sent max_tokens.
-	if decision.Models[0].MaxTokens != 64 {
-		t.Errorf("clamped MaxTokens = %d, want 64", decision.Models[0].MaxTokens)
-	}
-}
-
-func TestFilterByCapacity_ContextExhausted_Skipped(t *testing.T) {
-	// A request whose input leaves less than the output floor in the model's
-	// context window IS ineligible — the model physically cannot respond.
-	chain := []config.ModelConfig{
-		{ModelID: "kimi-k2.6", Provider: "opencode-go", ContextWindow: 128000, ContextMargin: 4096},
-	}
-
-	decision, err := FilterByCapacity(chain, 130000, 4096)
-	if err == nil {
-		t.Fatalf("expected error when context window is exhausted, got none (models=%d)", len(decision.Models))
+	if got, want := decision.Models[0].ModelID, "deepseek-v4-pro"; got != want {
+		t.Fatalf("selected model = %s, want %s", got, want)
 	}
 	if len(decision.Skipped) != 1 || decision.Skipped[0].Reason != "context_window_exceeded" {
-		t.Errorf("expected context_window_exceeded skip, got %+v", decision.Skipped)
+		t.Fatalf("skipped = %+v, want context skip", decision.Skipped)
 	}
 }
 
-func TestFilterByCapacity_UnconstrainedModel_Passthrough(t *testing.T) {
-	// A model that declares no capacity metadata (ContextWindow/MaxTokens<=0)
-	// is passed through unchanged — this is the pre-existing behavior.
+func TestFilterByCapacityRejectsVisionFallbackToTextModel(t *testing.T) {
 	chain := []config.ModelConfig{
-		{ModelID: "kimi-k2.6", Provider: "opencode-go", MaxTokens: 4096},
+		{Provider: "opencode-go", ModelID: "deepseek-v4-pro", MaxTokens: 8192},
 	}
 
-	decision, err := FilterByCapacity(chain, 90000, 64)
+	decision, err := FilterByCapacity(chain, 1000, 8192, true, false)
+	if err == nil {
+		t.Fatal("FilterByCapacity() error = nil, want error")
+	}
+	if len(decision.Models) != 0 {
+		t.Fatalf("eligible models = %+v, want none", decision.Models)
+	}
+	if len(decision.Skipped) != 1 || decision.Skipped[0].Reason != "vision_not_supported" {
+		t.Fatalf("skipped = %+v, want vision skip", decision.Skipped)
+	}
+}
+
+func TestFilterByCapacityClampsMaxTokens(t *testing.T) {
+	chain := []config.ModelConfig{
+		{Provider: "opencode-go", ModelID: "kimi-k2.6", MaxTokens: 16384},
+	}
+
+	decision, err := FilterByCapacity(chain, 240000, 16384, true, false)
 	if err != nil {
-		t.Fatalf("unconstrained model must not be rejected: %v", err)
+		t.Fatalf("FilterByCapacity() error = %v", err)
+	}
+	if got, want := decision.Models[0].MaxTokens, 256000-240000-config.DefaultContextMargin; got != want {
+		t.Fatalf("max_tokens = %d, want %d", got, want)
+	}
+}
+
+// TestFilterByCapacityHonorsSmallMaxTokens guards the auto-mode classifier
+// regression: the harness's safety classifier sends a tiny non-streaming
+// request (max_tokens=64) to render a yes/no verdict. The capacity filter
+// must keep the model eligible — the model has ample context room, it just
+// needs to produce few output tokens — rather than rejecting it with "no
+// eligible model for request capacity", which the harness reports as
+// "model temporarily unavailable, auto mode cannot determine safety".
+func TestFilterByCapacityHonorsSmallMaxTokens(t *testing.T) {
+	chain := []config.ModelConfig{
+		{Provider: "opencode-go", ModelID: "glm-5.2", MaxTokens: 8192},
+	}
+
+	decision, err := FilterByCapacity(chain, 500, 64, false, false)
+	if err != nil {
+		t.Fatalf("FilterByCapacity() error = %v, want nil (small max_tokens must not skip)", err)
 	}
 	if len(decision.Models) != 1 {
-		t.Fatalf("got %d models, want 1", len(decision.Models))
+		t.Fatalf("eligible models = %+v, want exactly 1", decision.Models)
 	}
-	if decision.Models[0].MaxTokens != 64 {
-		t.Errorf("clamped MaxTokens = %d, want 64 (requested max applies)", decision.Models[0].MaxTokens)
+	if got, want := decision.Models[0].MaxTokens, 64; got != want {
+		t.Fatalf("max_tokens = %d, want %d (client's small request honored)", got, want)
 	}
-}
-
-func TestClampOutputTokens_ClientRequestWins(t *testing.T) {
-	model := config.ModelConfig{ModelID: "m", ContextWindow: 128000, ContextMargin: 4096, MaxTokens: 8192}
-	// Client asks for 256; model cap has no room to raise it.
-	if got := clampOutputTokens(model, 1000, 256); got != 256 {
-		t.Errorf("got %d, want 256", got)
-	}
-}
-
-func TestClampOutputTokens_ModelOutputCapClamps(t *testing.T) {
-	model := config.ModelConfig{ModelID: "m", ContextWindow: 0, ContextMargin: 0, MaxOutputTokens: 512}
-	// Model-level output cap is tighter than the client's request.
-	if got := clampOutputTokens(model, 1000, 1024); got != 512 {
-		t.Errorf("got %d, want 512", got)
-	}
-	// Model-level cap is looser than the client's request — client wins.
-	if got := clampOutputTokens(model, 1000, 256); got != 256 {
-		t.Errorf("got %d, want 256", got)
+	if len(decision.Skipped) != 0 {
+		t.Fatalf("skipped = %+v, want none for small max_tokens with room to spare", decision.Skipped)
 	}
 }

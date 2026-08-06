@@ -26,6 +26,7 @@ const TRANSLATIONS = {
     'analytics.byProvider': 'Requests by Provider',
     'analytics.noData': 'No data',
     'analytics.noTrend': 'No trend data',
+    'analytics.singleDay': '(single-day data)',
     'analytics.dailyTrend': 'Daily Token Trend',
     'analytics.last7d': 'Last 7 days',
     'analytics.last30d': 'Last 30 days',
@@ -179,6 +180,7 @@ const TRANSLATIONS = {
     'analytics.byProvider': '按供应商请求量',
     'analytics.noData': '暂无数据',
     'analytics.noTrend': '暂无趋势数据',
+    'analytics.singleDay': '（仅单日数据）',
     'analytics.dailyTrend': '每日 Token 趋势',
     'analytics.last7d': '最近 7 天',
     'analytics.last30d': '最近 30 天',
@@ -2017,39 +2019,76 @@ const AnalyticsModule = {
     if (!wrap) return;
     wrap.innerHTML = '';
     if (!points.length) {
-      wrap.innerHTML = '<div class="empty-state">No trend data yet. Run some requests to see analytics.</div>';
+      wrap.innerHTML = '<div class="empty-state">' + t('analytics.noTrend') + '</div>';
       return;
     }
 
-    const w = 620, h = 188, pad = 30;
+    // Layout: leave room for a y-axis label column (left) and an x-axis date
+    // row (bottom) so the chart reads as a real axes plot even with few points.
+    const w = 648, h = 224;
+    const ml = 56, mb = 22, mt = 10, mr = 12;
+    const plotW = w - ml - mr;
+    const plotH = h - mt - mb;
+    const AXIS = '#48484a', GRID = '#3a3a3c', TXT = '#98989d';
+
     const maxV = Math.max(1, ...points.map(p => Math.max(p.input_tokens||0, p.output_tokens||0)));
-    const stepX = (w - pad*2) / Math.max(1, points.length - 1);
+    const stepX = plotW / Math.max(1, points.length - 1);
+    const x = (i) => ml + i * stepX;
+    const y = (v) => mt + plotH - (v || 0) / maxV * plotH;
 
-    const ptsIn = points.map((p,i) => {
-      const x = pad + i*stepX;
-      const y = h - pad - (p.input_tokens||0)/maxV * (h - pad*2);
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    });
-    const ptsOut = points.map((p,i) => {
-      const x = pad + i*stepX;
-      const y = h - pad - (p.output_tokens||0)/maxV * (h - pad*2);
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    });
+    const fmt = (n) => {
+      if (n >= 1_000_000) return (n/1_000_000).toFixed(n>=10_000_000?0:1) + 'M';
+      if (n >= 1000) return (n/1000).toFixed(n>=100_000?0:1) + 'K';
+      return String(n);
+    };
+    const fmtDay = (d) => { const parts=String(d).split('-'); return parts.length>=2 ? parts[1]+'-'+parts[2] : d; };
 
+    // Y gridlines + labels (0..maxV, 4 steps)
+    let yGrid = '';
+    for (let s = 0; s <= 4; s++) {
+      const v = maxV * s / 4;
+      const yy = y(v).toFixed(1);
+      yGrid += `<line x1="${ml}" y1="${yy}" x2="${w-mr}" y2="${yy}" stroke="${GRID}" stroke-width="1"/>`;
+      yGrid += `<text x="${ml-8}" y="${(+yy+3).toFixed(1)}" text-anchor="end" font-size="9.5" fill="${TXT}">${fmt(Math.round(v))}</text>`;
+    }
+    // X date labels + vertical gridlines (stride so labels don't collide)
+    const maxLabels = 7;
+    const stride = Math.max(1, Math.ceil(points.length / maxLabels));
+    let xGrid = '';
+    for (let i = 0; i < points.length; i += stride) {
+      const lx = x(i).toFixed(1);
+      xGrid += `<line x1="${lx}" y1="${mt}" x2="${lx}" y2="${h-mb}" stroke="${GRID}" stroke-width="1"/>`;
+      xGrid += `<text x="${lx}" y="${h-mb+14}" text-anchor="middle" font-size="9.5" fill="${TXT}">${fmtDay(points[i].date||'')}</text>`;
+    }
+    // last point label included even if skipped
+    if ((points.length-1) % stride !== 0) {
+      const lx = x(points.length-1).toFixed(1);
+      xGrid += `<text x="${lx}" y="${h-mb+14}" text-anchor="middle" font-size="9.5" fill="${TXT}">${fmtDay(points[points.length-1].date||'')}</text>`;
+    }
+
+    const ptsIn = points.map((p,i) => `${x(i).toFixed(1)},${y(p.input_tokens||0).toFixed(1)}`);
+    const ptsOut = points.map((p,i) => `${x(i).toFixed(1)},${y(p.output_tokens||0).toFixed(1)}`);
     const pathIn = 'M' + ptsIn.join(' L');
     const pathOut = 'M' + ptsOut.join(' L');
-    const areaIn = pathIn + ` L${(pad + (points.length-1)*stepX).toFixed(1)},${h-pad} L${pad},${h-pad} Z`;
-    const areaOut = pathOut + ` L${(pad + (points.length-1)*stepX).toFixed(1)},${h-pad} L${pad},${h-pad} Z`;
+    const lastXp = x(points.length-1).toFixed(1);
+    const baseY = (h - mb).toFixed(1);
+    const areaIn = pathIn + ` L${lastXp},${baseY} L${ml},${baseY} Z`;
+    const areaOut = pathOut + ` L${lastXp},${baseY} L${ml},${baseY} Z`;
 
+    const dotR = points.length > 1 ? 2.4 : 4;
     const dots = points.map((p,i) => {
-      const x = (pad + i*stepX).toFixed(1);
-      const yIn = (h - pad - (p.input_tokens||0)/maxV*(h-pad*2)).toFixed(1);
-      const yOut = (h - pad - (p.output_tokens||0)/maxV*(h-pad*2)).toFixed(1);
-      return `<circle cx="${x}" cy="${yIn}" r="2.2" fill="#3b82f6"/><circle cx="${x}" cy="${yOut}" r="2.2" fill="#10b981"/>`;
+      const lx = x(i).toFixed(1);
+      const yIn = y(p.input_tokens||0).toFixed(1);
+      const yOut = y(p.output_tokens||0).toFixed(1);
+      return `<circle cx="${lx}" cy="${yIn}" r="${dotR}" fill="#3b82f6"/><circle cx="${lx}" cy="${yOut}" r="${dotR}" fill="#10b981"/>`;
     }).join('');
 
     const svg = `
       <svg class="trend-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+        ${yGrid}
+        ${xGrid}
+        <line x1="${ml}" y1="${mt}" x2="${ml}" y2="${h-mb}" stroke="${AXIS}" stroke-width="1"/>
+        <line x1="${ml}" y1="${h-mb}" x2="${w-mr}" y2="${h-mb}" stroke="${AXIS}" stroke-width="1"/>
         <path d="${areaIn}" fill="#3b82f6" fill-opacity="0.12"/>
         <path d="${areaOut}" fill="#10b981" fill-opacity="0.12"/>
         <path d="${pathIn}" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round"/>
@@ -2059,6 +2098,7 @@ const AnalyticsModule = {
       <div class="trend-legend">
         <span><span class="swatch" style="background:#3b82f6;height:3px;width:14px;display:inline-block;border-radius:2px;margin-right:4px;"></span>${t('analytics.inputTokens')}</span>
         <span><span class="swatch" style="background:#10b981;height:3px;width:14px;display:inline-block;border-radius:2px;margin-right:4px;"></span>${t('analytics.outputTokens')}</span>
+        ${points.length===1?'<span style="color:#98989d;font-size:11px;">'+t('analytics.singleDay')+'</span>':''}
       </div>`;
     wrap.innerHTML = svg;
   },

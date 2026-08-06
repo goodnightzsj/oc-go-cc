@@ -395,19 +395,58 @@ type historyEntry struct {
 	Scenario     string `json:"scenario"`
 	StartTime    string `json:"start_time"` // RFC3339
 	DurationMs   int64  `json:"duration_ms"`
-	InputTokens  int    `json:"input_tokens"`
-	OutputTokens int    `json:"output_tokens"`
-	Streaming    bool   `json:"streaming"`
-	Success      bool   `json:"success"`
-	ErrorMsg     string `json:"error_msg,omitempty"`
+	InputTokens           int    `json:"input_tokens"`
+	OutputTokens          int    `json:"output_tokens"`
+	CacheReadTokens       int    `json:"cache_read_tokens"`
+	CacheCreationTokens   int    `json:"cache_creation_tokens"`
+	Streaming             bool   `json:"streaming"`
+	Success               bool   `json:"success"`
+	ErrorMsg              string `json:"error_msg,omitempty"`
 }
 
-func (s *Server) handleHistory(w http.ResponseWriter, _ *http.Request) {
-	if s.hist == nil {
-		writeJSON(w, []historyEntry{})
+func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	size, _ := strconv.Atoi(r.URL.Query().Get("size"))
+	if size <= 0 {
+		size = 50
+	}
+
+	// Prefer the persistent SQLite history (full dataset) with pagination;
+	// fall back to the in-memory ring buffer only when storage is unavailable.
+	if s.storage != nil {
+		repo := storage.NewRequests(s.storage)
+		records, total, err := repo.Page(page, size)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]any{
+			"items": toHistoryEntries(records),
+			"total": total,
+			"page":  page,
+			"size":  size,
+		})
 		return
 	}
-	records := s.hist.Last(200)
+
+	if s.hist == nil {
+		writeJSON(w, map[string]any{"items": []historyEntry{}, "total": 0, "page": page, "size": size})
+		return
+	}
+	records := s.hist.Last(size)
+	writeJSON(w, map[string]any{
+		"items": toHistoryEntries(records),
+		"total": int64(len(records)),
+		"page":  page,
+		"size":  size,
+	})
+}
+
+// toHistoryEntries converts request records to the wire format.
+func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 	out := make([]historyEntry, len(records))
 	for i, rec := range records {
 		out[i] = historyEntry{
@@ -419,12 +458,14 @@ func (s *Server) handleHistory(w http.ResponseWriter, _ *http.Request) {
 			DurationMs:   rec.Duration.Milliseconds(),
 			InputTokens:  rec.InputTokens,
 			OutputTokens: rec.OutputTokens,
+			CacheReadTokens:     rec.CacheReadTokens,
+			CacheCreationTokens: rec.CacheCreationTokens,
 			Streaming:    rec.Streaming,
 			Success:      rec.Success,
 			ErrorMsg:     rec.ErrorMsg,
 		}
 	}
-	writeJSON(w, out)
+	return out
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {

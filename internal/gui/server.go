@@ -61,11 +61,6 @@ type Server struct {
 	catalogMu         sync.Mutex
 
 	storage *storage.Database
-
-	// token guards the /api/* endpoints. Empty disables auth (default, for
-	// localhost-only use). Set ROUTATIC_PROXY_GUI_TOKEN to require a matching
-	// X-GUI-Token header before any /api request is served.
-	token string
 }
 
 // Options configures the GUI server.
@@ -99,12 +94,6 @@ func New(opts Options) *Server {
 		logger:           opts.Logger,
 
 		storage: opts.Storage,
-	}
-	// Optional API auth token. Only enforced when set; keeps localhost-only
-	// usage unchanged while allowing operators to gate the /api surface (which
-	// can expose API keys via /api/config) when the GUI is proxied publicly.
-	if t := os.Getenv("ROUTATIC_PROXY_GUI_TOKEN"); t != "" {
-		s.token = t
 	}
 	// Check initial autostart state.
 	s.cfg.Autostart = isAutostartEnabled()
@@ -179,32 +168,31 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 	}
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 
-	// API endpoints, guarded by optional token auth (see Server.token).
-	guard := s.requireAuth
-	mux.HandleFunc("/api/metrics", guard(s.handleMetrics))
-	mux.HandleFunc("/api/history", guard(s.handleHistory))
-	mux.HandleFunc("/api/config", guard(s.handleConfig))
-	mux.HandleFunc("/api/proxy/config", guard(s.handleProxyConfig))
-	mux.HandleFunc("/api/proxy/start", guard(s.handleProxyStart))
-	mux.HandleFunc("/api/proxy/stop", guard(s.handleProxyStop))
-	mux.HandleFunc("/api/catalog/lock", guard(s.handleCatalogLock))
-	mux.HandleFunc("/api/catalog/sync", guard(s.handleCatalogSync))
-	mux.HandleFunc("/api/test/send", guard(s.handleTestSend))
+	// API endpoints.
+	mux.HandleFunc("/api/metrics", s.handleMetrics)
+	mux.HandleFunc("/api/history", s.handleHistory)
+	mux.HandleFunc("/api/config", s.handleConfig)
+	mux.HandleFunc("/api/proxy/config", s.handleProxyConfig)
+	mux.HandleFunc("/api/proxy/start", s.handleProxyStart)
+	mux.HandleFunc("/api/proxy/stop", s.handleProxyStop)
+	mux.HandleFunc("/api/catalog/lock", s.handleCatalogLock)
+	mux.HandleFunc("/api/catalog/sync", s.handleCatalogSync)
+	mux.HandleFunc("/api/test/send", s.handleTestSend)
 
 	// New endpoints for advanced GUI features
 
-	mux.HandleFunc("/api/config/export", guard(s.handleConfigExport))
-	mux.HandleFunc("/api/config/import", guard(s.handleConfigImport))
-	mux.HandleFunc("/api/perf/models", guard(s.handlePerformance))
-	mux.HandleFunc("/api/perf/aggregate", guard(s.handlePerformanceAggregate))
-	mux.HandleFunc("/api/catalog/stats", guard(s.handleCatalogStats))
+	mux.HandleFunc("/api/config/export", s.handleConfigExport)
+	mux.HandleFunc("/api/config/import", s.handleConfigImport)
+	mux.HandleFunc("/api/perf/models", s.handlePerformance)
+	mux.HandleFunc("/api/perf/aggregate", s.handlePerformanceAggregate)
+	mux.HandleFunc("/api/catalog/stats", s.handleCatalogStats)
 
 	// Analytics (only when SQLite storage is available)
 	if s.storage != nil {
 		ah := NewAnalyticsHandler(s.storage)
-		mux.HandleFunc("/api/analytics/summary", guard(ah.Summary))
-		mux.HandleFunc("/api/analytics/tokens/trend", guard(ah.TokenTrend))
-		mux.HandleFunc("/api/analytics/latency", guard(ah.LatencyStats))
+		mux.HandleFunc("/api/analytics/summary", ah.Summary)
+		mux.HandleFunc("/api/analytics/tokens/trend", ah.TokenTrend)
+		mux.HandleFunc("/api/analytics/latency", ah.LatencyStats)
 	}
 
 	startPort := int(s.guiPort.Load())
@@ -240,45 +228,6 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 	url := "http://" + ln.Addr().String() + "/"
 	s.logger.Info("gui server started", "url", url)
 	return url, nil
-}
-
-// requireAuth wraps an /api handler with the optional shared-token gate. When
-// no token is configured (the default, localhost-only deployment) requests
-// pass through unchanged. When ROUTATIC_PROXY_GUI_TOKEN is set, a request must
-// present a matching token either as the X-GUI-Token header or as the ?token=
-// query parameter, otherwise it is rejected with 401. Static assets (the HTML
-// shell) are never guarded so the page still loads; only the data endpoints
-// are protected.
-func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
-	if s.token == "" {
-		return next
-	}
-	return func(w http.ResponseWriter, r *http.Request) {
-		got := r.Header.Get("X-GUI-Token")
-		if got == "" {
-			got = r.URL.Query().Get("token")
-		}
-		if secureCompare(got, s.token) {
-			next(w, r)
-			return
-		}
-		w.Header().Set("WWW-Authenticate", `Bearer realm="routatic-proxy"`)
-		s.logger.Warn("gui api unauthorized", "path", r.URL.Path, "remote", r.RemoteAddr)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-	}
-}
-
-// secureCompare compares two strings in constant time to avoid timing side
-// channels when an auth token is involved.
-func secureCompare(a, b string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	var v byte
-	for i := 0; i < len(a); i++ {
-		v |= a[i] ^ b[i]
-	}
-	return v == 0
 }
 
 // Shutdown gracefully stops the GUI server.

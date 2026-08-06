@@ -1692,8 +1692,12 @@ document.addEventListener('DOMContentLoaded', () => {
 loadProxyConfig();
 startPolling();
 // Activate the tab from the URL hash (deep-link / refresh resume). Defaults
-// to overview when no hash is present.
-activateTab((location.hash || '').replace(/^#/, '') || 'overview');
+// to overview when no hash is present. Deferred to a microtask so any
+// const modules (e.g. AnalyticsModule) defined later in this script have
+// been initialized — otherwise accessing them here hits a TDZ error.
+queueMicrotask(() => {
+  activateTab((location.hash || '').replace(/^#/, '') || 'overview');
+});
 
 const TestModule = {
   testModal: null,
@@ -2102,7 +2106,10 @@ const AnalyticsModule = {
       const lx = x(i).toFixed(1);
       const yIn = y(p.input_tokens||0).toFixed(1);
       const yOut = y(p.output_tokens||0).toFixed(1);
-      return `<circle cx="${lx}" cy="${yIn}" r="${dotR}" fill="#3b82f6"/><circle cx="${lx}" cy="${yOut}" r="${dotR}" fill="#10b981"/>`;
+      // Native SVG tooltip shows date + both values on hover (like deepseek's
+      // usage page) without extra JS.
+      const tip = `${p.date||''} · ${t('analytics.inputTokens')} ${(p.input_tokens||0).toLocaleString()} · ${t('analytics.outputTokens')} ${(p.output_tokens||0).toLocaleString()}`;
+      return `<g><circle cx="${lx}" cy="${yIn}" r="${dotR}" fill="#3b82f6"><title>${tip}</title></circle><circle cx="${lx}" cy="${yOut}" r="${dotR}" fill="#10b981"><title>${tip}</title></circle></g>`;
     }).join('');
 
     const svg = `

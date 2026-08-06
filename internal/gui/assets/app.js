@@ -2071,24 +2071,56 @@ const AnalyticsModule = {
     const rest = sorted.slice(5);
     const otherVal = rest.reduce((sum,i) => sum + (i[valKey]||0), 0);
     if (otherVal > 0) top.push({name: 'Other', [valKey]: otherVal});
-
     const total = top.reduce((sum,i) => sum + (i[valKey]||0), 0) || 1;
-    let segs = '';
-    let off = 0;
+
+    // SVG donut (drawn slices) so each sector can show a follow-cursor tooltip
+    // and a hover highlight, like a real usage dashboard.
+    const C = 120, R = 104, r = 68;
+    const px = (cx, cy, rad, ang) => [cx + rad * Math.cos(ang), cy + rad * Math.sin(ang)];
+    const slicePath = (a0, a1) => {
+      const [x0o, y0o] = px(C, C, R, a0);
+      const [x1o, y1o] = px(C, C, R, a1);
+      const [x1i, y1i] = px(C, C, r, a1);
+      const [x0i, y0i] = px(C, C, r, a0);
+      const large = (a1 - a0) > Math.PI ? 1 : 0;
+      return `M ${x0o.toFixed(1)} ${y0o.toFixed(1)} A ${R} ${R} 0 ${large} 1 ${x1o.toFixed(1)} ${y1o.toFixed(1)} ` +
+             `L ${x1i.toFixed(1)} ${y1i.toFixed(1)} A ${r} ${r} 0 ${large} 0 ${x0i.toFixed(1)} ${y0i.toFixed(1)} Z`;
+    };
+
+    let angle = -Math.PI / 2;
     const legend = [];
-    top.forEach((it, idx) => {
+    const slices = top.map((it, idx) => {
       const v = it[valKey] || 0;
-      const pct = v / total * 100;
+      const frac = v / total;
+      const sweep = frac * 2 * Math.PI;
+      const a0 = angle, a1 = angle + sweep;
+      angle = a1;
       const col = this.palette[idx % this.palette.length];
-      segs += `${col} ${off.toFixed(1)}% ${(off + pct).toFixed(1)}%, `;
-      off += pct;
       const label = it.model || it.provider || it.name || 'Unknown';
-      const pctTxt = pct.toFixed(1) + '%';
-      // title gives a native hover tooltip: full label, raw value, and share.
-      legend.push(`<div class="legend-item" title="${this.escapeHtml(label)}: ${v} (${pctTxt})"><span class="legend-swatch" style="background:${col}"></span><span class="legend-label">${this.escapeHtml(label)}</span><span class="legend-value">${v}</span><span class="legend-pct">${pctTxt}</span></div>`);
+      const pctTxt = (frac * 100).toFixed(1) + '%';
+      const tip = `${this.escapeHtml(label)}: ${v.toLocaleString()} tokens (${pctTxt})`;
+      legend.push(`<div class="legend-item"><span class="legend-swatch" style="background:${col}"></span><span class="legend-label">${this.escapeHtml(label)}</span><span class="legend-value">${v.toLocaleString()}</span><span class="legend-pct">${pctTxt}</span></div>`);
+      return { path: slicePath(a0, a1), col, tip, label, v };
     });
 
-    const html = `<div class="donut-wrapper"><div class="donut" style="--donut-segments: ${segs.slice(0,-2)}"></div><div class="donut-legend">${legend.join('')}</div></div>`;
+    const tooltipId = containerId + '-tip';
+    const svgSlices = slices.map((s, i) => `
+      <path d="${s.path}" fill="${s.col}" stroke="#1c1c1e" stroke-width="1.5"
+        onmouseenter="this.style.opacity='0.7'; document.getElementById('${tooltipId}').textContent='${s.tip}'; document.getElementById('${tooltipId}').style.display='block'"
+        onmousemove="var el=document.getElementById('${tooltipId}'); var r=this.closest('.donut-svg-wrap').getBoundingClientRect(); el.style.left=(event.clientX-r.left+10)+'px'; el.style.top=(event.clientY-r.top-10)+'px';"
+        onmouseleave="this.style.opacity='1'; document.getElementById('${tooltipId}').style.display='none'"
+        id="slice-${containerId}-${i}"></path>`).join('');
+
+    const html = `
+      <div class="donut-svg-wrap" style="position:relative;display:flex;justify-content:center;align-items:center;height:240px;">
+        <svg width="240" height="240" viewBox="0 0 240 240">
+          <text x="120" y="116" text-anchor="middle" font-size="20" font-weight="600" fill="#f5f5f7">${total >= 1_000_000 ? (total/1_000_000).toFixed(1)+'M' : total >= 1000 ? (total/1000).toFixed(0)+'K' : total}</text>
+          <text x="120" y="134" text-anchor="middle" font-size="10" fill="#98989d">tokens</text>
+          ${svgSlices}
+        </svg>
+        <div id="${tooltipId}" style="display:none;position:absolute;pointer-events:none;background:#2c2c2e;border:1px solid #48484a;border-radius:6px;padding:6px 9px;font-size:11px;color:#f5f5f7;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.4);z-index:10;"></div>
+      </div>
+      <div class="donut-legend">${legend.join('')}</div>`;
     wrap.innerHTML = html;
   },
 

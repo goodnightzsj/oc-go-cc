@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${ROOT_DIR}/.tmp/dev"
-DEV_BIN="${BUILD_DIR}/oc-go-cc"
+DEV_BIN="${BUILD_DIR}/routatic-proxy"
 WATCH_INTERVAL="${WATCH_INTERVAL:-1}"
 source "${ROOT_DIR}/scripts/go-common.sh"
 
@@ -45,17 +45,17 @@ LAST_FINGERPRINT="$(source_fingerprint "${ROOT_DIR}" "${HASHER}")"
 
 while true; do
   echo
-  echo "[dev] building oc-go-cc"
+  echo "[dev] building routatic-proxy"
   if ! (
     cd "${ROOT_DIR}"
-    GOTOOLCHAIN=local "${GO_BIN}" build -ldflags "${VERSION_LDFLAGS}" -o "${DEV_BIN}" ./cmd/oc-go-cc
+    GOTOOLCHAIN=local "${GO_BIN}" build -ldflags "${VERSION_LDFLAGS}" -o "${DEV_BIN}" ./cmd/routatic-proxy
   ); then
     echo "[dev] build failed; waiting for file changes"
     LAST_FINGERPRINT="$(wait_for_change "${LAST_FINGERPRINT}" "${HASHER}")"
     continue
   fi
 
-  echo "[dev] starting oc-go-cc serve $*"
+  echo "[dev] starting routatic-proxy serve $*"
   (
     cd "${ROOT_DIR}"
     exec "${DEV_BIN}" serve "$@"

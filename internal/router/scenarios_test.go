@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"oc-go-cc/internal/config"
+	"github.com/routatic/proxy/internal/config"
 )
 
 func TestHasComplexPattern_UserMessage(t *testing.T) {
@@ -110,6 +110,136 @@ func TestDetectScenario_LongContextTakesPriority(t *testing.T) {
 	result := DetectScenario(messages, 70000, mockConfig())
 	if result.Scenario != ScenarioLongContext {
 		t.Errorf("Expected ScenarioLongContext, got %s", result.Scenario)
+	}
+}
+
+func TestDetectScenario_VisionSimpleRequest(t *testing.T) {
+	messages := []MessageContent{
+		{Role: "user", Content: "Describe this screen", HasImage: true},
+	}
+	result := DetectScenario(messages, 100, mockConfig())
+	if result.Scenario != ScenarioVision {
+		t.Errorf("Expected ScenarioVision, got %s", result.Scenario)
+	}
+}
+
+func TestDetectScenario_VisionComplexRequest(t *testing.T) {
+	messages := []MessageContent{
+		{Role: "user", Content: "Analyze this screenshot and find the bug", HasImage: true},
+	}
+	result := DetectScenario(messages, 100, mockConfig())
+	if result.Scenario != ScenarioVisionComplex {
+		t.Errorf("Expected ScenarioVisionComplex, got %s", result.Scenario)
+	}
+}
+
+func TestDetectScenario_VisionUsesLatestImageRequestComplexity(t *testing.T) {
+	messages := []MessageContent{
+		{Role: "user", Content: "Analyze this previous architecture"},
+		{Role: "assistant", Content: "Done"},
+		{Role: "user", Content: "Cosa vedi?", HasImage: true},
+	}
+	result := DetectScenario(messages, 100, mockConfig())
+	if result.Scenario != ScenarioVision {
+		t.Errorf("Expected ScenarioVision, got %s", result.Scenario)
+	}
+}
+
+func TestDetectScenario_ReturnsToTextRoutingAfterImageTurn(t *testing.T) {
+	messages := []MessageContent{
+		{Role: "user", Content: "Analyze this screenshot and find the bug", HasImage: true},
+		{Role: "assistant", Content: "Done"},
+		{Role: "user", Content: "Refactor this code"},
+	}
+	result := DetectScenario(messages, 100, mockConfig())
+	if result.Scenario != ScenarioComplex {
+		t.Errorf("Expected ScenarioComplex, got %s", result.Scenario)
+	}
+}
+
+func TestDetectScenario_ReturnsToTextRoutingWhenLatestTurnHasHistoricalImageOnly(t *testing.T) {
+	messages := []MessageContent{
+		{Role: "user", Content: "Cosa vedi?", HasImage: true, ImageHashes: []string{"img1"}},
+		{Role: "assistant", Content: "Vedo una schermata."},
+		{Role: "user", Content: "ci sei?", HasImage: true, ImageHashes: []string{"img1"}},
+	}
+	result := DetectScenario(messages, 100, mockConfig())
+	if result.Scenario != ScenarioDefault {
+		t.Errorf("Expected ScenarioDefault, got %s", result.Scenario)
+	}
+}
+
+func TestDetectScenario_LatestTextVisualIntentWithoutNewImageStaysNonVision(t *testing.T) {
+	// Regression test: previously the proxy routed to the vision scenario
+	// whenever the latest user text contained a "visual intent" keyword
+	// (image/screenshot/ui/layout/...) AND any historical message had an
+	// image. That fired false positives on ordinary prose ("check the UI
+	// layout", "fix the Docker image", "look at this screenshot of the
+	// error") for long-running sessions that happened to have an image
+	// in the conversation history, forcing every subsequent turn onto a
+	// vision-capable model (and onto the long-context vision scenario
+	// once tokens crossed the threshold). Vision routing should only
+	// trigger when the LATEST user message actually contains a new image.
+	//
+	// The third user message below is identical to the previous
+	// (intentionally-true) assertion except HasImage is now false. The
+	// expected scenario is the text-or-complex default, not vision.
+	messages := []MessageContent{
+		{Role: "user", Content: "Cosa vedi?", HasImage: true, ImageHashes: []string{"img1"}},
+		{Role: "assistant", Content: "Vedo una schermata."},
+		{Role: "user", Content: "cosa vedi nello screenshot?", HasImage: false},
+	}
+	result := DetectScenario(messages, 100, mockConfig())
+	if result.Scenario == ScenarioVision {
+		t.Errorf("Expected non-vision scenario for text-only latest message, got %s", result.Scenario)
+	}
+}
+
+func TestDetectScenario_DebugWithoutVisualIntentStaysTextDefault(t *testing.T) {
+	// "debug" was removed from complexKeywords because tool_result content
+	// constantly contains it, routing every turn to complex by accident.
+	messages := []MessageContent{
+		{Role: "user", Content: "Cosa vedi?", HasImage: true, ImageHashes: []string{"img1"}},
+		{Role: "assistant", Content: "Vedo una schermata."},
+		{Role: "user", Content: "debug questo codice", HasImage: false},
+	}
+	result := DetectScenario(messages, 100, mockConfig())
+	if result.Scenario != ScenarioDefault {
+		t.Errorf("Expected ScenarioDefault (debug is no longer a complex trigger), got %s", result.Scenario)
+	}
+}
+
+func TestRouteForStreaming_ReturnsToFastAfterImageTurn(t *testing.T) {
+	messages := []MessageContent{
+		{Role: "user", Content: "Cosa vedi?", HasImage: true},
+		{Role: "assistant", Content: "Done"},
+		{Role: "user", Content: "Hello"},
+	}
+	result := RouteForStreaming(messages, 100, mockConfig())
+	if result.Scenario != ScenarioFast {
+		t.Errorf("Expected ScenarioFast, got %s", result.Scenario)
+	}
+}
+
+func TestDetectScenario_VisionLongContextTakesPriorityOverVisionComplex(t *testing.T) {
+	messages := []MessageContent{
+		{Role: "user", Content: "Analyze this screenshot and refactor the code", HasImage: true},
+	}
+	result := DetectScenario(messages, 70000, mockConfig())
+	if result.Scenario != ScenarioVisionLongContext {
+		t.Errorf("Expected ScenarioVisionLongContext, got %s", result.Scenario)
+	}
+}
+
+func TestRouteForStreaming_VisionComplexKeepsVisionComplexScenario(t *testing.T) {
+	// "bug" was removed from complexKeywords; use a retained architectural
+	// keyword ("refactor") to exercise the vision_complex path.
+	messages := []MessageContent{
+		{Role: "user", Content: "Refactor the code shown in this screenshot", HasImage: true},
+	}
+	result := RouteForStreaming(messages, 100, mockConfig())
+	if result.Scenario != ScenarioVisionComplex {
+		t.Errorf("Expected ScenarioVisionComplex, got %s", result.Scenario)
 	}
 }
 

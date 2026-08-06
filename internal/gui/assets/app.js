@@ -2049,7 +2049,8 @@ const AnalyticsModule = {
     // cache) rather than request count, which better reflects real usage.
     const withTotal = (items) => (items || []).map(it => ({
       ...it,
-      total_tokens: (it.input_tokens||0) + (it.output_tokens||0) + (it.cache_tokens||0),
+      total_tokens: (it.input_tokens||0) + (it.output_tokens||0)
+        + (it.cache_read_tokens||0) + (it.cache_creation_tokens||0),
     }));
     this.renderDonutChart('model-donut', withTotal(summary.models), 'total_tokens');
     this.renderDonutChart('provider-donut', withTotal(summary.providers), 'total_tokens');

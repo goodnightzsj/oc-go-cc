@@ -77,7 +77,8 @@ func (a *Analytics) modelCostSum(ctx context.Context, since string) (float64, er
 		SELECT model,
 		       COALESCE(SUM(input_tokens), 0),
 		       COALESCE(SUM(output_tokens), 0),
-		       COALESCE(SUM(cache_read_tokens), 0) + COALESCE(SUM(cache_creation_tokens), 0) AS cache_tokens
+		       COALESCE(SUM(cache_read_tokens), 0),
+		       COALESCE(SUM(cache_creation_tokens), 0)
 		FROM requests
 		WHERE created_at >= ?
 		GROUP BY model
@@ -89,12 +90,16 @@ func (a *Analytics) modelCostSum(ctx context.Context, since string) (float64, er
 	var cost float64
 	for rows.Next() {
 		var model string
-		var inToks, outToks, cacheToks int64
-		if err := rows.Scan(&model, &inToks, &outToks, &cacheToks); err != nil {
+		var inToks, outToks, cacheReadToks, cacheCreateToks int64
+		if err := rows.Scan(&model, &inToks, &outToks, &cacheReadToks, &cacheCreateToks); err != nil {
 			return 0, err
 		}
 		if ipm, opm, cpm, ok := PriceForModel(model); ok {
-			cost += (float64(inToks)*ipm + float64(cacheToks)*cpm + float64(outToks)*opm) / 1_000_000
+			// OpenCode semantics: cache CREATION is a first-time write of prompt
+			// input, billed at the input price; cache READ (an existing prompt
+			// hitting the cache) is billed at the cheap cache price.
+			effectiveInput := inToks + cacheCreateToks
+			cost += (float64(effectiveInput)*ipm + float64(cacheReadToks)*cpm + float64(outToks)*opm) / 1_000_000
 		}
 	}
 	return cost, rows.Err()
@@ -102,15 +107,21 @@ func (a *Analytics) modelCostSum(ctx context.Context, since string) (float64, er
 
 // ModelBreakdown holds per-model usage and performance stats.
 type ModelBreakdown struct {
-	Model        string  `json:"model"`
-	Provider     string  `json:"provider"`
-	Requests     int64   `json:"requests"`
-	InputTokens  int64   `json:"input_tokens"`
-	OutputTokens int64   `json:"output_tokens"`
-	CacheTokens  int64   `json:"cache_tokens"`
-	AvgLatencyMs float64 `json:"avg_latency_ms"`
-	SuccessRate  float64 `json:"success_rate"`
-	EstCostUSD   float64 `json:"est_cost_usd"` // based on models.cost_* if available
+	Model                string  `json:"model"`
+	Provider             string  `json:"provider"`
+	Requests             int64   `json:"requests"`
+	InputTokens          int64   `json:"input_tokens"`
+	OutputTokens         int64   `json:"output_tokens"`
+	CacheReadTokens      int64   `json:"cache_read_tokens"`
+	CacheCreationTokens  int64   `json:"cache_creation_tokens"`
+	AvgLatencyMs         float64 `json:"avg_latency_ms"`
+	SuccessRate          float64 `json:"success_rate"`
+	EstCostUSD           float64 `json:"est_cost_usd"` // based on models.cost_* if available
+}
+
+// TotalTokens is the full input/output/cache volume for ring-chart weighting.
+func (mb ModelBreakdown) TotalTokens() int64 {
+	return mb.InputTokens + mb.OutputTokens + mb.CacheReadTokens + mb.CacheCreationTokens
 }
 
 // GetModelBreakdown returns usage stats per model for the last N days.
@@ -130,7 +141,8 @@ func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
 			COUNT(*) AS requests,
 			COALESCE(SUM(r.input_tokens), 0) AS input_tokens,
 			COALESCE(SUM(r.output_tokens), 0) AS output_tokens,
-			COALESCE(SUM(r.cache_read_tokens), 0) + COALESCE(SUM(r.cache_creation_tokens), 0) AS cache_tokens,
+			COALESCE(SUM(r.cache_read_tokens), 0) AS cache_read_tokens,
+			COALESCE(SUM(r.cache_creation_tokens), 0) AS cache_creation_tokens,
 			COALESCE(l.avg_latency, 0) AS avg_latency_ms,
 			CASE
 				WHEN COUNT(*) > 0 THEN CAST(SUM(r.success) AS FLOAT) / COUNT(*)
@@ -168,7 +180,8 @@ func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
 			&mb.Requests,
 			&mb.InputTokens,
 			&mb.OutputTokens,
-			&mb.CacheTokens,
+			&mb.CacheReadTokens,
+			&mb.CacheCreationTokens,
 			&mb.AvgLatencyMs,
 			&mb.SuccessRate,
 			&mb.EstCostUSD,
@@ -177,11 +190,13 @@ func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
 		}
 		// models-table cost may be 0 when the catalog/models rows are missing
 		// (common on fresh installs). Fall back to the embedded price rules so
-		// /api/analytics/* still reports a USD estimate. Cache tokens are billed
-		// at the (much cheaper) cache-read price.
-		if mb.EstCostUSD == 0 && (mb.InputTokens > 0 || mb.OutputTokens > 0 || mb.CacheTokens > 0) {
+		// /api/analytics/* still reports a USD estimate. OpenCode bills cache
+		// CREATION at the input price (first-time prompt write) and cache READ
+		// at the cheap cache price.
+		if mb.EstCostUSD == 0 && (mb.InputTokens > 0 || mb.OutputTokens > 0 || mb.CacheReadTokens > 0 || mb.CacheCreationTokens > 0) {
 			if ipm, opm, cpm, ok := PriceForModel(mb.Model); ok {
-				mb.EstCostUSD = (float64(mb.InputTokens)*ipm + float64(mb.CacheTokens)*cpm + float64(mb.OutputTokens)*opm) / 1_000_000
+				effIn := mb.InputTokens + mb.CacheCreationTokens
+				mb.EstCostUSD = (float64(effIn)*ipm + float64(mb.CacheReadTokens)*cpm + float64(mb.OutputTokens)*opm) / 1_000_000
 			}
 		}
 		result = append(result, mb)

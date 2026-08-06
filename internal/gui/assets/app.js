@@ -142,6 +142,14 @@ const TRANSLATIONS = {
     'test.noPrompt': 'Please enter a prompt',
     'test.error': 'Error: ',
     'test.networkError': 'Network error',
+    'toast.catalogSynced': 'Catalog synced',
+    'toast.catalogSyncFailed': 'Catalog sync failed: ',
+    'toast.catalogNetworkError': 'Catalog sync network error',
+    'toast.guiTokenRequired': 'GUI token required (check server ROUTATIC_PROXY_GUI_TOKEN)',
+    'toast.proxyStarted': 'Proxy started',
+    'toast.proxyStopped': 'Proxy stopped',
+    'toast.proxyActionFailed': 'Action failed',
+    'toast.networkError': 'Network error',
     'tab.performance': 'Performance',
   },
   zh: {
@@ -214,6 +222,14 @@ const TRANSLATIONS = {
     'test.noPrompt': '请输入提示词',
     'test.error': '错误：',
     'test.networkError': '网络错误',
+    'toast.catalogSynced': '模型目录已同步',
+    'toast.catalogSyncFailed': '目录同步失败：',
+    'toast.catalogNetworkError': '目录同步网络错误',
+    'toast.guiTokenRequired': '需要 GUI Token（请检查服务器 ROUTATIC_PROXY_GUI_TOKEN）',
+    'toast.proxyStarted': '代理已启动',
+    'toast.proxyStopped': '代理已停止',
+    'toast.proxyActionFailed': '操作失败',
+    'toast.networkError': '网络错误',
     'fallback.scenario': '使用场景',
     'fallback.default': '默认',
     'fallback.streaming': '流式请求',
@@ -551,8 +567,7 @@ async function refreshMetrics() {
     // surface auth failures so a missing/mismatched GUI token is obvious
     // instead of looking like an empty dashboard.
     if (String(e && e.message).indexOf('GUI auth required') !== -1) {
-      toast(currentLang === 'zh' ? '需要 GUI Token（请检查服务器 ROUTATIC_PROXY_GUI_TOKEN）'
-                                 : 'GUI token required (check server ROUTATIC_PROXY_GUI_TOKEN)', 'error');
+      toast(t('toast.guiTokenRequired'), 'error');
       return;
     }
     /* server may not be ready yet */
@@ -707,15 +722,15 @@ async function refreshCatalog() {
     const r = await api('/api/catalog/sync', { method: 'POST' });
     if (r.ok) {
       await refreshCatalogAge();
-      toast(currentLang === 'zh' ? '模型目录已同步' : 'Catalog synced', 'success');
+      toast(t('toast.catalogSynced'), 'success');
     } else {
       const txt = await r.text();
       console.error('Catalog refresh failed:', txt);
-      toast(currentLang === 'zh' ? ('目录同步失败: ' + txt) : ('Catalog sync failed: ' + txt), 'error');
+      toast(t('toast.catalogSyncFailed') + txt, 'error');
     }
   } catch(e) {
     console.error('Catalog refresh network error:', e);
-    toast(currentLang === 'zh' ? '目录同步网络错误' : 'Catalog sync network error', 'error');
+    toast(t('toast.catalogNetworkError'), 'error');
   } finally {
     if (btn) {
       btn.disabled = false;
@@ -731,16 +746,14 @@ async function toggleProxy(el) {
     const action = el.checked ? 'start' : 'stop';
     const r = await api('/api/proxy/' + action, { method: 'POST' });
     if (r.ok) {
-      toast(el.checked
-        ? (currentLang === 'zh' ? '代理已启动' : 'Proxy started')
-        : (currentLang === 'zh' ? '代理已停止' : 'Proxy stopped'), 'success');
+      toast(el.checked ? t('toast.proxyStarted') : t('toast.proxyStopped'), 'success');
     } else {
       el.checked = !el.checked;
-      toast(currentLang === 'zh' ? '操作失败' : 'Action failed', 'error');
+      toast(t('toast.proxyActionFailed'), 'error');
     }
   } catch(e) {
     el.checked = !el.checked;
-    toast(currentLang === 'zh' ? '网络错误' : 'Network error', 'error');
+    toast(t('toast.networkError'), 'error');
   }
   setTimeout(() => { el._changing = false; }, 1000);
 }

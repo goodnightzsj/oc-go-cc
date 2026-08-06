@@ -5,7 +5,9 @@ package gui
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -161,12 +163,20 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 
 	mux := http.NewServeMux()
 
-	// Static assets — strip the "assets/" prefix so index.html is served at /.
-	sub, err := fs.Sub(assets, "assets")
+	// Content-hashed static assets. index.html is served from a rendered copy
+	// whose <script>/<link> URLs carry a per-build content hash (e.g.
+	// app.<sha12>.js), and those hashed URLs are served with an immutable
+	// long cache header. A fresh deploy changes the content, so the hashed
+	// URL changes and caches (incl. Cloudflare edge) naturally invalidate —
+	// this is the fix for stale front-ends behind a CDN.
+	hashed, err := buildHashedAssets()
 	if err != nil {
-		return "", fmt.Errorf("gui assets embed: %w", err)
+		return "", err
 	}
-	mux.Handle("/", http.FileServer(http.FS(sub)))
+	mux.HandleFunc("/", hashed.serveIndex)
+	for name, data := range hashed.files {
+		mux.HandleFunc("/"+name, hashed.serveHashed(name, data))
+	}
 
 	// API endpoints.
 	mux.HandleFunc("/api/metrics", s.handleMetrics)
@@ -228,6 +238,115 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 	url := "http://" + ln.Addr().String() + "/"
 	s.logger.Info("gui server started", "url", url)
 	return url, nil
+}
+
+// shortHash returns the first 12 hex chars of the SHA-256 of data.
+func shortHash(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// hashedAssets renders the embedded index.html with content-hashed asset URLs
+// and exposes each hashed file for serving. Using a new hashed filename on
+// every content change defeats stale edge/CDN caches (e.g. Cloudflare caching
+// app.js for 7 days) without manual purges.
+type hashedAssets struct {
+	index []byte // rendered index.html referencing hashed URLs
+	files map[string][]byte
+}
+
+func buildHashedAssets() (*hashedAssets, error) {
+	h := &hashedAssets{files: map[string][]byte{}}
+
+	read := func(name string) ([]byte, error) {
+		b, err := fs.ReadFile(assets, "assets/"+name)
+		if err != nil {
+			return nil, fmt.Errorf("read embedded %s: %w", name, err)
+		}
+		return b, nil
+	}
+
+	indexHTML, err := read("index.html")
+	if err != nil {
+		return nil, err
+	}
+	appJS, err := read("app.js")
+	if err != nil {
+		return nil, err
+	}
+	styleCSS, err := read("style.css")
+	if err != nil {
+		return nil, err
+	}
+	twCSS, err := read("compiled-tailwind.css")
+	if err != nil {
+		return nil, err
+	}
+
+	// content-hashed filenames
+	appName := "app." + shortHash(appJS) + ".js"
+	styleName := "style." + shortHash(styleCSS) + ".css"
+	twName := "compiled-tailwind." + shortHash(twCSS) + ".css"
+
+	h.files[appName] = appJS
+	h.files[styleName] = styleCSS
+	h.files[twName] = twCSS
+	// Keep plain names working too (backward-compat for direct fetches).
+	h.files["app.js"] = appJS
+	h.files["style.css"] = styleCSS
+	h.files["compiled-tailwind.css"] = twCSS
+
+	// Rewrite references in index.html to the hashed names.
+	html := string(indexHTML)
+	html = strings.Replace(html, `href="compiled-tailwind.css"`, `href="`+twName+`"`, 1)
+	html = strings.Replace(html, `href="style.css"`, `href="`+styleName+`"`, 1)
+	html = strings.Replace(html, `src="app.js"`, `src="`+appName+`"`, 1)
+	h.index = []byte(html)
+
+	return h, nil
+}
+
+// serveIndex serves the rendered (hashed) index.html.
+func (h *hashedAssets) serveIndex(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write(h.index)
+}
+
+// serveHashed serves a static asset. Hashed (immutable) files get a long cache
+// lifetime; plain-name aliases stay no-cache so stale CDN copies expire.
+func (h *hashedAssets) serveHashed(name string, data []byte) http.HandlerFunc {
+	hashed := isHashedName(name)
+	return func(w http.ResponseWriter, r *http.Request) {
+		ct := "application/javascript; charset=utf-8"
+		if strings.HasSuffix(name, ".css") {
+			ct = "text/css; charset=utf-8"
+		}
+		w.Header().Set("Content-Type", ct)
+		if hashed {
+			// Content-addressed: safe to cache forever; invalidation is the
+			// new filename, which the hashed index.html points at.
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
+		_, _ = w.Write(data)
+	}
+}
+
+// isHashedName reports whether name carries a content-hash prefix (x.<12hex>.<ext>).
+func isHashedName(name string) bool {
+	base := name[:strings.LastIndex(name, ".")]
+	i := strings.LastIndex(base, ".")
+	if i < 0 {
+		return false
+	}
+	tag := base[i+1:]
+	if len(tag) != 12 {
+		return false
+	}
+	_, err := hex.DecodeString(tag)
+	return err == nil
 }
 
 // Shutdown gracefully stops the GUI server.

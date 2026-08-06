@@ -2089,10 +2089,14 @@ const AnalyticsModule = {
 
     let angle = -Math.PI / 2;
     const legend = [];
+    // Enforce a tiny minimum angle so a sector with <0.1% share (e.g. a
+    // deepseek-dominated ring where every other model is ~0%) still renders a
+    // visible sliver instead of disappearing entirely.
+    const MIN_SWEEP = 0.05; // ~2.9%
     const slices = top.map((it, idx) => {
       const v = it[valKey] || 0;
       const frac = v / total;
-      const sweep = frac * 2 * Math.PI;
+      const sweep = Math.max(frac * 2 * Math.PI, MIN_SWEEP);
       const a0 = angle, a1 = angle + sweep;
       angle = a1;
       const col = this.palette[idx % this.palette.length];
@@ -2176,45 +2180,32 @@ const AnalyticsModule = {
       xGrid += `<text x="${lx}" y="${h-mb+14}" text-anchor="middle" font-size="9.5" fill="${TXT}">${fmtDay(points[points.length-1].date||'')}</text>`;
     }
 
-    const ptsIn = points.map((p,i) => `${x(i).toFixed(1)},${y(p.input_tokens||0).toFixed(1)}`);
-    const ptsOut = points.map((p,i) => `${x(i).toFixed(1)},${y(p.output_tokens||0).toFixed(1)}`);
-    const pathIn = 'M' + ptsIn.join(' L');
-    const pathOut = 'M' + ptsOut.join(' L');
-    const lastXp = x(points.length-1).toFixed(1);
-    const baseY = (h - mb).toFixed(1);
-    const areaIn = pathIn + ` L${lastXp},${baseY} L${ml},${baseY} Z`;
-    const areaOut = pathOut + ` L${lastXp},${baseY} L${ml},${baseY} Z`;
-
-    const dotR = points.length > 1 ? 2.4 : 4;
-    const dots = points.map((p,i) => {
-      const lx = x(i).toFixed(1);
-      const yIn = y(p.input_tokens||0).toFixed(1);
-      const yOut = y(p.output_tokens||0).toFixed(1);
-      // Native SVG tooltip shows date + both values on hover (like deepseek's
-      // usage page) without extra JS.
-      const tip = `${p.date||''} · ${t('analytics.inputTokens')} ${(p.input_tokens||0).toLocaleString()} · ${t('analytics.outputTokens')} ${(p.output_tokens||0).toLocaleString()}`;
-      return `<g><circle cx="${lx}" cy="${yIn}" r="${dotR}" fill="#3b82f6"><title>${tip}</title></circle><circle cx="${lx}" cy="${yOut}" r="${dotR}" fill="#10b981"><title>${tip}</title></circle></g>`;
+    // Grouped daily bars (input + output) like deepseek's usage chart. This
+    // renders visible bars even for a single day, with a native hover tooltip
+    // per bar.
+    const baseY = (h - mb);
+    const groupW = Math.max(6, (plotW / points.length) * 0.7);
+    const barW = groupW / 2 - 2;
+    const bars = points.map((p, i) => {
+      const cx = ml + i * (plotW / points.length) + (plotW / points.length) * 0.15;
+      const inV = p.input_tokens || 0;
+      const outV = p.output_tokens || 0;
+      const yIn = y(inV), yOut = y(outV);
+      const hIn = baseY - yIn, hOut = baseY - yOut;
+      const tip = `${p.date||''} · ${t('analytics.inputTokens')} ${inV.toLocaleString()} · ${t('analytics.outputTokens')} ${outV.toLocaleString()}`;
+      return (
+        `<rect x="${(cx).toFixed(1)}" y="${yIn.toFixed(1)}" width="${Math.max(2,(barW*0.9)).toFixed(1)}" height="${Math.max(0,hIn).toFixed(1)}" rx="2" fill="#3b82f6"><title>${tip}</title></rect>` +
+        `<rect x="${(cx+barW).toFixed(1)}" y="${yOut.toFixed(1)}" width="${Math.max(2,(barW*0.9)).toFixed(1)}" height="${Math.max(0,hOut).toFixed(1)}" rx="2" fill="#10b981"><title>${tip}</title></rect>`
+      );
     }).join('');
 
     const svg = `
       <svg class="trend-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
-        <defs>
-          <linearGradient id="gIn" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.45"/>
-            <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.04"/>
-          </linearGradient>
-          <linearGradient id="gOut" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#10b981" stop-opacity="0.45"/>
-            <stop offset="100%" stop-color="#10b981" stop-opacity="0.04"/>
-          </linearGradient>
-        </defs>
         ${yGrid}
         ${xGrid}
         <line x1="${ml}" y1="${mt}" x2="${ml}" y2="${h-mb}" stroke="${AXIS}" stroke-width="1"/>
         <line x1="${ml}" y1="${h-mb}" x2="${w-mr}" y2="${h-mb}" stroke="${AXIS}" stroke-width="1"/>
-        <path d="${areaIn}" fill="url(#gIn)"/>
-        <path d="${areaOut}" fill="url(#gOut)"/>
-        ${dots}
+        ${bars}
       </svg>
       <div class="trend-legend">
         <span><span class="swatch" style="background:#3b82f6;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.inputTokens')}</span>

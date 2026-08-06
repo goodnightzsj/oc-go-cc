@@ -122,27 +122,30 @@ func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
 	defer cancel()
 
 	rows, err := a.db.DB().QueryContext(ctx, `
-		SELECT 
+		SELECT
 			r.model,
 			COALESCE(r.provider, '') AS provider,
 			COUNT(*) AS requests,
 			COALESCE(SUM(r.input_tokens), 0) AS input_tokens,
 			COALESCE(SUM(r.output_tokens), 0) AS output_tokens,
-			COALESCE(AVG(l.latency_ms), 0) AS avg_latency_ms,
-			CASE 
+			COALESCE(l.avg_latency, 0) AS avg_latency_ms,
+			CASE
 				WHEN COUNT(*) > 0 THEN CAST(SUM(r.success) AS FLOAT) / COUNT(*)
-				ELSE 0 
+				ELSE 0
 			END AS success_rate,
 			COALESCE(
-				(SUM(r.input_tokens * COALESCE(m.cost_input_per_m, 0)) + 
+				(SUM(r.input_tokens * COALESCE(m.cost_input_per_m, 0)) +
 				 SUM(r.output_tokens * COALESCE(m.cost_output_per_m, 0))) / 1000000,
 				0
 			) AS est_cost_usd
 		FROM requests r
-		LEFT JOIN latency_samples l 
-			ON l.model = r.model 
-			AND l.recorded_at >= ?
-		LEFT JOIN models m 
+		LEFT JOIN (
+			SELECT model, AVG(latency_ms) AS avg_latency
+			FROM latency_samples
+			WHERE recorded_at >= ?
+			GROUP BY model
+		) l ON l.model = r.model
+		LEFT JOIN models m
 			ON m.id = r.model
 		WHERE r.created_at >= ?
 		GROUP BY r.model, r.provider

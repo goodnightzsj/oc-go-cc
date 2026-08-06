@@ -1,3 +1,28 @@
+/* ── API helper (unified fetch with optional GUI token) ──────────── */
+// Reads the GUI token from localStorage (set by the user in Settings) and
+// attaches it to every /api request as X-GUI-Token. The server only enforces
+// it when ROUTATIC_PROXY_GUI_TOKEN is configured; otherwise the header is
+// ignored, so this is transparent to existing localhost-only installs.
+const GUI_TOKEN_KEY = 'routatic-proxy-gui-token';
+function getGuiToken() { return localStorage.getItem(GUI_TOKEN_KEY) || ''; }
+function setGuiToken(token) { localStorage.setItem(GUI_TOKEN_KEY, token || ''); }
+
+async function api(path, options) {
+  options = options || {};
+  const token = getGuiToken();
+  if (token) {
+    if (!options.headers) options.headers = {};
+    options.headers['X-GUI-Token'] = token;
+  }
+  const r = await fetch(path, options);
+  if (r.status === 401) {
+    // Token required/mismatch — surface a clear error so the user knows to
+    // set the token rather than silently seeing empty data.
+    throw new Error('GUI auth required: set the GUI token (ROUTATIC_PROXY_GUI_TOKEN)');
+  }
+  return r;
+}
+
 /* ── i18n ────────────────────────────────────────────────────────── */
 const TRANSLATIONS = {
   en: {
@@ -278,7 +303,24 @@ function toggleLanguage() {
 document.addEventListener('DOMContentLoaded', () => {
   document.documentElement.lang = currentLang;
   applyTranslations();
+  initGuiTokenInput();
 });
+
+// Saves the GUI token (when present) to localStorage and re-fetches the
+// active tab so the data surface reflects the newly-applied token.
+function initGuiTokenInput() {
+  const input = document.getElementById('cfg-gui-token');
+  if (!input) return;
+  input.value = getGuiToken();
+  let timer = null;
+  input.addEventListener('input', () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      setGuiToken(input.value.trim());
+      refreshAll();
+    }, 400);
+  });
+}
 
 /* global state */
 let allHistory = [];
@@ -323,7 +365,7 @@ const PerfModule = {
 
   async refresh() {
     try {
-      const r = await fetch('/api/perf/models?range=' + encodeURIComponent(this.timeRange));
+      const r = await api('/api/perf/models?range=' + encodeURIComponent(this.timeRange));
       if (!r.ok) return;
       this.data = await r.json() || [];
       this.render();
@@ -386,21 +428,31 @@ document.querySelectorAll('.tab').forEach(tab => {
     tab.classList.add('active');
     const contentId = 'tab-' + tab.dataset.tab;
     document.getElementById(contentId).classList.add('active');
-    if (tab.dataset.tab === 'analytics') {
+    activeTab = tab.dataset.tab || '';
+    if (activeTab === 'analytics') {
       AnalyticsModule.load(true);
     }
+    refreshCurrentTab();
   });
 });
 
 /* ── Polling ───────────────────────────────────────────────────── */
 let perfPollTimer = null;
 let perfPollCounter = 0;
+let activeTab = 'overview';
+// Upper bound on how many history rows are rendered into the DOM at once.
+// Keeps long-session history tables fast while the count reflects all rows.
+const HISTORY_RENDER_LIMIT = 200;
 
 function startPolling() {
   refreshAll();
   PerfModule.init();
   PerfModule.refresh();
-  setInterval(refreshAll, 3000);
+  // Core metrics always refresh so overview badges stay warm; history,
+  // config and catalog-age are only refreshed when their tab is active so we
+  // don't rebuild DOM or hammer SQLite on views the user isn't looking at.
+  setInterval(refreshCore, 3000);
+  setInterval(refreshCurrentTab, 3000);
   perfPollTimer = setInterval(() => {
     perfPollCounter++;
     if (perfPollCounter >= 2) {
@@ -410,8 +462,38 @@ function startPolling() {
   }, 3000);
 }
 
+// Lightweight poll: metrics + catalog age only, always on.
+async function refreshCore() {
+  await Promise.all([refreshMetrics(), refreshCatalogAge()]);
+}
+
+// Full refresh (used by manual triggers / token change). Kept for backward
+// compatibility with debouncedRefresh.
 async function refreshAll() {
   await Promise.all([refreshMetrics(), refreshHistory(), refreshConfig(), refreshCatalogAge()]);
+}
+
+// Refresh only what the current tab needs. Turns expensive/rare refreshes
+// (config, catalog-age) off when the user is on Overview/History/Analytics,
+// and gates history's DOM-heavy render to the History tab.
+async function refreshCurrentTab() {
+  switch (activeTab) {
+    case 'history':
+      await Promise.all([refreshMetrics(), refreshHistory(), refreshCatalogAge()]);
+      break;
+    case 'settings':
+      await Promise.all([refreshMetrics(), refreshConfig(), refreshCatalogAge()]);
+      break;
+    case 'analytics':
+    case 'performance':
+    case 'fallback':
+      await refreshMetrics();
+      break;
+    case 'overview':
+    default:
+      await refreshMetrics();
+      break;
+  }
 }
 
 // Debounced refresh for manual triggers (keyboard shortcuts)
@@ -427,7 +509,7 @@ function debouncedRefresh() {
 /* ── /api/metrics ──────────────────────────────────────────────── */
 async function refreshMetrics() {
   try {
-    const r = await fetch('/api/metrics');
+    const r = await api('/api/metrics');
     if (!r.ok) return;
     const d = await r.json();
 
@@ -464,7 +546,17 @@ async function refreshMetrics() {
     // proxy toggle sync
     const proxyToggle = document.getElementById('toggle-proxy');
     if (proxyToggle && !proxyToggle._changing) proxyToggle.checked = running;
-  } catch(e) { /* server may not be ready yet */ }
+  } catch(e) {
+    // Stay quiet while the server is still coming up on first load, but
+    // surface auth failures so a missing/mismatched GUI token is obvious
+    // instead of looking like an empty dashboard.
+    if (String(e && e.message).indexOf('GUI auth required') !== -1) {
+      toast(currentLang === 'zh' ? '需要 GUI Token（请检查服务器 ROUTATIC_PROXY_GUI_TOKEN）'
+                                 : 'GUI token required (check server ROUTATIC_PROXY_GUI_TOKEN)', 'error');
+      return;
+    }
+    /* server may not be ready yet */
+  }
 }
 
 function renderModelList(counts) {
@@ -490,7 +582,7 @@ function renderModelList(counts) {
 /* ── /api/history ──────────────────────────────────────────────── */
 async function refreshHistory() {
   try {
-    const r = await fetch('/api/history');
+    const r = await api('/api/history');
     if (!r.ok) return;
     allHistory = await r.json() || [];
     renderHistory();
@@ -526,7 +618,14 @@ function renderHistory() {
     return;
   }
 
-  tbody.innerHTML = filtered.map(h => {
+  // Cap the DOM to the most recent rows to avoid rebuilding a huge <tbody>
+  // after long sessions. The count above still reflects the full (filtered)
+  // set, so the user only loses DOM rendering cost, not information.
+  const limited = filtered.length > HISTORY_RENDER_LIMIT
+    ? filtered.slice(filtered.length - HISTORY_RENDER_LIMIT)
+    : filtered;
+
+  tbody.innerHTML = limited.map(h => {
     // Use composite key to ensure uniqueness when multiple requests occur in the same second
     const rowId = `${h.start_time}_${h.model || 'unknown'}_${h.duration_ms || 0}`;
     return `
@@ -572,7 +671,7 @@ document.getElementById('model-filter').addEventListener('change', function() {
 /* ── /api/config ───────────────────────────────────────────────── */
 async function refreshConfig() {
   try {
-    const r = await fetch('/api/config');
+    const r = await api('/api/config');
     if (!r.ok) return;
     const d = await r.json();
     const autostartToggle = document.getElementById('toggle-autostart');
@@ -585,7 +684,7 @@ async function refreshConfig() {
 /* ── /api/catalog/lock & /api/catalog/sync ─────────────────────── */
 async function refreshCatalogAge() {
   try {
-    const r = await fetch('/api/catalog/lock');
+    const r = await api('/api/catalog/lock');
     if (!r.ok) return;
     const d = await r.json();
     const el = document.getElementById('catalog-age');
@@ -605,15 +704,18 @@ async function refreshCatalog() {
     btn.textContent = currentLang === 'zh' ? '同步中…' : 'Syncing…';
   }
   try {
-    const r = await fetch('/api/catalog/sync', { method: 'POST' });
+    const r = await api('/api/catalog/sync', { method: 'POST' });
     if (r.ok) {
       await refreshCatalogAge();
+      toast(currentLang === 'zh' ? '模型目录已同步' : 'Catalog synced', 'success');
     } else {
       const txt = await r.text();
       console.error('Catalog refresh failed:', txt);
+      toast(currentLang === 'zh' ? ('目录同步失败: ' + txt) : ('Catalog sync failed: ' + txt), 'error');
     }
   } catch(e) {
     console.error('Catalog refresh network error:', e);
+    toast(currentLang === 'zh' ? '目录同步网络错误' : 'Catalog sync network error', 'error');
   } finally {
     if (btn) {
       btn.disabled = false;
@@ -627,16 +729,26 @@ async function toggleProxy(el) {
   el._changing = true;
   try {
     const action = el.checked ? 'start' : 'stop';
-    const r = await fetch('/api/proxy/' + action, { method: 'POST' });
-    if (!r.ok) { el.checked = !el.checked; }
-  } catch(e) { el.checked = !el.checked; }
+    const r = await api('/api/proxy/' + action, { method: 'POST' });
+    if (r.ok) {
+      toast(el.checked
+        ? (currentLang === 'zh' ? '代理已启动' : 'Proxy started')
+        : (currentLang === 'zh' ? '代理已停止' : 'Proxy stopped'), 'success');
+    } else {
+      el.checked = !el.checked;
+      toast(currentLang === 'zh' ? '操作失败' : 'Action failed', 'error');
+    }
+  } catch(e) {
+    el.checked = !el.checked;
+    toast(currentLang === 'zh' ? '网络错误' : 'Network error', 'error');
+  }
   setTimeout(() => { el._changing = false; }, 1000);
 }
 
 async function toggleAutostart(el) {
   el._changing = true;
   try {
-    const r = await fetch('/api/config', {
+    const r = await api('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ autostart: el.checked })
@@ -649,7 +761,7 @@ async function toggleAutostart(el) {
 async function toggleNotify(el) {
   el._changing = true;
   try {
-    const r = await fetch('/api/config', {
+    const r = await api('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ notify: el.checked })
@@ -775,7 +887,7 @@ function readFieldValue(field) {
 
 async function loadProxyConfig() {
   try {
-    const r = await fetch('/api/proxy/config');
+    const r = await api('/api/proxy/config');
     if (!r.ok) return;
     currentProxyConfig = await r.json();
     if (!currentProxyConfig) return;
@@ -825,7 +937,7 @@ async function saveProxyConfig() {
   }
 
   try {
-    const r = await fetch('/api/proxy/config', {
+    const r = await api('/api/proxy/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch)
@@ -855,6 +967,27 @@ function showSaveStatus(msg, type) {
     status.textContent = '';
     status.className = 'save-status';
   }, 4000);
+}
+
+/* ── Toast notifications ───────────────────────────────────────── */
+// Lightweight, self-cleaning toast for transient action feedback (saved,
+// synced, proxy started/stopped, errors). Reuses a single element; a second
+// call while one is visible replaces it and restarts the timer.
+let toastTimer = null;
+function toast(message, type) {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = message;
+  el.className = 'toast ' + (type || 'info');
+  // Force reflow so re-adding the visible class on repeat messages replays
+  // the fade-in transition.
+  void el.offsetWidth;
+  el.classList.add('visible');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    el.classList.remove('visible');
+    toastTimer = null;
+  }, 3000);
 }
 
 function togglePasswordVisibility(id) {
@@ -1128,7 +1261,7 @@ async function exportConfig() {
 
   try {
     const url = '/api/config/export?anonymize=' + anonymize;
-    const response = await fetch(url);
+    const response = await api(url);
     if (!response.ok) {
       throw new Error(await response.text());
     }
@@ -1203,7 +1336,7 @@ async function handleConfigImport(file) {
 
     document.getElementById('btn-import-apply').onclick = async () => {
       try {
-        const response = await fetch('/api/config/import', {
+        const response = await api('/api/config/import', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ config: config, apply: true })
@@ -1256,7 +1389,7 @@ const FallbackModule = {
 
   async loadConfig() {
     try {
-      const r = await fetch('/api/proxy/config');
+      const r = await api('/api/proxy/config');
       if (!r.ok) return;
       const config = await r.json();
 
@@ -1480,7 +1613,7 @@ const FallbackModule = {
 
     try {
       const patch = { fallbacks: { ...this.chains } };
-      const r = await fetch('/api/proxy/config', {
+      const r = await api('/api/proxy/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch)
@@ -1575,7 +1708,7 @@ const TestModule = {
     this.testModelSelect.innerHTML = '<option value="">Select a model...</option>';
 
     try {
-      const r = await fetch('/api/proxy/config');
+      const r = await api('/api/proxy/config');
       if (!r.ok) return;
       const data = await r.json();
       const modelIds = new Set();
@@ -1622,7 +1755,7 @@ const TestModule = {
 
     const start = performance.now();
     try {
-      const r = await fetch('/api/test/send', {
+      const r = await api('/api/test/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1761,9 +1894,9 @@ const AnalyticsModule = {
 
     try {
       const [summaryRes, trendRes, latencyRes] = await Promise.all([
-        fetch(`/api/analytics/summary?days=${days}`),
-        fetch(`/api/analytics/tokens/trend?days=${days}`),
-        fetch(`/api/analytics/latency?days=${days}`)
+        api(`/api/analytics/summary?days=${days}`),
+        api(`/api/analytics/tokens/trend?days=${days}`),
+        api(`/api/analytics/latency?days=${days}`)
       ]);
       if (!summaryRes.ok) throw new Error('summary fetch failed');
       const summary = await summaryRes.json();

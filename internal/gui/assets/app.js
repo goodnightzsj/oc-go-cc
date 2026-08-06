@@ -459,20 +459,39 @@ const PerfModule = {
   }
 };
 
-/* ── Tab switching ─────────────────────────────────────────────── */
+/* ── Tab switching (hash-routed) ───────────────────────────────── */
+// activateTab shows the named tab and keeps the URL hash in sync so each
+// panel is deep-linkable / resumable (#overview, #analytics, #history, ...).
+function activateTab(name) {
+  if (!name) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  const tabEl = document.querySelector('.tab[data-tab="' + name + '"]');
+  const panel = document.getElementById('tab-' + name);
+  if (tabEl) tabEl.classList.add('active');
+  if (panel) panel.classList.add('active');
+  activeTab = name;
+  if (name === 'analytics' && AnalyticsModule && AnalyticsModule.load) {
+    AnalyticsModule.load(true);
+  }
+  refreshCurrentTab();
+}
+
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    tab.classList.add('active');
-    const contentId = 'tab-' + tab.dataset.tab;
-    document.getElementById(contentId).classList.add('active');
-    activeTab = tab.dataset.tab || '';
-    if (activeTab === 'analytics') {
-      AnalyticsModule.load(true);
+    // Update the hash (also fires hashchange -> activateTab), but avoid a
+    // duplicate activation by calling directly with the desired name.
+    if (location.hash !== '#' + tab.dataset.tab) {
+      location.hash = tab.dataset.tab;
     }
-    refreshCurrentTab();
+    activateTab(tab.dataset.tab);
   });
+});
+
+// Respond to back/forward and manual hash edits.
+window.addEventListener('hashchange', () => {
+  const name = (location.hash || '').replace(/^#/, '') || 'overview';
+  activateTab(name);
 });
 
 /* ── Polling ───────────────────────────────────────────────────── */
@@ -1672,6 +1691,9 @@ document.addEventListener('DOMContentLoaded', () => {
 /* ── Boot ──────────────────────────────────────────────────────── */
 loadProxyConfig();
 startPolling();
+// Activate the tab from the URL hash (deep-link / refresh resume). Defaults
+// to overview when no hash is present.
+activateTab((location.hash || '').replace(/^#/, '') || 'overview');
 
 const TestModule = {
   testModal: null,

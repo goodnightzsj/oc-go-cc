@@ -2003,7 +2003,9 @@ const AnalyticsModule = {
       segs += `${col} ${off.toFixed(1)}% ${(off + pct).toFixed(1)}%, `;
       off += pct;
       const label = it.model || it.provider || it.name || 'Unknown';
-      legend.push(`<div class="legend-item"><span class="legend-swatch" style="background:${col}"></span><span class="legend-label">${this.escapeHtml(label)}</span><span class="legend-value">${v}</span></div>`);
+      const pctTxt = pct.toFixed(1) + '%';
+      // title gives a native hover tooltip: full label, raw value, and share.
+      legend.push(`<div class="legend-item" title="${this.escapeHtml(label)}: ${v} (${pctTxt})"><span class="legend-swatch" style="background:${col}"></span><span class="legend-label">${this.escapeHtml(label)}</span><span class="legend-value">${v}</span><span class="legend-pct">${pctTxt}</span></div>`);
     });
 
     const html = `<div class="donut-wrapper"><div class="donut" style="--donut-segments: ${segs.slice(0,-2)}"></div><div class="donut-legend">${legend.join('')}</div></div>`;

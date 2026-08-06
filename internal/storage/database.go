@@ -254,6 +254,32 @@ type priceEntry struct {
 //go:embed seed_prices.json
 var defaultModelPrices []byte
 
+// PriceForModel returns the seeded per-1M-token prices (USD) for a model ID,
+// matching the longest seed rule whose Match substring occurs in the model ID.
+// This is independent of the catalog/models tables so cost figures are always
+// available even when a model is absent from the catalog sync. Returns ok=false
+// when no rule matches (or embedded data is unavailable).
+func PriceForModel(model string) (inputPerM, outputPerM float64, ok bool) {
+	if model == "" || len(defaultModelPrices) == 0 {
+		return 0, 0, false
+	}
+	var entries []priceEntry
+	if err := json.Unmarshal(defaultModelPrices, &entries); err != nil {
+		return 0, 0, false
+	}
+	bestLen := -1
+	for _, e := range entries {
+		if e.Match == "" {
+			continue
+		}
+		if strings.Contains(strings.ToLower(model), strings.ToLower(e.Match)) && len(e.Match) > bestLen {
+			bestLen = len(e.Match)
+			inputPerM, outputPerM, ok = e.Input, e.Output, true
+		}
+	}
+	return inputPerM, outputPerM, ok
+}
+
 // SeedDefaultModelPrices inserts realistic default pricing for common models
 // (GLM, Kimi, Qwen, Grok, DeepSeek, Claude, GPT, MiniMax, Nemotron, MiMo, etc.)
 // so that /api/analytics/* endpoints immediately show non-zero USD costs

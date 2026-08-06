@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"oc-go-cc/pkg/types"
@@ -17,6 +18,10 @@ import (
 
 // ErrClientDisconnected is returned when the client disconnects during streaming.
 var ErrClientDisconnected = fmt.Errorf("client disconnected")
+
+// ErrStreamIdle is returned when no upstream bytes arrive within the stream
+// idle timeout — the connection is considered stuck rather than finished.
+var ErrStreamIdle = fmt.Errorf("stream idle: no upstream bytes received")
 
 // StreamHandler handles streaming SSE transformation from OpenAI to Anthropic format.
 type StreamHandler struct {
@@ -41,11 +46,32 @@ func (h *StreamHandler) ProxyStream(
 	openaiResp io.ReadCloser,
 	originalModel string,
 	clientCtx context.Context,
+	idleTimeout time.Duration,
 ) error {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return fmt.Errorf("streaming not supported by response writer")
 	}
+
+	// Derive a watchdog context so that an idle upstream (no bytes for
+	// idleTimeout) releases the blocking Read() and returns ErrStreamIdle.
+	// A stuck upstream is treated as an error instead of holding the connection
+	// forever. When idleTimeout <= 0 the watchdog is disabled.
+	watchdogCtx, watchdogCancel := context.WithCancel(clientCtx)
+	defer watchdogCancel()
+	// idleFired is written by the watchdog goroutine (onIdle) and read by the
+	// read loop, so it must be accessed atomically.
+	var idleFired atomic.Bool
+	onIdle := func() {
+		idleFired.Store(true)
+		watchdogCancel()
+		// Unblock a Read() that is currently blocked on the upstream body;
+		// the body is wrapped in cancelOnCloseReadCloser so Close() also
+		// cancels the request context. The read-loop error branch below then
+		// turns any subsequent read error into ErrStreamIdle.
+		_ = openaiResp.Close()
+	}
+	ping := StartIdleWatchdog(watchdogCtx, onIdle, idleTimeout)
 
 	// Generate a unique message ID for this stream.
 	msgID := "msg_" + generateID()
@@ -89,9 +115,17 @@ func (h *StreamHandler) ProxyStream(
 		default:
 		}
 
+		// Watchdog fired — upstream went idle for idleTimeout. Release the
+		// blocking read by closing the body, then report the idle error.
+		if idleFired.Load() {
+			_ = openaiResp.Close()
+			return ErrStreamIdle
+		}
+
 		// Read chunk from upstream
 		n, err := openaiResp.Read(readBuf)
 		if n > 0 {
+			ping()
 			// Process bytes immediately
 			for i := 0; i < n; i++ {
 				b := readBuf[i]
@@ -120,6 +154,12 @@ func (h *StreamHandler) ProxyStream(
 			break
 		}
 		if err != nil {
+			// The watchdog fired while we were blocked in Read() and closed
+			// the body, so the read returned a non-EOF error. Report it as an
+			// idle stream unless the client disconnected at the same time.
+			if idleFired.Load() && clientCtx.Err() == nil {
+				return ErrStreamIdle
+			}
 			return fmt.Errorf("failed to read stream: %w", err)
 		}
 	}

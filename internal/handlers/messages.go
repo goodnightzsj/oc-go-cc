@@ -236,7 +236,7 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Route to appropriate model and build fallback chain.
-	modelChain, routeResult, err := h.buildModelChain(anthropicReq.Model, routerMessages, tokenCount, isStreaming)
+	modelChain, routeResult, err := h.buildModelChain(anthropicReq.Model, routerMessages, tokenCount, anthropicReq.MaxTokens, isStreaming)
 	if err != nil {
 		h.sendError(requestLogger, w, http.StatusInternalServerError, "routing failed", err)
 		return
@@ -270,6 +270,7 @@ func (h *MessagesHandler) buildModelChain(
 	requestedModel string,
 	routerMessages []router.MessageContent,
 	tokenCount int,
+	requestedMaxTokens int,
 	isStreaming bool,
 ) ([]config.ModelConfig, router.RouteResult, error) {
 	if requestedModel != "" {
@@ -281,7 +282,7 @@ func (h *MessagesHandler) buildModelChain(
 				return overrideResult.GetModelChain(), overrideResult, err
 			}
 			chain := appendUniqueModels(overrideResult.GetModelChain(), scenarioResult.GetModelChain())
-			return chain, overrideResult, nil
+			return filterChainCapacity(chain, tokenCount, requestedMaxTokens), overrideResult, nil
 		}
 	}
 
@@ -289,7 +290,37 @@ func (h *MessagesHandler) buildModelChain(
 	if err != nil {
 		return nil, result, err
 	}
-	return result.GetModelChain(), result, nil
+	return filterChainCapacity(result.GetModelChain(), tokenCount, requestedMaxTokens), result, nil
+}
+
+// filterChainCapacity applies the capacity filter to a model chain. Each model
+// is first resolved against the built-in model metadata registry, so known
+// models gain capacity limits (context_window / max_output_tokens) even when
+// the user's config omits them. When no model in the chain declares / resolves
+// to any capacity metadata, the chain is returned unchanged — behavior is
+// identical to before capacity filtering was introduced.
+func filterChainCapacity(chain []config.ModelConfig, tokenCount int, requestedMaxTokens int) []config.ModelConfig {
+	resolved := make([]config.ModelConfig, len(chain))
+	partitioned := false
+	for i, m := range chain {
+		m = config.ResolveModelConfig(m)
+		resolved[i] = m
+		if m.ContextWindow > 0 || m.MaxOutputTokens > 0 {
+			partitioned = true
+		}
+	}
+	if !partitioned {
+		return chain
+	}
+
+	decision, err := router.FilterByCapacity(resolved, tokenCount, requestedMaxTokens)
+	if err != nil || len(decision.Models) == 0 {
+		// No model can serve the request under its declared capacity. Keep the
+		// original chain so the existing fallback logic (and its error paths)
+		// still applies — capacity filtering is best-effort, not a hard gate.
+		return chain
+	}
+	return decision.Models
 }
 
 // routeOnce performs scenario-based routing, honoring the streaming-scenario-routing
@@ -557,7 +588,12 @@ func (h *MessagesHandler) handleStreaming(
 			continue
 		}
 
-		if err := h.streamHandler.ProxyStream(rw, streamBody, model.ModelID, clientCtx); err != nil {
+		// Stream timeout derivation for the idle watchdog: reuse the request
+		// timeout (stream_timeout_ms defaults to timeout_ms upstream). A
+		// configured TimeoutMs guards against truly-stuck upstreams; when it
+		// is unset this returns 0 and the watchdog is disabled for the stream.
+		streamIdleTimeout := h.client.RequestTimeout(model)
+		if err := h.streamHandler.ProxyStream(rw, streamBody, model.ModelID, clientCtx, streamIdleTimeout); err != nil {
 			_ = streamBody.Close()
 			cancel()
 			if err == transformer.ErrClientDisconnected {

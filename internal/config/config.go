@@ -30,6 +30,17 @@ type ModelConfig struct {
 	ReasoningEffort  string          `json:"reasoning_effort"`
 	Thinking         json.RawMessage `json:"thinking,omitempty"`
 	Vision           bool            `json:"vision"`
+	// ContextWindow is the model's context-window size in tokens. ≤ 0 means
+	// "unknown / unconstrained", which disables capacity filtering for the
+	// model. When set, requests whose context usage leaves fewer than
+	// ContextMargin (or the minimum output floor) tokens are filtered out.
+	ContextWindow int `json:"context_window"`
+	// ContextMargin is reserved headroom subtracted from the context window
+	// when computing how many output tokens a request may produce.
+	ContextMargin int `json:"context_margin"`
+	// MaxOutputTokens is a model-level cap on output tokens, applied after
+	// the client's max_tokens. ≤ 0 means no model-level cap.
+	MaxOutputTokens int `json:"max_output_tokens"`
 }
 
 // OpenCodeGoConfig holds the upstream OpenCode Go API settings.

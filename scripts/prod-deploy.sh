@@ -54,7 +54,7 @@ VERSION="$(git -C "${ROOT_DIR}" describe --tags --always --dirty 2>/dev/null || 
 FINGERPRINT="$(source_fingerprint "${ROOT_DIR}" "${HASHER}")"
 STAMP="$(date +%Y%m%d%H%M%S)"
 RELEASE_DIR="${RELEASES_DIR}/${STAMP}-${FINGERPRINT:0:12}"
-BUILD_PATH="${RELEASE_DIR}/oc-go-cc"
+BUILD_PATH="${RELEASE_DIR}/routatic-proxy"
 
 mkdir -p "${RELEASES_DIR}"
 rm -rf "${RELEASE_DIR}"
@@ -68,7 +68,7 @@ fi
 echo "[prod] building ${BUILD_PATH}"
 (
   cd "${ROOT_DIR}"
-  GOTOOLCHAIN=local "${GO_BIN}" build -ldflags "-X main.version=${VERSION}" -o "${BUILD_PATH}" ./cmd/oc-go-cc
+  GOTOOLCHAIN=local "${GO_BIN}" build -ldflags "-X main.version=${VERSION}" -o "${BUILD_PATH}" ./cmd/routatic-proxy
 )
 
 ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"

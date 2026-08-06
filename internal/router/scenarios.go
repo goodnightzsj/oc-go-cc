@@ -88,19 +88,18 @@ func DetectScenario(messages []MessageContent, tokenCount int, cfg *config.Confi
 	}
 }
 
-// hasComplexPattern looks for complex operations that need more capable models.
-// This includes tool-based operations (executing functions, writing/editing files, etc.)
+// hasComplexPattern looks for truly complex or architectural operations that need
+// the most capable models. It is intentionally narrow: common coding/debugging
+// tasks ("build", "debug", "create file", "bash") are NOT complex, because they
+// appear constantly in tool results and ordinary conversation and would otherwise
+// route every turn to the complex model.
 func hasComplexPattern(messages []MessageContent) bool {
 	complexKeywords := []string{
-		// Architectural
+		// Architectural / large-scale design
 		"architect", "architecture", "refactor", "redesign",
 		"complex", "difficult", "challenging",
 		"optimize", "performance", "efficiency",
 		"design pattern", "best practice",
-		// Tool-related keywords indicate complex operations
-		"execute", "run command", "bash", "shell",
-		"implement", "build", "create", "add feature",
-		"write to", "edit file", "create file",
 	}
 
 	for _, msg := range messages {

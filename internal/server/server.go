@@ -58,6 +58,11 @@ func NewServer(atomic *config.AtomicConfig) (*Server, error) {
 	openCodeClient := client.NewOpenCodeClient(atomic)
 	modelRouter := router.NewModelRouter(atomic)
 	fallbackHandler := router.NewFallbackHandler(logger, 3, 30*time.Second)
+	// Single-key deployments short-circuit the fallback chain on auth errors:
+	// a bad key fails every model identically, so there is no point retrying.
+	fallbackHandler.SetAuthSingleKey(func() bool {
+		return len(atomic.Get().EffectiveAPIKeys()) <= 1
+	})
 
 	// Create handlers.
 	messagesHandler := handlers.NewMessagesHandler(

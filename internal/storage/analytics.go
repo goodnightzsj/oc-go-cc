@@ -48,21 +48,55 @@ func (a *Analytics) GetTokenSummary(days int) (*TokenSummary, error) {
 			CASE
 				WHEN COUNT(*) > 0 THEN CAST(SUM(success) AS FLOAT) / COUNT(*)
 				ELSE 0
-			END AS success_rate,
-			COALESCE(
-				(SUM(input_tokens * COALESCE(m.cost_input_per_m, 0)) +
-				 SUM(output_tokens * COALESCE(m.cost_output_per_m, 0))) / 1000000,
-				0
-			) AS est_cost_usd
+			END AS success_rate
 		FROM requests r
-		LEFT JOIN models m ON m.id = r.model
 		WHERE r.created_at >= ?
 	`, since.Format(time.RFC3339Nano))
 
-	if err := row.Scan(&summary.TotalRequests, &summary.InputTokens, &summary.OutputTokens, &summary.SuccessRate, &summary.EstCostUSD); err != nil {
-		return nil, err
+	var scanErr error
+	if scanErr = row.Scan(&summary.TotalRequests, &summary.InputTokens, &summary.OutputTokens, &summary.SuccessRate); scanErr != nil {
+		return nil, scanErr
 	}
+
+	// Compute estimated cost in Go using per-model price rules. This stays
+	// correct even when the catalog/models table is empty (fresh installs):
+	// each model's input/output is priced from the embedded seed rules and
+	// summed, instead of a single models-table JOIN that yields NULL/0.
+	cost, costErr := a.modelCostSum(ctx, since.Format(time.RFC3339Nano))
+	if costErr != nil {
+		return nil, costErr
+	}
+	summary.EstCostUSD = cost
 	return &summary, nil
+}
+
+// modelCostSum sums estimated USD cost across requests using price rules from
+// seed_prices.json, keyed per model. Independent of the models table.
+func (a *Analytics) modelCostSum(ctx context.Context, since string) (float64, error) {
+	rows, err := a.db.DB().QueryContext(ctx, `
+		SELECT model,
+		       COALESCE(SUM(input_tokens), 0),
+		       COALESCE(SUM(output_tokens), 0)
+		FROM requests
+		WHERE created_at >= ?
+		GROUP BY model
+	`, since)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = rows.Close() }()
+	var cost float64
+	for rows.Next() {
+		var model string
+		var inToks, outToks int64
+		if err := rows.Scan(&model, &inToks, &outToks); err != nil {
+			return 0, err
+		}
+		if ipm, opm, ok := PriceForModel(model); ok {
+			cost += (float64(inToks)*ipm + float64(outToks)*opm) / 1_000_000
+		}
+	}
+	return cost, rows.Err()
 }
 
 // ModelBreakdown holds per-model usage and performance stats.
@@ -133,6 +167,14 @@ func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
 			&mb.EstCostUSD,
 		); err != nil {
 			return nil, err
+		}
+		// models-table cost may be 0 when the catalog/models rows are missing
+		// (common on fresh installs). Fall back to the embedded price rules so
+		// /api/analytics/* still reports a USD estimate.
+		if mb.EstCostUSD == 0 && (mb.InputTokens > 0 || mb.OutputTokens > 0) {
+			if ipm, opm, ok := PriceForModel(mb.Model); ok {
+				mb.EstCostUSD = (float64(mb.InputTokens)*ipm + float64(mb.OutputTokens)*opm) / 1_000_000
+			}
 		}
 		result = append(result, mb)
 	}

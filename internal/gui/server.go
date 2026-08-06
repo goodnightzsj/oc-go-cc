@@ -456,7 +456,10 @@ func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 			Scenario:     rec.Scenario,
 			StartTime:    rec.StartTime.Format("2006-01-02T15:04:05Z07:00"),
 			DurationMs:   rec.Duration.Milliseconds(),
-			InputTokens:  rec.InputTokens,
+			// Show the total input a request consumed (raw + cache), matching how
+			// the opencode console reports prompt input. Providers like deepseek
+			// put most of it in cache_read/cache_creation with input_tokens==0.
+			InputTokens:  rec.DisplayInputTokens(),
 			OutputTokens: rec.OutputTokens,
 			CacheReadTokens:     rec.CacheReadTokens,
 			CacheCreationTokens: rec.CacheCreationTokens,

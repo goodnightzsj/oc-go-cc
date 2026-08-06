@@ -110,6 +110,45 @@ func (r *Requests) Count() (int64, error) {
 	return count, err
 }
 
+// Page returns records for a single history page (1-based page, pageSize per
+// page, newest first) plus the total number of records.
+func (r *Requests) Page(page, pageSize int) ([]history.RequestRecord, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize <= 0 || pageSize > 1000 {
+		pageSize = 50
+	}
+	offset := (page - 1) * pageSize
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	rows, err := r.db.DB().QueryContext(ctx, `
+		SELECT id, model, provider, scenario, start_time, duration_ms,
+		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+		       streaming, success, error_msg, attempt
+		FROM requests
+		ORDER BY start_time DESC
+		LIMIT ? OFFSET ?
+	`, pageSize, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	records, err := scanRequests(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	total, err := r.Count()
+	if err != nil {
+		return records, 0, err
+	}
+	return records, total, nil
+}
+
 // CountSince returns the number of request records with start time after the given time.
 func (r *Requests) CountSince(since time.Time) (int64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -145,6 +184,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		var streaming, success int
 
 		var attempt sql.NullInt64
+		var errorMsg sql.NullString
 		err := rows.Scan(
 			&rec.ID,
 			&rec.Model,
@@ -158,13 +198,16 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 			&rec.CacheCreationTokens,
 			&streaming,
 			&success,
-			&rec.ErrorMsg,
+			&errorMsg,
 			&attempt,
 		)
 		if attempt.Valid {
 			rec.Attempt = int(attempt.Int64)
 		} else {
 			rec.Attempt = 1
+		}
+		if errorMsg.Valid {
+			rec.ErrorMsg = errorMsg.String
 		}
 		if err != nil {
 			return nil, err

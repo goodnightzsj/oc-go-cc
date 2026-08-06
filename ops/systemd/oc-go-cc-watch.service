@@ -1,5 +1,5 @@
 [Unit]
-Description=oc-go-cc source watcher
+Description=routatic-proxy source watcher
 After=network-online.target oc-go-cc.service
 Wants=network-online.target
 ConditionPathExists=/root/oc-go-cc/.enable-prod-watch

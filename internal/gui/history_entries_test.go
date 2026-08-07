@@ -8,10 +8,13 @@ import (
 
 func TestHistoryEntriesExposeRawAndPromptTokens(t *testing.T) {
 	entries := toHistoryEntries([]history.RequestRecord{{
+		ID:                  "request-1",
 		InputTokens:         10,
 		CacheReadTokens:     20,
 		CacheCreationTokens: 30,
 		OutputTokens:        40,
+		Attempt:             2,
+		ErrorMsg:            "upstream failed",
 	}})
 	if len(entries) != 1 {
 		t.Fatalf("entries = %d, want 1", len(entries))
@@ -25,5 +28,8 @@ func TestHistoryEntriesExposeRawAndPromptTokens(t *testing.T) {
 	}
 	if got.CacheReadTokens != 20 || got.CacheCreationTokens != 30 {
 		t.Errorf("cache tokens = (%d, %d), want (20, 30)", got.CacheReadTokens, got.CacheCreationTokens)
+	}
+	if got.ID != "request-1" || got.Attempt != 2 || got.ErrorMsg != "upstream failed" {
+		t.Errorf("request detail fields = %+v, want id/attempt/error preserved", got)
 	}
 }

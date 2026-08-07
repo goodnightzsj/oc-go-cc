@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -429,25 +430,35 @@ type historyEntry struct {
 	CacheReadTokens     int    `json:"cache_read_tokens"`
 	CacheCreationTokens int    `json:"cache_creation_tokens"`
 	Streaming           bool   `json:"streaming"`
+	Attempt             int    `json:"attempt"`
 	Success             bool   `json:"success"`
 	ErrorMsg            string `json:"error_msg,omitempty"`
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	if page < 1 {
 		page = 1
 	}
 	size, _ := strconv.Atoi(r.URL.Query().Get("size"))
-	if size <= 0 {
+	if size <= 0 || size > 1000 {
 		size = 50
+	}
+	query, err := historyRequestQuery(r, page, size)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	// Prefer the persistent SQLite history (full dataset) with pagination;
 	// fall back to the in-memory ring buffer only when storage is unavailable.
 	if s.storage != nil {
 		repo := storage.NewRequests(s.storage)
-		records, total, err := repo.Page(page, size)
+		records, total, err := repo.Query(query)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -465,13 +476,157 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"items": []historyEntry{}, "total": 0, "page": page, "size": size})
 		return
 	}
-	records := s.hist.Last(size)
+	records, total := filterMemoryHistory(s.hist.Last(0), query)
 	writeJSON(w, map[string]any{
 		"items": toHistoryEntries(records),
-		"total": int64(len(records)),
+		"total": total,
 		"page":  page,
 		"size":  size,
 	})
+}
+
+func historyRequestQuery(r *http.Request, page, size int) (storage.RequestQuery, error) {
+	values := r.URL.Query()
+	q := storage.RequestQuery{
+		Page:      page,
+		PageSize:  size,
+		Search:    strings.TrimSpace(values.Get("search")),
+		Model:     strings.TrimSpace(values.Get("model")),
+		Provider:  strings.TrimSpace(values.Get("provider")),
+		Scenario:  strings.TrimSpace(values.Get("scenario")),
+		SortBy:    values.Get("sort"),
+		SortOrder: values.Get("order"),
+	}
+
+	var err error
+	if q.Start, err = parseHistoryTime(values.Get("start"), false); err != nil {
+		return q, fmt.Errorf("invalid start: %w", err)
+	}
+	if q.End, err = parseHistoryTime(values.Get("end"), true); err != nil {
+		return q, fmt.Errorf("invalid end: %w", err)
+	}
+	if q.Success, err = parseHistoryBool(values.Get("success")); err != nil {
+		return q, fmt.Errorf("invalid success: %w", err)
+	}
+	if q.Streaming, err = parseHistoryBool(values.Get("streaming")); err != nil {
+		return q, fmt.Errorf("invalid streaming: %w", err)
+	}
+	if q.Start != nil && q.End != nil && !q.Start.Before(*q.End) {
+		return q, errors.New("start must be before end")
+	}
+	return q, nil
+}
+
+func parseHistoryTime(value string, endOfDay bool) (*time.Time, error) {
+	if value == "" {
+		return nil, nil
+	}
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return &parsed, nil
+	}
+	parsed, err := time.ParseInLocation("2006-01-02", value, time.Local)
+	if err != nil {
+		return nil, err
+	}
+	if endOfDay {
+		parsed = parsed.AddDate(0, 0, 1)
+	}
+	return &parsed, nil
+}
+
+func parseHistoryBool(value string) (*bool, error) {
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
+}
+
+func filterMemoryHistory(records []history.RequestRecord, q storage.RequestQuery) ([]history.RequestRecord, int64) {
+	search := strings.ToLower(strings.TrimSpace(q.Search))
+	filtered := make([]history.RequestRecord, 0, len(records))
+	for _, rec := range records {
+		if search != "" && !strings.Contains(strings.ToLower(strings.Join([]string{
+			rec.ID, rec.Model, rec.Provider, rec.Scenario, rec.ErrorMsg,
+		}, "\n")), search) {
+			continue
+		}
+		if (q.Model != "" && rec.Model != q.Model) ||
+			(q.Provider != "" && rec.Provider != q.Provider) ||
+			(q.Scenario != "" && rec.Scenario != q.Scenario) {
+			continue
+		}
+		if (q.Start != nil && rec.StartTime.Before(*q.Start)) ||
+			(q.End != nil && !rec.StartTime.Before(*q.End)) {
+			continue
+		}
+		if (q.Success != nil && rec.Success != *q.Success) ||
+			(q.Streaming != nil && rec.Streaming != *q.Streaming) {
+			continue
+		}
+		filtered = append(filtered, rec)
+	}
+
+	sort.SliceStable(filtered, func(i, j int) bool {
+		cmp := compareHistoryRecord(filtered[i], filtered[j], q.SortBy)
+		if cmp == 0 && q.SortBy != "start_time" {
+			return filtered[i].StartTime.After(filtered[j].StartTime)
+		}
+		if strings.EqualFold(q.SortOrder, "asc") {
+			return cmp < 0
+		}
+		return cmp > 0
+	})
+
+	total := int64(len(filtered))
+	start := (q.Page - 1) * q.PageSize
+	if start >= len(filtered) {
+		return []history.RequestRecord{}, total
+	}
+	end := min(start+q.PageSize, len(filtered))
+	return filtered[start:end], total
+}
+
+func compareHistoryRecord(a, b history.RequestRecord, field string) int {
+	switch field {
+	case "model":
+		return strings.Compare(strings.ToLower(a.Model), strings.ToLower(b.Model))
+	case "provider":
+		return strings.Compare(strings.ToLower(a.Provider), strings.ToLower(b.Provider))
+	case "scenario":
+		return strings.Compare(strings.ToLower(a.Scenario), strings.ToLower(b.Scenario))
+	case "prompt_tokens":
+		return a.DisplayInputTokens() - b.DisplayInputTokens()
+	case "output_tokens":
+		return a.OutputTokens - b.OutputTokens
+	case "duration_ms":
+		return int(a.Duration.Milliseconds() - b.Duration.Milliseconds())
+	case "success":
+		return boolToCompare(a.Success, b.Success)
+	case "streaming":
+		return boolToCompare(a.Streaming, b.Streaming)
+	default:
+		if a.StartTime.Before(b.StartTime) {
+			return -1
+		}
+		if a.StartTime.After(b.StartTime) {
+			return 1
+		}
+		return 0
+	}
+}
+
+func boolToCompare(a, b bool) int {
+	if a == b {
+		return 0
+	}
+	if a {
+		return 1
+	}
+	return -1
 }
 
 // toHistoryEntries converts request records to the wire format.
@@ -491,6 +646,7 @@ func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 			CacheReadTokens:     rec.CacheReadTokens,
 			CacheCreationTokens: rec.CacheCreationTokens,
 			Streaming:           rec.Streaming,
+			Attempt:             rec.Attempt,
 			Success:             rec.Success,
 			ErrorMsg:            rec.ErrorMsg,
 		}

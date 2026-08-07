@@ -2109,16 +2109,24 @@ const AnalyticsModule = {
       const pctTxt = (frac * 100).toFixed(1) + '%';
       const tip = `${this.escapeHtml(label)}: ${v.toLocaleString()} tokens (${pctTxt})`;
       legend.push(`<div class="legend-item"><span class="legend-swatch" style="background:${col}"></span><span class="legend-label">${this.escapeHtml(label)}</span><span class="legend-value">${v.toLocaleString()}</span><span class="legend-pct">${pctTxt}</span></div>`);
-      return { path: slicePath(a0, a1), col, tip, label, v };
+      return { path: slicePath(a0, a1), full: sweep >= 2 * Math.PI - 1e-6, col, tip, label, v };
     });
 
     const tooltipId = containerId + '-tip';
-    const svgSlices = slices.map((s, i) => `
-      <path d="${s.path}" fill="${s.col}" stroke="#1c1c1e" stroke-width="1.5"
-        onmouseenter="this.style.opacity='0.7'; document.getElementById('${tooltipId}').textContent='${s.tip}'; document.getElementById('${tooltipId}').style.display='block'"
-        onmousemove="var el=document.getElementById('${tooltipId}'); var r=this.closest('.donut-svg-wrap').getBoundingClientRect(); el.style.left=(event.clientX-r.left+10)+'px'; el.style.top=(event.clientY-r.top-10)+'px';"
-        onmouseleave="this.style.opacity='1'; document.getElementById('${tooltipId}').style.display='none'"
-        id="slice-${containerId}-${i}"></path>`).join('');
+    // A single slice that spans the whole circle (one model at 100%) can't be
+    // drawn with one SVG arc — start and end points coincide and the browser
+    // renders nothing (leaving only the L-to-center line). Draw a <circle> in
+    // that case so the disc is genuinely solid.
+    const svgSlices = slices.map((s, i) => {
+      const evt =
+        `onmouseenter="this.style.opacity='0.7'; document.getElementById('${tooltipId}').textContent='${s.tip}'; document.getElementById('${tooltipId}').style.display='block'" ` +
+        `onmousemove="var el=document.getElementById('${tooltipId}'); var r=this.closest('.donut-svg-wrap').getBoundingClientRect(); el.style.left=(event.clientX-r.left+10)+'px'; el.style.top=(event.clientY-r.top-10)+'px';" ` +
+        `onmouseleave="this.style.opacity='1'; document.getElementById('${tooltipId}').style.display='none'"`;
+      if (s.full) {
+        return `<circle cx="${C}" cy="${C}" r="${R}" fill="${s.col}" stroke="#1c1c1e" stroke-width="1.5" ${evt} id="slice-${containerId}-${i}"></circle>`;
+      }
+      return `<path d="${s.path}" fill="${s.col}" stroke="#1c1c1e" stroke-width="1.5" ${evt} id="slice-${containerId}-${i}"></path>`;
+    }).join('');
 
     const html = `
       <div class="donut-svg-wrap" style="position:relative;display:flex;justify-content:center;align-items:center;height:240px;">

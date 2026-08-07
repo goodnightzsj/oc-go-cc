@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 
 	"github.com/routatic/proxy/internal/history"
@@ -120,28 +121,61 @@ func (r *Requests) Count() (int64, error) {
 	return count, err
 }
 
+// RequestQuery describes a filtered, sorted history page. Empty fields keep
+// the existing all-records behavior.
+type RequestQuery struct {
+	Page, PageSize     int
+	Search, Model      string
+	Provider, Scenario string
+	Start, End         *time.Time
+	Success, Streaming *bool
+	SortBy, SortOrder  string
+}
+
 // Page returns records for a single history page (1-based page, pageSize per
 // page, newest first) plus the total number of records.
 func (r *Requests) Page(page, pageSize int) ([]history.RequestRecord, int64, error) {
-	if page < 1 {
-		page = 1
+	return r.Query(RequestQuery{Page: page, PageSize: pageSize})
+}
+
+// Query returns one server-side filtered history page and the matching total.
+func (r *Requests) Query(q RequestQuery) ([]history.RequestRecord, int64, error) {
+	if q.Page < 1 {
+		q.Page = 1
 	}
-	if pageSize <= 0 || pageSize > 1000 {
-		pageSize = 50
+	if q.PageSize <= 0 || q.PageSize > 1000 {
+		q.PageSize = 50
 	}
-	offset := (page - 1) * pageSize
+	offset := (q.Page - 1) * q.PageSize
+	where, args := requestWhere(q)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	var total int64
+	if err := r.db.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM requests`+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	order := "DESC"
+	if strings.EqualFold(q.SortOrder, "asc") {
+		order = "ASC"
+	}
+	sortColumn := requestSortColumn(q.SortBy)
+	orderBy := sortColumn + " " + order
+	if sortColumn != "start_time" {
+		orderBy += ", start_time DESC"
+	}
+
+	selectArgs := append(append([]any{}, args...), q.PageSize, offset)
 	rows, err := r.db.DB().QueryContext(ctx, `
 		SELECT id, model, provider, scenario, start_time, duration_ms,
 		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
 		       streaming, success, error_msg, attempt
-		FROM requests
-		ORDER BY start_time DESC
+		FROM requests`+where+`
+		ORDER BY `+orderBy+`
 		LIMIT ? OFFSET ?
-	`, pageSize, offset)
+	`, selectArgs...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -152,11 +186,74 @@ func (r *Requests) Page(page, pageSize int) ([]history.RequestRecord, int64, err
 		return nil, 0, err
 	}
 
-	total, err := r.Count()
-	if err != nil {
-		return records, 0, err
-	}
 	return records, total, nil
+}
+
+func requestWhere(q RequestQuery) (string, []any) {
+	var clauses []string
+	var args []any
+
+	if search := strings.TrimSpace(q.Search); search != "" {
+		term := "%" + strings.ToLower(search) + "%"
+		clauses = append(clauses, `(LOWER(id) LIKE ? OR LOWER(model) LIKE ? OR LOWER(COALESCE(provider, '')) LIKE ? OR LOWER(COALESCE(scenario, '')) LIKE ? OR LOWER(COALESCE(error_msg, '')) LIKE ?)`)
+		args = append(args, term, term, term, term, term)
+	}
+	for _, filter := range []struct {
+		column string
+		value  string
+	}{
+		{"model", q.Model},
+		{"provider", q.Provider},
+		{"scenario", q.Scenario},
+	} {
+		if value := strings.TrimSpace(filter.value); value != "" {
+			clauses = append(clauses, filter.column+" = ?")
+			args = append(args, value)
+		}
+	}
+	if q.Start != nil {
+		clauses = append(clauses, "julianday(start_time) >= julianday(?)")
+		args = append(args, q.Start.UTC().Format(time.RFC3339Nano))
+	}
+	if q.End != nil {
+		clauses = append(clauses, "julianday(start_time) < julianday(?)")
+		args = append(args, q.End.UTC().Format(time.RFC3339Nano))
+	}
+	if q.Success != nil {
+		clauses = append(clauses, "success = ?")
+		args = append(args, boolToInt(*q.Success))
+	}
+	if q.Streaming != nil {
+		clauses = append(clauses, "streaming = ?")
+		args = append(args, boolToInt(*q.Streaming))
+	}
+	if len(clauses) == 0 {
+		return "", args
+	}
+	return " WHERE " + strings.Join(clauses, " AND "), args
+}
+
+func requestSortColumn(field string) string {
+	switch field {
+	case "model":
+		return "LOWER(model)"
+	case "provider":
+		return "LOWER(COALESCE(provider, ''))"
+	case "scenario":
+		return "LOWER(COALESCE(scenario, ''))"
+	case "prompt_tokens":
+		return "COALESCE(input_tokens, 0) + COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0)"
+	case "output_tokens":
+		return "COALESCE(output_tokens, 0)"
+	case "duration_ms":
+		return "COALESCE(duration_ms, 0)"
+	case "success":
+		return "COALESCE(success, 0)"
+	case "streaming":
+		return "COALESCE(streaming, 0)"
+	default:
+		return "start_time"
+	}
 }
 
 // Totals is a persisted roll-up of request counters, used to backfill the

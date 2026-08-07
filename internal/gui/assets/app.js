@@ -63,6 +63,20 @@ const TRANSLATIONS = {
     'section.modelDist': 'Model Distribution',
     'empty.noData': 'No data yet',
     'filter.allModels': 'All Models',
+    'filter.model': 'Model',
+    'filter.provider': 'Provider',
+    'filter.scenario': 'Scenario',
+    'filter.startDate': 'Start date',
+    'filter.endDate': 'End date',
+    'filter.allStatuses': 'All statuses',
+    'filter.success': 'Success only',
+    'filter.failed': 'Failed only',
+    'filter.allStreams': 'All request types',
+    'filter.streaming': 'Streaming only',
+    'filter.nonStreaming': 'Non-streaming only',
+    'filter.reset': 'Reset',
+    'history.searchPlaceholder': 'Search ID, model, provider, scenario, or error…',
+    'analytics.viewRequests': 'View requests',
     'th.time': 'Time',
     'th.model': 'Model',
     'th.scenario': 'Scenario',
@@ -233,6 +247,20 @@ const TRANSLATIONS = {
     'section.modelDist': '模型调用分布',
     'empty.noData': '暂无数据',
     'filter.allModels': '全部模型',
+    'filter.model': '模型',
+    'filter.provider': '供应商',
+    'filter.scenario': '场景',
+    'filter.startDate': '开始日期',
+    'filter.endDate': '结束日期',
+    'filter.allStatuses': '全部状态',
+    'filter.success': '仅成功',
+    'filter.failed': '仅失败',
+    'filter.allStreams': '全部请求类型',
+    'filter.streaming': '仅流式',
+    'filter.nonStreaming': '仅非流式',
+    'filter.reset': '重置',
+    'history.searchPlaceholder': '搜索请求 ID、模型、供应商、场景或错误…',
+    'analytics.viewRequests': '查看请求',
     'th.time': '时间',
     'th.model': '模型',
     'th.scenario': '场景',
@@ -397,7 +425,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 /* global state */
 let allHistory = [];
-let currentFilter = '';
 let lastModelCounts = {};
 
 /* ── Performance Module ───────────────────────────────────────────── */
@@ -672,9 +699,62 @@ let historyPage = 1;
 let historySize = 50;
 let historyTotal = 0;
 
+function dateInputValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function historyDateBoundary(value, endOfDay) {
+  if (!value) return '';
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return '';
+  if (endOfDay) date.setDate(date.getDate() + 1);
+  return date.toISOString();
+}
+
+function historyQueryParams(page = historyPage, size = historySize) {
+  const params = new URLSearchParams({ page: String(page), size: String(size) });
+  const values = {
+    search: document.getElementById('history-search')?.value.trim(),
+    model: document.getElementById('model-filter')?.value.trim(),
+    provider: document.getElementById('provider-filter')?.value.trim(),
+    scenario: document.getElementById('scenario-filter')?.value.trim(),
+    success: document.getElementById('status-filter')?.value,
+    streaming: document.getElementById('streaming-filter')?.value,
+  };
+  Object.entries(values).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  const start = historyDateBoundary(document.getElementById('history-start')?.value, false);
+  const end = historyDateBoundary(document.getElementById('history-end')?.value, true);
+  if (start) params.set('start', start);
+  if (end) params.set('end', end);
+  params.set('sort', currentSort.field);
+  params.set('order', currentSort.dir);
+  return params;
+}
+
+function historyHasFilters() {
+  return ['history-search', 'history-start', 'history-end', 'model-filter', 'provider-filter',
+    'scenario-filter', 'status-filter', 'streaming-filter']
+    .some(id => document.getElementById(id)?.value);
+}
+
+function resetHistoryFilters(refresh = true) {
+  ['history-search', 'history-start', 'history-end', 'model-filter', 'provider-filter',
+    'scenario-filter', 'status-filter', 'streaming-filter'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+  historyPage = 1;
+  if (refresh) refreshHistory();
+}
+
 async function refreshHistory() {
   try {
-    const r = await fetch(`/api/history?page=${historyPage}&size=${historySize}`);
+    const r = await fetch(`/api/history?${historyQueryParams()}`);
     if (!r.ok) return;
     const data = await r.json();
     // New paginated shape: { items, total, page, size }. Tolerate the old
@@ -691,7 +771,7 @@ async function refreshHistory() {
       if (historyPage > maxPage) historyPage = maxPage;
     }
     renderHistory();
-    updateModelFilter();
+    updateHistoryModelSuggestions();
     renderHistoryPager();
   } catch(e) {}
 }
@@ -718,28 +798,10 @@ function renderHistoryPager() {
 
 function renderHistory() {
   const tbody = document.getElementById('history-tbody');
-
-  // Apply filter
-  let filtered = currentFilter
-    ? allHistory.filter(h => h.model === currentFilter)
-    : allHistory;
-
-  // Apply search
-  if (searchQuery) {
-    filtered = filtered.filter(h => {
-      return (h.model || '').toLowerCase().includes(searchQuery) ||
-             (h.scenario || '').toLowerCase().includes(searchQuery) ||
-             (h.provider || '').toLowerCase().includes(searchQuery);
-    });
-  }
-
-  // Apply sort
-  filtered = sortHistory(filtered);
-
   document.getElementById('history-count').textContent =
-    filtered.length + t('status.count') + (currentFilter ? t('status.filtered') : '');
+    historyTotal + t('status.count') + (historyHasFilters() ? t('status.filtered') : '');
 
-  if (filtered.length === 0) {
+  if (allHistory.length === 0) {
     tbody.innerHTML = '<tr><td colspan="7" class="empty-state">' + t('empty.noHistory') + '</td></tr>';
     return;
   }
@@ -747,13 +809,12 @@ function renderHistory() {
   // Cap the DOM to the most recent rows to avoid rebuilding a huge <tbody>
   // after long sessions. The count above still reflects the full (filtered)
   // set, so the user only loses DOM rendering cost, not information.
-  const limited = filtered.length > HISTORY_RENDER_LIMIT
-    ? filtered.slice(filtered.length - HISTORY_RENDER_LIMIT)
-    : filtered;
+  const limited = allHistory.length > HISTORY_RENDER_LIMIT
+    ? allHistory.slice(0, HISTORY_RENDER_LIMIT)
+    : allHistory;
 
   tbody.innerHTML = limited.map(h => {
-    // Use composite key to ensure uniqueness when multiple requests occur in the same second
-    const rowId = `${h.start_time}_${h.model || 'unknown'}_${h.duration_ms || 0}`;
+    const rowId = h.id || `${h.start_time}_${h.model || 'unknown'}_${h.duration_ms || 0}`;
     return `
     <tr data-id="${escapeHtml(rowId)}" tabindex="0" aria-haspopup="dialog" style="cursor: pointer;">
       <td>${fmtTime(h.start_time)}</td>
@@ -770,9 +831,8 @@ function renderHistory() {
   tbody.querySelectorAll('tr[data-id]').forEach(row => {
     const open = function() {
       const rowId = this.dataset.id;
-      // Parse the composite key to find the matching record
-      const record = filtered.find(h => {
-        const expectedId = `${h.start_time}_${h.model || 'unknown'}_${h.duration_ms || 0}`;
+      const record = allHistory.find(h => {
+        const expectedId = h.id || `${h.start_time}_${h.model || 'unknown'}_${h.duration_ms || 0}`;
         return expectedId === rowId;
       });
       if (record) showHistoryDetail(record);
@@ -787,19 +847,12 @@ function renderHistory() {
   });
 }
 
-function updateModelFilter() {
-  const sel = document.getElementById('model-filter');
-  const current = sel.value;
+function updateHistoryModelSuggestions() {
+  const list = document.getElementById('history-model-options');
+  if (!list) return;
   const models = [...new Set(allHistory.map(h => h.model).filter(Boolean))].sort();
-  sel.innerHTML = '<option value="">' + t('filter.allModels') + '</option>' +
-    models.map(m => `<option value="${escapeHtml(m)}" ${m===current?'selected':''}>${escapeHtml(m)}</option>`).join('');
-  sel.value = current;
+  list.innerHTML = models.map(m => `<option value="${escapeHtml(m)}"></option>`).join('');
 }
-
-document.getElementById('model-filter').addEventListener('change', function() {
-  currentFilter = this.value;
-  renderHistory();
-});
 
 /* ── /api/config ───────────────────────────────────────────────── */
 async function refreshConfig() {
@@ -916,6 +969,7 @@ function escapeCSV(value) {
 }
 
 const HISTORY_CSV_COLUMNS = [
+  ['id', r => r.id],
   ['start_time', r => r.start_time],
   ['model', r => r.model],
   ['provider', r => r.provider],
@@ -927,6 +981,7 @@ const HISTORY_CSV_COLUMNS = [
   ['output_tokens', r => r.output_tokens],
   ['duration_ms', r => r.duration_ms],
   ['streaming', r => r.streaming],
+  ['attempt', r => r.attempt],
   ['success', r => r.success],
   ['error_msg', r => r.error_msg || ''],
 ];
@@ -942,7 +997,7 @@ async function exportHistoryCSV() {
     const size = 500;
     const rows = [];
     for (let page = 1; ; page++) {
-      const r = await fetch(`/api/history?page=${page}&size=${size}`);
+      const r = await fetch(`/api/history?${historyQueryParams(page, size)}`);
       if (!r.ok) throw new Error(`history page ${page}: ${r.status}`);
       const d = await r.json();
       const items = d.items || [];
@@ -1276,12 +1331,24 @@ function togglePasswordVisibility(id) {
 }
 
 /* ── History Search ────────────────────────────────────────────── */
-let searchQuery = '';
+let historyRefreshTimer = null;
 
-document.getElementById('history-search')?.addEventListener('input', function(e) {
-  searchQuery = e.target.value.toLowerCase().trim();
-  renderHistory();
+function scheduleHistoryRefresh() {
+  historyPage = 1;
+  if (historyRefreshTimer) clearTimeout(historyRefreshTimer);
+  historyRefreshTimer = setTimeout(() => {
+    historyRefreshTimer = null;
+    refreshHistory();
+  }, 250);
+}
+
+['history-search', 'model-filter', 'provider-filter', 'scenario-filter'].forEach(id => {
+  document.getElementById(id)?.addEventListener('input', scheduleHistoryRefresh);
 });
+['history-start', 'history-end', 'status-filter', 'streaming-filter'].forEach(id => {
+  document.getElementById(id)?.addEventListener('change', scheduleHistoryRefresh);
+});
+document.getElementById('history-reset')?.addEventListener('click', () => resetHistoryFilters());
 
 /* ── History Sorting ───────────────────────────────────────────── */
 let currentSort = { field: 'start_time', dir: 'desc' };
@@ -1305,23 +1372,10 @@ document.querySelectorAll('.history-table .sortable').forEach(th => {
     });
     this.classList.add(currentSort.dir);
     this.setAttribute('aria-sort', currentSort.dir === 'asc' ? 'ascending' : 'descending');
-    renderHistory();
+    historyPage = 1;
+    refreshHistory();
   });
 });
-
-function sortHistory(history) {
-  return [...history].sort((a, b) => {
-    let aVal = a[currentSort.field];
-    let bVal = b[currentSort.field];
-    if (aVal == null) aVal = '';
-    if (bVal == null) bVal = '';
-    if (typeof aVal === 'string') aVal = aVal.toLowerCase();
-    if (typeof bVal === 'string') bVal = bVal.toLowerCase();
-    if (aVal < bVal) return currentSort.dir === 'asc' ? -1 : 1;
-    if (aVal > bVal) return currentSort.dir === 'asc' ? 1 : -1;
-    return 0;
-  });
-}
 
 /* ── History Detail Modal ──────────────────────────────────────── */
 const modal = document.getElementById('history-modal');
@@ -1331,6 +1385,10 @@ let modalReturnFocus = null;
 
 function showHistoryDetail(record) {
   modalBody.innerHTML = `
+    <div class="detail-row">
+      <span class="detail-label">Request ID</span>
+      <span class="detail-value">${escapeHtml(record.id || '—')}</span>
+    </div>
     <div class="detail-row">
       <span class="detail-label">Time</span>
       <span class="detail-value">${fmtTime(record.start_time)}</span>
@@ -1346,6 +1404,14 @@ function showHistoryDetail(record) {
     <div class="detail-row">
       <span class="detail-label">Scenario</span>
       <span class="detail-value">${escapeHtml(record.scenario || '—')}</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">Request Type</span>
+      <span class="detail-value">${record.streaming ? 'Streaming' : 'Non-streaming'}</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">Attempt</span>
+      <span class="detail-value">${record.attempt || 1}</span>
     </div>
     <div class="detail-row">
       <span class="detail-label">Input Tokens</span>
@@ -1375,6 +1441,10 @@ function showHistoryDetail(record) {
       <span class="detail-label">Status</span>
       <span class="detail-value" style="color: ${record.success ? '#30d158' : '#ff453a'}">${record.success ? 'Success' : 'Failed'}</span>
     </div>
+    ${record.error_msg ? `<div class="detail-row">
+      <span class="detail-label">Error</span>
+      <span class="detail-value" style="color:#ff453a">${escapeHtml(record.error_msg)}</span>
+    </div>` : ''}
   `;
   modalReturnFocus = document.activeElement;
   if (typeof modal?.showModal === 'function' && !modal.open) modal.showModal();
@@ -2412,6 +2482,9 @@ const AnalyticsModule = {
         .map(([name, value, format]) =>
           `<div class="legend-detail"><span>${name}</span><strong>${format(value)}</strong></div>`)
         .join('');
+      const filterKind = containerId === 'model-donut' ? 'model' : 'provider';
+      const drilldown = label === 'Other' ? '' :
+        `<button type="button" class="legend-drilldown" data-filter-kind="${filterKind}" data-filter-value="${this.escapeHtml(label)}">${t('analytics.viewRequests')}</button>`;
       legend.push(
         `<div class="legend-entry">` +
           `<button type="button" class="legend-item" data-slice="${idx}" aria-expanded="false" aria-controls="${detailId}">` +
@@ -2420,7 +2493,7 @@ const AnalyticsModule = {
           `<span class="legend-value">${fmtTok(v)}</span>` +
           `<span class="legend-pct">${pctTxt}</span>` +
           `</button>` +
-          `<div class="legend-details" id="${detailId}" hidden>${detailRows}</div>` +
+          `<div class="legend-details" id="${detailId}" hidden>${detailRows}${drilldown}</div>` +
         `</div>`);
       const dash = `${(drawFrac * CIRC).toFixed(2)} ${((1 - drawFrac) * CIRC).toFixed(2)}`;
       // Negative dashoffset advances clockwise from 12 o'clock (rotate -90).
@@ -2482,6 +2555,26 @@ const AnalyticsModule = {
         if (details) details.hidden = expanded;
       });
     });
+    wrap.querySelectorAll('.legend-drilldown').forEach(button => {
+      button.addEventListener('click', () => {
+        this.drillDown(button.dataset.filterKind, button.dataset.filterValue);
+      });
+    });
+  },
+
+  drillDown(kind, value) {
+    resetHistoryFilters(false);
+    const days = Number(document.getElementById('analytics-days')?.value || 30);
+    const end = new Date();
+    const start = new Date(end);
+    start.setDate(start.getDate() - Math.max(0, days - 1));
+    document.getElementById('history-start').value = dateInputValue(start);
+    document.getElementById('history-end').value = dateInputValue(end);
+    const target = document.getElementById(kind === 'provider' ? 'provider-filter' : 'model-filter');
+    if (target) target.value = value;
+    historyPage = 1;
+    if (location.hash !== '#history') location.hash = 'history';
+    else activateTab('history');
   },
 
   renderTrend(points) {

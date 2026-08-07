@@ -298,7 +298,11 @@
       <div class="bg-[#2c2c2e] border border-[#48484a] rounded-lg px-4 py-3.5 transition-all hover:-translate-y-0.5 hover:shadow-lg">
         <div class="text-xs text-[#98989d] mb-1 font-medium" data-i18n="analytics.totalTokens">Total Tokens</div>
         <div class="text-2xl font-bold tabular-nums text-[#f5f5f7] leading-tight my-0.5" id="kpi-tokens">--</div>
-        <div class="text-xs text-[#98989d]"><span id="kpi-tokens-in">0</span> <span data-i18n="analytics.inout">in / out</span> <span id="kpi-tokens-out">0</span></div>
+        <div class="text-xs text-[#98989d] flex items-center gap-2 flex-wrap">
+          <span class="inline-flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-[#3b82f6]"></span><span id="kpi-tokens-in" class="tabular-nums">0</span></span>
+          <span class="inline-flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-[#f59e0b]"></span><span id="kpi-tokens-cache" class="tabular-nums">0</span></span>
+          <span class="inline-flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-[#10b981]"></span><span id="kpi-tokens-out" class="tabular-nums">0</span></span>
+        </div>
       </div>
       <div class="bg-[#2c2c2e] border border-[#48484a] rounded-lg px-4 py-3.5 transition-all hover:-translate-y-0.5 hover:shadow-lg">
         <div class="text-xs text-[#98989d] mb-1 font-medium" data-i18n="analytics.estCost">Est. Cost</div>

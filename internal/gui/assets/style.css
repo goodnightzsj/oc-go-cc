@@ -1,12 +1,29 @@
 /* ── Donut Chart ──────────────────────────────────────────── */
-.donut-wrapper { display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.donut { width: 160px; height: 160px; border-radius: 50%; position: relative; background: conic-gradient(var(--donut-segments)); box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
-.donut::after { content: ''; position: absolute; top: 22px; left: 22px; width: 116px; height: 116px; background: #1c1c1e; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; color: #f5f5f7; }
-.donut-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 12px; max-width: 220px; justify-content: center; }
-.legend-item { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-.legend-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
-.legend-label { color: #f5f5f7; }
+/* Ring left, legend right; collapses to stacked on narrow cards. */
+.donut-layout { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; justify-content: center; }
+.donut-svg-wrap { position: relative; flex: 0 0 200px; width: 200px; height: 200px; }
+.donut-svg { width: 100%; height: 100%; display: block; }
+.donut-arc { transition: opacity 0.15s; cursor: pointer; }
+.donut-center-value { fill: #f5f5f7; font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.donut-center-label { fill: #98989d; font-size: 11px; letter-spacing: 0.04em; }
+
+.donut-legend { flex: 1 1 200px; min-width: 190px; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.legend-item { display: grid; grid-template-columns: 10px minmax(0,1fr) auto auto; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; transition: background 0.15s; }
+.legend-item.is-active { background: #3a3a3c; }
+.legend-swatch { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.legend-label { color: #f5f5f7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .legend-value { color: #98989d; font-variant-numeric: tabular-nums; }
+.legend-pct { color: #f5f5f7; font-weight: 600; font-variant-numeric: tabular-nums; min-width: 46px; text-align: right; }
+
+/* Shared floating tooltip for donut + trend charts. */
+.chart-tip { display: none; position: absolute; pointer-events: none; z-index: 10;
+  background: #2c2c2e; border: 1px solid #48484a; border-radius: 8px; padding: 7px 10px;
+  font-size: 11px; color: #f5f5f7; white-space: nowrap; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+.chart-tip .tip-title { color: #98989d; font-size: 10px; margin-bottom: 5px; letter-spacing: .03em; }
+.chart-tip .tip-row { display: flex; align-items: center; gap: 7px; line-height: 1.7; }
+.chart-tip .tip-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.chart-tip .tip-label { color: #98989d; }
+.chart-tip .tip-val { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 600; }
 
 /* ── Trend Chart ──────────────────────────────────────────── */
 .trend-svg { width: 100%; height: 200px; overflow: visible; }

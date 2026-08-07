@@ -1165,6 +1165,14 @@ func (h *MessagesHandler) sendStreamError(w http.ResponseWriter, message string)
 }
 
 // handleNonStreaming handles a non-streaming request with fallback.
+func decodeMessageUsage(responseBody []byte) types.Usage {
+	var response types.MessageResponse
+	if err := json.Unmarshal(responseBody, &response); err != nil {
+		return types.Usage{}
+	}
+	return response.Usage
+}
+
 func (h *MessagesHandler) handleNonStreaming(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -1254,25 +1262,22 @@ func (h *MessagesHandler) handleNonStreaming(
 		}
 	}
 
-	var inputTokens, outputTokens int
-	var msgResp types.MessageResponse
-	if errUnmarshal := json.Unmarshal(responseBody, &msgResp); errUnmarshal == nil {
-		inputTokens = msgResp.Usage.InputTokens
-		outputTokens = msgResp.Usage.OutputTokens
-	}
+	usage := decodeMessageUsage(responseBody)
 
 	rec := history.RequestRecord{
-		ID:           requestID,
-		Model:        result.ModelID,
-		Provider:     provider,
-		Scenario:     string(scenario),
-		StartTime:    startTime,
-		Duration:     latency,
-		InputTokens:  inputTokens,
-		OutputTokens: outputTokens,
-		Streaming:    false,
-		Success:      true,
-		Attempt:      result.Attempted,
+		ID:                  requestID,
+		Model:               result.ModelID,
+		Provider:            provider,
+		Scenario:            string(scenario),
+		StartTime:           startTime,
+		Duration:            latency,
+		InputTokens:         usage.InputTokens,
+		OutputTokens:        usage.OutputTokens,
+		CacheReadTokens:     usage.CacheReadInputTokens,
+		CacheCreationTokens: usage.CacheCreationInputTokens,
+		Streaming:           false,
+		Success:             true,
+		Attempt:             result.Attempted,
 	}
 	if h.history != nil {
 		h.history.Add(rec)

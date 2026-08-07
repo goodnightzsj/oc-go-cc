@@ -7,13 +7,18 @@
 .donut-center-value { fill: #f5f5f7; font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .donut-center-label { fill: #98989d; font-size: 11px; letter-spacing: 0.04em; }
 
-.donut-legend { flex: 1 1 200px; min-width: 190px; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
-.legend-item { display: grid; grid-template-columns: 10px minmax(0,1fr) auto auto; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; transition: background 0.15s; }
+.donut-legend { flex: 1 1 200px; min-width: 190px; max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.legend-entry { border-radius: 6px; }
+.legend-item { appearance: none; width: 100%; display: grid; grid-template-columns: 10px minmax(0,1fr) auto auto; align-items: center; gap: 8px; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.legend-item:focus-visible { outline: 2px solid #6366f1; outline-offset: 1px; }
 .legend-item.is-active { background: #3a3a3c; }
 .legend-swatch { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
 .legend-label { color: #f5f5f7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .legend-value { color: #98989d; font-variant-numeric: tabular-nums; }
 .legend-pct { color: #f5f5f7; font-weight: 600; font-variant-numeric: tabular-nums; min-width: 46px; text-align: right; }
+.legend-details { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 2px 8px 6px 26px; color: #98989d; font-size: 11px; }
+.legend-detail { display: contents; }
+.legend-detail strong { color: #f5f5f7; font-variant-numeric: tabular-nums; font-weight: 600; }
 
 /* Shared floating tooltip for donut + trend charts. */
 .chart-tip { display: none; position: absolute; pointer-events: none; z-index: 10;
@@ -34,6 +39,9 @@
 /* ── Modal ────────────────────────────────────────────────── */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100; opacity: 0; visibility: hidden; transition: opacity 0.2s, visibility 0.2s; }
 .modal-overlay.visible { opacity: 1; visibility: visible; }
+dialog.modal-overlay:not([open]) { display: none; }
+dialog.modal-overlay[open] { opacity: 1; visibility: visible; border: 0; padding: 0; color: inherit; }
+dialog.modal-overlay::backdrop { background: rgba(0,0,0,0.5); }
 .modal-content { background: #2c2c2e; border-radius: 10px; width: 90%; max-width: 500px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 2px 8px rgba(0,0,0,0.3); transform: scale(0.95); transition: transform 0.2s; }
 .modal-overlay.visible .modal-content { transform: scale(1); }
 .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #48484a; }

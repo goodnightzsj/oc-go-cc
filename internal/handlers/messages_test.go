@@ -26,6 +26,22 @@ import (
 
 func boolPtr(b bool) *bool { return &b }
 
+func TestDecodeMessageUsageIncludesCacheTokens(t *testing.T) {
+	usage := decodeMessageUsage([]byte(`{
+		"usage": {
+			"input_tokens": 10,
+			"output_tokens": 20,
+			"cache_read_input_tokens": 30,
+			"cache_creation_input_tokens": 40
+		}
+	}`))
+
+	if usage.InputTokens != 10 || usage.OutputTokens != 20 ||
+		usage.CacheReadInputTokens != 30 || usage.CacheCreationInputTokens != 40 {
+		t.Fatalf("decoded usage = %+v, want all raw and cache token fields", usage)
+	}
+}
+
 func TestAppendUniqueModels_DedupsByModelID(t *testing.T) {
 	base := []config.ModelConfig{
 		{Provider: "opencode-go", ModelID: "kimi-k2.6"},

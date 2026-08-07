@@ -82,13 +82,13 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 	var retention *storage.Retention
 	storageCfg := storage.DefaultConfig
 	if cfg.Storage != nil {
-		storageCfg = storage.Config{
+		storageCfg = storageCfg.WithOverlay(storage.Overlay{
 			DatabasePath:      cfg.Storage.DatabasePath,
 			RetentionDays:     cfg.Storage.RetentionDays,
 			VacuumOnStartup:   cfg.Storage.VacuumOnStartup,
 			WALEnabled:        cfg.Storage.WALEnabled,
 			AnalyticsBaseline: cfg.Storage.AnalyticsBaseline,
-		}
+		})
 	}
 	if storageCfg.DatabasePath != "" {
 		db, err = storage.Open(storageCfg)

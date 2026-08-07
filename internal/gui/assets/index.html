@@ -92,7 +92,7 @@
             <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="start_time" data-i18n="th.time" aria-sort="none">Time <span class="sort-icon opacity-40 ml-1">↕</span></th>
             <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="model" data-i18n="th.model" aria-sort="none">Model <span class="sort-icon opacity-40 ml-1">↕</span></th>
             <th class="sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-i18n="th.scenario">Scenario</th>
-            <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="input_tokens" data-i18n="th.inputTokens" aria-sort="none">Input Tokens <span class="sort-icon opacity-40 ml-1">↕</span></th>
+            <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="prompt_tokens" data-i18n="th.promptTokens" aria-sort="none">Prompt Tokens <span class="sort-icon opacity-40 ml-1">↕</span></th>
             <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="output_tokens" data-i18n="th.outputTokens" aria-sort="none">Output Tokens <span class="sort-icon opacity-40 ml-1">↕</span></th>
             <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="duration_ms" data-i18n="th.duration" aria-sort="none">Duration <span class="sort-icon opacity-40 ml-1">↕</span></th>
             <th class="sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-i18n="th.status">Status</th>
@@ -157,7 +157,7 @@
   </div>
 
   <!-- History Detail Modal -->
-  <div class="modal-overlay" id="history-modal" role="dialog" aria-labelledby="modal-title" aria-modal="true">
+  <dialog class="modal-overlay" id="history-modal" aria-labelledby="modal-title">
     <div class="modal-content">
       <div class="modal-header">
         <h3 class="modal-title" id="modal-title">Request Details</h3>
@@ -171,7 +171,7 @@
       <div class="modal-body" id="modal-body">
       </div>
     </div>
-  </div>
+  </dialog>
 
   <!-- Command Palette -->
   <div class="command-palette-overlay" id="command-palette" role="dialog" aria-label="Command palette">
@@ -291,6 +291,12 @@
           <option value="7" data-i18n-option="analytics.last7d">Last 7 days</option>
           <option value="30" selected data-i18n-option="analytics.last30d">Last 30 days</option>
           <option value="90" data-i18n-option="analytics.last90d">Last 90 days</option>
+        </select>
+        <select id="analytics-refresh-interval" class="filter-select" aria-label="Analytics auto-refresh interval">
+          <option value="0" data-i18n-option="analytics.autoRefreshOff">Auto-refresh: Off</option>
+          <option value="5" data-i18n-option="analytics.autoRefresh5s">Auto-refresh: 5s</option>
+          <option value="30" selected data-i18n-option="analytics.autoRefresh30s">Auto-refresh: 30s</option>
+          <option value="60" data-i18n-option="analytics.autoRefresh60s">Auto-refresh: 60s</option>
         </select>
         <button class="btn btn-small" id="btn-refresh-analytics" data-i18n="analytics.refresh">Refresh</button>
       </div>

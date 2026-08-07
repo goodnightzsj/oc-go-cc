@@ -21,6 +21,16 @@ type Database struct {
 	db   *sql.DB
 	path string
 	mu   sync.RWMutex
+
+	// analyticsBaseline is the parsed Config.AnalyticsBaseline; zero means the
+	// full history is analysed.
+	analyticsBaseline time.Time
+}
+
+// AnalyticsBaseline reports the configured cutoff for analytics aggregates.
+// The zero time means no cutoff.
+func (d *Database) AnalyticsBaseline() time.Time {
+	return d.analyticsBaseline
 }
 
 type Config struct {
@@ -28,6 +38,14 @@ type Config struct {
 	RetentionDays   int    `json:"retention_days"`
 	VacuumOnStartup bool   `json:"vacuum_on_startup"`
 	WALEnabled      bool   `json:"wal_enabled"`
+	// AnalyticsBaseline optionally drops requests recorded before this instant
+	// from every analytics aggregate, as an RFC3339 timestamp. Use it when an
+	// older build recorded a token split that cannot be trusted — for example a
+	// prompt billed entirely as fresh input because the upstream cache fields
+	// were never parsed. Those rows cannot be recomputed (the hit/miss
+	// breakdown was never stored), so excluding them is the only way to make
+	// the cost figure match the provider's own billing. Empty means no cutoff.
+	AnalyticsBaseline string `json:"analytics_baseline,omitempty"`
 }
 
 var DefaultConfig = Config{
@@ -75,6 +93,17 @@ func Open(cfg Config) (*Database, error) {
 	database := &Database{
 		db:   db,
 		path: path,
+	}
+
+	// Parse the baseline here so a malformed timestamp surfaces at startup
+	// rather than silently disabling the cutoff on every dashboard request.
+	if raw := strings.TrimSpace(cfg.AnalyticsBaseline); raw != "" {
+		baseline, parseErr := time.Parse(time.RFC3339, raw)
+		if parseErr != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("parse analytics_baseline %q: %w", raw, parseErr)
+		}
+		database.analyticsBaseline = baseline
 	}
 
 	if err := database.initSchema(ctx); err != nil {

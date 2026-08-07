@@ -5,21 +5,21 @@ import "time"
 
 // RequestRecord holds metadata for a single completed proxy request.
 type RequestRecord struct {
-	ID           string        // unique request ID
-	Model        string        // actual upstream model used (e.g. "kimi-k2.6")
-	Provider     string        // provider name (e.g. "opencode-go")
-	Scenario     string        // routing scenario (e.g. "default", "complex")
-	StartTime         time.Time     // when the request started
-	Duration          time.Duration // total latency
-	InputTokens       int           // raw (non-cache) input tokens from SSE usage event
-	OutputTokens      int           // output tokens from SSE usage event
-	CacheReadTokens   int           // prompt-cache read tokens
-	CacheCreationTokens int         // prompt-cache write tokens
-	Streaming         bool          // whether this was a streaming request
+	ID                  string        // unique request ID
+	Model               string        // actual upstream model used (e.g. "kimi-k2.6")
+	Provider            string        // provider name (e.g. "opencode-go")
+	Scenario            string        // routing scenario (e.g. "default", "complex")
+	StartTime           time.Time     // when the request started
+	Duration            time.Duration // total latency
+	InputTokens         int           // raw (non-cache) input tokens from SSE usage event
+	OutputTokens        int           // output tokens from SSE usage event
+	CacheReadTokens     int           // prompt-cache read tokens
+	CacheCreationTokens int           // prompt-cache write tokens
+	Streaming           bool          // whether this was a streaming request
 
-	Success      bool          // whether it completed successfully
-	ErrorMsg     string        // error message if failed
-	Attempt      int           // attempt number in fallback chain (1 = primary, >1 = fallback)
+	Success  bool   // whether it completed successfully
+	ErrorMsg string // error message if failed
+	Attempt  int    // attempt number in fallback chain (1 = primary, >1 = fallback)
 }
 
 // DisplayInputTokens is the total input a user consumed (raw + cache), used

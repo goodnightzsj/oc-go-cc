@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Rounded tile so the mark reads as an app icon in a browser tab, not a
+       floating glyph. Indigo matches the dashboard accent (#6366f1). -->
+  <rect width="32" height="32" rx="7" fill="#6366f1"/>
+  <!-- The bolt is the same polygon as the header logo in index.html, scaled
+       from its 24x24 viewBox into a 20x20 box centred at (6,6). Keeping one
+       shape for both means the tab icon and the in-app logo never drift. -->
+  <g transform="translate(6 6) scale(0.8333)">
+    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"
+             fill="none" stroke="#ffffff" stroke-width="2.4"
+             stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

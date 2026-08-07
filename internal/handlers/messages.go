@@ -662,19 +662,19 @@ func (h *MessagesHandler) handleStreaming(
 				"cache_creation_input_tokens", rw.usage.cacheCreationInputTokens,
 			)
 			rec := history.RequestRecord{
-				ID:                 requestID,
-				Model:              model.ModelID,
-				Provider:           model.Provider,
-				Scenario:           string(scenario),
-				StartTime:          streamStart,
-				Duration:           latency,
-				InputTokens:        rw.usage.inputTokens,
-				OutputTokens:       rw.usage.outputTokens,
+				ID:                  requestID,
+				Model:               model.ModelID,
+				Provider:            model.Provider,
+				Scenario:            string(scenario),
+				StartTime:           streamStart,
+				Duration:            latency,
+				InputTokens:         rw.usage.inputTokens,
+				OutputTokens:        rw.usage.outputTokens,
 				CacheReadTokens:     rw.usage.cacheReadInputTokens,
 				CacheCreationTokens: rw.usage.cacheCreationInputTokens,
 				Streaming:           true,
-				Success:            true,
-				Attempt:            1, // streaming fallback attempts not yet tracked in record; treat as primary
+				Success:             true,
+				Attempt:             1, // streaming fallback attempts not yet tracked in record; treat as primary
 			}
 			if h.history != nil {
 				h.history.Add(rec)

@@ -74,16 +74,30 @@
 
   <!-- History Tab -->
   <div class="tab-content flex-1 overflow-y-auto p-4" id="tab-history">
-    <div class="flex items-center justify-between mb-2.5">
-      <div class="flex items-center gap-2 flex-1">
-        <input type="text" id="history-search" placeholder="Search requests..." aria-label="Search history" class="flex-1 px-3 py-2 border border-[#48484a] rounded-md bg-[#2c2c2e] text-[#f5f5f7] text-xs focus:border-[#6366f1] focus:outline-none focus:shadow-[0_0_0_3px_rgba(99,102,241,0.25)]">
+    <div class="history-toolbar">
+      <div class="history-search-wrap">
+        <input type="search" id="history-search" placeholder="Search requests..." data-i18n-placeholder="history.searchPlaceholder" aria-label="Search history" class="history-filter-input">
         <span class="inline-flex items-center px-1.5 py-0.5 bg-[#3a3a3c] rounded text-[10px] text-[#98989d] font-mono">⌘F</span>
       </div>
-      <select class="filter-select" id="model-filter" aria-label="Filter by model">
-        <option value="" data-i18n="filter.allModels">All Models</option>
+      <input type="date" id="history-start" class="history-filter-input history-date" aria-label="Start date" title="Start date">
+      <input type="date" id="history-end" class="history-filter-input history-date" aria-label="End date" title="End date">
+      <input type="text" id="model-filter" class="history-filter-input" list="history-model-options" placeholder="Model" data-i18n-placeholder="filter.model" aria-label="Filter by model">
+      <datalist id="history-model-options"></datalist>
+      <input type="text" id="provider-filter" class="history-filter-input" placeholder="Provider" data-i18n-placeholder="filter.provider" aria-label="Filter by provider">
+      <input type="text" id="scenario-filter" class="history-filter-input" placeholder="Scenario" data-i18n-placeholder="filter.scenario" aria-label="Filter by scenario">
+      <select class="filter-select" id="status-filter" aria-label="Filter by status">
+        <option value="" data-i18n-option="filter.allStatuses">All statuses</option>
+        <option value="true" data-i18n-option="filter.success">Success only</option>
+        <option value="false" data-i18n-option="filter.failed">Failed only</option>
       </select>
-      <span class="text-xs text-[#98989d] ml-2" id="history-count" aria-live="polite"></span>
-      <button class="btn-small ml-2" id="history-export" data-i18n="export.csv">Export CSV</button>
+      <select class="filter-select" id="streaming-filter" aria-label="Filter by request type">
+        <option value="" data-i18n-option="filter.allStreams">All request types</option>
+        <option value="true" data-i18n-option="filter.streaming">Streaming only</option>
+        <option value="false" data-i18n-option="filter.nonStreaming">Non-streaming only</option>
+      </select>
+      <button class="btn btn-small" id="history-reset" data-i18n="filter.reset">Reset</button>
+      <span class="history-count" id="history-count" aria-live="polite"></span>
+      <button class="btn-small" id="history-export" data-i18n="export.csv">Export CSV</button>
     </div>
     <div class="overflow-x-auto">
       <table class="history-table w-full text-xs border-collapse" role="grid">
@@ -91,11 +105,11 @@
           <tr>
             <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="start_time" data-i18n="th.time" aria-sort="none">Time <span class="sort-icon opacity-40 ml-1">↕</span></th>
             <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="model" data-i18n="th.model" aria-sort="none">Model <span class="sort-icon opacity-40 ml-1">↕</span></th>
-            <th class="sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-i18n="th.scenario">Scenario</th>
+            <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="scenario" data-i18n="th.scenario" aria-sort="none">Scenario <span class="sort-icon opacity-40 ml-1">↕</span></th>
             <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="prompt_tokens" data-i18n="th.promptTokens" aria-sort="none">Prompt Tokens <span class="sort-icon opacity-40 ml-1">↕</span></th>
             <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="output_tokens" data-i18n="th.outputTokens" aria-sort="none">Output Tokens <span class="sort-icon opacity-40 ml-1">↕</span></th>
             <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="duration_ms" data-i18n="th.duration" aria-sort="none">Duration <span class="sort-icon opacity-40 ml-1">↕</span></th>
-            <th class="sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-i18n="th.status">Status</th>
+            <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="success" data-i18n="th.status" aria-sort="none">Status <span class="sort-icon opacity-40 ml-1">↕</span></th>
           </tr>
         </thead>
         <tbody id="history-tbody">

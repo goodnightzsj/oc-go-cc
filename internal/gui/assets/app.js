@@ -3,6 +3,13 @@ const TRANSLATIONS = {
   en: {
     'lang.toggle': '中文',
     'status.checking': 'Checking…',
+    'export.csv': 'Export CSV',
+    'export.working': 'Exporting…',
+    'export.ok': 'Exported {n} rows',
+    'export.empty': 'No history to export',
+    'export.fail': 'Export failed',
+    'status.stale': 'No response',
+    'status.staleFor': 'No response {secs}s',
     'status.running': 'Running',
     'status.stopped': 'Stopped',
     'status.connected': 'Connected',
@@ -21,9 +28,11 @@ const TRANSLATIONS = {
     'analytics.estCost': 'Est. Cost',
     'analytics.costUnit': 'USD (est.)',
     'analytics.p95Latency': 'p95 Latency',
-    'analytics.latencyUnit': 'ms across models',
-    'analytics.byModel': 'Requests by Model',
-    'analytics.byProvider': 'Requests by Provider',
+    'analytics.latencyUnit': 'request-weighted',
+    'analytics.cacheHitShort': 'cache hit',
+    'analytics.cacheHitTitle': 'Cache read as a share of all prompt tokens (input + cache read + cache write)',
+    'analytics.byModel': 'Tokens by Model',
+    'analytics.byProvider': 'Tokens by Provider',
     'analytics.noData': 'No data',
     'analytics.noTrend': 'No trend data',
     'analytics.singleDay': '(single-day data)',
@@ -40,6 +49,7 @@ const TRANSLATIONS = {
     'cmd.gotoHistory': 'Go to History',
     'cmd.gotoPerformance': 'Go to Performance',
     'cmd.gotoFallback': 'Go to Fallback',
+    'cmd.gotoAnalytics': 'Go to Analytics',
     'cmd.gotoSettings': 'Go to Settings',
     'cmd.refreshData': 'Refresh Data',
     'metric.total': 'Total Requests',
@@ -154,11 +164,17 @@ const TRANSLATIONS = {
     'toast.proxyStopped': 'Proxy stopped',
     'toast.proxyActionFailed': 'Action failed',
     'toast.networkError': 'Network error',
-    'tab.performance': 'Performance',
   },
   zh: {
     'lang.toggle': 'English',
     'status.checking': '检查中…',
+    'export.csv': '导出 CSV',
+    'export.working': '导出中…',
+    'export.ok': '已导出 {n} 条',
+    'export.empty': '暂无历史可导出',
+    'export.fail': '导出失败',
+    'status.stale': '无响应',
+    'status.staleFor': '已 {secs} 秒无响应',
     'status.running': '运行中',
     'status.stopped': '已停止',
     'status.connected': '已连接',
@@ -176,9 +192,11 @@ const TRANSLATIONS = {
     'analytics.estCost': '预估费用',
     'analytics.costUnit': 'USD（预估）',
     'analytics.p95Latency': 'p95 延迟',
-    'analytics.latencyUnit': '各模型 ms',
-    'analytics.byModel': '按模型请求量',
-    'analytics.byProvider': '按供应商请求量',
+    'analytics.latencyUnit': '按请求数加权',
+    'analytics.cacheHitShort': '缓存命中',
+    'analytics.cacheHitTitle': '缓存读取占全部输入 Token 的比例（输入 + 缓存读 + 缓存写）',
+    'analytics.byModel': '按模型 Token 用量',
+    'analytics.byProvider': '按供应商 Token 用量',
     'analytics.noData': '暂无数据',
     'analytics.noTrend': '暂无趋势数据',
     'analytics.singleDay': '（仅单日数据）',
@@ -196,6 +214,7 @@ const TRANSLATIONS = {
     'cmd.gotoHistory': '前往历史',
     'cmd.gotoPerformance': '前往性能',
     'cmd.gotoFallback': '前往降级策略',
+    'cmd.gotoAnalytics': '前往用量分析',
     'cmd.gotoSettings': '前往设置',
     'cmd.refreshData': '刷新数据',
     'metric.total': '总请求数',
@@ -362,6 +381,8 @@ function toggleLanguage() {
 document.addEventListener('DOMContentLoaded', () => {
   document.documentElement.lang = currentLang;
   applyTranslations();
+  const exportBtn = document.getElementById('history-export');
+  if (exportBtn) exportBtn.addEventListener('click', exportHistoryCSV);
 });
 
 /* global state */
@@ -571,8 +592,9 @@ function debouncedRefresh() {
 async function refreshMetrics() {
   try {
     const r = await fetch('/api/metrics');
-    if (!r.ok) return;
+    if (!r.ok) { markPollFail(); return; }
     const d = await r.json();
+    markPollOk();
 
     // status badge
     const running = d.proxy_running;
@@ -607,7 +629,11 @@ async function refreshMetrics() {
     // proxy toggle sync
     const proxyToggle = document.getElementById('toggle-proxy');
     if (proxyToggle && !proxyToggle._changing) proxyToggle.checked = running;
-  } catch(e) { /* server may not be ready yet */ }
+  } catch (e) {
+    // Startup races are expected, so the first failures stay quiet; markPollFail
+    // only surfaces the stale badge once several polls in a row have failed.
+    markPollFail();
+  }
 }
 
 function renderModelList(counts) {
@@ -859,8 +885,152 @@ async function toggleNotify(el) {
   setTimeout(() => { el._changing = false; }, 1000);
 }
 
+/* ── CSV export ────────────────────────────────────────────────── */
+// Model names and error messages reach this file from upstream responses, so a
+// value starting with = + - @ would run as a formula when the CSV is opened in
+// Excel or Sheets. Prefixing those with a quote neutralises them.
+function escapeCSV(value) {
+  if (value == null) return '';
+  const str = String(value);
+  const escaped = str.replace(/"/g, '""');
+  if (/^[=+\-@\t\r]/.test(str)) return `"'${escaped}"`;
+  if (/[,"\n\r]/.test(str)) return `"${escaped}"`;
+  return str;
+}
+
+const HISTORY_CSV_COLUMNS = [
+  ['start_time', r => r.start_time],
+  ['model', r => r.model],
+  ['provider', r => r.provider],
+  ['scenario', r => r.scenario],
+  ['input_tokens', r => r.input_tokens],
+  ['cache_read_tokens', r => r.cache_read_tokens],
+  ['cache_creation_tokens', r => r.cache_creation_tokens],
+  ['output_tokens', r => r.output_tokens],
+  ['duration_ms', r => r.duration_ms],
+  ['streaming', r => r.streaming],
+  ['success', r => r.success],
+  ['error_msg', r => r.error_msg || ''],
+];
+
+// Export walks the API rather than the rendered page so the file covers the
+// whole history, not just the page currently on screen. Pages are fetched one
+// after another on purpose: this is a local proxy and a burst of parallel
+// requests would compete with live traffic for no real gain.
+async function exportHistoryCSV() {
+  const btn = document.getElementById('history-export');
+  if (btn) { btn.disabled = true; btn.textContent = t('export.working'); }
+  try {
+    const size = 500;
+    const rows = [];
+    for (let page = 1; ; page++) {
+      const r = await fetch(`/api/history?page=${page}&size=${size}`);
+      if (!r.ok) throw new Error(`history page ${page}: ${r.status}`);
+      const d = await r.json();
+      const items = d.items || [];
+      rows.push(...items);
+      if (items.length < size || rows.length >= (d.total || 0)) break;
+    }
+    if (!rows.length) { toast(t('export.empty')); return; }
+
+    const csv = [
+      HISTORY_CSV_COLUMNS.map(c => escapeCSV(c[0])).join(','),
+      ...rows.map(r => HISTORY_CSV_COLUMNS.map(c => escapeCSV(c[1](r))).join(',')),
+    ].join('\n');
+
+    // The BOM is what makes Excel read the file as UTF-8 instead of the local
+    // codepage, which otherwise mangles non-ASCII model and error text.
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `routatic-proxy-history-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast(t('export.ok').replace('{n}', rows.length));
+  } catch (e) {
+    toast(t('export.fail'));
+    console.error('CSV export failed:', e);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = t('export.csv'); }
+  }
+}
+
+/* ── Connection health ─────────────────────────────────────────── */
+// The dashboard polls every few seconds and used to swallow every fetch error,
+// so a dead backend looked identical to an idle one: stale numbers, green dot,
+// no hint anything was wrong. Track consecutive failures instead and surface a
+// stale badge once a couple of polls in a row have failed, which keeps a single
+// dropped request from flapping the UI.
+const CONN = { fails: 0, threshold: 2, lastOk: null };
+
+function markPollOk() {
+  CONN.fails = 0;
+  CONN.lastOk = Date.now();
+  const el = document.getElementById('conn-stale');
+  if (el) el.hidden = true;
+}
+
+function markPollFail() {
+  CONN.fails++;
+  if (CONN.fails < CONN.threshold) return;
+  const el = document.getElementById('conn-stale');
+  if (!el) return;
+  el.hidden = false;
+  const secs = CONN.lastOk ? Math.round((Date.now() - CONN.lastOk) / 1000) : null;
+  el.textContent = secs != null
+    ? t('status.staleFor').replace('{secs}', secs)
+    : t('status.stale');
+  // A stale panel must not keep claiming the proxy is up.
+  const dot = document.getElementById('status-dot');
+  if (dot) dot.className = 'status-dot stale';
+}
+
 /* ── Helpers ───────────────────────────────────────────────────── */
 function fmt(n) { return n != null ? Number(n).toLocaleString() : '—'; }
+
+// Costs here are often fractions of a cent, so a fixed 2-decimal format
+// collapses real spend to "$0.00". Widen the precision for small amounts
+// and keep the familiar 2 decimals once the total is worth reading.
+function fmtCost(v) {
+  if (v == null || !isFinite(v)) return '—';
+  const n = Number(v);
+  if (n === 0) return '$0.00';
+  const abs = Math.abs(n);
+  if (abs < 0.01) return '$' + n.toFixed(abs < 0.001 ? 5 : 4);
+  if (abs < 1) return '$' + n.toFixed(3);
+  return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Percentiles cannot be averaged across models: a model with one request would
+// otherwise weigh as much as one with 100k. Weighting each model's p95 by its
+// request count is still an approximation (the true p95 needs the merged
+// distribution), so the worst single-model p95 is surfaced alongside it.
+function aggregateP95(stats) {
+  const rows = (stats || []).filter(st => st && (st.p95_ms || 0) > 0);
+  if (!rows.length) return '—';
+
+  let weighted = 0;
+  let totalCount = 0;
+  let worst = 0;
+  for (const st of rows) {
+    const count = Number(st.count) || 0;
+    const p95 = Number(st.p95_ms) || 0;
+    weighted += p95 * count;
+    totalCount += count;
+    if (p95 > worst) worst = p95;
+  }
+
+  // No usable counts (older rows) — fall back to the worst case rather than a
+  // misleading equal-weight mean.
+  if (totalCount <= 0) return Math.round(worst) + ' ms';
+
+  const val = Math.round(weighted / totalCount);
+  if (rows.length > 1 && worst > val) {
+    return val + ' ms · max ' + Math.round(worst) + ' ms';
+  }
+  return val + ' ms';
+}
 
 function escapeHtml(str) {
   if (!str && str !== 0) return '';
@@ -1096,9 +1266,12 @@ document.getElementById('history-search')?.addEventListener('input', function(e)
 });
 
 /* ── History Sorting ───────────────────────────────────────────── */
-let currentSort = { field: 'time', dir: 'desc' };
+let currentSort = { field: 'start_time', dir: 'desc' };
 
-document.querySelectorAll('.sortable').forEach(th => {
+// Scope to the History table: .perf-table has its own .sortable headers with a
+// dedicated handler, and an unscoped selector would bind both, so one click
+// would sort Performance and silently clear History's sort state.
+document.querySelectorAll('.history-table .sortable').forEach(th => {
   th.addEventListener('click', function() {
     const field = this.dataset.sort;
     if (currentSort.field === field) {
@@ -1107,8 +1280,8 @@ document.querySelectorAll('.sortable').forEach(th => {
       currentSort.field = field;
       currentSort.dir = 'desc';
     }
-    // Update visual indicators and aria-sort
-    document.querySelectorAll('.sortable').forEach(s => {
+    // Update visual indicators and aria-sort (History headers only).
+    document.querySelectorAll('.history-table .sortable').forEach(s => {
       s.classList.remove('asc', 'desc');
       s.setAttribute('aria-sort', 'none');
     });
@@ -1260,6 +1433,12 @@ function executeCommand(action) {
       break;
     case 'goto-performance':
       document.querySelector('[data-tab="performance"]').click();
+      break;
+    case 'goto-fallback':
+      document.querySelector('[data-tab="fallback"]').click();
+      break;
+    case 'goto-analytics':
+      document.querySelector('[data-tab="analytics"]').click();
       break;
     case 'goto-settings':
       document.querySelector('[data-tab="settings"]').click();
@@ -2042,16 +2221,27 @@ const AnalyticsModule = {
     const cacheEl = document.getElementById('kpi-tokens-cache');
     if (cacheEl) cacheEl.textContent = fmt(cacheTok);
     document.getElementById('kpi-tokens-out').textContent = fmt(s.output_tokens);
-    const cost = s.est_cost_usd != null ? '$' + Number(s.est_cost_usd).toFixed(2) : '—';
-    document.getElementById('kpi-cost').textContent = cost;
+
+    // Cache hit rate is an input-side ratio: the denominator is everything that
+    // arrived as prompt (fresh input + cache read + cache creation). Dividing by
+    // total tokens instead would fold output in and drift with response length.
+    const promptTok = (s.input_tokens||0) + (s.cache_read_tokens||0) + (s.cache_creation_tokens||0);
+    const hitWrap = document.getElementById('kpi-cache-hit-wrap');
+    const hitEl = document.getElementById('kpi-cache-hit');
+    if (hitWrap && hitEl) {
+      if (promptTok > 0) {
+        const pct = ((s.cache_read_tokens||0) / promptTok) * 100;
+        hitEl.textContent = (pct >= 10 ? pct.toFixed(0) : pct.toFixed(1)) + '%';
+        hitWrap.hidden = false;
+        hitWrap.title = t('analytics.cacheHitTitle');
+      } else {
+        hitWrap.hidden = true;
+      }
+    }
+    document.getElementById('kpi-cost').textContent = fmtCost(s.est_cost_usd);
 
     const stats = (data.latency && data.latency.stats) || [];
-    let p95Val = '—';
-    if (stats.length) {
-      const avg = stats.reduce((a, st) => a + (st.p95_ms || 0), 0) / stats.length;
-      p95Val = Math.round(avg) + ' ms';
-    }
-    document.getElementById('kpi-p95').textContent = p95Val;
+    document.getElementById('kpi-p95').textContent = aggregateP95(stats);
   },
 
   renderDonuts(summary) {

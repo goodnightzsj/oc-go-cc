@@ -4,7 +4,7 @@
 .donut-svg-wrap { position: relative; flex: 0 0 200px; width: 200px; height: 200px; }
 .donut-svg { width: 100%; height: 100%; display: block; }
 .donut-arc { transition: opacity 0.15s; cursor: pointer; }
-.donut-center-value { fill: #f5f5f7; font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.donut-center-value { fill: #f5f5f7; font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .donut-center-label { fill: #98989d; font-size: 11px; letter-spacing: 0.04em; }
 
 .donut-legend { flex: 1 1 200px; min-width: 190px; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
@@ -46,6 +46,9 @@
 .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #98989d; transition: background 0.3s; }
 .status-dot.running { background: #30d158; box-shadow: 0 0 6px #30d158; }
 .status-dot.stopped { background: #ff453a; }
+/* Polling stopped getting answers, so the values on screen are stale. The dot
+   must not keep showing the last known "running" green in that state. */
+.status-dot.stale { background: #98989d; box-shadow: none; opacity: 0.6; }
 
 /* ── Toggle Switch ────────────────────────────────────────── */
 .toggle { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; cursor: pointer; }
@@ -242,3 +245,30 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: none;
   cursor: help;
 }
 .ui-build:hover { color: #98989d; }
+
+/* ── Metric card grids ────────────────────────────────────────── */
+/* The Tailwind build only emits grid-cols-4, so the responsive
+   collapse is hand-written here. Below 1024px four KPI cards squeeze
+   their numbers; drop to two columns, then one on phones. */
+@media (max-width: 1023px) {
+  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .metric-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ── Reduced motion ───────────────────────────────────────────── */
+/* Users who ask the OS to minimise animation get instant state
+   changes instead. Transitions collapse to a near-zero duration
+   rather than 0s so transitionend listeners still fire, and the
+   looping spinner/shimmer stop moving entirely. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+  .loading-spinner { animation: none; border-top-color: #6366f1; }
+  .skeleton { animation: none; background: #3a3a3c; }
+}

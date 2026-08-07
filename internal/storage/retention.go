@@ -68,14 +68,20 @@ func (r *Retention) runOnce() {
 
 	if requests, err := r.db.DB().ExecContext(ctx, `DELETE FROM requests WHERE created_at < ?`, before.Format(time.RFC3339Nano)); err == nil {
 		stats.requestsDeleted, _ = requests.RowsAffected()
+	} else {
+		slog.Warn("retention cleanup failed", "table", "requests", "error", err)
 	}
 
-	if latency, ok := r.db.DB().ExecContext(ctx, `DELETE FROM latency_samples WHERE recorded_at < ?`, before.Format(time.RFC3339Nano)); ok == nil {
+	if latency, err := r.db.DB().ExecContext(ctx, `DELETE FROM latency_samples WHERE recorded_at < ?`, before.Format(time.RFC3339Nano)); err == nil {
 		stats.latencyDeleted, _ = latency.RowsAffected()
+	} else {
+		slog.Warn("retention cleanup failed", "table", "latency_samples", "error", err)
 	}
 
-	if logs, ok := r.db.DB().ExecContext(ctx, `DELETE FROM logs WHERE recorded_at < ?`, before.Format(time.RFC3339Nano)); ok == nil {
+	if logs, err := r.db.DB().ExecContext(ctx, `DELETE FROM logs WHERE recorded_at < ?`, before.Format(time.RFC3339Nano)); err == nil {
 		stats.logsDeleted, _ = logs.RowsAffected()
+	} else {
+		slog.Warn("retention cleanup failed", "table", "logs", "error", err)
 	}
 
 	if stats.requestsDeleted > 0 || stats.latencyDeleted > 0 || stats.logsDeleted > 0 {

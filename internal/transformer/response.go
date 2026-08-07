@@ -55,20 +55,18 @@ func (t *ResponseTransformer) TransformResponse(
 		Model:        originalModel,
 		StopReason:   stopReason,
 		StopSequence: "",
-		Usage: types.Usage{
-			// Per Anthropic Messages API spec, `input_tokens` is the count of
-			// regular input tokens — i.e. tokens that were neither read from
-			// the cache nor written to the cache this turn. OpenAI's
-			// `prompt_tokens` is the *total* prompt size including both. When
-			// the upstream reports prompt-cache fields we have to subtract
-			// them out, otherwise Claude Code's local context counter sees an
-			// inflated input_tokens on every turn and trips auto-compact ~5x
-			// too early on long-prefix sessions.
-			InputTokens:              nonNegative(openaiResp.Usage.PromptTokens - openaiResp.Usage.PromptCacheHitTokens - openaiResp.Usage.PromptCacheMissTokens),
-			OutputTokens:             openaiResp.Usage.CompletionTokens,
-			CacheCreationInputTokens: openaiResp.Usage.PromptCacheMissTokens,
-			CacheReadInputTokens:     openaiResp.Usage.PromptCacheHitTokens,
-		},
+		Usage: func() types.Usage {
+			// See splitPromptTokens in stream.go: DeepSeek partitions the
+			// prompt into cache hit + miss, so the miss part is the real
+			// full-rate input rather than something to subtract away.
+			in, cacheRead, cacheCreate := splitPromptTokens(&openaiResp.Usage)
+			return types.Usage{
+				InputTokens:              in,
+				OutputTokens:             openaiResp.Usage.CompletionTokens,
+				CacheCreationInputTokens: cacheCreate,
+				CacheReadInputTokens:     cacheRead,
+			}
+		}(),
 	}
 
 	return anthropicResp, nil

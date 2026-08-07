@@ -246,6 +246,40 @@ func TestProxyStream_TextOnlyStillWorks(t *testing.T) {
 	}
 }
 
+// TestProxyStream_FastPathDecodesEscapedNewlines is the regression guard for the
+// fast path re-emitting raw JSON bytes as text: upstream
+// `"content":"line1\nline2"` was passed through as the literal backslash-n,
+// so the client received `line1\nline2` (no actual line break).
+func TestProxyStream_FastPathDecodesEscapedNewlines(t *testing.T) {
+	handler := NewStreamHandler()
+	w := newMockResponseWriter()
+	// JSON-encoded content with a real newline: the raw bytes inside the
+	// string are `line1\nline2` — a backslash followed by 'n'.
+	body := sseLines(
+		"{\"choices\":[{\"delta\":{\"content\":\"line1\\nline2\"}}]}",
+		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := handler.ProxyStream(w, body, "kimi-k2.6", ctx, 0, cancel); err != nil {
+		t.Fatalf("ProxyStream error: %v", err)
+	}
+
+	events := parseSSEEvents(t, w.buf.String())
+	var joined string
+	for _, ev := range events {
+		if ev.Type == "content_block_delta" && ev.Delta != nil {
+			joined += ev.Delta.Text
+		}
+	}
+	// The delta must contain a real newline (0x0A), not the two characters '\' + 'n'.
+	if joined != "line1\nline2" {
+		t.Errorf("joined text = %q (bytes %v), want %q (real newline)", joined, []byte(joined), "line1\nline2")
+	}
+}
+
 func TestProxyStream_ContentArrayTextDelta(t *testing.T) {
 	handler := NewStreamHandler()
 	w := newMockResponseWriter()
@@ -303,10 +337,10 @@ func TestProxyStream_UsageOnlyChunk(t *testing.T) {
 		t.Fatalf("no usage event found in stream: %+v", events)
 		return
 	}
-	// Per Anthropic spec, input_tokens excludes cache reads AND cache
-	// creations. Upstream prompt_tokens=123 split as 100 hit + 23 miss
-	// means everything was accounted for by the cache → input_tokens = 0.
-	if got, want := usage.InputTokens, 0; got != want {
+	// Per DeepSeek partitioned form, upstream prompt_tokens=123 split as 100 hit
+	// + 23 miss means the 23 miss tokens are the full-rate input (input_tokens),
+	// and 100 are cache_read.
+	if got, want := usage.InputTokens, 23; got != want {
 		t.Fatalf("InputTokens = %d, want %d", got, want)
 	}
 	if got, want := usage.OutputTokens, 45; got != want {
@@ -315,7 +349,9 @@ func TestProxyStream_UsageOnlyChunk(t *testing.T) {
 	if got, want := usage.CacheReadInputTokens, 100; got != want {
 		t.Fatalf("CacheReadInputTokens = %d, want %d", got, want)
 	}
-	if got, want := usage.CacheCreationInputTokens, 23; got != want {
+	// Partitioned form: the miss part became input_tokens, so there is no
+	// separate cache-creation count to report.
+	if got, want := usage.CacheCreationInputTokens, 0; got != want {
 		t.Fatalf("CacheCreationInputTokens = %d, want %d", got, want)
 	}
 }

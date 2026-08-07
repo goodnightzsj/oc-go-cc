@@ -29,6 +29,7 @@
         <span class="status-dot" id="status-dot" aria-hidden="true"></span>
         <span id="status-text" data-i18n="status.checking">Checking...</span>
       </div>
+      <span class="px-1.5 py-0.5 rounded bg-[#ff453a]/20 text-[#ff6b5e] font-medium" id="conn-stale" hidden role="alert"></span>
     </div>
   </header>
 
@@ -43,7 +44,7 @@
 
   <!-- Overview Tab -->
   <div class="tab-content flex-1 overflow-y-auto p-4 active" id="tab-overview">
-    <div class="grid grid-cols-4 gap-2.5 mb-5">
+    <div class="grid grid-cols-4 gap-2.5 mb-5 metric-grid">
       <div class="bg-gradient-to-br from-[#2c2c2e] to-[#3a3a3c] border border-[#48484a] rounded-xl p-5 transition-transform hover:scale-[1.02]">
         <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="metric.total">Total Requests</div>
         <div class="text-[26px] font-bold tabular-nums" id="m-total">--</div>
@@ -81,12 +82,13 @@
         <option value="" data-i18n="filter.allModels">All Models</option>
       </select>
       <span class="text-xs text-[#98989d] ml-2" id="history-count" aria-live="polite"></span>
+      <button class="btn-small ml-2" id="history-export" data-i18n="export.csv">Export CSV</button>
     </div>
     <div class="overflow-x-auto">
       <table class="history-table w-full text-xs border-collapse" role="grid">
         <thead>
           <tr>
-            <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="time" data-i18n="th.time" aria-sort="none">Time <span class="sort-icon opacity-40 ml-1">↕</span></th>
+            <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="start_time" data-i18n="th.time" aria-sort="none">Time <span class="sort-icon opacity-40 ml-1">↕</span></th>
             <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="model" data-i18n="th.model" aria-sort="none">Model <span class="sort-icon opacity-40 ml-1">↕</span></th>
             <th class="sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-i18n="th.scenario">Scenario</th>
             <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="input_tokens" data-i18n="th.inputTokens" aria-sort="none">Input Tokens <span class="sort-icon opacity-40 ml-1">↕</span></th>
@@ -197,6 +199,10 @@
         </div>
         <div class="command-item" data-action="goto-fallback" role="option" id="cmd-goto-fallback">
           <span class="command-item-label" data-i18n="cmd.gotoFallback">Go to Fallback</span>
+          <span class="command-item-shortcut"><kbd aria-keyshortcuts="Meta+4">⌘4</kbd></span>
+        </div>
+        <div class="command-item" data-action="goto-analytics" role="option" id="cmd-goto-analytics">
+          <span class="command-item-label" data-i18n="cmd.gotoAnalytics">Go to Analytics</span>
           <span class="command-item-shortcut"><kbd aria-keyshortcuts="Meta+5">⌘5</kbd></span>
         </div>
         <div class="command-item" data-action="goto-settings" role="option" id="cmd-goto-settings">
@@ -289,7 +295,7 @@
       </div>
     </div>
 
-    <div class="grid grid-cols-4 gap-3 mb-6">
+    <div class="grid grid-cols-4 gap-3 mb-6 metric-grid">
       <div class="bg-[#2c2c2e] border border-[#48484a] rounded-lg px-4 py-3.5 transition-all hover:-translate-y-0.5 hover:shadow-lg">
         <div class="text-xs text-[#98989d] mb-1 font-medium" data-i18n="analytics.totalRequests">Total Requests</div>
         <div class="text-2xl font-bold tabular-nums text-[#f5f5f7] leading-tight my-0.5" id="kpi-requests">--</div>
@@ -302,6 +308,7 @@
           <span class="inline-flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-[#3b82f6]"></span><span id="kpi-tokens-in" class="tabular-nums">0</span></span>
           <span class="inline-flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-[#f59e0b]"></span><span id="kpi-tokens-cache" class="tabular-nums">0</span></span>
           <span class="inline-flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-[#10b981]"></span><span id="kpi-tokens-out" class="tabular-nums">0</span></span>
+          <span class="inline-flex items-center gap-1 text-[#f59e0b]" id="kpi-cache-hit-wrap" hidden><span data-i18n="analytics.cacheHitShort">cache</span> <span id="kpi-cache-hit" class="tabular-nums font-medium">—</span></span>
         </div>
       </div>
       <div class="bg-[#2c2c2e] border border-[#48484a] rounded-lg px-4 py-3.5 transition-all hover:-translate-y-0.5 hover:shadow-lg">
@@ -312,19 +319,19 @@
       <div class="bg-[#2c2c2e] border border-[#48484a] rounded-lg px-4 py-3.5 transition-all hover:-translate-y-0.5 hover:shadow-lg">
         <div class="text-xs text-[#98989d] mb-1 font-medium" data-i18n="analytics.p95Latency">p95 Latency</div>
         <div class="text-2xl font-bold tabular-nums text-[#f5f5f7] leading-tight my-0.5" id="kpi-p95">--</div>
-        <div class="text-xs text-[#98989d]" data-i18n="analytics.latencyUnit">ms across models</div>
+        <div class="text-xs text-[#98989d]" data-i18n="analytics.latencyUnit">request-weighted</div>
       </div>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-2">
       <div class="bg-[#2c2c2e] border border-[#48484a] rounded-lg p-4 shadow-lg shadow-black/20">
-        <div class="text-xs font-semibold text-[#98989d] uppercase tracking-wider mb-3" data-i18n="analytics.byModel">Requests by Model</div>
+        <div class="text-xs font-semibold text-[#98989d] uppercase tracking-wider mb-3" data-i18n="analytics.byModel">Tokens by Model</div>
         <div class="min-h-[240px] bg-[#2c2c2e] border border-[#48484a] rounded-lg p-4 flex items-center justify-center relative" id="model-donut">
           <div class="empty-state text-center text-[#98989d] py-6 text-[13px]" data-i18n="analytics.noData">No data</div>
         </div>
       </div>
       <div class="bg-[#2c2c2e] border border-[#48484a] rounded-lg p-4 shadow-lg shadow-black/20">
-        <div class="text-xs font-semibold text-[#98989d] uppercase tracking-wider mb-3" data-i18n="analytics.byProvider">Requests by Provider</div>
+        <div class="text-xs font-semibold text-[#98989d] uppercase tracking-wider mb-3" data-i18n="analytics.byProvider">Tokens by Provider</div>
         <div class="min-h-[240px] bg-[#2c2c2e] border border-[#48484a] rounded-lg p-4 flex items-center justify-center relative" id="provider-donut">
           <div class="empty-state text-center text-[#98989d] py-6 text-[13px]" data-i18n="analytics.noData">No data</div>
         </div>

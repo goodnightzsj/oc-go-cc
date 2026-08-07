@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"sort"
 	"time"
@@ -31,30 +32,76 @@ func (l *Latency) Insert(model string, latency time.Duration) error {
 }
 
 // ModelLatencyStats holds latency percentiles and counts for a single model.
+//
+// The JSON tags matter: /api/analytics/latency serialises this type straight to
+// the dashboard, so the field names below are the wire contract. Durations are
+// exposed as whole milliseconds (via MarshalJSON) rather than Go's native
+// nanoseconds, because that is the unit the UI labels and renders.
 type ModelLatencyStats struct {
-	Model string
-	Count int64
-	Avg   time.Duration
-	P50   time.Duration
-	P90   time.Duration
-	P99   time.Duration
-	Min   time.Duration
-	Max   time.Duration
+	Model string        `json:"model"`
+	Count int64         `json:"count"`
+	Avg   time.Duration `json:"-"`
+	P50   time.Duration `json:"-"`
+	P90   time.Duration `json:"-"`
+	P95   time.Duration `json:"-"`
+	P99   time.Duration `json:"-"`
+	Min   time.Duration `json:"-"`
+	Max   time.Duration `json:"-"`
 }
+
+// MarshalJSON emits millisecond fields so the dashboard reads plain numbers in
+// the unit it displays, instead of raw nanosecond durations.
+func (s ModelLatencyStats) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Model string `json:"model"`
+		Count int64  `json:"count"`
+		AvgMs int64  `json:"avg_ms"`
+		P50Ms int64  `json:"p50_ms"`
+		P90Ms int64  `json:"p90_ms"`
+		P95Ms int64  `json:"p95_ms"`
+		P99Ms int64  `json:"p99_ms"`
+		MinMs int64  `json:"min_ms"`
+		MaxMs int64  `json:"max_ms"`
+	}{
+		Model: s.Model,
+		Count: s.Count,
+		AvgMs: s.Avg.Milliseconds(),
+		P50Ms: s.P50.Milliseconds(),
+		P90Ms: s.P90.Milliseconds(),
+		P95Ms: s.P95.Milliseconds(),
+		P99Ms: s.P99.Milliseconds(),
+		MinMs: s.Min.Milliseconds(),
+		MaxMs: s.Max.Milliseconds(),
+	})
+}
+
+// maxSamplesPerModel bounds how many latency samples GetStats pulls per model.
+// Percentiles over the most recent 20k samples are representative, and this
+// keeps a long-running proxy from loading millions of rows into memory.
+const maxSamplesPerModel = 20000
 
 // GetStats returns latency statistics for all models with samples recorded after the given time.
 func (l *Latency) GetStats(since time.Time) ([]ModelLatencyStats, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// Cap the samples per model rather than overall: percentiles need a model's
+	// own distribution, so a global LIMIT would let one chatty model starve the
+	// others. Keeping the most recent maxSamplesPerModel rows per model bounds
+	// memory while leaving each model's recent distribution intact.
 	query := `
 		SELECT model, latency_ms
-		FROM latency_samples
-		WHERE recorded_at >= ?
+		FROM (
+			SELECT model, latency_ms,
+			       ROW_NUMBER() OVER (PARTITION BY model ORDER BY recorded_at DESC) AS rn
+			FROM latency_samples
+			WHERE recorded_at >= ?
+		)
+		WHERE rn <= ?
 		ORDER BY model
 	`
 
-	rows, err := l.db.DB().QueryContext(ctx, query, since.Format(time.RFC3339Nano))
+	rows, err := l.db.DB().QueryContext(ctx, query, since.Format(time.RFC3339Nano), maxSamplesPerModel)
 	if err != nil {
 		return nil, err
 	}
@@ -151,27 +198,29 @@ func calculateStats(model string, samples []int64) ModelLatencyStats {
 	count := len(sorted)
 	avg := sum / int64(count)
 
+	pctIdx := func(fraction float64) int {
+		idx := int(math.Ceil(float64(count)*fraction)) - 1
+		if idx < 0 {
+			return 0
+		}
+		if idx >= count {
+			return count - 1
+		}
+		return idx
+	}
+
+	// p50 keeps its original truncating form; the upper percentiles round up so
+	// a small sample set still reports its slow tail instead of the median.
 	p50Idx := int(float64(count)*0.50) - 1
-	p90Idx := int(math.Ceil(float64(count)*0.90)) - 1
-	p99Idx := int(math.Ceil(float64(count)*0.99)) - 1
 	if p50Idx < 0 {
 		p50Idx = 0
-	}
-	if p90Idx < 0 {
-		p90Idx = 0
-	}
-	if p99Idx < 0 {
-		p99Idx = 0
 	}
 	if p50Idx >= count {
 		p50Idx = count - 1
 	}
-	if p90Idx >= count {
-		p90Idx = count - 1
-	}
-	if p99Idx >= count {
-		p99Idx = count - 1
-	}
+	p90Idx := pctIdx(0.90)
+	p95Idx := pctIdx(0.95)
+	p99Idx := pctIdx(0.99)
 
 	return ModelLatencyStats{
 		Model: model,
@@ -179,6 +228,7 @@ func calculateStats(model string, samples []int64) ModelLatencyStats {
 		Avg:   time.Duration(avg) * time.Millisecond,
 		P50:   time.Duration(sorted[p50Idx]) * time.Millisecond,
 		P90:   time.Duration(sorted[p90Idx]) * time.Millisecond,
+		P95:   time.Duration(sorted[p95Idx]) * time.Millisecond,
 		P99:   time.Duration(sorted[p99Idx]) * time.Millisecond,
 		Min:   time.Duration(sorted[0]) * time.Millisecond,
 		Max:   time.Duration(sorted[count-1]) * time.Millisecond,

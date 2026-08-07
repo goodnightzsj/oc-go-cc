@@ -119,13 +119,15 @@
     "match": "minimax-m2.7",
     "input": 0.3,
     "output": 1.2,
-    "cache_read": 0.06
+    "cache_read": 0.06,
+    "cache_write": 0.375
   },
   {
     "match": "minimax-m2.5",
     "input": 0.3,
     "output": 1.2,
-    "cache_read": 0.06
+    "cache_read": 0.06,
+    "cache_write": 0.375
   },
   {
     "match": "minimax",
@@ -155,43 +157,50 @@
     "match": "qwen3.8-max",
     "input": 2.0,
     "output": 6.0,
-    "cache_read": 0.25
+    "cache_read": 0.25,
+    "cache_write": 2.5
   },
   {
     "match": "qwen3.8",
     "input": 2.0,
     "output": 6.0,
-    "cache_read": 0.25
+    "cache_read": 0.25,
+    "cache_write": 2.5
   },
   {
     "match": "qwen3.7-max",
     "input": 2.5,
     "output": 7.5,
-    "cache_read": 0.5
+    "cache_read": 0.5,
+    "cache_write": 3.125
   },
   {
     "match": "qwen3.7-plus",
     "input": 0.4,
     "output": 1.6,
-    "cache_read": 0.04
+    "cache_read": 0.04,
+    "cache_write": 0.5
   },
   {
     "match": "qwen3.7",
     "input": 0.4,
     "output": 1.6,
-    "cache_read": 0.04
+    "cache_read": 0.04,
+    "cache_write": 0.5
   },
   {
     "match": "qwen3.6-plus",
     "input": 0.5,
     "output": 3.0,
-    "cache_read": 0.05
+    "cache_read": 0.05,
+    "cache_write": 0.625
   },
   {
     "match": "qwen3.6",
     "input": 0.5,
     "output": 3.0,
-    "cache_read": 0.05
+    "cache_read": 0.05,
+    "cache_write": 0.625
   },
   {
     "match": "qwen3.5",
@@ -203,10 +212,17 @@
     "match": "qwen3",
     "input": 0.4,
     "output": 1.6,
-    "cache_read": 0.04
+    "cache_read": 0.04,
+    "cache_write": 0.5
   },
   {
     "_comment": "OpenCode Zen / other paid models (approximate public list prices)"
+  },
+  {
+    "match": "grok-4.5",
+    "input": 2.0,
+    "output": 6.0,
+    "cache_read": 0.3
   },
   {
     "match": "grok-4",
@@ -251,7 +267,9 @@
   {
     "match": "gpt-5.6",
     "input": 0.2,
-    "output": 1.2
+    "output": 1.2,
+    "cache_read": 0.02,
+    "cache_write": 0.25
   },
   {
     "match": "gpt-5",

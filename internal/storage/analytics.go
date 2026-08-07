@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"sort"
 	"time"
 )
 
@@ -75,17 +76,21 @@ func (a *Analytics) GetTokenSummary(days int) (*TokenSummary, error) {
 }
 
 // modelCostSum sums estimated USD cost across requests using price rules from
-// seed_prices.json, keyed per model. Independent of the models table.
+// seed_prices.json, keyed per model. Falls back to the models table for
+// input/output rates when a model has no seed rule.
 func (a *Analytics) modelCostSum(ctx context.Context, since string) (float64, error) {
 	rows, err := a.db.DB().QueryContext(ctx, `
-		SELECT model,
-		       COALESCE(SUM(input_tokens), 0),
-		       COALESCE(SUM(output_tokens), 0),
-		       COALESCE(SUM(cache_read_tokens), 0),
-		       COALESCE(SUM(cache_creation_tokens), 0)
-		FROM requests
-		WHERE created_at >= ?
-		GROUP BY model
+		SELECT r.model,
+		       COALESCE(SUM(r.input_tokens), 0),
+		       COALESCE(SUM(r.output_tokens), 0),
+		       COALESCE(SUM(r.cache_read_tokens), 0),
+		       COALESCE(SUM(r.cache_creation_tokens), 0),
+		       COALESCE(m.cost_input_per_m, 0),
+		       COALESCE(m.cost_output_per_m, 0)
+		FROM requests r
+		LEFT JOIN models m ON m.id = r.model
+		WHERE r.created_at >= ?
+		GROUP BY r.model
 	`, since)
 	if err != nil {
 		return 0, err
@@ -95,32 +100,29 @@ func (a *Analytics) modelCostSum(ctx context.Context, since string) (float64, er
 	for rows.Next() {
 		var model string
 		var inToks, outToks, cacheReadToks, cacheCreateToks int64
-		if err := rows.Scan(&model, &inToks, &outToks, &cacheReadToks, &cacheCreateToks); err != nil {
+		var modelsInputPerM, modelsOutputPerM float64
+		if err := rows.Scan(&model, &inToks, &outToks, &cacheReadToks, &cacheCreateToks,
+			&modelsInputPerM, &modelsOutputPerM); err != nil {
 			return 0, err
 		}
-		if ipm, opm, cpm, ok := PriceForModel(model); ok {
-			// OpenCode semantics: cache CREATION is a first-time write of prompt
-			// input, billed at the input price; cache READ (an existing prompt
-			// hitting the cache) is billed at the cheap cache price.
-			effectiveInput := inToks + cacheCreateToks
-			cost += (float64(effectiveInput)*ipm + float64(cacheReadToks)*cpm + float64(outToks)*opm) / 1_000_000
-		}
+		cost += costForTokens(model, inToks, outToks, cacheReadToks, cacheCreateToks,
+			modelsInputPerM, modelsOutputPerM)
 	}
 	return cost, rows.Err()
 }
 
 // ModelBreakdown holds per-model usage and performance stats.
 type ModelBreakdown struct {
-	Model                string  `json:"model"`
-	Provider             string  `json:"provider"`
-	Requests             int64   `json:"requests"`
-	InputTokens          int64   `json:"input_tokens"`
-	OutputTokens         int64   `json:"output_tokens"`
-	CacheReadTokens      int64   `json:"cache_read_tokens"`
-	CacheCreationTokens  int64   `json:"cache_creation_tokens"`
-	AvgLatencyMs         float64 `json:"avg_latency_ms"`
-	SuccessRate          float64 `json:"success_rate"`
-	EstCostUSD           float64 `json:"est_cost_usd"` // based on models.cost_* if available
+	Model               string  `json:"model"`
+	Provider            string  `json:"provider"`
+	Requests            int64   `json:"requests"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	CacheReadTokens     int64   `json:"cache_read_tokens"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	AvgLatencyMs        float64 `json:"avg_latency_ms"`
+	SuccessRate         float64 `json:"success_rate"`
+	EstCostUSD          float64 `json:"est_cost_usd"` // based on models.cost_* if available
 }
 
 // TotalTokens is the full input/output/cache volume for ring-chart weighting.
@@ -152,11 +154,8 @@ func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
 				WHEN COUNT(*) > 0 THEN CAST(SUM(r.success) AS FLOAT) / COUNT(*)
 				ELSE 0
 			END AS success_rate,
-			COALESCE(
-				(SUM(r.input_tokens * COALESCE(m.cost_input_per_m, 0)) +
-				 SUM(r.output_tokens * COALESCE(m.cost_output_per_m, 0))) / 1000000,
-				0
-			) AS est_cost_usd
+			COALESCE(m.cost_input_per_m, 0) AS models_cost_input_per_m,
+			COALESCE(m.cost_output_per_m, 0) AS models_cost_output_per_m
 		FROM requests r
 		LEFT JOIN (
 			SELECT model, AVG(latency_ms) AS avg_latency
@@ -178,6 +177,7 @@ func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
 	var result []ModelBreakdown
 	for rows.Next() {
 		var mb ModelBreakdown
+		var modelsInputPerM, modelsOutputPerM float64
 		if err := rows.Scan(
 			&mb.Model,
 			&mb.Provider,
@@ -188,24 +188,50 @@ func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
 			&mb.CacheCreationTokens,
 			&mb.AvgLatencyMs,
 			&mb.SuccessRate,
-			&mb.EstCostUSD,
+			&modelsInputPerM,
+			&modelsOutputPerM,
 		); err != nil {
 			return nil, err
 		}
-		// models-table cost may be 0 when the catalog/models rows are missing
-		// (common on fresh installs). Fall back to the embedded price rules so
-		// /api/analytics/* still reports a USD estimate. OpenCode bills cache
-		// CREATION at the input price (first-time prompt write) and cache READ
-		// at the cheap cache price.
-		if mb.EstCostUSD == 0 && (mb.InputTokens > 0 || mb.OutputTokens > 0 || mb.CacheReadTokens > 0 || mb.CacheCreationTokens > 0) {
-			if ipm, opm, cpm, ok := PriceForModel(mb.Model); ok {
-				effIn := mb.InputTokens + mb.CacheCreationTokens
-				mb.EstCostUSD = (float64(effIn)*ipm + float64(mb.CacheReadTokens)*cpm + float64(mb.OutputTokens)*opm) / 1_000_000
-			}
-		}
+		// Price the row in Go using the same rules as modelCostSum, so the
+		// per-model breakdown always adds up to the summary total. The old SQL
+		// expression priced only input+output at the models-table rates, which
+		// silently billed every cached token at the full input rate and left
+		// the breakdown disagreeing with the headline cost.
+		mb.EstCostUSD = costForTokens(mb.Model,
+			mb.InputTokens, mb.OutputTokens, mb.CacheReadTokens, mb.CacheCreationTokens,
+			modelsInputPerM, modelsOutputPerM)
 		result = append(result, mb)
 	}
 	return result, rows.Err()
+}
+
+// costForTokens prices one model's token counts in USD. Rates come from the
+// embedded seed rules; the models table (which has no cache columns) is used
+// only as a fallback for input/output when the model has no seed rule, so
+// catalog-synced or user-overridden prices still surface.
+func costForTokens(model string, in, out, cacheRead, cacheCreate int64, modelsInputPerM, modelsOutputPerM float64) float64 {
+	ipm, opm, crpm, cwpm, ok := PriceForModel(model)
+	if !ok {
+		if modelsInputPerM == 0 && modelsOutputPerM == 0 {
+			return 0
+		}
+		// No seed rule: fall back to models-table input/output rates and treat
+		// cache creation as input. Cache reads stay unpriced rather than being
+		// billed at the full input rate.
+		ipm, opm = modelsInputPerM, modelsOutputPerM
+	}
+	// OpenCode semantics: cache CREATION (first-time prompt write) bills at the
+	// cache_write price when the model publishes one, otherwise at the input
+	// price; cache READ bills at the cheap cache_read price.
+	cacheWriteRate := ipm
+	if cwpm > 0 {
+		cacheWriteRate = cwpm
+	}
+	return (float64(in)*ipm +
+		float64(cacheCreate)*cacheWriteRate +
+		float64(cacheRead)*crpm +
+		float64(out)*opm) / 1_000_000
 }
 
 // ProviderBreakdown holds per-provider aggregates.
@@ -228,37 +254,82 @@ func (a *Analytics) GetProviderBreakdown(days int) ([]ProviderBreakdown, error) 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// Grouped by provider *and* model: prices are per-model, so cost has to be
+	// accumulated at model granularity and only then summed up per provider.
+	// This keeps the provider totals equal to the model-breakdown totals.
 	rows, err := a.db.DB().QueryContext(ctx, `
-		SELECT 
-			COALESCE(provider, 'unknown') AS provider,
+		SELECT
+			COALESCE(r.provider, 'unknown') AS provider,
+			r.model,
 			COUNT(*) AS requests,
-			COALESCE(SUM(input_tokens), 0) AS input_tokens,
-			COALESCE(SUM(output_tokens), 0) AS output_tokens,
-			COALESCE(
-				(SUM(input_tokens) * 0 + SUM(output_tokens) * 0) / 1000000, -- placeholder; real cost via model join if needed
-				0
-			) AS est_cost_usd,
+			COALESCE(SUM(r.input_tokens), 0) AS input_tokens,
+			COALESCE(SUM(r.output_tokens), 0) AS output_tokens,
+			COALESCE(SUM(r.cache_read_tokens), 0) AS cache_read_tokens,
+			COALESCE(SUM(r.cache_creation_tokens), 0) AS cache_creation_tokens,
 			-- Fallback rate: attempts > 1 are fallbacks; old rows (NULL/0) treated as primary (rate 0)
-			COALESCE(100.0 * COUNT(CASE WHEN COALESCE(attempt, 1) > 1 THEN 1 END) / NULLIF(COUNT(*), 0), 0) AS fallback_rate
-		FROM requests
-		WHERE created_at >= ?
-		GROUP BY provider
-		ORDER BY requests DESC
+			COUNT(CASE WHEN COALESCE(r.attempt, 1) > 1 THEN 1 END) AS fallback_count,
+			COALESCE(m.cost_input_per_m, 0) AS models_cost_input_per_m,
+			COALESCE(m.cost_output_per_m, 0) AS models_cost_output_per_m
+		FROM requests r
+		LEFT JOIN models m ON m.id = r.model
+		WHERE r.created_at >= ?
+		GROUP BY r.provider, r.model
 	`, since.Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 
-	var result []ProviderBreakdown
+	type providerAgg struct {
+		pb        ProviderBreakdown
+		fallbacks int64
+	}
+	byProvider := make(map[string]*providerAgg)
+	order := make([]string, 0, 8)
+
 	for rows.Next() {
-		var pb ProviderBreakdown
-		if err := rows.Scan(&pb.Provider, &pb.Requests, &pb.InputTokens, &pb.OutputTokens, &pb.EstCostUSD, &pb.FallbackRate); err != nil {
+		var (
+			provider, model                        string
+			requests, in, out, cacheRead, cacheNew int64
+			fallbacks                              int64
+			modelsInRate, modelsOutRate            float64
+		)
+		if err := rows.Scan(&provider, &model, &requests, &in, &out, &cacheRead, &cacheNew,
+			&fallbacks, &modelsInRate, &modelsOutRate); err != nil {
 			return nil, err
 		}
-		result = append(result, pb)
+
+		agg, ok := byProvider[provider]
+		if !ok {
+			agg = &providerAgg{pb: ProviderBreakdown{Provider: provider}}
+			byProvider[provider] = agg
+			order = append(order, provider)
+		}
+		agg.pb.Requests += requests
+		agg.pb.InputTokens += in
+		agg.pb.OutputTokens += out
+		agg.pb.EstCostUSD += costForTokens(model, in, out, cacheRead, cacheNew, modelsInRate, modelsOutRate)
+		agg.fallbacks += fallbacks
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	result := make([]ProviderBreakdown, 0, len(order))
+	for _, provider := range order {
+		agg := byProvider[provider]
+		if agg.pb.Requests > 0 {
+			agg.pb.FallbackRate = 100.0 * float64(agg.fallbacks) / float64(agg.pb.Requests)
+		}
+		result = append(result, agg.pb)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Requests != result[j].Requests {
+			return result[i].Requests > result[j].Requests
+		}
+		return result[i].Provider < result[j].Provider
+	})
+	return result, nil
 }
 
 // DailyTokenPoint is a single day in the token trend.

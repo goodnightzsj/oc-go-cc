@@ -271,10 +271,10 @@ func TestTransformResponseWithCacheTokens(t *testing.T) {
 		t.Fatalf("TransformResponse() error = %v", err)
 	}
 
-	// Per Anthropic spec, input_tokens excludes cache reads AND cache
-	// creations. Upstream prompt_tokens=100 split as 80 hit + 20 miss
-	// means everything was accounted for by the cache → input_tokens = 0.
-	if got, want := anthropicResp.Usage.InputTokens, 0; got != want {
+	// Partitioned form (DeepSeek): prompt_tokens=100 == 80 hit + 20 miss. The
+	// miss part is what upstream bills at the full input rate, so it maps to
+	// input_tokens rather than being subtracted away.
+	if got, want := anthropicResp.Usage.InputTokens, 20; got != want {
 		t.Errorf("Usage.InputTokens = %d, want %d", got, want)
 	}
 	if got, want := anthropicResp.Usage.OutputTokens, 50; got != want {
@@ -283,7 +283,7 @@ func TestTransformResponseWithCacheTokens(t *testing.T) {
 	if got, want := anthropicResp.Usage.CacheReadInputTokens, 80; got != want {
 		t.Errorf("Usage.CacheReadInputTokens = %d, want %d", got, want)
 	}
-	if got, want := anthropicResp.Usage.CacheCreationInputTokens, 20; got != want {
+	if got, want := anthropicResp.Usage.CacheCreationInputTokens, 0; got != want {
 		t.Errorf("Usage.CacheCreationInputTokens = %d, want %d", got, want)
 	}
 }
@@ -359,9 +359,10 @@ func TestTransformResponseCacheExceedsPromptTokens(t *testing.T) {
 			PromptTokens:          50,
 			CompletionTokens:      5,
 			TotalTokens:           55,
-			PromptCacheHitTokens:  40,
-			PromptCacheMissTokens: 20,
-			// 50 - 40 - 20 = -10, clamped to 0
+			PromptCacheHitTokens:  46,
+			PromptCacheMissTokens: 4,
+			// Partitioned form: 46 hit + 4 miss == 50 prompt.
+			// The 4 miss tokens are input (billed at full rate).
 		},
 	}
 
@@ -370,13 +371,13 @@ func TestTransformResponseCacheExceedsPromptTokens(t *testing.T) {
 		t.Fatalf("TransformResponse() error = %v", err)
 	}
 
-	if got, want := anthropicResp.Usage.InputTokens, 0; got != want {
+	if got, want := anthropicResp.Usage.InputTokens, 4; got != want {
 		t.Errorf("Usage.InputTokens = %d, want %d", got, want)
 	}
-	if got, want := anthropicResp.Usage.CacheReadInputTokens, 40; got != want {
+	if got, want := anthropicResp.Usage.CacheReadInputTokens, 46; got != want {
 		t.Errorf("Usage.CacheReadInputTokens = %d, want %d", got, want)
 	}
-	if got, want := anthropicResp.Usage.CacheCreationInputTokens, 20; got != want {
+	if got, want := anthropicResp.Usage.CacheCreationInputTokens, 0; got != want {
 		t.Errorf("Usage.CacheCreationInputTokens = %d, want %d", got, want)
 	}
 }

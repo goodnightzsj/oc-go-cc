@@ -380,6 +380,18 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	if s.met != nil {
 		snap = s.met.GetSnapshot()
 	}
+	// The metrics counters live in process memory and reset on restart, which
+	// left the overview page reading all zeros even with thousands of requests
+	// on record. Fall back to the persisted roll-up in that case.
+	if snap.RequestsReceived == 0 && s.storage != nil {
+		if totals, err := storage.NewRequests(s.storage).Totals(); err == nil && totals.Received > 0 {
+			snap.RequestsReceived = totals.Received
+			snap.RequestsStreamed = totals.Streamed
+			snap.RequestsSuccess = totals.Success
+			snap.RequestsFailed = totals.Failed
+			snap.ModelCounts = totals.ModelCounts
+		}
+	}
 	resp := metricsResponse{
 		ProxyRunning:      s.proxyRunning.Load(),
 		ConnectedExisting: s.connectedExisting.Load(),
@@ -513,6 +525,117 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// redactConfigKeys returns a shallow clone of cfg with all API key fields
+// replaced by a fixed-width mask. The frontend settings form only needs to know
+// whether a key is set, not the key itself. Sending the actual keys to the
+// browser would leak them in the DevTools network tab and make them readable by
+// any script on the page. When the user saves without editing a masked field,
+// the frontend omits that field from the PATCH so the server never receives the
+// mask, leaving the real key on disk intact.
+func redactConfigKeys(cfg *config.Config) *config.Config {
+	out := *cfg // shallow copy
+
+	if out.APIKey != "" {
+		out.APIKey = keyMask
+	}
+	if len(out.APIKeys) > 0 {
+		out.APIKeys = make([]string, len(out.APIKeys))
+		for i := range out.APIKeys {
+			out.APIKeys[i] = keyMask
+		}
+	}
+	if out.OpenCodeGo.APIKey != "" {
+		out.OpenCodeGo.APIKey = keyMask
+	}
+	if len(out.OpenCodeGo.APIKeys) > 0 {
+		out.OpenCodeGo.APIKeys = make([]string, len(out.OpenCodeGo.APIKeys))
+		for i := range out.OpenCodeGo.APIKeys {
+			out.OpenCodeGo.APIKeys[i] = keyMask
+		}
+	}
+	if out.OpenCodeZen.APIKey != "" {
+		out.OpenCodeZen.APIKey = keyMask
+	}
+	if len(out.OpenCodeZen.APIKeys) > 0 {
+		out.OpenCodeZen.APIKeys = make([]string, len(out.OpenCodeZen.APIKeys))
+		for i := range out.OpenCodeZen.APIKeys {
+			out.OpenCodeZen.APIKeys[i] = keyMask
+		}
+	}
+	if out.AWSBedrock.APIKey != "" {
+		out.AWSBedrock.APIKey = keyMask
+	}
+	if len(out.AWSBedrock.APIKeys) > 0 {
+		out.AWSBedrock.APIKeys = make([]string, len(out.AWSBedrock.APIKeys))
+		for i := range out.AWSBedrock.APIKeys {
+			out.AWSBedrock.APIKeys[i] = keyMask
+		}
+	}
+	if out.OpenRouter.APIKey != "" {
+		out.OpenRouter.APIKey = keyMask
+	}
+	if len(out.OpenRouter.APIKeys) > 0 {
+		out.OpenRouter.APIKeys = make([]string, len(out.OpenRouter.APIKeys))
+		for i := range out.OpenRouter.APIKeys {
+			out.OpenRouter.APIKeys[i] = keyMask
+		}
+	}
+	return &out
+}
+
+// maskForKeys is the exact mask redactConfigKeys substitutes for real keys.
+const keyMask = "••••••••••••••••"
+
+// stripMaskedKeys removes from a config PATCH any field whose value is still
+// the keyMask placeholder, recursively. This is a server-side guard against the
+// masked GET response being replayed: if the client never edited a key field,
+// its mask must not overwrite the real key on disk.
+func stripMaskedKeys(patch map[string]json.RawMessage) {
+	for field, raw := range patch {
+		// A bare masked string at this level: drop the whole field.
+		var asString string
+		if json.Unmarshal(raw, &asString) == nil {
+			if asString == keyMask {
+				delete(patch, field)
+			}
+			continue
+		}
+
+		// An array whose every element is the mask: drop the whole field.
+		var asArray []string
+		if json.Unmarshal(raw, &asArray) == nil {
+			if len(asArray) > 0 && allMasked(asArray) {
+				delete(patch, field)
+			}
+			continue
+		}
+
+		// A nested object (e.g. "opencode_go"): recurse, then re-encode so the
+		// stripped version is what gets merged onto the on-disk config.
+		var nested map[string]json.RawMessage
+		if json.Unmarshal(raw, &nested) != nil {
+			continue // scalar or shape we don't need to touch
+		}
+		stripMaskedKeys(nested)
+		if len(nested) == 0 {
+			delete(patch, field)
+			continue
+		}
+		if reencoded, err := json.Marshal(nested); err == nil {
+			patch[field] = reencoded
+		}
+	}
+}
+
+func allMasked(values []string) bool {
+	for _, v := range values {
+		if v != keyMask {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Server) handleProxyStart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -557,18 +680,14 @@ func (s *Server) handleProxyConfig(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		cfg := s.atomicCfg.Get()
-		writeJSON(w, cfg)
+		// Never ship raw API keys to the browser: they would be visible in the
+		// DevTools network tab and readable by any script on the page. The
+		// settings form only needs to know whether a key is set, so send a
+		// fixed-width mask instead. Saving an unchanged masked field is a no-op
+		// because the frontend only patches fields the user actually edited.
+		writeJSON(w, redactConfigKeys(s.atomicCfg.Get()))
 
 	case http.MethodPost:
-		// Read the current config from disk as the baseline.
-		configPath := s.atomicCfg.Path()
-		currentCfg, err := config.LoadFromPath(configPath)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("failed to read current config: %v", err), http.StatusInternalServerError)
-			return
-		}
-
 		// Decode only the fields the client sent (partial update).
 		var patch map[string]json.RawMessage
 		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
@@ -576,35 +695,14 @@ func (s *Server) handleProxyConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Apply each patch field onto the current config.
-		patchBytes, err := json.Marshal(patch)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("failed to re-encode patch: %v", err), http.StatusInternalServerError)
-			return
-		}
-		if err := json.Unmarshal(patchBytes, currentCfg); err != nil {
-			http.Error(w, fmt.Sprintf("failed to apply patch: %v", err), http.StatusInternalServerError)
-			return
-		}
+		// Drop any key field whose value is still the mask sent by GET. The
+		// frontend normally omits untouched fields, but a browser autofill or a
+		// client replaying a GET response would otherwise overwrite the real key
+		// on disk with bullet characters.
+		stripMaskedKeys(patch)
 
-		// Validate essential fields.
-		if currentCfg.Host == "" {
-			http.Error(w, "host is required", http.StatusBadRequest)
-			return
-		}
-		if currentCfg.Port < 1 || currentCfg.Port > 65535 {
-			http.Error(w, "port must be between 1 and 65535", http.StatusBadRequest)
-			return
-		}
-
-		// Serialize and write the merged config.
-		data, err := json.MarshalIndent(currentCfg, "", "  ")
-		if err != nil {
-			http.Error(w, fmt.Sprintf("failed to serialize config: %v", err), http.StatusInternalServerError)
-			return
-		}
-		if err := os.WriteFile(configPath, data, 0600); err != nil {
-			http.Error(w, fmt.Sprintf("failed to write config file: %v", err), http.StatusInternalServerError)
+		if err := applyConfigPatch(s.atomicCfg.Path(), patch); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -619,6 +717,70 @@ func (s *Server) handleProxyConfig(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// applyConfigPatch merges a partial update into the config file on disk.
+//
+// The merge happens on the file's *raw* JSON, never on a parsed config.Config.
+// config.LoadFromPath expands ${VAR} references, applies environment overrides
+// and fills in defaults; round-tripping through it would rewrite the file with
+// every secret resolved to plaintext and every default materialised, silently
+// destroying the user's ${VAR} indirection.
+func applyConfigPatch(configPath string, patch map[string]json.RawMessage) error {
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to read current config: %w", err)
+	}
+
+	var merged map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &merged); err != nil {
+		return fmt.Errorf("failed to parse current config: %w", err)
+	}
+	if merged == nil {
+		merged = map[string]json.RawMessage{}
+	}
+	for field, value := range patch {
+		merged[field] = value
+	}
+
+	// Validate the result by loading it the way the proxy will, without letting
+	// that normalised form reach the file.
+	if err := validateMergedConfig(merged); err != nil {
+		return err
+	}
+
+	data, err := json.MarshalIndent(merged, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to serialize config: %w", err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(configPath, data, 0600); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+	return nil
+}
+
+// validateMergedConfig checks the essential fields the proxy cannot start
+// without. It works on the raw merged JSON so that unset fields stay unset.
+func validateMergedConfig(merged map[string]json.RawMessage) error {
+	var probe struct {
+		Host string `json:"host"`
+		Port int    `json:"port"`
+	}
+	blob, err := json.Marshal(merged)
+	if err != nil {
+		return fmt.Errorf("failed to re-encode config: %w", err)
+	}
+	if err := json.Unmarshal(blob, &probe); err != nil {
+		return fmt.Errorf("invalid config format: %w", err)
+	}
+	if probe.Host == "" {
+		return errors.New("host is required")
+	}
+	if probe.Port < 1 || probe.Port > 65535 {
+		return errors.New("port must be between 1 and 65535")
+	}
+	return nil
 }
 
 type catalogLockResponse struct {

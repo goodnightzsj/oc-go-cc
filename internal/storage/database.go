@@ -45,9 +45,14 @@ func Open(cfg Config) (*Database, error) {
 		return nil, fmt.Errorf("create database directory: %w", err)
 	}
 
-	dsn := path
+	// modernc.org/sqlite only parses the _pragma, _time_format and _txlock DSN
+	// parameters. The bare _journal_mode / _synchronous / _busy_timeout form
+	// used by mattn/go-sqlite3 is silently ignored here, which left WAL off
+	// (journal_mode=delete) and busy_timeout at 0 — every write that hit
+	// contention failed immediately with SQLITE_BUSY instead of waiting.
+	dsn := path + "?_pragma=busy_timeout(5000)"
 	if cfg.WALEnabled {
-		dsn = path + "?_journal_mode=WAL&_synchronous=NORMAL&_busy_timeout=5000"
+		dsn += "&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
 	}
 
 	db, err := sql.Open("sqlite", dsn)
@@ -267,10 +272,11 @@ func expandPath(path string) string {
 // priceEntry defines a pricing rule for models whose id/name/display_name
 // contains the match substring. Applied only if current cost is 0/NULL.
 type priceEntry struct {
-	Match     string  `json:"match"`
-	Input     float64 `json:"input"`
-	Output    float64 `json:"output"`
-	CacheRead float64 `json:"cache_read,omitempty"`
+	Match      string  `json:"match"`
+	Input      float64 `json:"input"`
+	Output     float64 `json:"output"`
+	CacheRead  float64 `json:"cache_read,omitempty"`
+	CacheWrite float64 `json:"cache_write,omitempty"`
 }
 
 //go:embed seed_prices.json
@@ -281,13 +287,13 @@ var defaultModelPrices []byte
 // This is independent of the catalog/models tables so cost figures are always
 // available even when a model is absent from the catalog sync. Returns ok=false
 // when no rule matches (or embedded data is unavailable).
-func PriceForModel(model string) (inputPerM, outputPerM, cacheReadPerM float64, ok bool) {
+func PriceForModel(model string) (inputPerM, outputPerM, cacheReadPerM, cacheWritePerM float64, ok bool) {
 	if model == "" || len(defaultModelPrices) == 0 {
-		return 0, 0, 0, false
+		return 0, 0, 0, 0, false
 	}
 	var entries []priceEntry
 	if err := json.Unmarshal(defaultModelPrices, &entries); err != nil {
-		return 0, 0, 0, false
+		return 0, 0, 0, 0, false
 	}
 	bestLen := -1
 	for _, e := range entries {
@@ -296,10 +302,10 @@ func PriceForModel(model string) (inputPerM, outputPerM, cacheReadPerM float64, 
 		}
 		if strings.Contains(strings.ToLower(model), strings.ToLower(e.Match)) && len(e.Match) > bestLen {
 			bestLen = len(e.Match)
-			inputPerM, outputPerM, cacheReadPerM, ok = e.Input, e.Output, e.CacheRead, true
+			inputPerM, outputPerM, cacheReadPerM, cacheWritePerM, ok = e.Input, e.Output, e.CacheRead, e.CacheWrite, true
 		}
 	}
-	return inputPerM, outputPerM, cacheReadPerM, ok
+	return inputPerM, outputPerM, cacheReadPerM, cacheWritePerM, ok
 }
 
 // SeedDefaultModelPrices inserts realistic default pricing for common models

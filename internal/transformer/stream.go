@@ -420,7 +420,18 @@ func (h *StreamHandler) processSSELine(
 				}
 			}
 			if end != -1 {
-				content := data[start : start+end]
+				// Decode the JSON string escapes before forwarding. The bytes
+				// between the quotes are raw JSON (e.g. `line1\nline2` is a
+				// literal backslash-n), so they must be unmarshaled or the
+				// escaped newline reaches the client as literal "\n". Wrapping
+				// in quotes makes the slice a standalone JSON string.
+				raw := data[start : start+end]
+				var content string
+				if err := json.Unmarshal(append([]byte(`"`), append(raw, '"')...), &content); err != nil {
+					// Not valid JSON inside the quotes; forward the raw bytes
+					// rather than dropping the chunk.
+					content = string(raw)
+				}
 				if len(content) > 0 {
 					if !*contentStarted {
 						// If reasoning was already started, close it first
@@ -756,18 +767,36 @@ func usageInfoToAnthropic(usage *types.UsageInfo) *types.Usage {
 			OutputTokens: 0,
 		}
 	}
+	in, cacheRead, cacheCreate := splitPromptTokens(usage)
 	return &types.Usage{
-		// Per Anthropic Messages API spec, `input_tokens` is the count of
-		// regular input tokens — i.e. tokens that were neither read from the
-		// cache nor written to the cache this turn. OpenAI's `prompt_tokens`
-		// is the *total* prompt size. We must subtract the cache parts here
-		// for the same reason TransformResponse does — see the longer comment
-		// in response.go.
-		InputTokens:              nonNegative(usage.PromptTokens - usage.PromptCacheHitTokens - usage.PromptCacheMissTokens),
+		InputTokens:              in,
 		OutputTokens:             usage.CompletionTokens,
-		CacheCreationInputTokens: usage.PromptCacheMissTokens,
-		CacheReadInputTokens:     usage.PromptCacheHitTokens,
+		CacheCreationInputTokens: cacheCreate,
+		CacheReadInputTokens:     cacheRead,
 	}
+}
+
+// splitPromptTokens maps an OpenAI-compatible usage block onto Anthropic's
+// (input, cache_read, cache_creation) triple.
+//
+// DeepSeek reports prompt_cache_hit_tokens + prompt_cache_miss_tokens ==
+// prompt_tokens: the two fields *partition* the prompt rather than counting
+// extra tokens on top of it. The cache-miss part is the portion actually billed
+// at the full input rate, so it maps to Anthropic's `input_tokens`, and only the
+// hit part is cache_read. Subtracting both (the previous behaviour) drove
+// input_tokens to zero on every cached turn and, when upstream omitted the cache
+// fields entirely, billed the whole prompt at the uncached rate.
+func splitPromptTokens(usage *types.UsageInfo) (input, cacheRead, cacheCreate int) {
+	hit, miss := usage.PromptCacheHitTokens, usage.PromptCacheMissTokens
+	if hit == 0 && miss == 0 {
+		return usage.PromptTokens, 0, 0
+	}
+	// Partitioned form (DeepSeek): hit + miss accounts for the whole prompt.
+	if hit+miss >= usage.PromptTokens {
+		return miss, hit, 0
+	}
+	// Additive form: cache counts sit outside prompt_tokens.
+	return nonNegative(usage.PromptTokens - hit - miss), hit, miss
 }
 
 // writeContentBlockStop writes a content_block_stop SSE event at the given index.

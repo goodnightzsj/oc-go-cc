@@ -34,9 +34,17 @@ func (l *Logs) Insert(level, message, field, value string) error {
 	return err
 }
 
+const (
+	// defaultLogLimit is the page size used when a caller passes n <= 0.
+	defaultLogLimit = 200
+	// maxLogScan caps time-range scans so a far-past `since` cannot stream the
+	// whole logs table into memory.
+	maxLogScan = 20000
+)
+
 func (l *Logs) Last(n int) ([]LogEntry, error) {
 	if n <= 0 {
-		n = 200
+		n = defaultLogLimit
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -69,16 +77,18 @@ func (l *Logs) Since(since time.Time, level string) ([]LogEntry, error) {
 			FROM logs
 			WHERE recorded_at >= ? AND level = ?
 			ORDER BY recorded_at DESC
+			LIMIT ?
 		`
-		args = []interface{}{since.Format(time.RFC3339Nano), level}
+		args = []interface{}{since.Format(time.RFC3339Nano), level, maxLogScan}
 	} else {
 		query = `
 			SELECT level, message, field, value, recorded_at
 			FROM logs
 			WHERE recorded_at >= ?
 			ORDER BY recorded_at DESC
+			LIMIT ?
 		`
-		args = []interface{}{since.Format(time.RFC3339Nano)}
+		args = []interface{}{since.Format(time.RFC3339Nano), maxLogScan}
 	}
 
 	rows, err := l.db.DB().QueryContext(ctx, query, args...)

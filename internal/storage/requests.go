@@ -54,10 +54,18 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 	return err
 }
 
+const (
+	// defaultRequestLimit is the page size used when a caller passes n <= 0.
+	defaultRequestLimit = 1000
+	// maxRequestScan caps time-range scans. A far-past `since` would otherwise
+	// stream the whole table into memory.
+	maxRequestScan = 50000
+)
+
 // Last returns the most recent n request records ordered by start time.
 func (r *Requests) Last(n int) ([]history.RequestRecord, error) {
 	if n <= 0 {
-		n = 1000
+		n = defaultRequestLimit
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -79,7 +87,8 @@ func (r *Requests) Last(n int) ([]history.RequestRecord, error) {
 	return scanRequests(rows)
 }
 
-// Since returns all request records with start time after the given time.
+// Since returns request records with start time after the given time, newest
+// first, capped at maxRequestScan rows so a wide range cannot exhaust memory.
 func (r *Requests) Since(since time.Time) ([]history.RequestRecord, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -91,7 +100,8 @@ func (r *Requests) Since(since time.Time) ([]history.RequestRecord, error) {
 		FROM requests
 		WHERE start_time >= ?
 		ORDER BY start_time DESC
-	`, since.Format(time.RFC3339Nano))
+		LIMIT ?
+	`, since.Format(time.RFC3339Nano), maxRequestScan)
 	if err != nil {
 		return nil, err
 	}
@@ -147,6 +157,52 @@ func (r *Requests) Page(page, pageSize int) ([]history.RequestRecord, int64, err
 		return records, 0, err
 	}
 	return records, total, nil
+}
+
+// Totals is a persisted roll-up of request counters, used to backfill the
+// overview page after a restart (the in-process metrics counters start at zero).
+type Totals struct {
+	Received    int64
+	Streamed    int64
+	Success     int64
+	Failed      int64
+	ModelCounts map[string]int64
+}
+
+// Totals returns lifetime request counters aggregated from the requests table.
+func (r *Requests) Totals() (*Totals, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	t := &Totals{ModelCounts: map[string]int64{}}
+	row := r.db.DB().QueryRowContext(ctx, `
+		SELECT
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN streaming = 1 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END), 0)
+		FROM requests
+	`)
+	if err := row.Scan(&t.Received, &t.Streamed, &t.Success, &t.Failed); err != nil {
+		return nil, err
+	}
+
+	rows, err := r.db.DB().QueryContext(ctx, `
+		SELECT model, COUNT(*) FROM requests GROUP BY model
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var model string
+		var n int64
+		if err := rows.Scan(&model, &n); err != nil {
+			return nil, err
+		}
+		t.ModelCounts[model] = n
+	}
+	return t, rows.Err()
 }
 
 // CountSince returns the number of request records with start time after the given time.

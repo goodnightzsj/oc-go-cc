@@ -17,13 +17,15 @@ func NewAnalytics(db *Database) *Analytics {
 
 // TokenSummary holds high-level token and request metrics for a time window.
 type TokenSummary struct {
-	TotalRequests int64     `json:"total_requests"`
-	InputTokens   int64     `json:"input_tokens"`
-	OutputTokens  int64     `json:"output_tokens"`
-	SuccessRate   float64   `json:"success_rate"` // 0-1
-	EstCostUSD    float64   `json:"est_cost_usd"`
-	PeriodStart   time.Time `json:"period_start"`
-	PeriodEnd     time.Time `json:"period_end"`
+	TotalRequests       int64     `json:"total_requests"`
+	InputTokens         int64     `json:"input_tokens"`
+	OutputTokens        int64     `json:"output_tokens"`
+	CacheReadTokens     int64     `json:"cache_read_tokens"`
+	CacheCreationTokens int64     `json:"cache_creation_tokens"`
+	SuccessRate         float64   `json:"success_rate"` // 0-1
+	EstCostUSD          float64   `json:"est_cost_usd"`
+	PeriodStart         time.Time `json:"period_start"`
+	PeriodEnd           time.Time `json:"period_end"`
 }
 
 // GetTokenSummary returns aggregated token/request metrics for the last N days.
@@ -45,6 +47,8 @@ func (a *Analytics) GetTokenSummary(days int) (*TokenSummary, error) {
 			COUNT(*) AS total_requests,
 			COALESCE(SUM(input_tokens), 0) AS input_tokens,
 			COALESCE(SUM(output_tokens), 0) AS output_tokens,
+			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+			COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
 			CASE
 				WHEN COUNT(*) > 0 THEN CAST(SUM(success) AS FLOAT) / COUNT(*)
 				ELSE 0
@@ -54,7 +58,7 @@ func (a *Analytics) GetTokenSummary(days int) (*TokenSummary, error) {
 	`, since.Format(time.RFC3339Nano))
 
 	var scanErr error
-	if scanErr = row.Scan(&summary.TotalRequests, &summary.InputTokens, &summary.OutputTokens, &summary.SuccessRate); scanErr != nil {
+	if scanErr = row.Scan(&summary.TotalRequests, &summary.InputTokens, &summary.OutputTokens, &summary.CacheReadTokens, &summary.CacheCreationTokens, &summary.SuccessRate); scanErr != nil {
 		return nil, scanErr
 	}
 
@@ -259,10 +263,12 @@ func (a *Analytics) GetProviderBreakdown(days int) ([]ProviderBreakdown, error) 
 
 // DailyTokenPoint is a single day in the token trend.
 type DailyTokenPoint struct {
-	Date         string `json:"date"` // YYYY-MM-DD
-	Requests     int64  `json:"requests"`
-	InputTokens  int64  `json:"input_tokens"`
-	OutputTokens int64  `json:"output_tokens"`
+	Date                string `json:"date"` // YYYY-MM-DD
+	Requests            int64  `json:"requests"`
+	InputTokens         int64  `json:"input_tokens"`
+	OutputTokens        int64  `json:"output_tokens"`
+	CacheReadTokens     int64  `json:"cache_read_tokens"`
+	CacheCreationTokens int64  `json:"cache_creation_tokens"`
 }
 
 // GetDailyTokenTrend returns daily token/request aggregates for the last N days.
@@ -276,11 +282,13 @@ func (a *Analytics) GetDailyTokenTrend(days int) ([]DailyTokenPoint, error) {
 	defer cancel()
 
 	rows, err := a.db.DB().QueryContext(ctx, `
-		SELECT 
+		SELECT
 			DATE(created_at) AS day,
 			COUNT(*) AS requests,
 			COALESCE(SUM(input_tokens), 0) AS input_tokens,
-			COALESCE(SUM(output_tokens), 0) AS output_tokens
+			COALESCE(SUM(output_tokens), 0) AS output_tokens,
+			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+			COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens
 		FROM requests
 		WHERE created_at >= ?
 		GROUP BY DATE(created_at)
@@ -294,7 +302,7 @@ func (a *Analytics) GetDailyTokenTrend(days int) ([]DailyTokenPoint, error) {
 	var result []DailyTokenPoint
 	for rows.Next() {
 		var p DailyTokenPoint
-		if err := rows.Scan(&p.Date, &p.Requests, &p.InputTokens, &p.OutputTokens); err != nil {
+		if err := rows.Scan(&p.Date, &p.Requests, &p.InputTokens, &p.OutputTokens, &p.CacheReadTokens, &p.CacheCreationTokens); err != nil {
 			return nil, err
 		}
 		result = append(result, p)

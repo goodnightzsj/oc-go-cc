@@ -2031,9 +2031,16 @@ const AnalyticsModule = {
     const s = data.summary || {};
     const fmt = (n) => n != null ? Number(n).toLocaleString() : '—';
     document.getElementById('kpi-requests').textContent = fmt(s.total_requests);
-    const totTok = (s.input_tokens||0) + (s.output_tokens||0);
+    // Total tokens = input (non-cached new) + output + cache (read+creation).
+    // This matches the billing structure and avoids underreporting when a large
+    // fraction of input is served from cache at lower cost.
+    const totTok = (s.input_tokens||0) + (s.output_tokens||0)
+      + (s.cache_read_tokens||0) + (s.cache_creation_tokens||0);
     document.getElementById('kpi-tokens').textContent = fmt(totTok);
     document.getElementById('kpi-tokens-in').textContent = fmt(s.input_tokens);
+    const cacheTok = (s.cache_read_tokens||0) + (s.cache_creation_tokens||0);
+    const cacheEl = document.getElementById('kpi-tokens-cache');
+    if (cacheEl) cacheEl.textContent = fmt(cacheTok);
     document.getElementById('kpi-tokens-out').textContent = fmt(s.output_tokens);
     const cost = s.est_cost_usd != null ? '$' + Number(s.est_cost_usd).toFixed(2) : '—';
     document.getElementById('kpi-cost').textContent = cost;
@@ -2076,68 +2083,86 @@ const AnalyticsModule = {
     if (otherVal > 0) top.push({name: 'Other', [valKey]: otherVal});
     const total = top.reduce((sum,i) => sum + (i[valKey]||0), 0) || 1;
 
-    // SVG pie (solid slices, no hole) so a 100% share visibly FILLS the whole
-    // circle — a thin ring (donut) made a dominant model look like it "only
-    // took a small slice". r = 0 => true pie; the percentage is in the legend
-    // beside each name, so nothing needs to overlay the solid fill.
-    const C = 120, R = 104, r = 0;
-    const px = (cx, cy, rad, ang) => [cx + rad * Math.cos(ang), cy + rad * Math.sin(ang)];
-    const slicePath = (a0, a1) => {
-      const [x0o, y0o] = px(C, C, R, a0);
-      const [x1o, y1o] = px(C, C, R, a1);
-      const [x1i, y1i] = px(C, C, r, a1);
-      const [x0i, y0i] = px(C, C, r, a0);
-      const large = (a1 - a0) > Math.PI ? 1 : 0;
-      return `M ${x0o.toFixed(1)} ${y0o.toFixed(1)} A ${R} ${R} 0 ${large} 1 ${x1o.toFixed(1)} ${y1o.toFixed(1)} ` +
-             `L ${x1i.toFixed(1)} ${y1i.toFixed(1)} A ${r} ${r} 0 ${large} 0 ${x0i.toFixed(1)} ${y0i.toFixed(1)} Z`;
-    };
+    // Donut drawn with stroke-dasharray on <circle> arcs rather than <path>
+    // wedges: a 100% share is just a full-circumference dash, so it renders
+    // correctly instead of degenerating (coincident arc endpoints draw nothing).
+    const C = 120, R = 82, STROKE = 34;
+    const CIRC = 2 * Math.PI * R;
+    const fmtTok = (n) => n >= 1_000_000 ? (n/1_000_000).toFixed(1)+'M'
+      : n >= 1000 ? (n/1000).toFixed(1)+'K' : String(n);
 
-    let angle = -Math.PI / 2;
+    const tooltipId = containerId + '-tip';
     const legend = [];
-    // Enforce a tiny minimum angle so a sector with <0.1% share (e.g. a
-    // deepseek-dominated ring where every other model is ~0%) still renders a
-    // visible sliver instead of disappearing entirely.
-    const MIN_SWEEP = 0.05; // ~2.9%
-    const slices = top.map((it, idx) => {
+    // Floor tiny-but-nonzero shares so a <0.5% sector stays visible/hoverable.
+    const MIN_FRAC = 0.005;
+    let offset = 0;
+    const arcs = top.map((it, idx) => {
       const v = it[valKey] || 0;
       const frac = v / total;
-      const sweep = Math.max(frac * 2 * Math.PI, MIN_SWEEP);
-      const a0 = angle, a1 = angle + sweep;
-      angle = a1;
+      const drawFrac = Math.min(1, Math.max(frac, v > 0 ? MIN_FRAC : 0));
       const col = this.palette[idx % this.palette.length];
       const label = it.model || it.provider || it.name || 'Unknown';
       const pctTxt = (frac * 100).toFixed(1) + '%';
-      const tip = `${this.escapeHtml(label)}: ${v.toLocaleString()} tokens (${pctTxt})`;
-      legend.push(`<div class="legend-item"><span class="legend-swatch" style="background:${col}"></span><span class="legend-label">${this.escapeHtml(label)}</span><span class="legend-value">${v.toLocaleString()}</span><span class="legend-pct">${pctTxt}</span></div>`);
-      return { path: slicePath(a0, a1), full: sweep >= 2 * Math.PI - 1e-6, col, tip, label, v };
-    });
-
-    const tooltipId = containerId + '-tip';
-    // A single slice that spans the whole circle (one model at 100%) can't be
-    // drawn with one SVG arc — start and end points coincide and the browser
-    // renders nothing (leaving only the L-to-center line). Draw a <circle> in
-    // that case so the disc is genuinely solid.
-    const svgSlices = slices.map((s, i) => {
-      const evt =
-        `onmouseenter="this.style.opacity='0.7'; document.getElementById('${tooltipId}').textContent='${s.tip}'; document.getElementById('${tooltipId}').style.display='block'" ` +
-        `onmousemove="var el=document.getElementById('${tooltipId}'); var r=this.closest('.donut-svg-wrap').getBoundingClientRect(); el.style.left=(event.clientX-r.left+10)+'px'; el.style.top=(event.clientY-r.top-10)+'px';" ` +
-        `onmouseleave="this.style.opacity='1'; document.getElementById('${tooltipId}').style.display='none'"`;
-      if (s.full) {
-        return `<circle cx="${C}" cy="${C}" r="${R}" fill="${s.col}" stroke="#1c1c1e" stroke-width="1.5" ${evt} id="slice-${containerId}-${i}"></circle>`;
-      }
-      return `<path d="${s.path}" fill="${s.col}" stroke="#1c1c1e" stroke-width="1.5" ${evt} id="slice-${containerId}-${i}"></path>`;
+      const tip = `${this.escapeHtml(label)} · ${v.toLocaleString()} (${pctTxt})`;
+      legend.push(
+        `<div class="legend-item" data-slice="${idx}">` +
+          `<span class="legend-swatch" style="background:${col}"></span>` +
+          `<span class="legend-label">${this.escapeHtml(label)}</span>` +
+          `<span class="legend-value">${fmtTok(v)}</span>` +
+          `<span class="legend-pct">${pctTxt}</span>` +
+        `</div>`);
+      const dash = `${(drawFrac * CIRC).toFixed(2)} ${((1 - drawFrac) * CIRC).toFixed(2)}`;
+      // Negative dashoffset advances clockwise from 12 o'clock (rotate -90).
+      const arc = `<circle class="donut-arc" cx="${C}" cy="${C}" r="${R}" fill="none"` +
+        ` stroke="${col}" stroke-width="${STROKE}"` +
+        ` stroke-dasharray="${dash}" stroke-dashoffset="${(-offset * CIRC).toFixed(2)}"` +
+        ` data-tip="${tip}" id="slice-${containerId}-${idx}"></circle>`;
+      offset += drawFrac;
+      return arc;
     }).join('');
 
     const html = `
-      <div class="donut-svg-wrap" style="position:relative;display:flex;justify-content:center;align-items:center;height:240px;">
-        <svg width="240" height="240" viewBox="0 0 240 240">
-          ${svgSlices}
-        </svg>
-        <div id="${tooltipId}" style="display:none;position:absolute;pointer-events:none;background:#2c2c2e;border:1px solid #48484a;border-radius:6px;padding:6px 9px;font-size:11px;color:#f5f5f7;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.4);z-index:10;"></div>
-      </div>
-      <div class="donut-total" style="font-size:12px;color:#98989d;text-align:center;margin-bottom:6px;">${total >= 1_000_000 ? (total/1_000_000).toFixed(1)+'M' : total >= 1000 ? (total/1000).toFixed(0)+'K' : total} tokens</div>
-      <div class="donut-legend">${legend.join('')}</div>`;
+      <div class="donut-layout">
+        <div class="donut-svg-wrap">
+          <svg viewBox="0 0 240 240" class="donut-svg" role="img">
+            <circle cx="${C}" cy="${C}" r="${R}" fill="none" stroke="#3a3a3c" stroke-width="${STROKE}" opacity=".35"></circle>
+            <g transform="rotate(-90 ${C} ${C})">${arcs}</g>
+            <text x="${C}" y="${C - 4}" text-anchor="middle" class="donut-center-value">${fmtTok(total)}</text>
+            <text x="${C}" y="${C + 16}" text-anchor="middle" class="donut-center-label">tokens</text>
+          </svg>
+          <div id="${tooltipId}" class="chart-tip"></div>
+        </div>
+        <div class="donut-legend">${legend.join('')}</div>
+      </div>`;
     wrap.innerHTML = html;
+
+    // Hover wiring (JS listeners instead of inline handlers so the tooltip can
+    // follow the cursor and the matching legend row can highlight in sync).
+    const tipEl = wrap.querySelector('#' + CSS.escape(tooltipId));
+    const wrapEl = wrap.querySelector('.donut-svg-wrap');
+    wrap.querySelectorAll('.donut-arc').forEach((arc, idx) => {
+      const row = wrap.querySelector(`.legend-item[data-slice="${idx}"]`);
+      const show = (e) => {
+        tipEl.textContent = arc.getAttribute('data-tip');
+        tipEl.style.display = 'block';
+        arc.style.opacity = '0.78';
+        if (row) row.classList.add('is-active');
+        move(e);
+      };
+      const move = (e) => {
+        const r = wrapEl.getBoundingClientRect();
+        tipEl.style.left = (e.clientX - r.left + 12) + 'px';
+        tipEl.style.top = (e.clientY - r.top - 8) + 'px';
+      };
+      const hide = () => {
+        tipEl.style.display = 'none';
+        arc.style.opacity = '1';
+        if (row) row.classList.remove('is-active');
+      };
+      arc.addEventListener('mouseenter', show);
+      arc.addEventListener('mousemove', move);
+      arc.addEventListener('mouseleave', hide);
+    });
   },
 
   renderTrend(points) {
@@ -2157,7 +2182,11 @@ const AnalyticsModule = {
     const plotH = h - mt - mb;
     const AXIS = '#48484a', GRID = '#3a3a3c', TXT = '#98989d';
 
-    const maxV = Math.max(1, ...points.map(p => Math.max(p.input_tokens||0, p.output_tokens||0)));
+    // Bars are stacked, so the axis must span the stacked TOTAL of a day, not
+    // the largest single series — otherwise tall columns overflow the plot.
+    const dayTotal = (p) => (p.input_tokens||0) + (p.output_tokens||0)
+      + (p.cache_read_tokens||0) + (p.cache_creation_tokens||0);
+    const maxV = Math.max(1, ...points.map(dayTotal));
     const stepX = plotW / Math.max(1, points.length - 1);
     const x = (i) => ml + i * stepX;
     const y = (v) => mt + plotH - (v || 0) / maxV * plotH;
@@ -2217,27 +2246,63 @@ const AnalyticsModule = {
         const rawH = (s.v || 0) / maxV * plotH;
         const segH = Math.max(rawH, 2);
         const yTop = yy - segH;
-        const r = `<rect x="${(cx).toFixed(1)}" y="${yTop.toFixed(1)}" width="${colW.toFixed(1)}" height="${segH.toFixed(1)}" rx="1" fill="${s.col}"><title>${p.date||''} · ${s.label} ${(s.v||0).toLocaleString()}</title></rect>`;
+        const r = `<rect x="${(cx).toFixed(1)}" y="${yTop.toFixed(1)}" width="${colW.toFixed(1)}" height="${segH.toFixed(1)}" rx="1" fill="${s.col}"></rect>`;
         yy = yTop;
         return r;
       }).join('');
-      return rects;
+      // Full-height transparent hit area: hovering anywhere in the day's column
+      // (not just an individual segment) opens one tooltip listing all three
+      // series, matching how the deepseek usage page behaves.
+      const tipRows = [
+        { v: inV, col: '#3b82f6', label: t('analytics.inputTokens') },
+        { v: cacheV, col: '#f59e0b', label: t('analytics.cacheTokens') },
+        { v: outV, col: '#10b981', label: t('analytics.outputTokens') },
+      ].map(s => `<div class="tip-row"><span class="tip-dot" style="background:${s.col}"></span>` +
+        `<span class="tip-label">${s.label}</span><span class="tip-val">${(s.v||0).toLocaleString()}</span></div>`).join('');
+      const tipHtml = `<div class="tip-title">${p.date || ''}</div>${tipRows}`;
+      const hit = `<rect class="trend-hit" x="${(cx - colW * 0.35).toFixed(1)}" y="${mt}"` +
+        ` width="${(colW * 1.7).toFixed(1)}" height="${plotH.toFixed(1)}"` +
+        ` fill="transparent" data-tip="${this.escapeHtml(tipHtml)}"></rect>`;
+      return rects + hit;
     }).join('');
 
     const svg = `
-      <svg class="trend-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
-        ${yGrid}
-        ${xGrid}
-        <line x1="${ml}" y1="${mt}" x2="${ml}" y2="${h-mb}" stroke="${AXIS}" stroke-width="1"/>
-        <line x1="${ml}" y1="${h-mb}" x2="${w-mr}" y2="${h-mb}" stroke="${AXIS}" stroke-width="1"/>
-        ${bars}
-      </svg>
+      <div style="position:relative;">
+        <svg class="trend-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+          ${yGrid}
+          ${xGrid}
+          <line x1="${ml}" y1="${mt}" x2="${ml}" y2="${h-mb}" stroke="${AXIS}" stroke-width="1"/>
+          <line x1="${ml}" y1="${h-mb}" x2="${w-mr}" y2="${h-mb}" stroke="${AXIS}" stroke-width="1"/>
+          ${bars}
+        </svg>
+        <div class="chart-tip" id="trend-tip"></div>
+      </div>
       <div class="trend-legend">
         <span><span class="swatch" style="background:#3b82f6;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.inputTokens')}</span>
         <span><span class="swatch" style="background:#f59e0b;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.cacheTokens')}</span>
         <span><span class="swatch" style="background:#10b981;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.outputTokens')}</span>
       </div>`;
     wrap.innerHTML = svg;
+
+    // Hover tooltip wiring (HTML floating tip, matching donut style)
+    const tipEl = wrap.querySelector('#trend-tip');
+    const svgWrap = wrap.querySelector('svg').parentElement;
+    wrap.querySelectorAll('.trend-hit').forEach(hit => {
+      const show = (e) => {
+        tipEl.innerHTML = hit.getAttribute('data-tip');
+        tipEl.style.display = 'block';
+        move(e);
+      };
+      const move = (e) => {
+        const r = svgWrap.getBoundingClientRect();
+        tipEl.style.left = (e.clientX - r.left + 12) + 'px';
+        tipEl.style.top = (e.clientY - r.top - 8) + 'px';
+      };
+      const hide = () => { tipEl.style.display = 'none'; };
+      hit.addEventListener('mouseenter', show);
+      hit.addEventListener('mousemove', move);
+      hit.addEventListener('mouseleave', hide);
+    });
   },
 
   renderEmpty(msg = 'No usage data yet. Run some requests or configure a model to see analytics.') {

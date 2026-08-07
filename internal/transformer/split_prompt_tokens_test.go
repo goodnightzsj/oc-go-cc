@@ -8,9 +8,9 @@ import (
 
 func TestSplitPromptTokens(t *testing.T) {
 	tests := []struct {
-		name                             string
-		usage                            types.UsageInfo
-		wantIn, wantRead, wantCreate     int
+		name                         string
+		usage                        types.UsageInfo
+		wantIn, wantRead, wantCreate int
 	}{
 		{
 			name:  "deepseek partitioned: hit+miss == prompt",
@@ -19,18 +19,18 @@ func TestSplitPromptTokens(t *testing.T) {
 			wantIn: 4000, wantRead: 96000, wantCreate: 0,
 		},
 		{
-			name:  "no cache fields reported: whole prompt is input",
-			usage: types.UsageInfo{PromptTokens: 628385},
+			name:   "no cache fields reported: whole prompt is input",
+			usage:  types.UsageInfo{PromptTokens: 628385},
 			wantIn: 628385, wantRead: 0, wantCreate: 0,
 		},
 		{
-			name:  "fully cached prompt",
-			usage: types.UsageInfo{PromptTokens: 50000, PromptCacheHitTokens: 50000},
+			name:   "fully cached prompt",
+			usage:  types.UsageInfo{PromptTokens: 50000, PromptCacheHitTokens: 50000},
 			wantIn: 0, wantRead: 50000, wantCreate: 0,
 		},
 		{
-			name:  "additive form: cache counts sit outside prompt_tokens",
-			usage: types.UsageInfo{PromptTokens: 10000, PromptCacheHitTokens: 3000, PromptCacheMissTokens: 2000},
+			name:   "additive form: cache counts sit outside prompt_tokens",
+			usage:  types.UsageInfo{PromptTokens: 10000, PromptCacheHitTokens: 3000, PromptCacheMissTokens: 2000},
 			wantIn: 5000, wantRead: 3000, wantCreate: 2000,
 		},
 	}

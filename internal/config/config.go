@@ -210,6 +210,14 @@ type StorageConfig struct {
 	RetentionDays   int    `json:"retention_days"`
 	VacuumOnStartup bool   `json:"vacuum_on_startup"`
 	WALEnabled      bool   `json:"wal_enabled"`
+
+	// AnalyticsBaseline (RFC3339) makes the analytics tab ignore requests older
+	// than this instant. Rows written before the proxy learned to read the
+	// upstream cache fields booked an entire prompt as fresh input, which
+	// overstates cost by up to 50x; the hit/miss split is absent from those
+	// rows, so they cannot be repaired and are excluded instead. Empty means
+	// analyse the full history.
+	AnalyticsBaseline string `json:"analytics_baseline,omitempty"`
 }
 
 // DebugCapture controls request/response capture for debugging.

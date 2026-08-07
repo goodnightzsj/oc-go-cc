@@ -9,11 +9,42 @@ import (
 // Analytics provides aggregated metrics for the dashboard.
 type Analytics struct {
 	db *Database
+
+	// baseline optionally excludes requests recorded before it. Rows written by
+	// an earlier build can carry an unusable token split — most importantly a
+	// prompt that was billed entirely as fresh input because the upstream cache
+	// fields were never parsed. Such a row cannot be repaired after the fact
+	// (the hit/miss breakdown is simply absent), so the only honest options are
+	// to drop it or to exclude it from the window. Zero means "include all".
+	baseline time.Time
 }
 
-// NewAnalytics creates a new Analytics store.
+// NewAnalytics creates a new Analytics store. It inherits the database's
+// configured analytics baseline, so callers get the trustworthy window by
+// default without having to know the cutoff exists.
 func NewAnalytics(db *Database) *Analytics {
-	return &Analytics{db: db}
+	return &Analytics{db: db, baseline: db.AnalyticsBaseline()}
+}
+
+// SetBaseline makes every aggregate ignore requests recorded before t. Pass the
+// zero time to analyse the full history again.
+func (a *Analytics) SetBaseline(t time.Time) {
+	a.baseline = t
+}
+
+// Baseline reports the current cutoff; the zero time means no cutoff.
+func (a *Analytics) Baseline() time.Time {
+	return a.baseline
+}
+
+// windowStart clamps a requested "last N days" start to the baseline, so all
+// aggregates share one definition of where trustworthy data begins.
+func (a *Analytics) windowStart(days int) time.Time {
+	since := time.Now().AddDate(0, 0, -days)
+	if !a.baseline.IsZero() && a.baseline.After(since) {
+		return a.baseline
+	}
+	return since
 }
 
 // TokenSummary holds high-level token and request metrics for a time window.
@@ -34,7 +65,7 @@ func (a *Analytics) GetTokenSummary(days int) (*TokenSummary, error) {
 	if days <= 0 {
 		days = 30
 	}
-	since := time.Now().AddDate(0, 0, -days)
+	since := a.windowStart(days)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -55,7 +86,7 @@ func (a *Analytics) GetTokenSummary(days int) (*TokenSummary, error) {
 				ELSE 0
 			END AS success_rate
 		FROM requests r
-		WHERE r.created_at >= ?
+		WHERE r.start_time >= ?
 	`, since.Format(time.RFC3339Nano))
 
 	var scanErr error
@@ -89,7 +120,7 @@ func (a *Analytics) modelCostSum(ctx context.Context, since string) (float64, er
 		       COALESCE(m.cost_output_per_m, 0)
 		FROM requests r
 		LEFT JOIN models m ON m.id = r.model
-		WHERE r.created_at >= ?
+		WHERE r.start_time >= ?
 		GROUP BY r.model
 	`, since)
 	if err != nil {
@@ -135,7 +166,7 @@ func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
 	if days <= 0 {
 		days = 30
 	}
-	since := time.Now().AddDate(0, 0, -days)
+	since := a.windowStart(days)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -165,7 +196,7 @@ func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
 		) l ON l.model = r.model
 		LEFT JOIN models m
 			ON m.id = r.model
-		WHERE r.created_at >= ?
+		WHERE r.start_time >= ?
 		GROUP BY r.model, r.provider
 		ORDER BY requests DESC
 	`, since.Format(time.RFC3339Nano), since.Format(time.RFC3339Nano))
@@ -249,7 +280,7 @@ func (a *Analytics) GetProviderBreakdown(days int) ([]ProviderBreakdown, error) 
 	if days <= 0 {
 		days = 30
 	}
-	since := time.Now().AddDate(0, 0, -days)
+	since := a.windowStart(days)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -272,7 +303,7 @@ func (a *Analytics) GetProviderBreakdown(days int) ([]ProviderBreakdown, error) 
 			COALESCE(m.cost_output_per_m, 0) AS models_cost_output_per_m
 		FROM requests r
 		LEFT JOIN models m ON m.id = r.model
-		WHERE r.created_at >= ?
+		WHERE r.start_time >= ?
 		GROUP BY r.provider, r.model
 	`, since.Format(time.RFC3339Nano))
 	if err != nil {
@@ -347,22 +378,22 @@ func (a *Analytics) GetDailyTokenTrend(days int) ([]DailyTokenPoint, error) {
 	if days <= 0 {
 		days = 30
 	}
-	since := time.Now().AddDate(0, 0, -days)
+	since := a.windowStart(days)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	rows, err := a.db.DB().QueryContext(ctx, `
 		SELECT
-			DATE(created_at) AS day,
+			DATE(start_time) AS day,
 			COUNT(*) AS requests,
 			COALESCE(SUM(input_tokens), 0) AS input_tokens,
 			COALESCE(SUM(output_tokens), 0) AS output_tokens,
 			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens
 		FROM requests
-		WHERE created_at >= ?
-		GROUP BY DATE(created_at)
+		WHERE start_time >= ?
+		GROUP BY DATE(start_time)
 		ORDER BY day ASC
 	`, since.Format(time.RFC3339Nano))
 	if err != nil {

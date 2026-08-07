@@ -83,10 +83,11 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 	storageCfg := storage.DefaultConfig
 	if cfg.Storage != nil {
 		storageCfg = storage.Config{
-			DatabasePath:    cfg.Storage.DatabasePath,
-			RetentionDays:   cfg.Storage.RetentionDays,
-			VacuumOnStartup: cfg.Storage.VacuumOnStartup,
-			WALEnabled:      cfg.Storage.WALEnabled,
+			DatabasePath:      cfg.Storage.DatabasePath,
+			RetentionDays:     cfg.Storage.RetentionDays,
+			VacuumOnStartup:   cfg.Storage.VacuumOnStartup,
+			WALEnabled:        cfg.Storage.WALEnabled,
+			AnalyticsBaseline: cfg.Storage.AnalyticsBaseline,
 		}
 	}
 	if storageCfg.DatabasePath != "" {

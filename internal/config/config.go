@@ -209,7 +209,12 @@ type StorageConfig struct {
 	DatabasePath    string `json:"database_path"`
 	RetentionDays   int    `json:"retention_days"`
 	VacuumOnStartup bool   `json:"vacuum_on_startup"`
-	WALEnabled      bool   `json:"wal_enabled"`
+
+	// WALEnabled is a pointer so an explicit false stays distinguishable from
+	// an absent field. The default is true, and with a plain bool there would
+	// be no way to turn WAL off from config: the zero value and "unset" would
+	// look identical to the overlay below.
+	WALEnabled *bool `json:"wal_enabled,omitempty"`
 
 	// AnalyticsBaseline (RFC3339) makes the analytics tab ignore requests older
 	// than this instant. Rows written before the proxy learned to read the

@@ -55,6 +55,41 @@ var DefaultConfig = Config{
 	WALEnabled:      true,
 }
 
+// Overlay describes storage settings a caller explicitly configured. The zero
+// value means "nothing set", so applying it changes nothing.
+type Overlay struct {
+	DatabasePath      string
+	RetentionDays     int
+	VacuumOnStartup   bool
+	WALEnabled        *bool
+	AnalyticsBaseline string
+}
+
+// WithOverlay returns cfg with the caller's configured fields applied on top.
+//
+// Callers must not assemble a Config from scratch out of user input. A config
+// file that sets only analytics_baseline would otherwise leave DatabasePath
+// empty, and Open is skipped entirely when that is empty — silently disabling
+// persistence and every analytics endpoint along with it.
+func (c Config) WithOverlay(o Overlay) Config {
+	if o.DatabasePath != "" {
+		c.DatabasePath = o.DatabasePath
+	}
+	if o.RetentionDays != 0 {
+		c.RetentionDays = o.RetentionDays
+	}
+	if o.VacuumOnStartup {
+		c.VacuumOnStartup = true
+	}
+	if o.WALEnabled != nil {
+		c.WALEnabled = *o.WALEnabled
+	}
+	if o.AnalyticsBaseline != "" {
+		c.AnalyticsBaseline = o.AnalyticsBaseline
+	}
+	return c
+}
+
 func Open(cfg Config) (*Database, error) {
 	path := expandPath(cfg.DatabasePath)
 

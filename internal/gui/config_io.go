@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"regexp"
 	"strings"
 
@@ -19,23 +18,28 @@ var sensitiveFieldPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)credential`),
 }
 
-func anonymizeConfig(cfg *config.Config) *config.Config {
+func anonymizeConfig(cfg *config.Config) (*config.Config, error) {
 	data, err := json.Marshal(cfg)
 	if err != nil {
-		return cfg
+		return nil, fmt.Errorf("marshal config for export: %w", err)
 	}
 
 	var raw map[string]interface{}
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return cfg
+		return nil, fmt.Errorf("decode config for export: %w", err)
 	}
 
 	anonymizeMap(raw)
 
 	result := &config.Config{}
-	data, _ = json.Marshal(raw)
-	_ = json.Unmarshal(data, result)
-	return result
+	data, err = json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("marshal anonymized config: %w", err)
+	}
+	if err := json.Unmarshal(data, result); err != nil {
+		return nil, fmt.Errorf("decode anonymized config: %w", err)
+	}
+	return result, nil
 }
 
 func anonymizeMap(m map[string]interface{}) {
@@ -44,10 +48,10 @@ func anonymizeMap(m map[string]interface{}) {
 			switch v := value.(type) {
 			case string:
 				if v != "" {
-					m[key] = "***REDACTED***"
+					m[key] = keyMask
 				}
 			case []interface{}:
-				m[key] = []string{"***REDACTED***"}
+				m[key] = []string{keyMask}
 			}
 		} else if nested, ok := value.(map[string]interface{}); ok {
 			anonymizeMap(nested)
@@ -66,20 +70,24 @@ func shouldAnonymize(key string) bool {
 }
 
 func (s *Server) handleConfigExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	if s.atomicCfg == nil {
 		http.Error(w, "config not available", http.StatusServiceUnavailable)
 		return
 	}
 
-	cfg := s.atomicCfg.Get()
-
-	anonymize := r.URL.Query().Get("anonymize") == "true"
-	if anonymize {
-		cfg = anonymizeConfig(cfg)
+	cfg, err := anonymizeConfig(s.atomicCfg.Get())
+	if err != nil {
+		http.Error(w, "failed to export config", http.StatusInternalServerError)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", "attachment; filename=routatic-proxy-config.json")
+	w.Header().Set("Cache-Control", "no-store")
 
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
@@ -129,13 +137,14 @@ func (s *Server) handleConfigImport(w http.ResponseWriter, r *http.Request) {
 
 	if req.Apply {
 		configPath := s.atomicCfg.Path()
-		data, err := json.MarshalIndent(cfg, "", "  ")
-		if err != nil {
-			http.Error(w, fmt.Sprintf("failed to marshal config: %v", err), http.StatusInternalServerError)
+		var patch map[string]json.RawMessage
+		if err := json.Unmarshal(req.Config, &patch); err != nil {
+			http.Error(w, fmt.Sprintf("invalid config: %v", err), http.StatusBadRequest)
 			return
 		}
-		if err := writeFileAtomic(configPath, data, 0600); err != nil {
-			http.Error(w, fmt.Sprintf("failed to write config: %v", err), http.StatusInternalServerError)
+		stripMaskedKeys(patch)
+		if err := applyConfigPatch(configPath, patch); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -148,12 +157,4 @@ func (s *Server) handleConfigImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, resp)
-}
-
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, perm); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
 }

@@ -424,6 +424,7 @@ type historyEntry struct {
 	StartTime           string `json:"start_time"` // RFC3339
 	DurationMs          int64  `json:"duration_ms"`
 	InputTokens         int    `json:"input_tokens"`
+	PromptTokens        int    `json:"prompt_tokens"`
 	OutputTokens        int    `json:"output_tokens"`
 	CacheReadTokens     int    `json:"cache_read_tokens"`
 	CacheCreationTokens int    `json:"cache_creation_tokens"`
@@ -478,16 +479,14 @@ func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 	out := make([]historyEntry, len(records))
 	for i, rec := range records {
 		out[i] = historyEntry{
-			ID:         rec.ID,
-			Model:      rec.Model,
-			Provider:   rec.Provider,
-			Scenario:   rec.Scenario,
-			StartTime:  rec.StartTime.Format("2006-01-02T15:04:05Z07:00"),
-			DurationMs: rec.Duration.Milliseconds(),
-			// Show the total input a request consumed (raw + cache), matching how
-			// the opencode console reports prompt input. Providers like deepseek
-			// put most of it in cache_read/cache_creation with input_tokens==0.
-			InputTokens:         rec.DisplayInputTokens(),
+			ID:                  rec.ID,
+			Model:               rec.Model,
+			Provider:            rec.Provider,
+			Scenario:            rec.Scenario,
+			StartTime:           rec.StartTime.Format("2006-01-02T15:04:05Z07:00"),
+			DurationMs:          rec.Duration.Milliseconds(),
+			InputTokens:         rec.InputTokens,
+			PromptTokens:        rec.DisplayInputTokens(),
 			OutputTokens:        rec.OutputTokens,
 			CacheReadTokens:     rec.CacheReadTokens,
 			CacheCreationTokens: rec.CacheCreationTokens,

@@ -21,6 +21,10 @@ const TRANSLATIONS = {
     'tab.settings': 'Settings',
     'analytics.title': 'Usage Analytics',
     'analytics.refresh': 'Refresh',
+    'analytics.autoRefreshOff': 'Auto-refresh: Off',
+    'analytics.autoRefresh5s': 'Auto-refresh: 5s',
+    'analytics.autoRefresh30s': 'Auto-refresh: 30s',
+    'analytics.autoRefresh60s': 'Auto-refresh: 60s',
     'analytics.totalRequests': 'Total Requests',
     'analytics.requestsUnit': 'requests',
     'analytics.totalTokens': 'Total Tokens',
@@ -63,6 +67,7 @@ const TRANSLATIONS = {
     'th.model': 'Model',
     'th.scenario': 'Scenario',
     'th.inputTokens': 'Input Tokens',
+    'th.promptTokens': 'Prompt Tokens',
     'th.outputTokens': 'Output Tokens',
     'th.duration': 'Duration',
     'th.status': 'Status',
@@ -185,6 +190,10 @@ const TRANSLATIONS = {
     'tab.analytics': '用量分析',
     'analytics.title': '用量分析',
     'analytics.refresh': '刷新',
+    'analytics.autoRefreshOff': '自动刷新：关闭',
+    'analytics.autoRefresh5s': '自动刷新：5 秒',
+    'analytics.autoRefresh30s': '自动刷新：30 秒',
+    'analytics.autoRefresh60s': '自动刷新：60 秒',
     'analytics.totalRequests': '总请求数',
     'analytics.requestsUnit': '次',
     'analytics.totalTokens': '总 Token',
@@ -228,6 +237,7 @@ const TRANSLATIONS = {
     'th.model': '模型',
     'th.scenario': '场景',
     'th.inputTokens': '输入 Token',
+    'th.promptTokens': 'Prompt Token',
     'th.outputTokens': '输出 Token',
     'th.duration': '耗时',
     'th.status': '状态',
@@ -745,20 +755,20 @@ function renderHistory() {
     // Use composite key to ensure uniqueness when multiple requests occur in the same second
     const rowId = `${h.start_time}_${h.model || 'unknown'}_${h.duration_ms || 0}`;
     return `
-    <tr data-id="${escapeHtml(rowId)}" style="cursor: pointer;">
+    <tr data-id="${escapeHtml(rowId)}" tabindex="0" aria-haspopup="dialog" style="cursor: pointer;">
       <td>${fmtTime(h.start_time)}</td>
       <td><span title="${escapeHtml(h.provider || '')}">${escapeHtml(h.model) || '—'}</span></td>
       <td><span class="badge badge-scene">${escapeHtml(h.scenario) || '—'}</span></td>
-      <td>${h.input_tokens != null ? h.input_tokens.toLocaleString() : '—'}</td>
+      <td>${h.prompt_tokens != null ? h.prompt_tokens.toLocaleString() : '—'}</td>
       <td>${h.output_tokens != null ? h.output_tokens.toLocaleString() : '—'}</td>
       <td>${fmtDuration(h.duration_ms)}</td>
       <td><span class="badge ${h.success ? 'badge-success' : 'badge-error'}">${h.success ? t('badge.success') : t('badge.fail')}</span></td>
     </tr>
   `}).join('');
 
-  // Add click handlers for detail modal
+  // Add pointer and keyboard handlers for detail modal.
   tbody.querySelectorAll('tr[data-id]').forEach(row => {
-    row.addEventListener('click', function() {
+    const open = function() {
       const rowId = this.dataset.id;
       // Parse the composite key to find the matching record
       const record = filtered.find(h => {
@@ -766,6 +776,13 @@ function renderHistory() {
         return expectedId === rowId;
       });
       if (record) showHistoryDetail(record);
+    };
+    row.addEventListener('click', open);
+    row.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        open.call(this);
+      }
     });
   });
 }
@@ -904,6 +921,7 @@ const HISTORY_CSV_COLUMNS = [
   ['provider', r => r.provider],
   ['scenario', r => r.scenario],
   ['input_tokens', r => r.input_tokens],
+  ['prompt_tokens', r => r.prompt_tokens],
   ['cache_read_tokens', r => r.cache_read_tokens],
   ['cache_creation_tokens', r => r.cache_creation_tokens],
   ['output_tokens', r => r.output_tokens],
@@ -1309,6 +1327,7 @@ function sortHistory(history) {
 const modal = document.getElementById('history-modal');
 const modalBody = document.getElementById('modal-body');
 const modalClose = document.getElementById('modal-close');
+let modalReturnFocus = null;
 
 function showHistoryDetail(record) {
   modalBody.innerHTML = `
@@ -1333,6 +1352,18 @@ function showHistoryDetail(record) {
       <span class="detail-value">${record.input_tokens != null ? record.input_tokens.toLocaleString() : '—'}</span>
     </div>
     <div class="detail-row">
+      <span class="detail-label">Prompt Tokens</span>
+      <span class="detail-value">${record.prompt_tokens != null ? record.prompt_tokens.toLocaleString() : '—'}</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">Cache Read</span>
+      <span class="detail-value">${record.cache_read_tokens != null ? record.cache_read_tokens.toLocaleString() : '—'}</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">Cache Creation</span>
+      <span class="detail-value">${record.cache_creation_tokens != null ? record.cache_creation_tokens.toLocaleString() : '—'}</span>
+    </div>
+    <div class="detail-row">
       <span class="detail-label">Output Tokens</span>
       <span class="detail-value">${record.output_tokens != null ? record.output_tokens.toLocaleString() : '—'}</span>
     </div>
@@ -1345,14 +1376,22 @@ function showHistoryDetail(record) {
       <span class="detail-value" style="color: ${record.success ? '#30d158' : '#ff453a'}">${record.success ? 'Success' : 'Failed'}</span>
     </div>
   `;
-  modal.classList.add('visible');
+  modalReturnFocus = document.activeElement;
+  if (typeof modal?.showModal === 'function' && !modal.open) modal.showModal();
+  else modal?.classList.add('visible');
 }
 
 function closeHistoryModal() {
-  modal.classList.remove('visible');
+  if (modal?.open) modal.close();
+  else modal?.classList.remove('visible');
 }
 
 modalClose?.addEventListener('click', closeHistoryModal);
+modal?.addEventListener('close', function() {
+  const target = modalReturnFocus;
+  modalReturnFocus = null;
+  if (target && typeof target.focus === 'function') target.focus();
+});
 modal?.addEventListener('click', function(e) {
   if (e.target === modal) closeHistoryModal();
 });
@@ -2148,12 +2187,60 @@ document.addEventListener('DOMContentLoaded', () => TestModule.init());
 /* ── Analytics Tab (minimal, vanilla JS + SVG/CSS) ─────────────── */
 const AnalyticsModule = {
   palette: ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6'],
+  refreshStorageKey: 'routatic-analytics-refresh-interval',
+  refreshTimer: null,
+  refreshInterval: 30,
+  loadSeq: 0,
+  ready: false,
 
   init() {
     const daysSel = document.getElementById('analytics-days');
     const refreshBtn = document.getElementById('btn-refresh-analytics');
+    const intervalSel = document.getElementById('analytics-refresh-interval');
     if (daysSel) daysSel.addEventListener('change', () => this.load(true));
     if (refreshBtn) refreshBtn.addEventListener('click', () => this.load(true));
+    this.refreshInterval = this.readRefreshInterval();
+    if (intervalSel) {
+      intervalSel.value = String(this.refreshInterval);
+      intervalSel.addEventListener('change', () => {
+        const value = Number(intervalSel.value);
+        this.refreshInterval = [0, 5, 30, 60].includes(value) ? value : 30;
+        try {
+          localStorage.setItem(this.refreshStorageKey, String(this.refreshInterval));
+        } catch (_) {}
+        this.scheduleRefresh();
+      });
+    }
+    document.addEventListener('visibilitychange', () => this.scheduleRefresh());
+    this.scheduleRefresh();
+  },
+
+  readRefreshInterval() {
+    try {
+      const stored = localStorage.getItem(this.refreshStorageKey);
+      const value = Number(stored);
+      if (stored !== null && [0, 5, 30, 60].includes(value)) return value;
+    } catch (_) {}
+    return 30;
+  },
+
+  refreshPaused() {
+    return activeTab !== 'analytics' || document.hidden ||
+      !!document.querySelector('.modal-overlay.visible, dialog[open]');
+  },
+
+  scheduleRefresh() {
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+    if (!this.refreshInterval) return;
+    const delay = this.refreshPaused() ? 1000 : this.refreshInterval * 1000;
+    this.refreshTimer = setTimeout(async () => {
+      this.refreshTimer = null;
+      if (!this.refreshPaused()) await this.load(false);
+      this.scheduleRefresh();
+    }, delay);
   },
 
   loadingHtml() {
@@ -2161,16 +2248,18 @@ const AnalyticsModule = {
   },
 
   async load(force) {
+    const seq = ++this.loadSeq;
     const daysEl = document.getElementById('analytics-days');
     const days = daysEl ? daysEl.value : 30;
     const genEl = document.getElementById('analytics-generated');
-    if (genEl) genEl.textContent = '';
-    ['kpi-requests','kpi-tokens','kpi-tokens-in','kpi-tokens-out','kpi-cost','kpi-p95'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.textContent = '…';
-    });
-
-    this.showLoading();
+    if (!this.ready) {
+      if (genEl) genEl.textContent = '';
+      ['kpi-requests','kpi-tokens','kpi-tokens-in','kpi-tokens-out','kpi-cost','kpi-p95'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '…';
+      });
+      this.showLoading();
+    }
 
     try {
       const [summaryRes, trendRes, latencyRes] = await Promise.all([
@@ -2183,19 +2272,25 @@ const AnalyticsModule = {
       const trend = trendRes.ok ? await trendRes.json() : { trend: [] };
       const latencyData = latencyRes.ok ? await latencyRes.json() : { stats: [] };
 
+      if (seq !== this.loadSeq) return;
+
       summary.latency = latencyData;
 
       this.renderKPIs(summary);
       this.renderDonuts(summary);
       this.renderTrend(trend.trend || []);
+      this.ready = true;
       if (genEl) {
         const ts = summary.generated_at ? new Date(summary.generated_at) : new Date();
         genEl.textContent = '· ' + ts.toLocaleDateString(undefined, {month:'short', day:'numeric'});
       }
     } catch (e) {
+      if (seq !== this.loadSeq) return;
       console.error('Analytics error:', e);
-      this.renderEmpty('Failed to load analytics');
+      if (!this.ready) this.renderEmpty('Failed to load analytics');
       if (genEl) genEl.textContent = 'Error';
+    } finally {
+      if (seq === this.loadSeq) this.scheduleRefresh();
     }
   },
 
@@ -2294,12 +2389,38 @@ const AnalyticsModule = {
       const label = it.model || it.provider || it.name || 'Unknown';
       const pctTxt = (frac * 100).toFixed(1) + '%';
       const tip = `${this.escapeHtml(label)} · ${v.toLocaleString()} (${pctTxt})`;
+      const metrics = containerId === 'model-donut' ? [
+        ['Total tokens', v, fmt],
+        ['Requests', it.requests, fmt],
+        ['Input tokens', it.input_tokens, fmt],
+        ['Cache read', it.cache_read_tokens, fmt],
+        ['Cache creation', it.cache_creation_tokens, fmt],
+        ['Output tokens', it.output_tokens, fmt],
+        ['Avg latency', it.avg_latency_ms, n => `${Number(n).toFixed(0)} ms`],
+        ['Success rate', it.success_rate, n => `${(Number(n) * 100).toFixed(1)}%`],
+        ['Est. cost', it.est_cost_usd, fmtCost],
+      ] : [
+        ['Total tokens', v, fmt],
+        ['Requests', it.requests, fmt],
+        ['Input tokens', it.input_tokens, fmt],
+        ['Output tokens', it.output_tokens, fmt],
+        ['Fallback rate', it.fallback_rate, n => `${Number(n).toFixed(1)}%`],
+        ['Est. cost', it.est_cost_usd, fmtCost],
+      ];
+      const detailId = `${containerId}-legend-details-${idx}`;
+      const detailRows = metrics.filter(([, value]) => value != null)
+        .map(([name, value, format]) =>
+          `<div class="legend-detail"><span>${name}</span><strong>${format(value)}</strong></div>`)
+        .join('');
       legend.push(
-        `<div class="legend-item" data-slice="${idx}">` +
+        `<div class="legend-entry">` +
+          `<button type="button" class="legend-item" data-slice="${idx}" aria-expanded="false" aria-controls="${detailId}">` +
           `<span class="legend-swatch" style="background:${col}"></span>` +
           `<span class="legend-label">${this.escapeHtml(label)}</span>` +
           `<span class="legend-value">${fmtTok(v)}</span>` +
           `<span class="legend-pct">${pctTxt}</span>` +
+          `</button>` +
+          `<div class="legend-details" id="${detailId}" hidden>${detailRows}</div>` +
         `</div>`);
       const dash = `${(drawFrac * CIRC).toFixed(2)} ${((1 - drawFrac) * CIRC).toFixed(2)}`;
       // Negative dashoffset advances clockwise from 12 o'clock (rotate -90).
@@ -2352,6 +2473,14 @@ const AnalyticsModule = {
       arc.addEventListener('mouseenter', show);
       arc.addEventListener('mousemove', move);
       arc.addEventListener('mouseleave', hide);
+    });
+    wrap.querySelectorAll('.legend-item').forEach(row => {
+      const details = document.getElementById(row.getAttribute('aria-controls'));
+      row.addEventListener('click', () => {
+        const expanded = row.getAttribute('aria-expanded') === 'true';
+        row.setAttribute('aria-expanded', String(!expanded));
+        if (details) details.hidden = expanded;
+      });
     });
   },
 
@@ -2511,4 +2640,3 @@ const AnalyticsModule = {
 setTimeout(() => {
   AnalyticsModule.init();
 }, 250);
-

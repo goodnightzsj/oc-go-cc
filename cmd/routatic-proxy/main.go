@@ -755,13 +755,13 @@ func runModelsList(cmd *cobra.Command, configPath, provider string) error {
 
 	storageCfg := storage.DefaultConfig
 	if cfg.Storage != nil {
-		storageCfg = storage.Config{
+		storageCfg = storageCfg.WithOverlay(storage.Overlay{
 			DatabasePath:      cfg.Storage.DatabasePath,
 			RetentionDays:     cfg.Storage.RetentionDays,
 			VacuumOnStartup:   cfg.Storage.VacuumOnStartup,
 			WALEnabled:        cfg.Storage.WALEnabled,
 			AnalyticsBaseline: cfg.Storage.AnalyticsBaseline,
-		}
+		})
 	}
 
 	db, err := storage.Open(storageCfg)

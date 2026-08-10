@@ -185,9 +185,14 @@ func TestGetProviderBreakdown_CostIsRealAndMatchesModels(t *testing.T) {
 	if providers[0].Provider != "opencode-go" {
 		t.Errorf("rows[0] = %q, want opencode-go (ordered by requests)", providers[0].Provider)
 	}
+	goProvider := byName["opencode-go"]
+	if goProvider.InputTokens != 15_000 || goProvider.OutputTokens != 7_500 ||
+		goProvider.CacheReadTokens != 146_000 || goProvider.CacheCreationTokens != 20_000 {
+		t.Errorf("opencode-go token totals = %+v", goProvider)
+	}
 
 	// Fallback rate: one of two opencode-go requests had attempt > 1.
-	if got := byName["opencode-go"].FallbackRate; math.Abs(got-50.0) > 1e-9 {
+	if got := goProvider.FallbackRate; math.Abs(got-50.0) > 1e-9 {
 		t.Errorf("opencode-go fallback rate = %v, want 50", got)
 	}
 	if got := byName["opencode-zen"].FallbackRate; got != 0 {

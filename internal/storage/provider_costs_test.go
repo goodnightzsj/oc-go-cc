@@ -16,10 +16,10 @@ func TestProviderCostReconciliationClassifiesWithoutGuessing(t *testing.T) {
 	base := time.Date(2026, 8, 6, 7, 0, 0, 0, time.UTC)
 
 	for _, rec := range []history.RequestRecord{
-		{ID: "exact", Model: "opencode-go/deepseek-v4-flash", StartTime: base.Add(100 * time.Millisecond), InputTokens: 10, OutputTokens: 2, CacheReadTokens: 30, Success: true},
-		{ID: "ambiguous-a", Model: "deepseek-v4-flash", StartTime: base.Add(time.Second + 100*time.Millisecond), InputTokens: 20, OutputTokens: 3, Success: true},
-		{ID: "ambiguous-b", Model: "deepseek-v4-flash", StartTime: base.Add(time.Second + 700*time.Millisecond), InputTokens: 20, OutputTokens: 3, Success: true},
-		{ID: "conflict", Model: "deepseek-v4-flash", StartTime: base.Add(2*time.Second + 100*time.Millisecond), InputTokens: 40, OutputTokens: 4, Success: true},
+		{ID: "exact", Model: "opencode-go/deepseek-v4-flash", StartTime: base.Add(-2038 * time.Millisecond), Duration: 2705 * time.Millisecond, CacheCreationTokens: 10, OutputTokens: 2, CacheReadTokens: 30, Success: true},
+		{ID: "ambiguous-a", Model: "deepseek-v4-flash", StartTime: base.Add(-time.Second), Duration: 2200 * time.Millisecond, CacheCreationTokens: 20, OutputTokens: 3, Success: true},
+		{ID: "ambiguous-b", Model: "deepseek-v4-flash", StartTime: base.Add(200 * time.Millisecond), Duration: time.Second, CacheCreationTokens: 20, OutputTokens: 3, Success: true},
+		{ID: "conflict", Model: "deepseek-v4-flash", StartTime: base.Add(time.Second), Duration: 1200 * time.Millisecond, CacheCreationTokens: 40, OutputTokens: 4, Success: true},
 	} {
 		if err := repo.Insert(rec); err != nil {
 			t.Fatalf("insert %s: %v", rec.ID, err)
@@ -54,16 +54,17 @@ func TestProviderCostReconciliationClassifiesWithoutGuessing(t *testing.T) {
 func TestProviderCostReconciliationAppliesExactMatches(t *testing.T) {
 	db := newCostTestDB(t)
 	repo := NewRequests(db)
-	at := time.Date(2026, 8, 6, 7, 0, 0, 400_000_000, time.UTC)
+	completedAt := time.Date(2026, 8, 6, 7, 0, 0, 0, time.UTC)
+	startedAt := completedAt.Add(-1662 * time.Millisecond)
 	if err := repo.Insert(history.RequestRecord{
-		ID: "request-1", Model: "deepseek-v4-flash", StartTime: at,
-		InputTokens: 10, OutputTokens: 2, CacheReadTokens: 30, Success: true,
+		ID: "request-1", Model: "deepseek-v4-flash", StartTime: startedAt, Duration: 2705 * time.Millisecond,
+		CacheCreationTokens: 10, OutputTokens: 2, CacheReadTokens: 30, Success: true,
 	}); err != nil {
 		t.Fatalf("insert request: %v", err)
 	}
 
 	row := ProviderCostRecord{
-		Time: at.Truncate(time.Second), Model: "deepseek-v4-flash",
+		Time: completedAt, Model: "deepseek-v4-flash",
 		InputTokens: 10, OutputTokens: 2, CacheReadTokens: 30,
 		ProviderCostUnits: 1234,
 	}

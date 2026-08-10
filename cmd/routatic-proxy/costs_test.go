@@ -16,15 +16,16 @@ func TestRunCostsReconcileDryRunAndApply(t *testing.T) {
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "data.db")
 	configPath := writeTestConfigWithDB(t, tmp, dbPath)
-	at := time.Date(2026, 8, 6, 7, 0, 0, 500_000_000, time.UTC)
+	completedAt := time.Date(2026, 8, 6, 7, 0, 0, 0, time.UTC)
+	startedAt := completedAt.Add(-1662 * time.Millisecond)
 
 	db, err := storage.Open(storage.Config{DatabasePath: dbPath})
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}
 	if err := storage.NewRequests(db).Insert(history.RequestRecord{
-		ID: "request-1", Model: "deepseek-v4-flash", StartTime: at,
-		InputTokens: 10, OutputTokens: 2, CacheReadTokens: 30, Success: true,
+		ID: "request-1", Model: "deepseek-v4-flash", StartTime: startedAt, Duration: 2705 * time.Millisecond,
+		CacheCreationTokens: 10, OutputTokens: 2, CacheReadTokens: 30, Success: true,
 	}); err != nil {
 		t.Fatalf("insert request: %v", err)
 	}
@@ -34,7 +35,7 @@ func TestRunCostsReconcileDryRunAndApply(t *testing.T) {
 
 	inputPath := filepath.Join(tmp, "usage.json")
 	capture := providerCostCapture{Rows: []storage.ProviderCostRecord{{
-		Time: at.Truncate(time.Second), Model: "deepseek-v4-flash",
+		Time: completedAt, Model: "deepseek-v4-flash",
 		InputTokens: 10, OutputTokens: 2, CacheReadTokens: 30,
 		ProviderCostUnits: 1234,
 	}}}

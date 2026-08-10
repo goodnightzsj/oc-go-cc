@@ -2524,6 +2524,8 @@ const AnalyticsModule = {
         ['Total tokens', v, fmt],
         ['Requests', it.requests, fmt],
         ['Input tokens', it.input_tokens, fmt],
+        ['Cache read', it.cache_read_tokens, fmt],
+        ['Cache creation', it.cache_creation_tokens, fmt],
         ['Output tokens', it.output_tokens, fmt],
         ['Fallback rate', it.fallback_rate, n => `${Number(n).toFixed(1)}%`],
         ['Cost', it.est_cost_usd, fmtCost],

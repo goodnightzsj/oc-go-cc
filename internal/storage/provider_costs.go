@@ -16,7 +16,7 @@ const maxProviderCostIssueExamples = 50
 var ErrAmbiguousProviderCosts = errors.New("provider cost reconciliation contains ambiguous matches")
 
 // ProviderCostRecord contains only the provider fields used to identify a
-// request and replace its estimated cost.
+// completed request and replace its estimated cost.
 type ProviderCostRecord struct {
 	Time               time.Time `json:"time"`
 	Model              string    `json:"model"`
@@ -63,7 +63,7 @@ type ProviderCostReport struct {
 
 type providerCostCandidate struct {
 	id                  string
-	time                time.Time
+	completedAt         time.Time
 	model               string
 	input, output       int64
 	cacheRead, cacheNew int64
@@ -76,9 +76,10 @@ type providerCostMatch struct {
 	costUSD   float64
 }
 
-// ReconcileProviderCosts matches provider rows to proxy rows without time
-// tolerances or best guesses. When apply is true, all updates are rejected if
-// any identity is ambiguous.
+// ReconcileProviderCosts requires a unique full token fingerprint on both
+// sides. Provider completion timestamps are second-granular; the proxy may
+// finish local response handling in that second or the following second.
+// When apply is true, all updates are rejected if any identity is ambiguous.
 func (d *Database) ReconcileProviderCosts(ctx context.Context, providerRows []ProviderCostRecord, apply bool) (ProviderCostReport, error) {
 	report := ProviderCostReport{ProviderRows: len(providerRows)}
 	if len(providerRows) == 0 {
@@ -105,17 +106,19 @@ func (d *Database) ReconcileProviderCosts(ctx context.Context, providerRows []Pr
 
 	providerByIdentity := make(map[string][]ProviderCostRecord)
 	for _, row := range providerRows {
-		key := providerCostIdentity(row.Time, row.Model, row.InputTokens, row.OutputTokens,
-			row.CacheReadTokens, row.CacheWrite5mTokens+row.CacheWrite1hTokens)
+		freshTokens := row.InputTokens + row.CacheWrite5mTokens + row.CacheWrite1hTokens
+		key := providerCostFingerprint(row.Model, freshTokens, row.OutputTokens, row.CacheReadTokens)
 		providerByIdentity[key] = append(providerByIdentity[key], row)
 	}
 	candidatesByIdentity := make(map[string][]providerCostCandidate)
 	candidatesByTimeModel := make(map[string][]providerCostCandidate)
 	for _, row := range candidates {
-		key := providerCostIdentity(row.time, row.model, row.input, row.output, row.cacheRead, row.cacheNew)
+		key := providerCostFingerprint(row.model, row.input+row.cacheNew, row.output, row.cacheRead)
 		candidatesByIdentity[key] = append(candidatesByIdentity[key], row)
-		coarse := providerCostTimeModel(row.time, row.model)
-		candidatesByTimeModel[coarse] = append(candidatesByTimeModel[coarse], row)
+		for _, observedAt := range []time.Time{row.completedAt, row.completedAt.Add(-time.Second)} {
+			coarse := providerCostTimeModel(observedAt, row.model)
+			candidatesByTimeModel[coarse] = append(candidatesByTimeModel[coarse], row)
+		}
 	}
 
 	keys := make([]string, 0, len(providerByIdentity))
@@ -137,6 +140,12 @@ func (d *Database) ReconcileProviderCosts(ctx context.Context, providerRows []Pr
 		}
 		if len(providers) == 1 && len(proxy) == 1 {
 			providerRow, candidate := providers[0], proxy[0]
+			completionSkew := candidate.completedAt.UTC().Unix() - providerRow.Time.UTC().Unix()
+			if completionSkew < 0 || completionSkew > 1 {
+				report.Conflicting++
+				report.addIssue("completion_time_conflict", providerRow, 1)
+				continue
+			}
 			cost := providerRow.costUSD()
 			if candidate.costSource.Valid && candidate.costSource.String == CostSourceProvider &&
 				candidate.cost.Valid && math.Abs(candidate.cost.Float64-cost) > 1e-12 {
@@ -228,15 +237,15 @@ func validateProviderCostRecord(row ProviderCostRecord) error {
 
 func (d *Database) providerCostCandidates(ctx context.Context, minTime, maxTime time.Time) ([]providerCostCandidate, error) {
 	rows, err := d.db.QueryContext(ctx, `
-		SELECT id, start_time, model,
+		SELECT id, start_time, duration_ms, model,
 		       COALESCE(input_tokens, 0), COALESCE(output_tokens, 0),
 		       COALESCE(cache_read_tokens, 0), COALESCE(cache_creation_tokens, 0),
 		       cost_usd, cost_source
 		FROM requests
-		WHERE julianday(start_time) >= julianday(?)
-		  AND julianday(start_time) < julianday(?)
+		WHERE julianday(start_time) + (COALESCE(duration_ms, 0) / 86400000.0) >= julianday(?)
+		  AND julianday(start_time) + (COALESCE(duration_ms, 0) / 86400000.0) < julianday(?)
 	`, minTime.UTC().Truncate(time.Second).Format(time.RFC3339Nano),
-		maxTime.UTC().Truncate(time.Second).Add(time.Second).Format(time.RFC3339Nano))
+		maxTime.UTC().Truncate(time.Second).Add(2*time.Second).Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, err
 	}
@@ -246,7 +255,8 @@ func (d *Database) providerCostCandidates(ctx context.Context, minTime, maxTime 
 	for rows.Next() {
 		var row providerCostCandidate
 		var rawTime string
-		if err := rows.Scan(&row.id, &rawTime, &row.model, &row.input, &row.output,
+		var durationMS int64
+		if err := rows.Scan(&row.id, &rawTime, &durationMS, &row.model, &row.input, &row.output,
 			&row.cacheRead, &row.cacheNew, &row.cost, &row.costSource); err != nil {
 			return nil, err
 		}
@@ -254,14 +264,14 @@ func (d *Database) providerCostCandidates(ctx context.Context, minTime, maxTime 
 		if err != nil {
 			return nil, fmt.Errorf("parse request %q start time: %w", row.id, err)
 		}
-		row.time = parsed
+		row.completedAt = parsed.Add(time.Duration(durationMS) * time.Millisecond)
 		candidates = append(candidates, row)
 	}
 	return candidates, rows.Err()
 }
 
-func providerCostIdentity(at time.Time, model string, input, output, cacheRead, cacheWrite int64) string {
-	return fmt.Sprintf("%d|%s|%d|%d|%d|%d", at.UTC().Unix(), normalizeProviderCostModel(model), input, output, cacheRead, cacheWrite)
+func providerCostFingerprint(model string, fresh, output, cacheRead int64) string {
+	return fmt.Sprintf("%s|%d|%d|%d", normalizeProviderCostModel(model), fresh, output, cacheRead)
 }
 
 func providerCostTimeModel(at time.Time, model string) string {

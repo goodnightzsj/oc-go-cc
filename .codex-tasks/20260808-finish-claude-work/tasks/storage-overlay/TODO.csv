@@ -1,0 +1,4 @@
+id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,notes
+1,Inspect overlay diff and all callers,DONE,"No caller still replaces defaults wholesale","rg -n 'storage.DefaultConfig|WithOverlay|storage.Config' cmd internal",2026-08-08T01:25:58+08:00,0,"Only NewServer and models list translate partial user config; both use WithOverlay"
+2,Run focused and package validation,DONE,"Overlay and storage tests pass","go test ./internal/storage -count=1",2026-08-08T01:27:00+08:00,0,"storage config server and CLI packages pass"
+3,Review formatting vet and final diff,DONE,"gofmt vet and diff checks pass","go vet ./... && test -z \"$(gofmt -l cmd internal pkg)\" && git diff --check",2026-08-08T01:28:00+08:00,0,"All checks clean; implementation diff remains scoped to four files plus one test"

@@ -418,21 +418,22 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 }
 
 type historyEntry struct {
-	ID                  string `json:"id"`
-	Model               string `json:"model"`
-	Provider            string `json:"provider"`
-	Scenario            string `json:"scenario"`
-	StartTime           string `json:"start_time"` // RFC3339
-	DurationMs          int64  `json:"duration_ms"`
-	InputTokens         int    `json:"input_tokens"`
-	PromptTokens        int    `json:"prompt_tokens"`
-	OutputTokens        int    `json:"output_tokens"`
-	CacheReadTokens     int    `json:"cache_read_tokens"`
-	CacheCreationTokens int    `json:"cache_creation_tokens"`
-	Streaming           bool   `json:"streaming"`
-	Attempt             int    `json:"attempt"`
-	Success             bool   `json:"success"`
-	ErrorMsg            string `json:"error_msg,omitempty"`
+	ID                  string   `json:"id"`
+	Model               string   `json:"model"`
+	Provider            string   `json:"provider"`
+	Scenario            string   `json:"scenario"`
+	StartTime           string   `json:"start_time"` // RFC3339
+	DurationMs          int64    `json:"duration_ms"`
+	InputTokens         int      `json:"input_tokens"`
+	PromptTokens        int      `json:"prompt_tokens"`
+	OutputTokens        int      `json:"output_tokens"`
+	CacheReadTokens     int      `json:"cache_read_tokens"`
+	CacheCreationTokens int      `json:"cache_creation_tokens"`
+	CostUSD             *float64 `json:"cost_usd"`
+	Streaming           bool     `json:"streaming"`
+	Attempt             int      `json:"attempt"`
+	Success             bool     `json:"success"`
+	ErrorMsg            string   `json:"error_msg,omitempty"`
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
@@ -602,6 +603,8 @@ func compareHistoryRecord(a, b history.RequestRecord, field string) int {
 		return a.DisplayInputTokens() - b.DisplayInputTokens()
 	case "output_tokens":
 		return a.OutputTokens - b.OutputTokens
+	case "cost_usd":
+		return floatCompare(a.CostUSD, b.CostUSD)
 	case "duration_ms":
 		return int(a.Duration.Milliseconds() - b.Duration.Milliseconds())
 	case "success":
@@ -619,6 +622,16 @@ func compareHistoryRecord(a, b history.RequestRecord, field string) int {
 	}
 }
 
+func floatCompare(a, b float64) int {
+	if a < b {
+		return -1
+	}
+	if a > b {
+		return 1
+	}
+	return 0
+}
+
 func boolToCompare(a, b bool) int {
 	if a == b {
 		return 0
@@ -633,7 +646,7 @@ func boolToCompare(a, b bool) int {
 func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 	out := make([]historyEntry, len(records))
 	for i, rec := range records {
-		out[i] = historyEntry{
+		entry := historyEntry{
 			ID:                  rec.ID,
 			Model:               rec.Model,
 			Provider:            rec.Provider,
@@ -650,6 +663,10 @@ func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 			Success:             rec.Success,
 			ErrorMsg:            rec.ErrorMsg,
 		}
+		if rec.CostKnown || rec.CostUSD != 0 {
+			entry.CostUSD = &rec.CostUSD
+		}
+		out[i] = entry
 	}
 	return out
 }

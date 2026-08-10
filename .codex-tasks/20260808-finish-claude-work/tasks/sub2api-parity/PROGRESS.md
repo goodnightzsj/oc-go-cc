@@ -2,18 +2,18 @@
 
 ## Context Recovery Block
 
-- **Current milestone**: Deploy and validate the verified CompactGate port
-- **Current status**: IN_PROGRESS
-- **Last completed**: #12 - Port verified dashboard, usage, and log patterns
+- **Current milestone**: Verified CompactGate port released
+- **Current status**: DONE
+- **Last completed**: #13 - Deploy and validate the final UI in the existing Edge session
 - **Current artifact**: `TODO.csv`
 - **Key context**: Production History and Analytics now share 1,390 trusted request rows totaling `$3.03965577`; provider labels are normalized to `opencode-go`.
-- **Known issues**: None in local checks; production still runs the previous release until task #13 deploys this commit.
-- **Next action**: #13 - deploy and verify the public-domain desktop/narrow layouts, custom tooltips, dialog, and browser refresh in the existing Edge session.
+- **Known issues**: None. The unrelated remote `.ace-tool/` directory remains untouched.
+- **Next action**: None.
 
 ## Reopened Production Findings
 
 - History and Analytics disagree because the prior release stored the complete provider snapshot separately instead of correcting the primary request history.
-- The oversized indigo bar is the filtered History token trend compressed into one daily bucket; it has insufficient context and will be replaced by a labelled, multi-metric time-series treatment.
+- The oversized indigo bar was the filtered History token trend compressed into one daily bucket; the History trend was removed at the user's request.
 - Provider provenance is an implementation detail and must not be shown in Analytics.
 - The final release must be tested remotely in Edge through `https://opencode.9962510.xyz/` only.
 
@@ -28,7 +28,7 @@
 - `costs sync-requests` reads the persisted sanitized snapshot, reports exact projected totals without writes, and applies one transactional correction with stable request IDs.
 - Corrected usage is marked internally as trusted so the configured legacy baseline cannot hide repaired rows; future requests continue through the normal request insert path and the UI reads only the primary request aggregates.
 - Dashboard and Analytics now share request-backed KPIs, four-series Token trend, model/platform distributions, Token/cost/request metric switching, and themed pointer/keyboard/touch tooltips.
-- History now exposes four filtered KPIs, full model/platform/scenario rows, metric switching, a labelled trend, and unknown-detail semantics for fields the one-time correction cannot reconstruct.
+- History now exposes four filtered KPIs, full model/platform/scenario rows, metric switching, a structured Token tooltip, and unknown-detail semantics for fields the one-time correction cannot reconstruct; it does not render a daily trend.
 
 ## Production Retry
 
@@ -37,10 +37,12 @@
 
 ## Production Validation
 
-- Backup `20260810-165925-before-cc7b0d9.db` passed `PRAGMA integrity_check` and is mode `0600`.
-- Product commits `cc7b0d9`, `60bc714`, and `d0d8fa5` are pushed; production runs `d0d8fa5` through the existing health/rollback deployment gate.
-- Edge on `https://opencode.9962510.xyz/` verified the Chinese request dialog, themed selects/date range, model/provider/plan charts, token trend, recent usage, History summaries, and zero desktop/mobile document overflow.
-- Provider and plan labels resolve to `inf-go.oa-compat` and `lite`; refresh events for `Meta+R`, `F5`, and `Meta+Shift+R` are not prevented.
+- Backup `20260810-190542-before-16cdc19.db` passed `PRAGMA integrity_check`, is mode `0600`, and preserves the pre-scenario-normalization database.
+- Product commits `dede6d0`, `16cdc19`, and `3c0ded5` are pushed; production runs `3c0ded5` through the existing health/rollback deployment gate.
+- Production has 1,390 requests, 463,249,833 Tokens, and `$3.03965577`; model/platform costs add up exactly and all 1,390 scenarios are `override`.
+- The scenario correction updated 1,099 rows without inserts or removals; a second dry run reported zero changes.
+- The existing Edge session on `https://opencode.9962510.xyz/` verified desktop and 400x739 responsive layouts, no document overflow, Chinese modal/tooltips, themed controls, no source/recent/History-trend sections, and tooltip dismissal on tab changes.
+- Real `Cmd+R` and `Cmd+Shift+R` keystrokes cleared an in-memory probe and reported Navigation Timing type `reload` on UI build `6ca66216bc0f`.
 
 ## Verified Local Reference
 

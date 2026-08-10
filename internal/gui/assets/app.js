@@ -19,6 +19,7 @@ const TRANSLATIONS = {
     'tab.fallback': 'Fallback',
     'tab.analytics': 'Analytics',
     'tab.settings': 'Settings',
+    'overview.title': 'Dashboard',
     'analytics.title': 'Usage Analytics',
     'analytics.refresh': 'Refresh',
     'analytics.autoRefreshOff': 'Auto-refresh: Off',
@@ -30,11 +31,7 @@ const TRANSLATIONS = {
     'analytics.totalTokens': 'Total Tokens',
     'analytics.inout': 'in / out',
     'analytics.cost': 'Cost',
-    'analytics.costEstimated': 'Estimated',
-    'analytics.costProvider': 'Provider-reported',
-    'analytics.costMixed': '{provider}/{total} provider-reported',
-    'analytics.costSourceProvider': 'Provider-reported cost',
-    'analytics.costSourceEstimated': 'Estimated cost',
+    'analytics.currencyUSD': 'USD',
     'analytics.p95Latency': 'p95 Latency',
     'analytics.latencyUnit': 'request-weighted',
     'analytics.cacheHitShort': 'cache hit',
@@ -51,13 +48,8 @@ const TRANSLATIONS = {
     'analytics.inputTokens': 'Input tokens',
     'analytics.outputTokens': 'Output tokens',
     'analytics.cacheTokens': 'Cache tokens',
-    'analytics.sourceOpenCode': 'Source: OpenCode usage',
-    'analytics.sourceLocalFallback': 'Source: local proxy (OpenCode snapshot unavailable)',
-    'analytics.byPlan': 'Usage by Plan',
-    'analytics.recentUsage': 'Recent Usage',
     'analytics.reasoningTokens': 'Reasoning Tokens',
     'analytics.reasoningNote': 'included in output',
-    'analytics.capturedAt': 'Captured {time}',
     'analytics.requests': 'Requests',
     'analytics.avgLatency': 'Average latency',
     'analytics.successRate': 'Success rate',
@@ -69,6 +61,8 @@ const TRANSLATIONS = {
     'history.modelDistribution': 'Models',
     'history.providerDistribution': 'Platforms',
     'history.scenarioDistribution': 'Scenarios',
+    'history.distribution': 'Distribution details',
+    'history.dailyTrend': 'Daily trend',
     'filter.dateRange': 'Date range',
     'filter.today': 'Today',
     'filter.clear': 'Clear',
@@ -94,6 +88,8 @@ const TRANSLATIONS = {
     'detail.status': 'Status',
     'detail.success': 'Success',
     'detail.failed': 'Failed',
+    'detail.unknown': 'Unknown',
+    'detail.unavailable': 'Not available',
     'detail.error': 'Error',
     'cmd.startProxy': 'Start Proxy',
     'cmd.stopProxy': 'Stop Proxy',
@@ -122,9 +118,6 @@ const TRANSLATIONS = {
     'filter.allStreams': 'All request types',
     'filter.streaming': 'Streaming only',
     'filter.nonStreaming': 'Non-streaming only',
-    'filter.allCostSources': 'All cost sources',
-    'filter.providerCost': 'Provider-reported',
-    'filter.estimatedCost': 'Estimated',
     'filter.reset': 'Reset',
     'history.title': 'Request History',
     'history.searchPlaceholder': 'Search ID, model, provider, scenario, or error…',
@@ -255,6 +248,7 @@ const TRANSLATIONS = {
     'tab.fallback': '降级策略',
     'tab.settings': '设置',
     'tab.analytics': '用量分析',
+    'overview.title': '仪表盘',
     'analytics.title': '用量分析',
     'analytics.refresh': '刷新',
     'analytics.autoRefreshOff': '自动刷新：关闭',
@@ -266,11 +260,7 @@ const TRANSLATIONS = {
     'analytics.totalTokens': '总 Token',
     'analytics.inout': '输入 / 输出',
     'analytics.cost': '费用',
-    'analytics.costEstimated': '预估',
-    'analytics.costProvider': '供应商原始费用',
-    'analytics.costMixed': '{provider}/{total} 条为供应商原始费用',
-    'analytics.costSourceProvider': '供应商原始费用',
-    'analytics.costSourceEstimated': '预估费用',
+    'analytics.currencyUSD': '美元（USD）',
     'analytics.p95Latency': 'p95 延迟',
     'analytics.latencyUnit': '按请求数加权',
     'analytics.cacheHitShort': '缓存命中',
@@ -288,13 +278,8 @@ const TRANSLATIONS = {
     'analytics.outputTokens': '输出 Token',
     'analytics.cacheTokens': '缓存 Token',
     'analytics.cacheTokensLegend': '缓存',
-    'analytics.sourceOpenCode': '数据源：OpenCode 用量账单',
-    'analytics.sourceLocalFallback': '数据源：本地代理（尚未导入 OpenCode 基线）',
-    'analytics.byPlan': '按套餐拆分',
-    'analytics.recentUsage': '最近使用',
     'analytics.reasoningTokens': '推理 Token',
     'analytics.reasoningNote': '已包含在输出 Token 中',
-    'analytics.capturedAt': '采集于 {time}',
     'analytics.requests': '请求数',
     'analytics.avgLatency': '平均延迟',
     'analytics.successRate': '成功率',
@@ -306,6 +291,8 @@ const TRANSLATIONS = {
     'history.modelDistribution': '模型分布',
     'history.providerDistribution': '平台分布',
     'history.scenarioDistribution': '场景分布',
+    'history.distribution': '分布明细',
+    'history.dailyTrend': '每日趋势',
     'filter.dateRange': '日期范围',
     'filter.today': '今天',
     'filter.clear': '清除',
@@ -331,6 +318,8 @@ const TRANSLATIONS = {
     'detail.status': '状态',
     'detail.success': '成功',
     'detail.failed': '失败',
+    'detail.unknown': '未知',
+    'detail.unavailable': '暂无记录',
     'detail.error': '错误信息',
     'cmd.startProxy': '启动代理',
     'cmd.stopProxy': '停止代理',
@@ -359,9 +348,6 @@ const TRANSLATIONS = {
     'filter.allStreams': '全部请求类型',
     'filter.streaming': '仅流式',
     'filter.nonStreaming': '仅非流式',
-    'filter.allCostSources': '全部费用来源',
-    'filter.providerCost': '供应商原始费用',
-    'filter.estimatedCost': '预估费用',
     'filter.reset': '重置',
     'history.title': '请求记录',
     'history.searchPlaceholder': '搜索请求 ID、模型、供应商、场景或错误…',
@@ -988,7 +974,11 @@ function debouncedRefresh() {
 /* ── /api/metrics ──────────────────────────────────────────────── */
 async function refreshMetrics() {
   try {
-    const r = await fetch('/api/metrics');
+    const [r, usageResponse, trendResponse] = await Promise.all([
+      fetch('/api/metrics'),
+      fetch('/api/analytics/summary?days=30'),
+      fetch('/api/analytics/tokens/trend?days=30'),
+    ]);
     if (!r.ok) { markPollFail(); return; }
     const d = await r.json();
     markPollOk();
@@ -1007,11 +997,13 @@ async function refreshMetrics() {
       text.textContent = t('status.stopped');
     }
 
-    // metric cards
-    document.getElementById('m-total').textContent   = fmt(d.requests_received);
-    document.getElementById('m-success').textContent = fmt(d.requests_success);
-    document.getElementById('m-failed').textContent  = fmt(d.requests_failed);
-    document.getElementById('m-streamed').textContent = fmt(d.requests_streamed);
+    document.getElementById('m-total').textContent = fmt(d.requests_received);
+
+    if (usageResponse.ok) {
+      const usage = await usageResponse.json();
+      const trend = trendResponse.ok ? await trendResponse.json() : {trend: []};
+      if (activeTab === 'overview') renderOverviewUsage(usage, trend.trend || []);
+    }
 
     // port info
     const portEl = document.getElementById('port-info');
@@ -1031,6 +1023,38 @@ async function refreshMetrics() {
     // only surfaces the stale badge once several polls in a row have failed.
     markPollFail();
   }
+}
+
+function renderOverviewUsage(data, trend) {
+  const summary = data.summary || {};
+  const input = Number(summary.input_tokens || 0);
+  const output = Number(summary.output_tokens || 0);
+  const cacheRead = Number(summary.cache_read_tokens || 0);
+  const cacheWrite = Number(summary.cache_creation_tokens || 0);
+  const total = input + output + cacheRead + cacheWrite;
+  const prompt = input + cacheRead + cacheWrite;
+  const set = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  };
+  set('m-total', Number(summary.total_requests || 0).toLocaleString());
+  set('m-cost', fmtCost(summary.cost_usd ?? summary.est_cost_usd ?? 0));
+  set('m-tokens', fmtTok(total));
+  set('m-cache-hit', prompt > 0 ? `${(cacheRead / prompt * 100).toFixed(1)}%` : '—');
+  set('m-input', fmtTok(input));
+  set('m-cache-read', fmtTok(cacheRead));
+  set('m-cache-write', fmtTok(cacheWrite));
+  set('m-output', fmtTok(output));
+  set('overview-generated', new Date().toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'}));
+
+  const withTotal = items => (items || []).map(item => ({
+    ...item,
+    total_tokens: Number(item.input_tokens || 0) + Number(item.output_tokens || 0)
+      + Number(item.cache_read_tokens || 0) + Number(item.cache_creation_tokens || 0),
+  }));
+  AnalyticsModule.renderTrend(trend || [], 'overview-token-trend');
+  AnalyticsModule.renderDonutChart('overview-model-donut', withTotal(data.models), 'total_tokens', 'model');
+  AnalyticsModule.renderDonutChart('overview-provider-donut', withTotal(data.providers), 'total_tokens', 'provider');
 }
 
 function renderModelList(counts) {
@@ -1081,7 +1105,6 @@ function historyQueryParams(page = historyPage, size = historySize) {
     model: document.getElementById('model-filter')?.value.trim(),
     provider: document.getElementById('provider-filter')?.value.trim(),
     scenario: document.getElementById('scenario-filter')?.value.trim(),
-    cost_source: document.getElementById('cost-source-filter')?.value,
     success: document.getElementById('status-filter')?.value,
     streaming: document.getElementById('streaming-filter')?.value,
   };
@@ -1099,13 +1122,13 @@ function historyQueryParams(page = historyPage, size = historySize) {
 
 function historyHasFilters() {
   return ['history-search', 'history-start', 'history-end', 'model-filter', 'provider-filter',
-    'scenario-filter', 'status-filter', 'streaming-filter', 'cost-source-filter']
+    'scenario-filter', 'status-filter', 'streaming-filter']
     .some(id => document.getElementById(id)?.value);
 }
 
 function resetHistoryFilters(refresh = true) {
   ['history-search', 'history-start', 'history-end', 'model-filter', 'provider-filter',
-    'scenario-filter', 'status-filter', 'streaming-filter', 'cost-source-filter'].forEach(id => {
+    'scenario-filter', 'status-filter', 'streaming-filter'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = '';
   });
@@ -1143,13 +1166,20 @@ async function refreshHistory() {
   } catch(e) {}
 }
 
+let lastHistorySummary = null;
+let historyBreakdownMetric = 'tokens';
+let historyTrendMetric = 'tokens';
+
 function renderHistorySummary(summary) {
+  lastHistorySummary = summary;
   const set = (id, value) => {
     const el = document.getElementById(id);
     if (el) el.textContent = value;
   };
   set('history-summary-requests', Number(summary.total_requests || 0).toLocaleString());
-  set('history-summary-success', `${(Number(summary.success_rate || 0) * 100).toFixed(1)}%`);
+  set('history-summary-success', Number(summary.success_rows || 0) > 0
+    ? `${(Number(summary.success_rate || 0) * 100).toFixed(1)}%`
+    : '—');
   set('history-summary-tokens', fmtTok(Number(summary.total_tokens || 0)));
   set('history-summary-cost', fmtCost(Number(summary.cost_usd || 0)));
   renderCompactBreakdown('history-model-breakdown', summary.models || []);
@@ -1161,38 +1191,98 @@ function renderHistorySummary(summary) {
 function renderCompactBreakdown(id, items) {
   const root = document.getElementById(id);
   if (!root) return;
-  const top = [...items].sort((a, b) => (b.tokens || 0) - (a.tokens || 0)).slice(0, 4);
+  const metricKey = historyBreakdownMetric === 'cost' ? 'cost_usd' : historyBreakdownMetric;
+  const top = [...items].sort((a, b) => Number(b[metricKey] || 0) - Number(a[metricKey] || 0)).slice(0, 5);
   if (!top.length) {
     root.innerHTML = `<span class="compact-breakdown-value">${t('analytics.noData')}</span>`;
     return;
   }
-  const max = Math.max(1, ...top.map(item => Number(item.tokens || 0)));
-  root.innerHTML = top.map(item => `
-    <div class="compact-breakdown-row" title="${escapeHtml(item.name)} · ${Number(item.requests || 0).toLocaleString()} ${t('analytics.requests')}">
-      <span class="compact-breakdown-name">${escapeHtml(item.name)}</span>
-      <span class="compact-breakdown-track"><i class="compact-breakdown-fill" style="width:${Math.max(3, Number(item.tokens || 0) / max * 100).toFixed(1)}%"></i></span>
-      <span class="compact-breakdown-value">${fmtTok(Number(item.tokens || 0))}</span>
-    </div>`).join('');
+  const total = Math.max(1, top.reduce((sum, item) => sum + Number(item[metricKey] || 0), 0));
+  root.innerHTML = top.map(item => {
+    const label = !item.name || item.name === 'unknown' ? t('detail.unknown') : item.name;
+    return `
+    <div class="compact-breakdown-row">
+      <i class="compact-breakdown-fill" style="width:${Math.max(2, Number(item[metricKey] || 0) / total * 100).toFixed(1)}%"></i>
+      <span class="compact-breakdown-name">${escapeHtml(label)}</span>
+      <span class="compact-breakdown-stat"><strong>${Number(item.requests || 0).toLocaleString()}</strong><small>${t('analytics.requests')}</small></span>
+      <span class="compact-breakdown-stat"><strong>${fmtTok(Number(item.tokens || 0))}</strong><small>Token</small></span>
+      <span class="compact-breakdown-stat"><strong>${fmtCost(Number(item.cost_usd || 0))}</strong><small>${t('analytics.cost')}</small></span>
+    </div>`;
+  }).join('');
 }
 
 function renderHistoryMiniTrend(points) {
   const root = document.getElementById('history-filter-trend');
   if (!root) return;
   if (!points.length) {
-    root.innerHTML = '';
+    root.innerHTML = `<div class="empty-state">${t('analytics.noTrend')}</div>`;
     return;
   }
-  const width = 760, height = 72, pad = 4;
-  const max = Math.max(1, ...points.map(point => Number(point.tokens || 0)));
-  const slot = (width - pad * 2) / points.length;
-  const bars = points.map((point, index) => {
-    const barHeight = Math.max(2, Number(point.tokens || 0) / max * (height - 16));
-    const x = pad + index * slot + slot * .16;
-    const y = height - barHeight - 4;
-    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(2, slot * .68).toFixed(1)}" height="${barHeight.toFixed(1)}" rx="1"><title>${escapeHtml(point.date)} · ${Number(point.tokens || 0).toLocaleString()} Token</title></rect>`;
-  }).join('');
-  root.innerHTML = `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img">${bars}</svg>`;
+  const metricKey = historyTrendMetric === 'cost' ? 'cost_usd' : historyTrendMetric;
+  const formatValue = value => historyTrendMetric === 'cost'
+    ? fmtCost(value)
+    : historyTrendMetric === 'requests'
+      ? Number(value || 0).toLocaleString()
+      : fmtTok(value);
+  const width = 760, height = 176, ml = 52, mr = 16, mt = 18, mb = 30;
+  const plotW = width - ml - mr, plotH = height - mt - mb;
+  const values = points.map(point => Number(point[metricKey] || 0));
+  const max = Math.max(1, ...values);
+  const x = index => points.length === 1 ? ml + plotW / 2 : ml + index * plotW / (points.length - 1);
+  const y = value => mt + plotH - value / max * plotH;
+  let grid = '';
+  for (let step = 0; step <= 4; step++) {
+    const value = max * step / 4;
+    const yy = y(value);
+    grid += `<line x1="${ml}" y1="${yy.toFixed(1)}" x2="${width - mr}" y2="${yy.toFixed(1)}" class="chart-grid"></line>`;
+    grid += `<text x="${ml - 8}" y="${(yy + 3).toFixed(1)}" text-anchor="end" class="chart-axis-label">${escapeHtml(formatValue(value))}</text>`;
+  }
+  const stride = Math.max(1, Math.ceil(points.length / 6));
+  let dates = '';
+  points.forEach((point, index) => {
+    if (index % stride !== 0 && index !== points.length - 1) return;
+    dates += `<text x="${x(index).toFixed(1)}" y="${height - 8}" text-anchor="middle" class="chart-axis-label">${escapeHtml(String(point.date || '').slice(5))}</text>`;
+  });
+  const coordinates = values.map((value, index) => `${x(index).toFixed(1)},${y(value).toFixed(1)}`);
+  const line = points.length > 1
+    ? `<polyline class="history-trend-line" points="${coordinates.join(' ')}"></polyline>`
+    : `<line class="history-trend-single" x1="${x(0)}" y1="${y(values[0])}" x2="${x(0)}" y2="${mt + plotH}"></line>`;
+  const dots = points.map((point, index) => `
+    <circle class="history-trend-dot" cx="${x(index).toFixed(1)}" cy="${y(values[index]).toFixed(1)}" r="4"></circle>
+    <circle class="history-trend-hit" cx="${x(index).toFixed(1)}" cy="${y(values[index]).toFixed(1)}" r="18" fill="transparent" tabindex="0" role="button" aria-label="${escapeHtml(point.date || '')}"></circle>`).join('');
+  const singleValue = points.length === 1
+    ? `<text x="${x(0)}" y="${Math.max(12, y(values[0]) - 10)}" text-anchor="middle" class="history-trend-value">${escapeHtml(formatValue(values[0]))}</text>`
+    : '';
+  root.innerHTML = `<div class="history-trend-stage">
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(t('history.dailyTrend'))}">
+      ${grid}<line x1="${ml}" y1="${mt + plotH}" x2="${width - mr}" y2="${mt + plotH}" class="chart-axis"></line>
+      ${dates}${line}${dots}${singleValue}
+    </svg><div class="chart-tip" id="history-trend-tip"></div></div>`;
+  const tip = root.querySelector('#history-trend-tip');
+  bindChartTooltip(root.querySelector('.history-trend-stage'), tip, '.history-trend-hit', (_target, index) => {
+    const point = points[index];
+    return chartTooltipMarkup(point.date || '', [
+      {label: t('analytics.requests'), value: Number(point.requests || 0).toLocaleString(), color: '#818cf8'},
+      {label: t('analytics.totalTokens'), value: Number(point.tokens || 0).toLocaleString(), color: '#22d3ee'},
+      {label: t('analytics.cost'), value: fmtCost(Number(point.cost_usd || 0)), color: '#34d399'},
+    ]);
+  });
 }
+
+document.querySelectorAll('#history-breakdown-metric button').forEach(button => {
+  button.addEventListener('click', () => {
+    historyBreakdownMetric = button.dataset.metric;
+    button.parentElement.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
+    if (lastHistorySummary) renderHistorySummary(lastHistorySummary);
+  });
+});
+document.querySelectorAll('#history-trend-metric button').forEach(button => {
+  button.addEventListener('click', () => {
+    historyTrendMetric = button.dataset.metric;
+    button.parentElement.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
+    if (lastHistorySummary) renderHistoryMiniTrend(lastHistorySummary.trend || []);
+  });
+});
 
 function historyGoToPage(p) {
   if (p < 1) p = 1;
@@ -1233,11 +1323,8 @@ function renderHistory() {
 
   tbody.innerHTML = limited.map(h => {
     const rowId = h.id || `${h.start_time}_${h.model || 'unknown'}_${h.duration_ms || 0}`;
-    const costSource = h.cost_source === 'provider' ? 'provider' : 'estimated';
-    const costSourceLabel = t(costSource === 'provider' ? 'analytics.costSourceProvider' : 'analytics.costSourceEstimated');
-    const cost = h.cost_usd != null
-      ? `<span class="cost-value"><span class="cost-source-dot ${costSource === 'provider' ? 'provider' : ''}" title="${escapeHtml(costSourceLabel)}" aria-label="${escapeHtml(costSourceLabel)}"></span>${fmtCost(h.cost_usd)}</span>`
-      : '—';
+    const cost = h.cost_usd != null ? fmtCost(h.cost_usd) : '—';
+    const detailsKnown = h.details_known !== false;
     return `
     <tr data-id="${escapeHtml(rowId)}" tabindex="0" aria-haspopup="dialog" style="cursor: pointer;">
       <td>${fmtTime(h.start_time)}</td>
@@ -1246,8 +1333,8 @@ function renderHistory() {
       <td>${h.prompt_tokens != null ? h.prompt_tokens.toLocaleString() : '—'}</td>
       <td>${h.output_tokens != null ? h.output_tokens.toLocaleString() : '—'}</td>
       <td>${cost}</td>
-      <td>${fmtDuration(h.duration_ms)}</td>
-      <td><span class="badge ${h.success ? 'badge-success' : 'badge-error'}">${h.success ? t('badge.success') : t('badge.fail')}</span></td>
+      <td>${detailsKnown ? fmtDuration(h.duration_ms) : '—'}</td>
+      <td>${detailsKnown ? `<span class="badge ${h.success ? 'badge-success' : 'badge-error'}">${h.success ? t('badge.success') : t('badge.fail')}</span>` : `<span class="badge badge-unknown">${t('detail.unknown')}</span>`}</td>
     </tr>
   `}).join('');
 
@@ -1397,7 +1484,6 @@ const HISTORY_CSV_COLUMNS = [
   ['cache_creation_tokens', r => r.cache_creation_tokens],
   ['output_tokens', r => r.output_tokens],
   ['cost_usd', r => r.cost_usd],
-  ['cost_source', r => r.cost_source || ''],
   ['duration_ms', r => r.duration_ms],
   ['streaming', r => r.streaming],
   ['attempt', r => r.attempt],
@@ -1498,6 +1584,68 @@ function fmtCost(v) {
   if (abs < 0.01) return '$' + n.toFixed(abs < 0.001 ? 5 : 4);
   if (abs < 1) return '$' + n.toFixed(3);
   return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function chartTooltipMarkup(title, rows, footer) {
+  const body = rows.map(row => `
+    <div class="tip-row">
+      <span class="tip-dot" style="background:${row.color || '#818cf8'}"></span>
+      <span class="tip-label">${escapeHtml(row.label)}</span>
+      <strong class="tip-val">${escapeHtml(row.value)}</strong>
+    </div>`).join('');
+  const tail = (footer || []).length ? `<div class="tip-footer">${footer.map(row => `
+    <div><span>${escapeHtml(row.label)}</span><strong>${escapeHtml(row.value)}</strong></div>`).join('')}</div>` : '';
+  return `<div class="tip-title">${escapeHtml(title)}</div><div class="tip-body">${body}</div>${tail}`;
+}
+
+function bindChartTooltip(root, tip, selector, contentFor) {
+  if (!root || !tip) return;
+  const place = (target, event) => {
+    const bounds = root.getBoundingClientRect();
+    const targetBounds = target.getBoundingClientRect();
+    const x = event?.clientX || targetBounds.left + targetBounds.width / 2;
+    const y = event?.clientY || targetBounds.top + targetBounds.height / 2;
+    tip.style.display = 'block';
+    const tipBounds = tip.getBoundingClientRect();
+    const localX = x - bounds.left;
+    const localY = y - bounds.top;
+    const left = Math.max(8, Math.min(bounds.width - tipBounds.width - 8, localX + 14));
+    const below = localY + 14;
+    const top = below + tipBounds.height <= bounds.height - 4
+      ? below
+      : Math.max(4, localY - tipBounds.height - 14);
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
+  };
+  const hide = (target) => {
+    if (tip.dataset.pinned === target.dataset.tipIndex) return;
+    tip.style.display = 'none';
+    target.classList.remove('is-active');
+  };
+  root.querySelectorAll(selector).forEach((target, index) => {
+    target.dataset.tipIndex = String(index);
+    const show = (event, pin) => {
+      tip.innerHTML = contentFor(target, index);
+      if (pin) tip.dataset.pinned = tip.dataset.pinned === String(index) ? '' : String(index);
+      target.classList.add('is-active');
+      place(target, event);
+    };
+    target.addEventListener('pointerenter', event => show(event, false));
+    target.addEventListener('pointermove', event => place(target, event));
+    target.addEventListener('pointerleave', () => hide(target));
+    target.addEventListener('focus', event => show(event, false));
+    target.addEventListener('blur', () => {
+      if (tip.dataset.pinned !== String(index)) hide(target);
+    });
+    target.addEventListener('click', event => show(event, true));
+    target.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        tip.dataset.pinned = '';
+        tip.style.display = 'none';
+        target.classList.remove('is-active');
+      }
+    });
+  });
 }
 
 // Percentiles cannot be averaged across models: a model with one request would
@@ -1770,7 +1918,7 @@ function scheduleHistoryRefresh() {
 ['history-search', 'model-filter', 'provider-filter', 'scenario-filter'].forEach(id => {
   document.getElementById(id)?.addEventListener('input', scheduleHistoryRefresh);
 });
-['history-start', 'history-end', 'status-filter', 'streaming-filter', 'cost-source-filter'].forEach(id => {
+['history-start', 'history-end', 'status-filter', 'streaming-filter'].forEach(id => {
   document.getElementById(id)?.addEventListener('change', scheduleHistoryRefresh);
 });
 document.getElementById('history-reset')?.addEventListener('click', () => resetHistoryFilters());
@@ -1809,10 +1957,9 @@ const modalClose = document.getElementById('modal-close');
 let modalReturnFocus = null;
 
 function showHistoryDetail(record) {
-  const costSource = record.cost_source === 'provider' ? 'provider' : 'estimated';
-  const costSourceLabel = t(costSource === 'provider' ? 'analytics.costSourceProvider' : 'analytics.costSourceEstimated');
   const tokenValue = value => value != null ? Number(value).toLocaleString() : '—';
-  const statusLabel = record.success ? t('detail.success') : t('detail.failed');
+  const detailsKnown = record.details_known !== false;
+  const statusLabel = detailsKnown ? (record.success ? t('detail.success') : t('detail.failed')) : t('detail.unknown');
   modalBody.innerHTML = `
     <div class="detail-summary">
       <div>
@@ -1825,7 +1972,7 @@ function showHistoryDetail(record) {
       </div>
       <div class="detail-outcome">
         <strong class="detail-cost">${record.cost_usd != null ? fmtCost(record.cost_usd) : '—'}</strong>
-        <span class="detail-status ${record.success ? 'success' : ''}">${statusLabel}</span>
+        <span class="detail-status ${detailsKnown ? (record.success ? 'success' : '') : 'unknown'}">${statusLabel}</span>
       </div>
     </div>
     <div class="detail-token-grid">
@@ -1837,10 +1984,9 @@ function showHistoryDetail(record) {
     </div>
     <div class="detail-metadata">
       <div class="detail-row"><span class="detail-label">${t('detail.requestId')}</span><span class="detail-value">${escapeHtml(record.id || '—')}</span></div>
-      <div class="detail-row"><span class="detail-label">${t('detail.requestType')}</span><span class="detail-value">${t(record.streaming ? 'detail.streaming' : 'detail.nonStreaming')}</span></div>
-      <div class="detail-row"><span class="detail-label">${t('detail.attempt')}</span><span class="detail-value">${record.attempt || 1}</span></div>
-      <div class="detail-row"><span class="detail-label">${t('detail.duration')}</span><span class="detail-value">${fmtDuration(record.duration_ms)}</span></div>
-      <div class="detail-row"><span class="detail-label">${t('analytics.cost')}</span><span class="detail-value"><span class="cost-source-badge ${costSource === 'provider' ? 'provider' : ''}">${escapeHtml(costSourceLabel)}</span></span></div>
+      <div class="detail-row"><span class="detail-label">${t('detail.requestType')}</span><span class="detail-value">${detailsKnown ? t(record.streaming ? 'detail.streaming' : 'detail.nonStreaming') : t('detail.unavailable')}</span></div>
+      <div class="detail-row"><span class="detail-label">${t('detail.attempt')}</span><span class="detail-value">${detailsKnown ? (record.attempt || 1) : t('detail.unavailable')}</span></div>
+      <div class="detail-row"><span class="detail-label">${t('detail.duration')}</span><span class="detail-value">${detailsKnown ? fmtDuration(record.duration_ms) : t('detail.unavailable')}</span></div>
     </div>
     ${record.error_msg ? `<div class="detail-error"><strong>${t('detail.error')}</strong><br>${escapeHtml(record.error_msg)}</div>` : ''}
   `;
@@ -2655,6 +2801,8 @@ const AnalyticsModule = {
   refreshInterval: 30,
   loadSeq: 0,
   ready: false,
+  breakdownMetric: 'tokens',
+  currentView: null,
 
   init() {
     const daysSel = document.getElementById('analytics-days');
@@ -2662,6 +2810,13 @@ const AnalyticsModule = {
     const intervalSel = document.getElementById('analytics-refresh-interval');
     if (daysSel) daysSel.addEventListener('change', () => this.load(true));
     if (refreshBtn) refreshBtn.addEventListener('click', () => this.load(true));
+    document.querySelectorAll('#analytics-breakdown-metric button').forEach(button => {
+      button.addEventListener('click', () => {
+        this.breakdownMetric = button.dataset.metric;
+        button.parentElement.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
+        if (this.currentView) this.renderDonuts(this.currentView);
+      });
+    });
     this.refreshInterval = this.readRefreshInterval();
     if (intervalSel) {
       intervalSel.value = String(this.refreshInterval);
@@ -2717,7 +2872,7 @@ const AnalyticsModule = {
     const genEl = document.getElementById('analytics-generated');
     if (!this.ready) {
       if (genEl) genEl.textContent = '';
-      ['kpi-requests','kpi-tokens','kpi-tokens-in','kpi-tokens-out','kpi-cost','kpi-reasoning'].forEach(id => {
+      ['kpi-requests','kpi-tokens','kpi-tokens-in','kpi-tokens-out','kpi-cost','kpi-cache-read','kpi-cache-rate'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.textContent = '…';
       });
@@ -2734,14 +2889,10 @@ const AnalyticsModule = {
       const trend = trendRes.ok ? await trendRes.json() : { trend: [] };
 
       if (seq !== this.loadSeq) return;
-      const account = summary.account || {};
-      const hasAccount = Number(account.summary?.total_requests || 0) > 0;
-      const view = hasAccount ? this.accountView(account) : summary;
-      this.renderSource(account.summary, hasAccount);
-      this.renderKPIs(view, hasAccount);
-      this.renderDonuts(view);
-      this.renderTrend(hasAccount ? (account.trend || []) : (trend.trend || []));
-      this.renderRecent(hasAccount ? (account.recent || []) : []);
+      this.currentView = summary;
+      this.renderKPIs(summary);
+      this.renderDonuts(summary);
+      this.renderTrend(trend.trend || []);
       this.ready = true;
       if (genEl) {
         const ts = summary.generated_at ? new Date(summary.generated_at) : new Date();
@@ -2758,45 +2909,13 @@ const AnalyticsModule = {
   },
 
   showLoading() {
-    ['model-donut','provider-donut','plan-donut','token-trend','analytics-recent'].forEach(id => {
+    ['model-donut','provider-donut','token-trend'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.innerHTML = this.loadingHtml();
     });
   },
 
-  accountView(account) {
-    const normalize = (items, field) => (items || []).map(item => ({
-      ...item,
-      [field]: item.name,
-      est_cost_usd: item.cost_usd,
-      account_usage: true,
-    }));
-    return {
-      summary: {
-        ...(account.summary || {}),
-        est_cost_usd: account.summary?.cost_usd || 0,
-        provider_cost_rows: account.summary?.total_requests || 0,
-        estimated_cost_rows: 0,
-      },
-      models: normalize(account.models, 'model'),
-      providers: normalize(account.providers, 'provider'),
-      plans: normalize(account.plans, 'plan'),
-    };
-  },
-
-  renderSource(summary, hasAccount) {
-    const source = document.getElementById('analytics-source');
-    if (!source) return;
-    source.classList.toggle('local', !hasAccount);
-    if (!hasAccount) {
-      source.textContent = t('analytics.sourceLocalFallback');
-      return;
-    }
-    const captured = summary?.snapshot_at ? fmtTime(summary.snapshot_at) : '';
-    source.textContent = `${t('analytics.sourceOpenCode')}${captured ? ` · ${t('analytics.capturedAt').replace('{time}', captured)}` : ''}`;
-  },
-
-  renderKPIs(data, hasAccount) {
+  renderKPIs(data) {
     const s = data.summary || {};
     const fmt = (n) => n != null ? Number(n).toLocaleString() : '—';
     document.getElementById('kpi-requests').textContent = fmt(s.total_requests);
@@ -2828,27 +2947,12 @@ const AnalyticsModule = {
         hitWrap.hidden = true;
       }
     }
-    document.getElementById('kpi-cost').textContent = fmtCost(s.est_cost_usd);
-    const providerCostRows = Number(s.provider_cost_rows || 0);
-    const estimatedCostRows = Number(s.estimated_cost_rows || 0);
-    const knownCostRows = providerCostRows + estimatedCostRows;
-    const sourceEl = document.getElementById('kpi-cost-source');
-    if (sourceEl) {
-      sourceEl.classList.remove('provider', 'mixed');
-      if (providerCostRows > 0 && estimatedCostRows === 0) {
-        sourceEl.textContent = t('analytics.costProvider');
-        sourceEl.classList.add('provider');
-      } else if (providerCostRows > 0) {
-        sourceEl.textContent = t('analytics.costMixed')
-          .replace('{provider}', providerCostRows.toLocaleString())
-          .replace('{total}', knownCostRows.toLocaleString());
-        sourceEl.classList.add('mixed');
-      } else {
-        sourceEl.textContent = t('analytics.costEstimated');
-      }
-    }
+    document.getElementById('kpi-cost').textContent = fmtCost(s.cost_usd ?? s.est_cost_usd ?? 0);
+    document.getElementById('kpi-cache-read').textContent = fmt(s.cache_read_tokens || 0);
+    document.getElementById('kpi-cache-rate').textContent = promptTok > 0
+      ? `${((s.cache_read_tokens || 0) / promptTok * 100).toFixed(1)}% ${t('analytics.cacheHitShort')}`
+      : '—';
 
-    document.getElementById('kpi-reasoning').textContent = hasAccount ? fmt(s.reasoning_tokens || 0) : '—';
   },
 
   renderDonuts(summary) {
@@ -2859,12 +2963,13 @@ const AnalyticsModule = {
       total_tokens: (it.input_tokens||0) + (it.output_tokens||0)
         + (it.cache_read_tokens||0) + (it.cache_creation_tokens||0),
     }));
-    this.renderDonutChart('model-donut', withTotal(summary.models), 'total_tokens');
-    this.renderDonutChart('provider-donut', withTotal(summary.providers), 'total_tokens');
-    this.renderDonutChart('plan-donut', withTotal(summary.plans), 'total_tokens');
+    const valueKey = this.breakdownMetric === 'cost' ? 'cost_usd'
+      : this.breakdownMetric === 'requests' ? 'requests' : 'total_tokens';
+    this.renderDonutChart('model-donut', withTotal(summary.models), valueKey, 'model');
+    this.renderDonutChart('provider-donut', withTotal(summary.providers), valueKey, 'provider');
   },
 
-  renderDonutChart(containerId, items, valKey) {
+  renderDonutChart(containerId, items, valKey, dimension) {
     const wrap = document.getElementById(containerId);
     if (!wrap) return;
     wrap.innerHTML = '';
@@ -2874,12 +2979,22 @@ const AnalyticsModule = {
       return;
     }
 
-    const sorted = [...items].sort((a,b) => (b[valKey]||0) - (a[valKey]||0));
+    const normalized = items.map(item => ({...item, cost_usd: item.cost_usd ?? item.est_cost_usd ?? 0}));
+    const sorted = [...normalized].sort((a,b) => Number(b[valKey]||0) - Number(a[valKey]||0));
     let top = sorted.slice(0,5);
     const rest = sorted.slice(5);
-    const otherVal = rest.reduce((sum,i) => sum + (i[valKey]||0), 0);
-    if (otherVal > 0) top.push({name: 'Other', [valKey]: otherVal});
-    const total = top.reduce((sum,i) => sum + (i[valKey]||0), 0) || 1;
+    if (rest.length) {
+      const other = {name: currentLang === 'zh' ? '其他' : 'Other'};
+      ['requests','total_tokens','input_tokens','output_tokens','reasoning_tokens','cache_read_tokens','cache_creation_tokens','cost_usd'].forEach(key => {
+        other[key] = rest.reduce((sum, item) => sum + Number(item[key] || 0), 0);
+      });
+      top.push(other);
+    }
+    const total = top.reduce((sum,item) => sum + Number(item[valKey]||0), 0) || 1;
+    const formatMetric = value => valKey === 'cost_usd' ? fmtCost(value)
+      : valKey === 'requests' ? Number(value || 0).toLocaleString() : fmtTok(value);
+    const centerLabel = valKey === 'cost_usd' ? t('analytics.cost')
+      : valKey === 'requests' ? t('analytics.requests') : 'Token';
 
     // Donut drawn with stroke-dasharray on <circle> arcs rather than <path>
     // wedges: a 100% share is just a full-circumference dash, so it renders
@@ -2888,22 +3003,21 @@ const AnalyticsModule = {
     const CIRC = 2 * Math.PI * R;
     const tooltipId = containerId + '-tip';
     const legend = [];
+    const tooltipContent = [];
     // Floor tiny-but-nonzero shares so a <0.5% sector stays visible/hoverable.
     const MIN_FRAC = 0.005;
     let offset = 0;
     const arcs = top.map((it, idx) => {
-      const v = it[valKey] || 0;
+      const v = Number(it[valKey] || 0);
       const frac = v / total;
       const drawFrac = Math.min(1, Math.max(frac, v > 0 ? MIN_FRAC : 0));
       const col = this.palette[idx % this.palette.length];
-      const label = containerId === 'model-donut' ? (it.model || it.name) :
-        containerId === 'provider-donut' ? (it.provider || it.name) :
-        containerId === 'plan-donut' ? (it.plan || it.name) :
-        (it.name || 'Unknown');
+      const rawLabel = dimension === 'model' ? (it.model || it.name) :
+        dimension === 'provider' ? (it.provider || it.name) : it.name;
+      const label = !rawLabel || rawLabel === 'unknown' ? t('detail.unknown') : rawLabel;
       const pctTxt = (frac * 100).toFixed(1) + '%';
-      const tip = `${this.escapeHtml(label)} · ${v.toLocaleString()} (${pctTxt})`;
       const metrics = [
-        [t('analytics.totalTokens'), v, fmt],
+        [t('analytics.totalTokens'), it.total_tokens, n => Number(n || 0).toLocaleString()],
         [t('analytics.requests'), it.requests, fmt],
         [t('analytics.inputTokens'), it.input_tokens, fmt],
         [t('detail.cacheRead'), it.cache_read_tokens, fmt],
@@ -2913,22 +3027,28 @@ const AnalyticsModule = {
         [t('analytics.avgLatency'), it.avg_latency_ms, n => `${Number(n).toFixed(0)} ms`],
         [t('analytics.successRate'), it.success_rate, n => `${(Number(n) * 100).toFixed(1)}%`],
         [t('analytics.fallbackRate'), it.fallback_rate, n => `${Number(n).toFixed(1)}%`],
-        [t('analytics.cost'), it.est_cost_usd, fmtCost],
+        [t('analytics.cost'), it.cost_usd, fmtCost],
       ];
+      tooltipContent.push(chartTooltipMarkup(label, [
+        {label: t('analytics.requests'), value: Number(it.requests || 0).toLocaleString(), color: col},
+        {label: t('analytics.totalTokens'), value: Number(it.total_tokens || 0).toLocaleString(), color: '#22d3ee'},
+        {label: t('analytics.cost'), value: fmtCost(Number(it.cost_usd || 0)), color: '#34d399'},
+      ], [{label: currentLang === 'zh' ? '当前占比' : 'Share', value: pctTxt}]));
       const detailId = `${containerId}-legend-details-${idx}`;
       const detailRows = metrics.filter(([, value]) => value != null)
         .map(([name, value, format]) =>
           `<div class="legend-detail"><span>${name}</span><strong>${format(value)}</strong></div>`)
         .join('');
-      const filterKind = containerId === 'model-donut' ? 'model' : containerId === 'provider-donut' ? 'provider' : '';
-      const drilldown = label === 'Other' || !filterKind || it.account_usage ? '' :
+      const filterKind = dimension === 'model' ? 'model' : dimension === 'provider' ? 'provider' : '';
+      const isOther = it.name === 'Other' || it.name === '其他';
+      const drilldown = isOther || !filterKind ? '' :
         `<button type="button" class="legend-drilldown" data-filter-kind="${filterKind}" data-filter-value="${this.escapeHtml(label)}">${t('analytics.viewRequests')}</button>`;
       legend.push(
         `<div class="legend-entry">` +
           `<button type="button" class="legend-item" data-slice="${idx}" aria-expanded="false" aria-controls="${detailId}">` +
           `<span class="legend-swatch" style="background:${col}"></span>` +
           `<span class="legend-label">${this.escapeHtml(label)}</span>` +
-          `<span class="legend-value">${fmtTok(v)}</span>` +
+          `<span class="legend-value">${formatMetric(v)}</span>` +
           `<span class="legend-pct">${pctTxt}</span>` +
           `</button>` +
           `<div class="legend-details" id="${detailId}" hidden>${detailRows}${drilldown}</div>` +
@@ -2938,7 +3058,7 @@ const AnalyticsModule = {
       const arc = `<circle class="donut-arc" cx="${C}" cy="${C}" r="${R}" fill="none"` +
         ` stroke="${col}" stroke-width="${STROKE}"` +
         ` stroke-dasharray="${dash}" stroke-dashoffset="${(-offset * CIRC).toFixed(2)}"` +
-        ` data-tip="${tip}" id="slice-${containerId}-${idx}"></circle>`;
+        ` tabindex="0" role="button" aria-label="${this.escapeHtml(label)} ${pctTxt}" id="slice-${containerId}-${idx}"></circle>`;
       offset += drawFrac;
       return arc;
     }).join('');
@@ -2949,8 +3069,8 @@ const AnalyticsModule = {
           <svg viewBox="0 0 240 240" class="donut-svg" role="img">
             <circle cx="${C}" cy="${C}" r="${R}" fill="none" stroke="#343a41" stroke-width="${STROKE}" opacity=".55"></circle>
             <g transform="rotate(-90 ${C} ${C})">${arcs}</g>
-            <text x="${C}" y="${C - 4}" text-anchor="middle" class="donut-center-value">${fmtTok(total)}</text>
-            <text x="${C}" y="${C + 16}" text-anchor="middle" class="donut-center-label">Token</text>
+            <text x="${C}" y="${C - 4}" text-anchor="middle" class="donut-center-value">${formatMetric(total)}</text>
+            <text x="${C}" y="${C + 16}" text-anchor="middle" class="donut-center-label">${centerLabel}</text>
           </svg>
           <div id="${tooltipId}" class="chart-tip"></div>
         </div>
@@ -2958,35 +3078,11 @@ const AnalyticsModule = {
       </div>`;
     wrap.innerHTML = html;
 
-    // Hover wiring (JS listeners instead of inline handlers so the tooltip can
-    // follow the cursor and the matching legend row can highlight in sync).
     const tipEl = wrap.querySelector('#' + CSS.escape(tooltipId));
     const wrapEl = wrap.querySelector('.donut-svg-wrap');
-    wrap.querySelectorAll('.donut-arc').forEach((arc, idx) => {
-      const row = wrap.querySelector(`.legend-item[data-slice="${idx}"]`);
-      const show = (e) => {
-        tipEl.textContent = arc.getAttribute('data-tip');
-        tipEl.style.display = 'block';
-        arc.style.opacity = '0.78';
-        if (row) row.classList.add('is-active');
-        move(e);
-      };
-      const move = (e) => {
-        const r = wrapEl.getBoundingClientRect();
-        tipEl.style.left = (e.clientX - r.left + 12) + 'px';
-        tipEl.style.top = (e.clientY - r.top - 8) + 'px';
-      };
-      const hide = () => {
-        tipEl.style.display = 'none';
-        arc.style.opacity = '1';
-        if (row) row.classList.remove('is-active');
-      };
-      arc.addEventListener('mouseenter', show);
-      arc.addEventListener('mousemove', move);
-      arc.addEventListener('mouseleave', hide);
-    });
+    bindChartTooltip(wrapEl, tipEl, '.donut-arc', (_arc, index) => tooltipContent[index]);
     wrap.querySelectorAll('.legend-item').forEach(row => {
-      const details = document.getElementById(row.getAttribute('aria-controls'));
+      const details = wrap.querySelector('#' + CSS.escape(row.getAttribute('aria-controls')));
       row.addEventListener('click', () => {
         const expanded = row.getAttribute('aria-expanded') === 'true';
         row.setAttribute('aria-expanded', String(!expanded));
@@ -3015,8 +3111,8 @@ const AnalyticsModule = {
     else activateTab('history');
   },
 
-  renderTrend(points) {
-    const wrap = document.getElementById('token-trend');
+  renderTrend(points, containerId = 'token-trend') {
+    const wrap = document.getElementById(containerId);
     if (!wrap) return;
     wrap.innerHTML = '';
     if (!points.length) {
@@ -3037,8 +3133,6 @@ const AnalyticsModule = {
     const dayTotal = (p) => (p.input_tokens||0) + (p.output_tokens||0)
       + (p.cache_read_tokens||0) + (p.cache_creation_tokens||0);
     const maxV = Math.max(1, ...points.map(dayTotal));
-    const stepX = plotW / Math.max(1, points.length - 1);
-    const x = (i) => ml + i * stepX;
     const y = (v) => mt + plotH - (v || 0) / maxV * plotH;
 
     const fmt = (n) => {
@@ -3061,13 +3155,13 @@ const AnalyticsModule = {
     const stride = Math.max(1, Math.ceil(points.length / maxLabels));
     let xGrid = '';
     for (let i = 0; i < points.length; i += stride) {
-      const lx = x(i).toFixed(1);
+      const lx = (points.length === 1 ? ml + plotW / 2 : ml + i * plotW / (points.length - 1)).toFixed(1);
       xGrid += `<line x1="${lx}" y1="${mt}" x2="${lx}" y2="${h-mb}" stroke="${GRID}" stroke-width="1"/>`;
       xGrid += `<text x="${lx}" y="${h-mb+14}" text-anchor="middle" font-size="9.5" fill="${TXT}">${fmtDay(points[i].date||'')}</text>`;
     }
     // last point label included even if skipped
     if ((points.length-1) % stride !== 0) {
-      const lx = x(points.length-1).toFixed(1);
+      const lx = (ml + plotW).toFixed(1);
       xGrid += `<text x="${lx}" y="${h-mb+14}" text-anchor="middle" font-size="9.5" fill="${TXT}">${fmtDay(points[points.length-1].date||'')}</text>`;
     }
 
@@ -3076,15 +3170,18 @@ const AnalyticsModule = {
     // A single day renders a full-height stacked column; each segment has its
     // own native hover tooltip.
     const baseY = (h - mb);
-    const colW = Math.max(10, (plotW / points.length) * 0.55);
+    const slotW = plotW / points.length;
+    const colW = Math.min(42, Math.max(10, slotW * 0.55));
     const bars = points.map((p, i) => {
-      const cx = ml + i * (plotW / points.length) + (plotW / points.length) * 0.225;
+      const cx = ml + i * slotW + (slotW - colW) / 2;
       const inV = p.input_tokens || 0;
-      const cacheV = (p.cache_read_tokens || 0) + (p.cache_creation_tokens || 0);
+      const cacheReadV = p.cache_read_tokens || 0;
+      const cacheWriteV = p.cache_creation_tokens || 0;
       const outV = p.output_tokens || 0;
       const segs = [
         { v: outV, col: '#34d399', label: t('analytics.outputTokens') },
-        { v: cacheV, col: '#fbbf24', label: t('analytics.cacheTokens') },
+        { v: cacheReadV, col: '#22d3ee', label: t('detail.cacheRead') },
+        { v: cacheWriteV, col: '#fbbf24', label: t('detail.cacheCreation') },
         { v: inV, col: '#818cf8', label: t('analytics.inputTokens') },
       ];
       let yy = baseY;
@@ -3103,16 +3200,9 @@ const AnalyticsModule = {
       // Full-height transparent hit area: hovering anywhere in the day's column
       // (not just an individual segment) opens one tooltip listing all three
       // series, matching how the deepseek usage page behaves.
-      const tipRows = [
-        { v: inV, col: '#818cf8', label: t('analytics.inputTokens') },
-        { v: cacheV, col: '#fbbf24', label: t('analytics.cacheTokens') },
-        { v: outV, col: '#34d399', label: t('analytics.outputTokens') },
-      ].map(s => `<div class="tip-row"><span class="tip-dot" style="background:${s.col}"></span>` +
-        `<span class="tip-label">${s.label}</span><span class="tip-val">${(s.v||0).toLocaleString()}</span></div>`).join('');
-      const tipHtml = `<div class="tip-title">${p.date || ''}</div>${tipRows}`;
       const hit = `<rect class="trend-hit" x="${(cx - colW * 0.35).toFixed(1)}" y="${mt}"` +
         ` width="${(colW * 1.7).toFixed(1)}" height="${plotH.toFixed(1)}"` +
-        ` fill="transparent" data-tip="${this.escapeHtml(tipHtml)}"></rect>`;
+        ` fill="transparent" tabindex="0" role="button" aria-label="${this.escapeHtml(p.date || '')}"></rect>`;
       return rects + hit;
     }).join('');
 
@@ -3125,58 +3215,34 @@ const AnalyticsModule = {
           <line x1="${ml}" y1="${h-mb}" x2="${w-mr}" y2="${h-mb}" stroke="${AXIS}" stroke-width="1"/>
           ${bars}
         </svg>
-        <div class="chart-tip" id="trend-tip"></div>
+        <div class="chart-tip" id="${containerId}-tip"></div>
       </div>
       <div class="trend-legend">
         <span><span class="swatch" style="background:#818cf8;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.inputTokens')}</span>
-        <span><span class="swatch" style="background:#fbbf24;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.cacheTokens')}</span>
+        <span><span class="swatch" style="background:#22d3ee;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('detail.cacheRead')}</span>
+        <span><span class="swatch" style="background:#fbbf24;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('detail.cacheCreation')}</span>
         <span><span class="swatch" style="background:#34d399;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.outputTokens')}</span>
       </div>`;
     wrap.innerHTML = svg;
 
-    // Hover tooltip wiring (HTML floating tip, matching donut style)
-    const tipEl = wrap.querySelector('#trend-tip');
+    const tipEl = wrap.querySelector('#' + CSS.escape(containerId + '-tip'));
     const svgWrap = wrap.querySelector('svg').parentElement;
-    wrap.querySelectorAll('.trend-hit').forEach(hit => {
-      const show = (e) => {
-        tipEl.innerHTML = hit.getAttribute('data-tip');
-        tipEl.style.display = 'block';
-        move(e);
-      };
-      const move = (e) => {
-        const r = svgWrap.getBoundingClientRect();
-        tipEl.style.left = (e.clientX - r.left + 12) + 'px';
-        tipEl.style.top = (e.clientY - r.top - 8) + 'px';
-      };
-      const hide = () => { tipEl.style.display = 'none'; };
-      hit.addEventListener('mouseenter', show);
-      hit.addEventListener('mousemove', move);
-      hit.addEventListener('mouseleave', hide);
+    bindChartTooltip(svgWrap, tipEl, '.trend-hit', (_hit, index) => {
+      const point = points[index];
+      return chartTooltipMarkup(point.date || '', [
+        {label: t('analytics.inputTokens'), value: Number(point.input_tokens || 0).toLocaleString(), color: '#818cf8'},
+        {label: t('detail.cacheRead'), value: Number(point.cache_read_tokens || 0).toLocaleString(), color: '#22d3ee'},
+        {label: t('detail.cacheCreation'), value: Number(point.cache_creation_tokens || 0).toLocaleString(), color: '#fbbf24'},
+        {label: t('analytics.outputTokens'), value: Number(point.output_tokens || 0).toLocaleString(), color: '#34d399'},
+      ], [
+        {label: t('analytics.requests'), value: Number(point.requests || 0).toLocaleString()},
+        {label: t('analytics.cost'), value: fmtCost(Number(point.cost_usd ?? point.est_cost_usd ?? 0))},
+      ]);
     });
   },
 
-  renderRecent(items) {
-    const root = document.getElementById('analytics-recent');
-    if (!root) return;
-    if (!items.length) {
-      root.innerHTML = `<div class="empty-state">${t('analytics.noData')}</div>`;
-      return;
-    }
-    root.innerHTML = items.map(item => {
-      const cache = Number(item.cache_read_tokens || 0) + Number(item.cache_write_5m_tokens || 0) + Number(item.cache_write_1h_tokens || 0);
-      const tokens = Number(item.input_tokens || 0) + Number(item.output_tokens || 0) + cache;
-      const cost = Number(item.cost_units || 0) / 1e8 || Number(item.cost_usd || 0);
-      return `<div class="recent-usage-row">
-        <div class="recent-usage-model"><strong>${this.escapeHtml(item.model || '—')}</strong><span>${this.escapeHtml(item.provider || '—')} · ${this.escapeHtml(item.plan || '—')}</span></div>
-        <div class="recent-usage-meta">${fmtTime(item.time)}</div>
-        <div class="recent-usage-tokens">${fmtTok(tokens)} Token</div>
-        <div class="recent-usage-cost">${fmtCost(cost)}</div>
-      </div>`;
-    }).join('');
-  },
-
   renderEmpty(msg = 'No usage data yet. Run some requests or configure a model to see analytics.') {
-    ['model-donut','provider-donut','plan-donut','token-trend','analytics-recent'].forEach(id => {
+    ['model-donut','provider-donut','token-trend'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.innerHTML = `<div class="empty-state">${msg}</div>`;
     });

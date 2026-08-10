@@ -117,3 +117,34 @@ func TestRunCostsImportReplacesProviderUsage(t *testing.T) {
 		t.Fatalf("unexpected imported summary: %+v", summary)
 	}
 }
+
+func TestRunCostsSyncRequestsUsesPersistedSnapshot(t *testing.T) {
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "data.db")
+	configPath := writeTestConfigWithDB(t, tmp, dbPath)
+	db, err := storage.Open(storage.Config{DatabasePath: dbPath})
+	if err != nil {
+		t.Fatalf("open storage: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := db.ReplaceProviderUsage(context.Background(), now.Add(time.Minute), []storage.ProviderCostRecord{{
+		Time: now, Model: "model-a", Provider: "platform-a", InputTokens: 10, ProviderCostUnits: 1234,
+	}}); err != nil {
+		t.Fatalf("replace provider usage: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close storage: %v", err)
+	}
+
+	cmd, output := newCaptureCommand(t)
+	if err := runCostsSyncRequests(cmd, configPath, false); err != nil {
+		t.Fatalf("dry-run sync: %v", err)
+	}
+	var report storage.ProviderRequestSyncReport
+	if err := json.Unmarshal(output.Bytes(), &report); err != nil {
+		t.Fatalf("decode sync report: %v", err)
+	}
+	if report.SnapshotRows != 1 || report.WouldInsert != 1 || report.Inserted != 0 {
+		t.Fatalf("unexpected sync report: %+v", report)
+	}
+}

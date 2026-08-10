@@ -83,6 +83,7 @@ const TRANSLATIONS = {
     'th.inputTokens': 'Input Tokens',
     'th.promptTokens': 'Prompt Tokens',
     'th.outputTokens': 'Output Tokens',
+    'th.cost': 'Est. Cost',
     'th.duration': 'Duration',
     'th.status': 'Status',
     'empty.noHistory': 'No history yet',
@@ -267,6 +268,7 @@ const TRANSLATIONS = {
     'th.inputTokens': '输入 Token',
     'th.promptTokens': 'Prompt Token',
     'th.outputTokens': '输出 Token',
+    'th.cost': '预估费用',
     'th.duration': '耗时',
     'th.status': '状态',
     'empty.noHistory': '暂无历史请求',
@@ -802,7 +804,7 @@ function renderHistory() {
     historyTotal + t('status.count') + (historyHasFilters() ? t('status.filtered') : '');
 
   if (allHistory.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">' + t('empty.noHistory') + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">' + t('empty.noHistory') + '</td></tr>';
     return;
   }
 
@@ -822,6 +824,7 @@ function renderHistory() {
       <td><span class="badge badge-scene">${escapeHtml(h.scenario) || '—'}</span></td>
       <td>${h.prompt_tokens != null ? h.prompt_tokens.toLocaleString() : '—'}</td>
       <td>${h.output_tokens != null ? h.output_tokens.toLocaleString() : '—'}</td>
+      <td>${h.cost_usd != null ? fmtCost(h.cost_usd) : '—'}</td>
       <td>${fmtDuration(h.duration_ms)}</td>
       <td><span class="badge ${h.success ? 'badge-success' : 'badge-error'}">${h.success ? t('badge.success') : t('badge.fail')}</span></td>
     </tr>
@@ -979,6 +982,7 @@ const HISTORY_CSV_COLUMNS = [
   ['cache_read_tokens', r => r.cache_read_tokens],
   ['cache_creation_tokens', r => r.cache_creation_tokens],
   ['output_tokens', r => r.output_tokens],
+  ['cost_usd', r => r.cost_usd],
   ['duration_ms', r => r.duration_ms],
   ['streaming', r => r.streaming],
   ['attempt', r => r.attempt],
@@ -1432,6 +1436,10 @@ function showHistoryDetail(record) {
     <div class="detail-row">
       <span class="detail-label">Output Tokens</span>
       <span class="detail-value">${record.output_tokens != null ? record.output_tokens.toLocaleString() : '—'}</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">Est. Cost</span>
+      <span class="detail-value">${record.cost_usd != null ? fmtCost(record.cost_usd) : '—'}</span>
     </div>
     <div class="detail-row">
       <span class="detail-label">Duration</span>

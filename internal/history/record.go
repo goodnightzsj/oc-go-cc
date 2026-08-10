@@ -15,6 +15,8 @@ type RequestRecord struct {
 	OutputTokens        int           // output tokens from SSE usage event
 	CacheReadTokens     int           // prompt-cache read tokens
 	CacheCreationTokens int           // prompt-cache write tokens
+	CostUSD             float64       // estimated provider cost in USD
+	CostKnown           bool          // whether CostUSD is available
 	Streaming           bool          // whether this was a streaming request
 
 	Success  bool   // whether it completed successfully

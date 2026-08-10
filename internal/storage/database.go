@@ -154,10 +154,17 @@ func Open(cfg Config) (*Database, error) {
 	if err := database.migrateAddCacheColumns(ctx); err != nil {
 		slog.Warn("migration warning", "err", err)
 	}
+	if err := database.migrateAddCostColumn(ctx); err != nil {
+		_ = database.Close()
+		return nil, fmt.Errorf("migrate request cost column: %w", err)
+	}
 
 	// Seed default model prices so analytics dashboard shows meaningful
 	// cost numbers immediately for new/existing installs. Idempotent.
 	_ = database.SeedDefaultModelPrices(ctx)
+	if _, err := database.BackfillRequestCosts(ctx); err != nil {
+		slog.Warn("request cost backfill warning", "err", err)
+	}
 
 	if cfg.VacuumOnStartup {
 		if _, err := db.ExecContext(ctx, "VACUUM"); err != nil {
@@ -182,6 +189,7 @@ func (d *Database) initSchema(ctx context.Context) error {
 		output_tokens INTEGER,
 		cache_read_tokens INTEGER DEFAULT 0,
 		cache_creation_tokens INTEGER DEFAULT 0,
+		cost_usd REAL,
 		streaming INTEGER,
 		success INTEGER,
 		error_msg TEXT,
@@ -299,6 +307,88 @@ func (d *Database) migrateAddCacheColumns(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// migrateAddCostColumn adds the per-request cost column to existing databases.
+func (d *Database) migrateAddCostColumn(ctx context.Context) error {
+	_, err := d.db.ExecContext(ctx, `ALTER TABLE requests ADD COLUMN cost_usd REAL`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		return err
+	}
+	return nil
+}
+
+// BackfillRequestCosts fills missing trustworthy per-request costs using the
+// same pricing rules as analytics aggregates.
+func (d *Database) BackfillRequestCosts(ctx context.Context) (int64, error) {
+	baseline := ""
+	if !d.analyticsBaseline.IsZero() {
+		baseline = d.analyticsBaseline.Format(time.RFC3339Nano)
+	}
+	rows, err := d.db.QueryContext(ctx, `
+		SELECT r.id, r.model,
+		       COALESCE(r.input_tokens, 0),
+		       COALESCE(r.output_tokens, 0),
+		       COALESCE(r.cache_read_tokens, 0),
+		       COALESCE(r.cache_creation_tokens, 0),
+		       COALESCE(m.cost_input_per_m, 0),
+		       COALESCE(m.cost_output_per_m, 0)
+		FROM requests r
+		LEFT JOIN models m ON m.id = r.model
+		WHERE r.cost_usd IS NULL
+		  AND (? = '' OR r.start_time >= ?)
+	`, baseline, baseline)
+	if err != nil {
+		return 0, err
+	}
+	type requestCostRow struct {
+		id                                      string
+		model                                   string
+		input, output, cacheRead, cacheCreation int64
+		modelsInputPerM, modelsOutputPerM       float64
+	}
+	var pending []requestCostRow
+	for rows.Next() {
+		var row requestCostRow
+		if err := rows.Scan(&row.id, &row.model, &row.input, &row.output, &row.cacheRead, &row.cacheCreation, &row.modelsInputPerM, &row.modelsOutputPerM); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		pending = append(pending, row)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	if len(pending) == 0 {
+		return 0, nil
+	}
+
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	stmt, err := tx.PrepareContext(ctx, `UPDATE requests SET cost_usd = ? WHERE id = ?`)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+	defer func() { _ = stmt.Close() }()
+
+	var updated int64
+	for _, row := range pending {
+		cost := costForTokens(row.model, row.input, row.output, row.cacheRead, row.cacheCreation, row.modelsInputPerM, row.modelsOutputPerM)
+		res, err := stmt.ExecContext(ctx, cost, row.id)
+		if err != nil {
+			_ = tx.Rollback()
+			return updated, err
+		}
+		n, _ := res.RowsAffected()
+		updated += n
+	}
+	if err := tx.Commit(); err != nil {
+		return updated, err
+	}
+	return updated, nil
 }
 
 func (d *Database) Close() error {

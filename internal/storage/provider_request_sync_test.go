@@ -92,7 +92,7 @@ func TestSyncProviderUsageRequestsCorrectsHistoryAndIsIdempotent(t *testing.T) {
 			imported = rec
 		}
 	}
-	if imported.ID == "" || imported.DetailsKnown || imported.Model != "kimi-k2.6" || imported.Provider != "platform-a" || imported.CacheCreationTokens != 5 {
+	if imported.ID == "" || imported.DetailsKnown || imported.Model != "kimi-k2.6" || imported.Provider != "platform-a" || imported.Scenario != "override" || imported.CacheCreationTokens != 5 {
 		t.Fatalf("unexpected imported row: %+v", imported)
 	}
 	if byID["exact-local"].Provider != "platform-a" {
@@ -106,6 +106,26 @@ func TestSyncProviderUsageRequestsCorrectsHistoryAndIsIdempotent(t *testing.T) {
 	}
 	if summary.TotalRequests != 3 {
 		t.Fatalf("analytics requests = %d, want both corrected rows plus later live row", summary.TotalRequests)
+	}
+	if _, err := db.DB().Exec(`UPDATE requests SET scenario = '' WHERE id = ?`, imported.ID); err != nil {
+		t.Fatalf("clear imported scenario: %v", err)
+	}
+	scenarioDryRun, err := db.SyncProviderUsageRequests(context.Background(), false)
+	if err != nil {
+		t.Fatalf("scenario dry run: %v", err)
+	}
+	if scenarioDryRun.WouldUpdate != 1 {
+		t.Fatalf("scenario dry run updates = %d, want 1", scenarioDryRun.WouldUpdate)
+	}
+	if _, err := db.SyncProviderUsageRequests(context.Background(), true); err != nil {
+		t.Fatalf("repair imported scenario: %v", err)
+	}
+	var repairedScenario string
+	if err := db.DB().QueryRow(`SELECT scenario FROM requests WHERE id = ?`, imported.ID).Scan(&repairedScenario); err != nil {
+		t.Fatalf("read repaired scenario: %v", err)
+	}
+	if repairedScenario != "override" {
+		t.Fatalf("repaired scenario = %q, want override", repairedScenario)
 	}
 
 	idempotent, err := db.SyncProviderUsageRequests(context.Background(), true)

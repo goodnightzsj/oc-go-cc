@@ -196,12 +196,16 @@ func (r *Requests) Summary(q RequestQuery) (*RequestSummary, error) {
 	}{
 		{"model", &out.Models}, {"provider", &out.Providers}, {"scenario", &out.Scenarios},
 	} {
+		dimension := spec.column
+		if spec.column == "scenario" {
+			dimension = "CASE WHEN LOWER(TRIM(COALESCE(scenario, ''))) IN ('', 'unknown') THEN 'override' ELSE scenario END"
+		}
 		rows, err := r.db.DB().QueryContext(ctx, `
-			SELECT COALESCE(NULLIF(`+spec.column+`, ''), 'unknown'), COUNT(*),
+			SELECT `+dimension+`, COUNT(*),
 			       COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) +
 			                    COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0)), 0),
 			       COALESCE(SUM(cost_usd), 0)
-			FROM requests`+where+` GROUP BY `+spec.column+` ORDER BY COUNT(*) DESC, `+spec.column, args...)
+			FROM requests`+where+` GROUP BY `+dimension+` ORDER BY COUNT(*) DESC, `+dimension, args...)
 		if err != nil {
 			return nil, err
 		}

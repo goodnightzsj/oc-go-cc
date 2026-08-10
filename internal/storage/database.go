@@ -97,6 +97,9 @@ func Open(cfg Config) (*Database, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("create database directory: %w", err)
 	}
+	if err := prepareDatabaseFile(path); err != nil {
+		return nil, err
+	}
 
 	// modernc.org/sqlite only parses the _pragma, _time_format and _txlock DSN
 	// parameters. The bare _journal_mode / _synchronous / _busy_timeout form
@@ -158,6 +161,14 @@ func Open(cfg Config) (*Database, error) {
 		_ = database.Close()
 		return nil, fmt.Errorf("migrate request cost column: %w", err)
 	}
+	if err := database.migrateAddCostSourceColumn(ctx); err != nil {
+		_ = database.Close()
+		return nil, fmt.Errorf("migrate request cost source column: %w", err)
+	}
+	if err := database.clearCatalogAPIKeys(ctx); err != nil {
+		_ = database.Close()
+		return nil, fmt.Errorf("clear persisted catalog API keys: %w", err)
+	}
 
 	// Seed default model prices so analytics dashboard shows meaningful
 	// cost numbers immediately for new/existing installs. Idempotent.
@@ -172,8 +183,36 @@ func Open(cfg Config) (*Database, error) {
 			return nil, fmt.Errorf("vacuum: %w", err)
 		}
 	}
+	if err := secureDatabaseFiles(path); err != nil {
+		_ = database.Close()
+		return nil, err
+	}
 
 	return database, nil
+}
+
+func prepareDatabaseFile(path string) error {
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0600)
+	if err != nil {
+		return fmt.Errorf("prepare database file: %w", err)
+	}
+	if err := file.Chmod(0600); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("secure database file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close database file: %w", err)
+	}
+	return nil
+}
+
+func secureDatabaseFiles(path string) error {
+	for _, candidate := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.Chmod(candidate, 0600); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("secure database file %q: %w", candidate, err)
+		}
+	}
+	return nil
 }
 
 func (d *Database) initSchema(ctx context.Context) error {
@@ -190,6 +229,7 @@ func (d *Database) initSchema(ctx context.Context) error {
 		cache_read_tokens INTEGER DEFAULT 0,
 		cache_creation_tokens INTEGER DEFAULT 0,
 		cost_usd REAL,
+		cost_source TEXT,
 		streaming INTEGER,
 		success INTEGER,
 		error_msg TEXT,
@@ -318,6 +358,26 @@ func (d *Database) migrateAddCostColumn(ctx context.Context) error {
 	return nil
 }
 
+func (d *Database) migrateAddCostSourceColumn(ctx context.Context) error {
+	_, err := d.db.ExecContext(ctx, `ALTER TABLE requests ADD COLUMN cost_source TEXT`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		return err
+	}
+	_, err = d.db.ExecContext(ctx, `
+		UPDATE requests
+		SET cost_source = 'estimated'
+		WHERE cost_usd IS NOT NULL AND (cost_source IS NULL OR cost_source = '')
+	`)
+	return err
+}
+
+// clearCatalogAPIKeys removes credentials written by versions that treated the
+// catalog as a credential source. Runtime authentication is config-owned.
+func (d *Database) clearCatalogAPIKeys(ctx context.Context) error {
+	_, err := d.db.ExecContext(ctx, `UPDATE providers SET api_key = NULL WHERE api_key IS NOT NULL`)
+	return err
+}
+
 // BackfillRequestCosts fills missing trustworthy per-request costs using the
 // same pricing rules as analytics aggregates.
 func (d *Database) BackfillRequestCosts(ctx context.Context) (int64, error) {
@@ -367,7 +427,7 @@ func (d *Database) BackfillRequestCosts(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	stmt, err := tx.PrepareContext(ctx, `UPDATE requests SET cost_usd = ? WHERE id = ?`)
+	stmt, err := tx.PrepareContext(ctx, `UPDATE requests SET cost_usd = ?, cost_source = ? WHERE id = ?`)
 	if err != nil {
 		_ = tx.Rollback()
 		return 0, err
@@ -377,7 +437,7 @@ func (d *Database) BackfillRequestCosts(ctx context.Context) (int64, error) {
 	var updated int64
 	for _, row := range pending {
 		cost := costForTokens(row.model, row.input, row.output, row.cacheRead, row.cacheCreation, row.modelsInputPerM, row.modelsOutputPerM)
-		res, err := stmt.ExecContext(ctx, cost, row.id)
+		res, err := stmt.ExecContext(ctx, cost, CostSourceEstimated, row.id)
 		if err != nil {
 			_ = tx.Rollback()
 			return updated, err

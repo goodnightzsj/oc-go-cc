@@ -12,7 +12,7 @@ import (
 
 const testCatalogFixture = `{
   "providers": {
-    "opencode-go": {"name": "opencode-go", "base_url": "https://opencode.ai/zen/go/v1/chat/completions", "enabled": true},
+    "opencode-go": {"name": "opencode-go", "base_url": "https://opencode.ai/zen/go/v1/chat/completions", "api_key": "must-not-persist", "enabled": true},
     "opencode-zen": {"name": "opencode-zen", "base_url": "https://opencode.ai/zen/v1/chat/completions", "enabled": true}
   },
   "models": {
@@ -68,5 +68,13 @@ func TestMigrateFromJSON(t *testing.T) {
 	}
 	if len(idx.Models) != 2 {
 		t.Errorf("expected 2 models, got %d", len(idx.Models))
+	}
+
+	var persistedKey *string
+	if err := db.DB().QueryRowContext(ctx, `SELECT api_key FROM providers WHERE name = 'opencode-go'`).Scan(&persistedKey); err != nil {
+		t.Fatalf("read persisted catalog API key: %v", err)
+	}
+	if persistedKey != nil {
+		t.Errorf("persisted catalog API key = %q, want NULL", *persistedKey)
 	}
 }

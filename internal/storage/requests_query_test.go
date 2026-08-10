@@ -17,7 +17,7 @@ func TestRequestsQueryFiltersAndSortsFullDataset(t *testing.T) {
 	for _, rec := range []history.RequestRecord{
 		{ID: "r1", Model: "model-a", Provider: "provider-a", Scenario: "default", StartTime: base.Add(time.Hour), InputTokens: 10, CacheReadTokens: 20, Duration: 100 * time.Millisecond, Success: true},
 		{ID: "r2", Model: "model-b", Provider: "provider-a", Scenario: "complex", StartTime: base.Add(2 * time.Hour), InputTokens: 5, OutputTokens: 30, Duration: 300 * time.Millisecond, Streaming: true, Success: false, ErrorMsg: "quota exceeded"},
-		{ID: "r3", Model: "model-b", Provider: "provider-b", Scenario: "complex", StartTime: base.Add(3 * time.Hour), InputTokens: 100, OutputTokens: 10, Streaming: true, Success: true},
+		{ID: "r3", Model: "model-b", Provider: "provider-b", Scenario: "complex", StartTime: base.Add(3 * time.Hour), InputTokens: 100, OutputTokens: 10, CostUSD: 0.25, CostKnown: true, CostSource: CostSourceProvider, Streaming: true, Success: true},
 		{ID: "r4", Model: "model-c", Provider: "provider-b", Scenario: "default", StartTime: base.Add(48 * time.Hour), Success: true},
 	} {
 		if err := repo.Insert(rec); err != nil {
@@ -55,6 +55,14 @@ func TestRequestsQueryFiltersAndSortsFullDataset(t *testing.T) {
 	}
 	if total != 1 || len(rows) != 1 || rows[0].ID != "r3" {
 		t.Fatalf("exact-filter rows = %+v, total = %d; want only r3", rows, total)
+	}
+
+	rows, total, err = repo.Query(RequestQuery{Page: 1, PageSize: 50, CostSource: CostSourceProvider})
+	if err != nil {
+		t.Fatalf("cost-source filter: %v", err)
+	}
+	if total != 1 || len(rows) != 1 || rows[0].ID != "r3" {
+		t.Fatalf("provider-cost rows = %+v, total = %d; want only r3", rows, total)
 	}
 
 	rows, total, err = repo.Query(RequestQuery{Page: 1, PageSize: 50, SortBy: "cost_usd", SortOrder: "desc"})

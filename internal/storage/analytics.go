@@ -56,6 +56,8 @@ type TokenSummary struct {
 	CacheCreationTokens int64     `json:"cache_creation_tokens"`
 	SuccessRate         float64   `json:"success_rate"` // 0-1
 	EstCostUSD          float64   `json:"est_cost_usd"`
+	ProviderCostRows    int64     `json:"provider_cost_rows"`
+	EstimatedCostRows   int64     `json:"estimated_cost_rows"`
 	PeriodStart         time.Time `json:"period_start"`
 	PeriodEnd           time.Time `json:"period_end"`
 }
@@ -84,13 +86,16 @@ func (a *Analytics) GetTokenSummary(days int) (*TokenSummary, error) {
 			CASE
 				WHEN COUNT(*) > 0 THEN CAST(SUM(success) AS FLOAT) / COUNT(*)
 				ELSE 0
-			END AS success_rate
+			END AS success_rate,
+			COUNT(CASE WHEN cost_source = 'provider' THEN 1 END) AS provider_cost_rows,
+			COUNT(CASE WHEN cost_usd IS NOT NULL AND COALESCE(cost_source, 'estimated') != 'provider' THEN 1 END) AS estimated_cost_rows
 		FROM requests r
 		WHERE r.start_time >= ?
 	`, since.Format(time.RFC3339Nano))
 
 	var scanErr error
-	if scanErr = row.Scan(&summary.TotalRequests, &summary.InputTokens, &summary.OutputTokens, &summary.CacheReadTokens, &summary.CacheCreationTokens, &summary.SuccessRate); scanErr != nil {
+	if scanErr = row.Scan(&summary.TotalRequests, &summary.InputTokens, &summary.OutputTokens, &summary.CacheReadTokens, &summary.CacheCreationTokens,
+		&summary.SuccessRate, &summary.ProviderCostRows, &summary.EstimatedCostRows); scanErr != nil {
 		return nil, scanErr
 	}
 

@@ -22,7 +22,6 @@ func NewCatalogRepo(db *Database) *CatalogRepo {
 type ProviderRecord struct {
 	Name                   string
 	BaseURL                string
-	APIKey                 string
 	Enabled                *bool
 	AnthropicToolsDisabled bool
 }
@@ -43,7 +42,6 @@ type ModelRecord struct {
 type Provider struct {
 	Name                   string
 	BaseURL                string
-	APIKey                 string
 	Enabled                *bool
 	AnthropicToolsDisabled bool
 }
@@ -135,10 +133,14 @@ func (r *CatalogRepo) UpsertBatch(ctx context.Context, providers []ProviderRecor
 		}
 
 		_, err := tx.ExecContext(ctx, `
-			INSERT OR REPLACE INTO providers (name, base_url, api_key, enabled, anthropic_tools_disabled, created_at)
-			VALUES (?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM providers WHERE name = ?), ?))
-		`,
-			p.Name, p.BaseURL, p.APIKey, enabled, anthropicToolsDisabled, p.Name, now)
+			INSERT INTO providers (name, base_url, api_key, enabled, anthropic_tools_disabled, created_at)
+			VALUES (?, ?, NULL, ?, ?, ?)
+			ON CONFLICT(name) DO UPDATE SET
+				base_url = excluded.base_url,
+				api_key = NULL,
+				enabled = excluded.enabled,
+				anthropic_tools_disabled = excluded.anthropic_tools_disabled
+		`, p.Name, p.BaseURL, enabled, anthropicToolsDisabled, now)
 		if err != nil {
 			return err
 		}
@@ -188,7 +190,7 @@ func (r *CatalogRepo) Load(ctx context.Context) (*IndexedCatalog, error) {
 	models := make(map[string]Model)
 
 	rows, err := r.db.DB().QueryContext(ctx, `
-		SELECT name, base_url, api_key, enabled, anthropic_tools_disabled
+		SELECT name, base_url, enabled, anthropic_tools_disabled
 		FROM providers
 	`)
 	if err != nil {
@@ -201,7 +203,7 @@ func (r *CatalogRepo) Load(ctx context.Context) (*IndexedCatalog, error) {
 		var enabled sql.NullBool
 		var anthropicToolsDisabled int
 
-		if err := rows.Scan(&p.Name, &p.BaseURL, &p.APIKey, &enabled, &anthropicToolsDisabled); err != nil {
+		if err := rows.Scan(&p.Name, &p.BaseURL, &enabled, &anthropicToolsDisabled); err != nil {
 			return nil, err
 		}
 		if enabled.Valid {

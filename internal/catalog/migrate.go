@@ -70,7 +70,6 @@ func ExportJSON(ctx context.Context, db *storage.Database, jsonPath string) erro
 		catalog.Providers[name] = Provider{
 			Name:                   p.Name,
 			BaseURL:                p.BaseURL,
-			APIKey:                 p.APIKey,
 			Enabled:                p.Enabled,
 			AnthropicToolsDisabled: p.AnthropicToolsDisabled,
 		}
@@ -103,7 +102,6 @@ func LoadFromSQLite(ctx context.Context, db *storage.Database) (*IndexedCatalog,
 		cat.Providers[name] = Provider{
 			Name:                   p.Name,
 			BaseURL:                p.BaseURL,
-			APIKey:                 p.APIKey,
 			Enabled:                p.Enabled,
 			AnthropicToolsDisabled: p.AnthropicToolsDisabled,
 		}
@@ -226,7 +224,6 @@ func providerToStorageRecord(name string, p Provider) storage.ProviderRecord {
 	return storage.ProviderRecord{
 		Name:                   name,
 		BaseURL:                p.BaseURL,
-		APIKey:                 p.APIKey,
 		Enabled:                p.Enabled,
 		AnthropicToolsDisabled: p.AnthropicToolsDisabled,
 	}

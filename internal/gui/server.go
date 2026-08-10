@@ -430,6 +430,7 @@ type historyEntry struct {
 	CacheReadTokens     int      `json:"cache_read_tokens"`
 	CacheCreationTokens int      `json:"cache_creation_tokens"`
 	CostUSD             *float64 `json:"cost_usd"`
+	CostSource          string   `json:"cost_source,omitempty"`
 	Streaming           bool     `json:"streaming"`
 	Attempt             int      `json:"attempt"`
 	Success             bool     `json:"success"`
@@ -489,14 +490,18 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 func historyRequestQuery(r *http.Request, page, size int) (storage.RequestQuery, error) {
 	values := r.URL.Query()
 	q := storage.RequestQuery{
-		Page:      page,
-		PageSize:  size,
-		Search:    strings.TrimSpace(values.Get("search")),
-		Model:     strings.TrimSpace(values.Get("model")),
-		Provider:  strings.TrimSpace(values.Get("provider")),
-		Scenario:  strings.TrimSpace(values.Get("scenario")),
-		SortBy:    values.Get("sort"),
-		SortOrder: values.Get("order"),
+		Page:       page,
+		PageSize:   size,
+		Search:     strings.TrimSpace(values.Get("search")),
+		Model:      strings.TrimSpace(values.Get("model")),
+		Provider:   strings.TrimSpace(values.Get("provider")),
+		Scenario:   strings.TrimSpace(values.Get("scenario")),
+		CostSource: strings.TrimSpace(values.Get("cost_source")),
+		SortBy:     values.Get("sort"),
+		SortOrder:  values.Get("order"),
+	}
+	if q.CostSource != "" && q.CostSource != storage.CostSourceProvider && q.CostSource != storage.CostSourceEstimated {
+		return q, errors.New("invalid cost_source")
 	}
 
 	var err error
@@ -557,7 +562,8 @@ func filterMemoryHistory(records []history.RequestRecord, q storage.RequestQuery
 		}
 		if (q.Model != "" && rec.Model != q.Model) ||
 			(q.Provider != "" && rec.Provider != q.Provider) ||
-			(q.Scenario != "" && rec.Scenario != q.Scenario) {
+			(q.Scenario != "" && rec.Scenario != q.Scenario) ||
+			(q.CostSource != "" && rec.CostSource != q.CostSource) {
 			continue
 		}
 		if (q.Start != nil && rec.StartTime.Before(*q.Start)) ||
@@ -665,6 +671,7 @@ func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 		}
 		if rec.CostKnown || rec.CostUSD != 0 {
 			entry.CostUSD = &rec.CostUSD
+			entry.CostSource = rec.CostSource
 		}
 		out[i] = entry
 	}

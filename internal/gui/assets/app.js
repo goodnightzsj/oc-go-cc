@@ -29,8 +29,12 @@ const TRANSLATIONS = {
     'analytics.requestsUnit': 'requests',
     'analytics.totalTokens': 'Total Tokens',
     'analytics.inout': 'in / out',
-    'analytics.estCost': 'Est. Cost',
-    'analytics.costUnit': 'USD (est.)',
+    'analytics.cost': 'Cost',
+    'analytics.costEstimated': 'Estimated',
+    'analytics.costProvider': 'Provider-reported',
+    'analytics.costMixed': '{provider}/{total} provider-reported',
+    'analytics.costSourceProvider': 'Provider-reported cost',
+    'analytics.costSourceEstimated': 'Estimated cost',
     'analytics.p95Latency': 'p95 Latency',
     'analytics.latencyUnit': 'request-weighted',
     'analytics.cacheHitShort': 'cache hit',
@@ -74,7 +78,11 @@ const TRANSLATIONS = {
     'filter.allStreams': 'All request types',
     'filter.streaming': 'Streaming only',
     'filter.nonStreaming': 'Non-streaming only',
+    'filter.allCostSources': 'All cost sources',
+    'filter.providerCost': 'Provider-reported',
+    'filter.estimatedCost': 'Estimated',
     'filter.reset': 'Reset',
+    'history.title': 'Request History',
     'history.searchPlaceholder': 'Search ID, model, provider, scenario, or error…',
     'analytics.viewRequests': 'View requests',
     'th.time': 'Time',
@@ -83,7 +91,7 @@ const TRANSLATIONS = {
     'th.inputTokens': 'Input Tokens',
     'th.promptTokens': 'Prompt Tokens',
     'th.outputTokens': 'Output Tokens',
-    'th.cost': 'Est. Cost',
+    'th.cost': 'Cost',
     'th.duration': 'Duration',
     'th.status': 'Status',
     'empty.noHistory': 'No history yet',
@@ -213,8 +221,12 @@ const TRANSLATIONS = {
     'analytics.requestsUnit': '次',
     'analytics.totalTokens': '总 Token',
     'analytics.inout': '输入 / 输出',
-    'analytics.estCost': '预估费用',
-    'analytics.costUnit': 'USD（预估）',
+    'analytics.cost': '费用',
+    'analytics.costEstimated': '预估',
+    'analytics.costProvider': '供应商原始费用',
+    'analytics.costMixed': '{provider}/{total} 条为供应商原始费用',
+    'analytics.costSourceProvider': '供应商原始费用',
+    'analytics.costSourceEstimated': '预估费用',
     'analytics.p95Latency': 'p95 延迟',
     'analytics.latencyUnit': '按请求数加权',
     'analytics.cacheHitShort': '缓存命中',
@@ -259,7 +271,11 @@ const TRANSLATIONS = {
     'filter.allStreams': '全部请求类型',
     'filter.streaming': '仅流式',
     'filter.nonStreaming': '仅非流式',
+    'filter.allCostSources': '全部费用来源',
+    'filter.providerCost': '供应商原始费用',
+    'filter.estimatedCost': '预估费用',
     'filter.reset': '重置',
+    'history.title': '请求记录',
     'history.searchPlaceholder': '搜索请求 ID、模型、供应商、场景或错误…',
     'analytics.viewRequests': '查看请求',
     'th.time': '时间',
@@ -268,7 +284,7 @@ const TRANSLATIONS = {
     'th.inputTokens': '输入 Token',
     'th.promptTokens': 'Prompt Token',
     'th.outputTokens': '输出 Token',
-    'th.cost': '预估费用',
+    'th.cost': '费用',
     'th.duration': '耗时',
     'th.status': '状态',
     'empty.noHistory': '暂无历史请求',
@@ -723,6 +739,7 @@ function historyQueryParams(page = historyPage, size = historySize) {
     model: document.getElementById('model-filter')?.value.trim(),
     provider: document.getElementById('provider-filter')?.value.trim(),
     scenario: document.getElementById('scenario-filter')?.value.trim(),
+    cost_source: document.getElementById('cost-source-filter')?.value,
     success: document.getElementById('status-filter')?.value,
     streaming: document.getElementById('streaming-filter')?.value,
   };
@@ -740,13 +757,13 @@ function historyQueryParams(page = historyPage, size = historySize) {
 
 function historyHasFilters() {
   return ['history-search', 'history-start', 'history-end', 'model-filter', 'provider-filter',
-    'scenario-filter', 'status-filter', 'streaming-filter']
+    'scenario-filter', 'status-filter', 'streaming-filter', 'cost-source-filter']
     .some(id => document.getElementById(id)?.value);
 }
 
 function resetHistoryFilters(refresh = true) {
   ['history-search', 'history-start', 'history-end', 'model-filter', 'provider-filter',
-    'scenario-filter', 'status-filter', 'streaming-filter'].forEach(id => {
+    'scenario-filter', 'status-filter', 'streaming-filter', 'cost-source-filter'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = '';
     });
@@ -817,6 +834,11 @@ function renderHistory() {
 
   tbody.innerHTML = limited.map(h => {
     const rowId = h.id || `${h.start_time}_${h.model || 'unknown'}_${h.duration_ms || 0}`;
+    const costSource = h.cost_source === 'provider' ? 'provider' : 'estimated';
+    const costSourceLabel = t(costSource === 'provider' ? 'analytics.costSourceProvider' : 'analytics.costSourceEstimated');
+    const cost = h.cost_usd != null
+      ? `<span class="cost-value"><span class="cost-source-dot ${costSource === 'provider' ? 'provider' : ''}" title="${escapeHtml(costSourceLabel)}" aria-label="${escapeHtml(costSourceLabel)}"></span>${fmtCost(h.cost_usd)}</span>`
+      : '—';
     return `
     <tr data-id="${escapeHtml(rowId)}" tabindex="0" aria-haspopup="dialog" style="cursor: pointer;">
       <td>${fmtTime(h.start_time)}</td>
@@ -824,7 +846,7 @@ function renderHistory() {
       <td><span class="badge badge-scene">${escapeHtml(h.scenario) || '—'}</span></td>
       <td>${h.prompt_tokens != null ? h.prompt_tokens.toLocaleString() : '—'}</td>
       <td>${h.output_tokens != null ? h.output_tokens.toLocaleString() : '—'}</td>
-      <td>${h.cost_usd != null ? fmtCost(h.cost_usd) : '—'}</td>
+      <td>${cost}</td>
       <td>${fmtDuration(h.duration_ms)}</td>
       <td><span class="badge ${h.success ? 'badge-success' : 'badge-error'}">${h.success ? t('badge.success') : t('badge.fail')}</span></td>
     </tr>
@@ -983,6 +1005,7 @@ const HISTORY_CSV_COLUMNS = [
   ['cache_creation_tokens', r => r.cache_creation_tokens],
   ['output_tokens', r => r.output_tokens],
   ['cost_usd', r => r.cost_usd],
+  ['cost_source', r => r.cost_source || ''],
   ['duration_ms', r => r.duration_ms],
   ['streaming', r => r.streaming],
   ['attempt', r => r.attempt],
@@ -1349,7 +1372,7 @@ function scheduleHistoryRefresh() {
 ['history-search', 'model-filter', 'provider-filter', 'scenario-filter'].forEach(id => {
   document.getElementById(id)?.addEventListener('input', scheduleHistoryRefresh);
 });
-['history-start', 'history-end', 'status-filter', 'streaming-filter'].forEach(id => {
+['history-start', 'history-end', 'status-filter', 'streaming-filter', 'cost-source-filter'].forEach(id => {
   document.getElementById(id)?.addEventListener('change', scheduleHistoryRefresh);
 });
 document.getElementById('history-reset')?.addEventListener('click', () => resetHistoryFilters());
@@ -1388,6 +1411,8 @@ const modalClose = document.getElementById('modal-close');
 let modalReturnFocus = null;
 
 function showHistoryDetail(record) {
+  const costSource = record.cost_source === 'provider' ? 'provider' : 'estimated';
+  const costSourceLabel = t(costSource === 'provider' ? 'analytics.costSourceProvider' : 'analytics.costSourceEstimated');
   modalBody.innerHTML = `
     <div class="detail-row">
       <span class="detail-label">Request ID</span>
@@ -1438,8 +1463,8 @@ function showHistoryDetail(record) {
       <span class="detail-value">${record.output_tokens != null ? record.output_tokens.toLocaleString() : '—'}</span>
     </div>
     <div class="detail-row">
-      <span class="detail-label">Est. Cost</span>
-      <span class="detail-value">${record.cost_usd != null ? fmtCost(record.cost_usd) : '—'}</span>
+      <span class="detail-label">${t('analytics.cost')}</span>
+      <span class="detail-value">${record.cost_usd != null ? fmtCost(record.cost_usd) : '—'} ${record.cost_usd != null ? `<span class="cost-source-badge ${costSource === 'provider' ? 'provider' : ''}">${escapeHtml(costSourceLabel)}</span>` : ''}</span>
     </div>
     <div class="detail-row">
       <span class="detail-label">Duration</span>
@@ -2264,7 +2289,7 @@ document.addEventListener('DOMContentLoaded', () => TestModule.init());
 
 /* ── Analytics Tab (minimal, vanilla JS + SVG/CSS) ─────────────── */
 const AnalyticsModule = {
-  palette: ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6'],
+  palette: ['#818cf8', '#34d399', '#fbbf24', '#fb7185', '#22d3ee', '#c084fc'],
   refreshStorageKey: 'routatic-analytics-refresh-interval',
   refreshTimer: null,
   refreshInterval: 30,
@@ -2412,6 +2437,24 @@ const AnalyticsModule = {
       }
     }
     document.getElementById('kpi-cost').textContent = fmtCost(s.est_cost_usd);
+    const providerCostRows = Number(s.provider_cost_rows || 0);
+    const estimatedCostRows = Number(s.estimated_cost_rows || 0);
+    const knownCostRows = providerCostRows + estimatedCostRows;
+    const sourceEl = document.getElementById('kpi-cost-source');
+    if (sourceEl) {
+      sourceEl.classList.remove('provider', 'mixed');
+      if (providerCostRows > 0 && estimatedCostRows === 0) {
+        sourceEl.textContent = t('analytics.costProvider');
+        sourceEl.classList.add('provider');
+      } else if (providerCostRows > 0) {
+        sourceEl.textContent = t('analytics.costMixed')
+          .replace('{provider}', providerCostRows.toLocaleString())
+          .replace('{total}', knownCostRows.toLocaleString());
+        sourceEl.classList.add('mixed');
+      } else {
+        sourceEl.textContent = t('analytics.costEstimated');
+      }
+    }
 
     const stats = (data.latency && data.latency.stats) || [];
     document.getElementById('kpi-p95').textContent = aggregateP95(stats);
@@ -2476,14 +2519,14 @@ const AnalyticsModule = {
         ['Output tokens', it.output_tokens, fmt],
         ['Avg latency', it.avg_latency_ms, n => `${Number(n).toFixed(0)} ms`],
         ['Success rate', it.success_rate, n => `${(Number(n) * 100).toFixed(1)}%`],
-        ['Est. cost', it.est_cost_usd, fmtCost],
+        ['Cost', it.est_cost_usd, fmtCost],
       ] : [
         ['Total tokens', v, fmt],
         ['Requests', it.requests, fmt],
         ['Input tokens', it.input_tokens, fmt],
         ['Output tokens', it.output_tokens, fmt],
         ['Fallback rate', it.fallback_rate, n => `${Number(n).toFixed(1)}%`],
-        ['Est. cost', it.est_cost_usd, fmtCost],
+        ['Cost', it.est_cost_usd, fmtCost],
       ];
       const detailId = `${containerId}-legend-details-${idx}`;
       const detailRows = metrics.filter(([, value]) => value != null)
@@ -2517,7 +2560,7 @@ const AnalyticsModule = {
       <div class="donut-layout">
         <div class="donut-svg-wrap">
           <svg viewBox="0 0 240 240" class="donut-svg" role="img">
-            <circle cx="${C}" cy="${C}" r="${R}" fill="none" stroke="#3a3a3c" stroke-width="${STROKE}" opacity=".35"></circle>
+            <circle cx="${C}" cy="${C}" r="${R}" fill="none" stroke="#343a41" stroke-width="${STROKE}" opacity=".55"></circle>
             <g transform="rotate(-90 ${C} ${C})">${arcs}</g>
             <text x="${C}" y="${C - 4}" text-anchor="middle" class="donut-center-value">${fmtTok(total)}</text>
             <text x="${C}" y="${C + 16}" text-anchor="middle" class="donut-center-label">tokens</text>
@@ -2600,7 +2643,7 @@ const AnalyticsModule = {
     const ml = 56, mb = 22, mt = 10, mr = 12;
     const plotW = w - ml - mr;
     const plotH = h - mt - mb;
-    const AXIS = '#48484a', GRID = '#3a3a3c', TXT = '#98989d';
+    const AXIS = '#49515b', GRID = '#2a3036', TXT = '#9aa3ad';
 
     // Bars are stacked, so the axis must span the stacked TOTAL of a day, not
     // the largest single series — otherwise tall columns overflow the plot.
@@ -2653,9 +2696,9 @@ const AnalyticsModule = {
       const cacheV = (p.cache_read_tokens || 0) + (p.cache_creation_tokens || 0);
       const outV = p.output_tokens || 0;
       const segs = [
-        { v: outV, col: '#10b981', label: t('analytics.outputTokens') },
-        { v: cacheV, col: '#f59e0b', label: t('analytics.cacheTokens') },
-        { v: inV, col: '#3b82f6', label: t('analytics.inputTokens') },
+        { v: outV, col: '#34d399', label: t('analytics.outputTokens') },
+        { v: cacheV, col: '#fbbf24', label: t('analytics.cacheTokens') },
+        { v: inV, col: '#818cf8', label: t('analytics.inputTokens') },
       ];
       let yy = baseY;
       const rects = segs.filter(s => (s.v || 0) > 0).map(s => {
@@ -2674,9 +2717,9 @@ const AnalyticsModule = {
       // (not just an individual segment) opens one tooltip listing all three
       // series, matching how the deepseek usage page behaves.
       const tipRows = [
-        { v: inV, col: '#3b82f6', label: t('analytics.inputTokens') },
-        { v: cacheV, col: '#f59e0b', label: t('analytics.cacheTokens') },
-        { v: outV, col: '#10b981', label: t('analytics.outputTokens') },
+        { v: inV, col: '#818cf8', label: t('analytics.inputTokens') },
+        { v: cacheV, col: '#fbbf24', label: t('analytics.cacheTokens') },
+        { v: outV, col: '#34d399', label: t('analytics.outputTokens') },
       ].map(s => `<div class="tip-row"><span class="tip-dot" style="background:${s.col}"></span>` +
         `<span class="tip-label">${s.label}</span><span class="tip-val">${(s.v||0).toLocaleString()}</span></div>`).join('');
       const tipHtml = `<div class="tip-title">${p.date || ''}</div>${tipRows}`;
@@ -2698,9 +2741,9 @@ const AnalyticsModule = {
         <div class="chart-tip" id="trend-tip"></div>
       </div>
       <div class="trend-legend">
-        <span><span class="swatch" style="background:#3b82f6;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.inputTokens')}</span>
-        <span><span class="swatch" style="background:#f59e0b;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.cacheTokens')}</span>
-        <span><span class="swatch" style="background:#10b981;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.outputTokens')}</span>
+        <span><span class="swatch" style="background:#818cf8;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.inputTokens')}</span>
+        <span><span class="swatch" style="background:#fbbf24;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.cacheTokens')}</span>
+        <span><span class="swatch" style="background:#34d399;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.outputTokens')}</span>
       </div>`;
     wrap.innerHTML = svg;
 

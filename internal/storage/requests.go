@@ -9,6 +9,11 @@ import (
 	"github.com/routatic/proxy/internal/history"
 )
 
+const (
+	CostSourceEstimated = "estimated"
+	CostSourceProvider  = "provider"
+)
+
 // Requests provides methods for reading and writing request records.
 type Requests struct {
 	db *Database
@@ -28,7 +33,7 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 	if attempt < 1 {
 		attempt = 1
 	}
-	costUSD, err := r.costForRecord(ctx, rec)
+	costUSD, costSource, err := r.costForRecord(ctx, rec)
 	if err != nil {
 		return err
 	}
@@ -37,8 +42,8 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 		INSERT OR REPLACE INTO requests (
 			id, model, provider, scenario, start_time, duration_ms,
 			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-			cost_usd, streaming, success, error_msg, attempt
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			cost_usd, cost_source, streaming, success, error_msg, attempt
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		rec.ID,
 		rec.Model,
@@ -51,6 +56,7 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 		rec.CacheReadTokens,
 		rec.CacheCreationTokens,
 		costUSD,
+		costSource,
 		boolToInt(rec.Streaming),
 		boolToInt(rec.Success),
 		rec.ErrorMsg,
@@ -80,7 +86,7 @@ func (r *Requests) Last(n int) ([]history.RequestRecord, error) {
 	rows, err := r.db.DB().QueryContext(ctx, `
 		SELECT id, model, provider, scenario, start_time, duration_ms,
 		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-		       cost_usd, streaming, success, error_msg, attempt
+		       cost_usd, cost_source, streaming, success, error_msg, attempt
 		FROM requests
 		ORDER BY start_time DESC
 		LIMIT ?
@@ -102,7 +108,7 @@ func (r *Requests) Since(since time.Time) ([]history.RequestRecord, error) {
 	rows, err := r.db.DB().QueryContext(ctx, `
 		SELECT id, model, provider, scenario, start_time, duration_ms,
 		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-		       cost_usd, streaming, success, error_msg, attempt
+		       cost_usd, cost_source, streaming, success, error_msg, attempt
 		FROM requests
 		WHERE start_time >= ?
 		ORDER BY start_time DESC
@@ -132,6 +138,7 @@ type RequestQuery struct {
 	Page, PageSize     int
 	Search, Model      string
 	Provider, Scenario string
+	CostSource         string
 	Start, End         *time.Time
 	Success, Streaming *bool
 	SortBy, SortOrder  string
@@ -176,7 +183,7 @@ func (r *Requests) Query(q RequestQuery) ([]history.RequestRecord, int64, error)
 	rows, err := r.db.DB().QueryContext(ctx, `
 		SELECT id, model, provider, scenario, start_time, duration_ms,
 		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-		       cost_usd, streaming, success, error_msg, attempt
+		       cost_usd, cost_source, streaming, success, error_msg, attempt
 		FROM requests`+where+`
 		ORDER BY `+orderBy+`
 		LIMIT ? OFFSET ?
@@ -215,6 +222,10 @@ func requestWhere(q RequestQuery) (string, []any) {
 			clauses = append(clauses, filter.column+" = ?")
 			args = append(args, value)
 		}
+	}
+	if q.CostSource == CostSourceProvider || q.CostSource == CostSourceEstimated {
+		clauses = append(clauses, "cost_source = ?")
+		args = append(args, q.CostSource)
 	}
 	if q.Start != nil {
 		clauses = append(clauses, "julianday(start_time) >= julianday(?)")
@@ -345,6 +356,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 
 		var attempt sql.NullInt64
 		var costUSD sql.NullFloat64
+		var costSource sql.NullString
 		var errorMsg sql.NullString
 		err := rows.Scan(
 			&rec.ID,
@@ -358,6 +370,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 			&rec.CacheReadTokens,
 			&rec.CacheCreationTokens,
 			&costUSD,
+			&costSource,
 			&streaming,
 			&success,
 			&errorMsg,
@@ -374,6 +387,11 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		if costUSD.Valid {
 			rec.CostUSD = costUSD.Float64
 			rec.CostKnown = true
+			if costSource.Valid {
+				rec.CostSource = costSource.String
+			} else {
+				rec.CostSource = CostSourceEstimated
+			}
 		}
 		if errorMsg.Valid {
 			rec.ErrorMsg = errorMsg.String
@@ -390,9 +408,13 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 	return records, rows.Err()
 }
 
-func (r *Requests) costForRecord(ctx context.Context, rec history.RequestRecord) (float64, error) {
+func (r *Requests) costForRecord(ctx context.Context, rec history.RequestRecord) (float64, string, error) {
 	if rec.CostKnown || rec.CostUSD != 0 {
-		return rec.CostUSD, nil
+		source := rec.CostSource
+		if source != CostSourceProvider {
+			source = CostSourceEstimated
+		}
+		return rec.CostUSD, source, nil
 	}
 	var modelsInputPerM, modelsOutputPerM float64
 	err := r.db.DB().QueryRowContext(ctx, `
@@ -401,7 +423,7 @@ func (r *Requests) costForRecord(ctx context.Context, rec history.RequestRecord)
 		WHERE id = ?
 	`, rec.Model).Scan(&modelsInputPerM, &modelsOutputPerM)
 	if err != nil && err != sql.ErrNoRows {
-		return 0, err
+		return 0, "", err
 	}
 	return costForTokens(rec.Model,
 		int64(rec.InputTokens),
@@ -409,7 +431,7 @@ func (r *Requests) costForRecord(ctx context.Context, rec history.RequestRecord)
 		int64(rec.CacheReadTokens),
 		int64(rec.CacheCreationTokens),
 		modelsInputPerM,
-		modelsOutputPerM), nil
+		modelsOutputPerM), CostSourceEstimated, nil
 }
 
 func boolToInt(b bool) int {

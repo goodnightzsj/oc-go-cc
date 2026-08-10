@@ -56,6 +56,7 @@ Legacy ~/.config/oc-go-cc/config.json and OC_GO_CC_* environment variables are s
 	rootCmd.AddCommand(validateCmd())
 	rootCmd.AddCommand(checkCmd())
 	rootCmd.AddCommand(modelsCmd())
+	rootCmd.AddCommand(costsCmd())
 	rootCmd.AddCommand(catalogCmd())
 	rootCmd.AddCommand(autostartCmd())
 	rootCmd.AddCommand(updateCmd)
@@ -753,16 +754,7 @@ func runModelsList(cmd *cobra.Command, configPath, provider string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	storageCfg := storage.DefaultConfig
-	if cfg.Storage != nil {
-		storageCfg = storageCfg.WithOverlay(storage.Overlay{
-			DatabasePath:      cfg.Storage.DatabasePath,
-			RetentionDays:     cfg.Storage.RetentionDays,
-			VacuumOnStartup:   cfg.Storage.VacuumOnStartup,
-			WALEnabled:        cfg.Storage.WALEnabled,
-			AnalyticsBaseline: cfg.Storage.AnalyticsBaseline,
-		})
-	}
+	storageCfg := storageConfig(cfg)
 
 	db, err := storage.Open(storageCfg)
 	if err != nil {
@@ -830,6 +822,20 @@ func runModelsList(cmd *cobra.Command, configPath, provider string) error {
 	cmd.Println()
 	cmd.Println("Use these model IDs in your config.json file (model_overrides).")
 	return nil
+}
+
+func storageConfig(cfg *config.Config) storage.Config {
+	storageCfg := storage.DefaultConfig
+	if cfg.Storage == nil {
+		return storageCfg
+	}
+	return storageCfg.WithOverlay(storage.Overlay{
+		DatabasePath:      cfg.Storage.DatabasePath,
+		RetentionDays:     cfg.Storage.RetentionDays,
+		VacuumOnStartup:   cfg.Storage.VacuumOnStartup,
+		WALEnabled:        cfg.Storage.WALEnabled,
+		AnalyticsBaseline: cfg.Storage.AnalyticsBaseline,
+	})
 }
 
 // catalogProviders returns all provider names from the catalog that have at

@@ -78,7 +78,6 @@ const TRANSLATIONS = {
     'history.providerDistribution': 'Platforms',
     'history.scenarioDistribution': 'Scenarios',
     'history.distribution': 'Distribution details',
-    'history.dailyTrend': 'Daily trend',
     'filter.dateRange': 'Date range',
     'filter.today': 'Today',
     'filter.clear': 'Clear',
@@ -327,7 +326,6 @@ const TRANSLATIONS = {
     'history.providerDistribution': '平台分布',
     'history.scenarioDistribution': '场景分布',
     'history.distribution': '分布明细',
-    'history.dailyTrend': '每日趋势',
     'filter.dateRange': '日期范围',
     'filter.today': '今天',
     'filter.clear': '清除',
@@ -1221,7 +1219,6 @@ async function refreshHistory() {
 
 let lastHistorySummary = null;
 let historyBreakdownMetric = 'tokens';
-let historyTrendMetric = 'tokens';
 
 function renderHistorySummary(summary) {
   lastHistorySummary = summary;
@@ -1238,7 +1235,6 @@ function renderHistorySummary(summary) {
   renderCompactBreakdown('history-model-breakdown', summary.models || []);
   renderCompactBreakdown('history-provider-breakdown', summary.providers || []);
   renderCompactBreakdown('history-scenario-breakdown', summary.scenarios || []);
-  renderHistoryMiniTrend(summary.trend || []);
 }
 
 function renderCompactBreakdown(id, items) {
@@ -1252,7 +1248,7 @@ function renderCompactBreakdown(id, items) {
   }
   const total = Math.max(1, top.reduce((sum, item) => sum + Number(item[metricKey] || 0), 0));
   root.innerHTML = top.map(item => {
-    const label = !item.name || item.name === 'unknown' ? t('detail.unknown') : item.name;
+    const label = !item.name || item.name === 'unknown' ? 'override' : item.name;
     return `
     <div class="compact-breakdown-row">
       <i class="compact-breakdown-fill" style="width:${Math.max(2, Number(item[metricKey] || 0) / total * 100).toFixed(1)}%"></i>
@@ -1264,64 +1260,6 @@ function renderCompactBreakdown(id, items) {
   }).join('');
 }
 
-function renderHistoryMiniTrend(points) {
-  const root = document.getElementById('history-filter-trend');
-  if (!root) return;
-  if (!points.length) {
-    root.innerHTML = `<div class="empty-state">${t('analytics.noTrend')}</div>`;
-    return;
-  }
-  const metricKey = historyTrendMetric === 'cost' ? 'cost_usd' : historyTrendMetric;
-  const formatValue = value => historyTrendMetric === 'cost'
-    ? fmtCost(value)
-    : historyTrendMetric === 'requests'
-      ? Number(value || 0).toLocaleString()
-      : fmtTok(value);
-  const width = 760, height = 176, ml = 52, mr = 16, mt = 18, mb = 30;
-  const plotW = width - ml - mr, plotH = height - mt - mb;
-  const values = points.map(point => Number(point[metricKey] || 0));
-  const max = Math.max(1, ...values);
-  const x = index => points.length === 1 ? ml + plotW / 2 : ml + index * plotW / (points.length - 1);
-  const y = value => mt + plotH - value / max * plotH;
-  let grid = '';
-  for (let step = 0; step <= 4; step++) {
-    const value = max * step / 4;
-    const yy = y(value);
-    grid += `<line x1="${ml}" y1="${yy.toFixed(1)}" x2="${width - mr}" y2="${yy.toFixed(1)}" class="chart-grid"></line>`;
-    grid += `<text x="${ml - 8}" y="${(yy + 3).toFixed(1)}" text-anchor="end" class="chart-axis-label">${escapeHtml(formatValue(value))}</text>`;
-  }
-  const stride = Math.max(1, Math.ceil(points.length / 6));
-  let dates = '';
-  points.forEach((point, index) => {
-    if (index % stride !== 0 && index !== points.length - 1) return;
-    dates += `<text x="${x(index).toFixed(1)}" y="${height - 8}" text-anchor="middle" class="chart-axis-label">${escapeHtml(String(point.date || '').slice(5))}</text>`;
-  });
-  const coordinates = values.map((value, index) => `${x(index).toFixed(1)},${y(value).toFixed(1)}`);
-  const line = points.length > 1
-    ? `<polyline class="history-trend-line" points="${coordinates.join(' ')}"></polyline>`
-    : `<line class="history-trend-single" x1="${x(0)}" y1="${y(values[0])}" x2="${x(0)}" y2="${mt + plotH}"></line>`;
-  const dots = points.map((point, index) => `
-    <circle class="history-trend-dot" cx="${x(index).toFixed(1)}" cy="${y(values[index]).toFixed(1)}" r="4"></circle>
-    <circle class="history-trend-hit" cx="${x(index).toFixed(1)}" cy="${y(values[index]).toFixed(1)}" r="18" fill="transparent" tabindex="0" role="button" aria-label="${escapeHtml(point.date || '')}"></circle>`).join('');
-  const singleValue = points.length === 1
-    ? `<text x="${x(0)}" y="${Math.max(12, y(values[0]) - 10)}" text-anchor="middle" class="history-trend-value">${escapeHtml(formatValue(values[0]))}</text>`
-    : '';
-  root.innerHTML = `<div class="history-trend-stage">
-    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(t('history.dailyTrend'))}">
-      ${grid}<line x1="${ml}" y1="${mt + plotH}" x2="${width - mr}" y2="${mt + plotH}" class="chart-axis"></line>
-      ${dates}${line}${dots}${singleValue}
-    </svg><div class="chart-tip" id="history-trend-tip"></div></div>`;
-  const tip = root.querySelector('#history-trend-tip');
-  bindChartTooltip(root.querySelector('.history-trend-stage'), tip, '.history-trend-hit', (_target, index) => {
-    const point = points[index];
-    return chartTooltipMarkup(point.date || '', [
-      {label: t('analytics.requests'), value: Number(point.requests || 0).toLocaleString(), color: '#818cf8'},
-      {label: t('analytics.totalTokens'), value: Number(point.tokens || 0).toLocaleString(), color: '#22d3ee'},
-      {label: t('analytics.cost'), value: fmtCost(Number(point.cost_usd || 0)), color: '#34d399'},
-    ]);
-  });
-}
-
 document.querySelectorAll('#history-breakdown-metric button').forEach(button => {
   button.addEventListener('click', () => {
     historyBreakdownMetric = button.dataset.metric;
@@ -1329,14 +1267,6 @@ document.querySelectorAll('#history-breakdown-metric button').forEach(button => 
     if (lastHistorySummary) renderHistorySummary(lastHistorySummary);
   });
 });
-document.querySelectorAll('#history-trend-metric button').forEach(button => {
-  button.addEventListener('click', () => {
-    historyTrendMetric = button.dataset.metric;
-    button.parentElement.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
-    if (lastHistorySummary) renderHistoryMiniTrend(lastHistorySummary.trend || []);
-  });
-});
-
 function historyGoToPage(p) {
   if (p < 1) p = 1;
   const max = Math.max(1, Math.ceil(historyTotal / historySize));

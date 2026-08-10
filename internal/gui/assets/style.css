@@ -764,8 +764,7 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .history-summary-metrics > div:last-child { border-right: 0; }
 .history-summary-metrics span { display: block; color: var(--ui-muted); font-size: 10px; }
 .history-summary-metrics strong { display: block; margin-top: 3px; font-size: 16px; font-variant-numeric: tabular-nums; }
-.insight-toolbar,
-.history-trend-heading {
+.insight-toolbar {
   min-height: 42px;
   display: flex;
   align-items: center;
@@ -797,20 +796,6 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .compact-breakdown-stat strong { display: block; color: var(--ui-text); font-size: 10px; font-variant-numeric: tabular-nums; }
 .compact-breakdown-stat small { display: block; margin-top: 1px; color: var(--ui-muted); font-size: 8px; }
 .compact-breakdown-value { color: var(--ui-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
-.history-trend-heading { border-top: 1px solid var(--ui-line); }
-.history-filter-trend { min-height: 190px; padding: 7px 10px 10px; }
-.history-trend-stage { position: relative; min-height: 176px; }
-.history-trend-stage svg { display: block; width: 100%; height: 176px; }
-.chart-grid { stroke: #2a3036; stroke-width: 1; }
-.chart-axis { stroke: var(--ui-line-strong); stroke-width: 1; }
-.chart-axis-label { fill: var(--ui-muted); font-size: 9px; font-variant-numeric: tabular-nums; }
-.history-trend-line { fill: none; stroke: var(--ui-indigo); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.history-trend-single { stroke: rgba(129,140,248,.28); stroke-width: 1; stroke-dasharray: 3 3; }
-.history-trend-dot { fill: var(--ui-indigo); stroke: #15191d; stroke-width: 2; }
-.history-trend-hit { cursor: crosshair; }
-.history-trend-hit:focus { outline: 0; stroke: rgba(129,140,248,.75); stroke-width: 1; }
-.history-trend-value { fill: var(--ui-text); font-size: 10px; font-weight: 650; font-variant-numeric: tabular-nums; }
-
 .history-date-range { position: relative; }
 .date-range-trigger {
   width: 100%;
@@ -910,8 +895,7 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
   .detail-token { border-bottom: 1px solid var(--ui-line); }
   .detail-token:nth-child(2n) { border-right: 0; }
   .detail-token:last-child { grid-column: 1 / -1; border-bottom: 0; }
-  .insight-toolbar,
-  .history-trend-heading { align-items: flex-start; flex-direction: column; }
+  .insight-toolbar { align-items: flex-start; flex-direction: column; }
   .metric-segment { width: 100%; }
   .metric-segment button { flex: 1; }
   .compact-breakdown-row { grid-template-columns: minmax(80px, 1fr) repeat(3, auto); gap: 7px; }

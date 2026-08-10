@@ -391,7 +391,7 @@ func (a *Analytics) getScenarioBreakdown(window analyticsWindow) ([]ScenarioBrea
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	rows, err := a.db.DB().QueryContext(ctx, `
-		SELECT COALESCE(NULLIF(r.scenario, ''), 'unknown'), r.model,
+		SELECT CASE WHEN LOWER(TRIM(COALESCE(r.scenario, ''))) IN ('', 'unknown') THEN 'override' ELSE r.scenario END, r.model,
 		       COUNT(*), COALESCE(SUM(r.input_tokens), 0), COALESCE(SUM(r.output_tokens), 0),
 		       COALESCE(SUM(r.cache_read_tokens), 0), COALESCE(SUM(r.cache_creation_tokens), 0),
 		       COALESCE(SUM(r.success), 0), COUNT(r.cost_usd), COALESCE(SUM(r.cost_usd), 0),
@@ -401,7 +401,7 @@ func (a *Analytics) getScenarioBreakdown(window analyticsWindow) ([]ScenarioBrea
 			WHERE julianday(r.start_time) >= julianday(?)
 			  AND julianday(r.start_time) < julianday(?)
 			  AND (julianday(r.start_time) >= julianday(?) OR r.usage_trusted = 1)
-			GROUP BY r.scenario, r.model
+			GROUP BY CASE WHEN LOWER(TRIM(COALESCE(r.scenario, ''))) IN ('', 'unknown') THEN 'override' ELSE r.scenario END, r.model
 		`, window.requested.Format(time.RFC3339Nano), window.end.Format(time.RFC3339Nano), window.trusted.Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, err

@@ -2,13 +2,13 @@
 
 ## Context Recovery Block
 
-- **Current milestone**: #10 - Complete Sub2API parity, custom controls, and refresh behavior
-- **Current status**: IN_PROGRESS
-- **Last completed**: #6 - Validate, deploy, correct production data, and smoke-test
+- **Current milestone**: Complete
+- **Current status**: DONE
+- **Last completed**: #10 - Complete Sub2API parity, custom controls, and refresh behavior
 - **Current artifact**: `SUBTASKS.csv`
-- **Key context**: A fresh authenticated Edge capture reconfirms 1,390 OpenCode rows and `$3.03965577`; the imported OpenCode snapshot is the authoritative Analytics baseline, while local History remains the request-detail surface.
-- **Known issues**: Implementation and focused tests pass; production still needs the schema release, sanitized snapshot import, and Edge validation.
-- **Next action**: Run full validation, release to production, import the snapshot, and validate all affected workflows through the public domain in Edge.
+- **Key context**: Production `d0d8fa5` uses the imported 1,390-row OpenCode snapshot and `$3.03965577` as the authoritative Analytics baseline; local History remains the request-detail surface.
+- **Known issues**: None in the requested scope; the unrelated remote `.ace-tool/` directory remains untouched.
+- **Next action**: None.
 
 ## Child 1: Finalize storage overlay regression
 
@@ -72,10 +72,10 @@
 
 ## Child 10: Complete Sub2API parity, custom controls, and refresh behavior
 
-- **Status**: IN_PROGRESS
+- **Status**: DONE
 - **Key context**: OpenCode is the current usage authority; Analytics now uses its snapshot for headline totals, models, providers, plans, trends, and recent rows. History keeps local filtered summaries and scenario data without inventing unavailable fields.
-- **Validation**: Focused storage, GUI, CLI, JavaScript syntax, formatting, and diff checks pass.
-- **Next step**: Full validation, commit/push, remote database backup, deploy/import, then desktop/mobile Edge validation through `https://opencode.9962510.xyz/`.
+- **Validation**: Full tests, vet, production build, formatting, JavaScript syntax, database backup/import, API checks, and public-domain Edge desktop/mobile visual and interaction checks pass.
+- **Next step**: None.
 
 ## Session Start
 

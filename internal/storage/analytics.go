@@ -291,12 +291,14 @@ func costForTokens(model string, in, out, cacheRead, cacheCreate int64, modelsIn
 
 // ProviderBreakdown holds per-provider aggregates.
 type ProviderBreakdown struct {
-	Provider     string  `json:"provider"`
-	Requests     int64   `json:"requests"`
-	InputTokens  int64   `json:"input_tokens"`
-	OutputTokens int64   `json:"output_tokens"`
-	FallbackRate float64 `json:"fallback_rate"` // % of requests that were fallbacks
-	EstCostUSD   float64 `json:"est_cost_usd"`
+	Provider            string  `json:"provider"`
+	Requests            int64   `json:"requests"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	CacheReadTokens     int64   `json:"cache_read_tokens"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	FallbackRate        float64 `json:"fallback_rate"` // % of requests that were fallbacks
+	EstCostUSD          float64 `json:"est_cost_usd"`
 }
 
 // GetProviderBreakdown returns usage by provider (with fallback rate).
@@ -365,6 +367,8 @@ func (a *Analytics) GetProviderBreakdown(days int) ([]ProviderBreakdown, error) 
 		agg.pb.Requests += requests
 		agg.pb.InputTokens += in
 		agg.pb.OutputTokens += out
+		agg.pb.CacheReadTokens += cacheRead
+		agg.pb.CacheCreationTokens += cacheNew
 		if costRows == requests {
 			agg.pb.EstCostUSD += storedCost
 		} else {

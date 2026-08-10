@@ -28,13 +28,17 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 	if attempt < 1 {
 		attempt = 1
 	}
+	costUSD, err := r.costForRecord(ctx, rec)
+	if err != nil {
+		return err
+	}
 
-	_, err := r.db.DB().ExecContext(ctx, `
+	_, err = r.db.DB().ExecContext(ctx, `
 		INSERT OR REPLACE INTO requests (
 			id, model, provider, scenario, start_time, duration_ms,
 			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-			streaming, success, error_msg, attempt
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			cost_usd, streaming, success, error_msg, attempt
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		rec.ID,
 		rec.Model,
@@ -46,6 +50,7 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 		rec.OutputTokens,
 		rec.CacheReadTokens,
 		rec.CacheCreationTokens,
+		costUSD,
 		boolToInt(rec.Streaming),
 		boolToInt(rec.Success),
 		rec.ErrorMsg,
@@ -75,7 +80,7 @@ func (r *Requests) Last(n int) ([]history.RequestRecord, error) {
 	rows, err := r.db.DB().QueryContext(ctx, `
 		SELECT id, model, provider, scenario, start_time, duration_ms,
 		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-		       streaming, success, error_msg, attempt
+		       cost_usd, streaming, success, error_msg, attempt
 		FROM requests
 		ORDER BY start_time DESC
 		LIMIT ?
@@ -97,7 +102,7 @@ func (r *Requests) Since(since time.Time) ([]history.RequestRecord, error) {
 	rows, err := r.db.DB().QueryContext(ctx, `
 		SELECT id, model, provider, scenario, start_time, duration_ms,
 		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-		       streaming, success, error_msg, attempt
+		       cost_usd, streaming, success, error_msg, attempt
 		FROM requests
 		WHERE start_time >= ?
 		ORDER BY start_time DESC
@@ -171,7 +176,7 @@ func (r *Requests) Query(q RequestQuery) ([]history.RequestRecord, int64, error)
 	rows, err := r.db.DB().QueryContext(ctx, `
 		SELECT id, model, provider, scenario, start_time, duration_ms,
 		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-		       streaming, success, error_msg, attempt
+		       cost_usd, streaming, success, error_msg, attempt
 		FROM requests`+where+`
 		ORDER BY `+orderBy+`
 		LIMIT ? OFFSET ?
@@ -245,6 +250,8 @@ func requestSortColumn(field string) string {
 		return "COALESCE(input_tokens, 0) + COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0)"
 	case "output_tokens":
 		return "COALESCE(output_tokens, 0)"
+	case "cost_usd":
+		return "COALESCE(cost_usd, 0)"
 	case "duration_ms":
 		return "COALESCE(duration_ms, 0)"
 	case "success":
@@ -337,6 +344,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		var streaming, success int
 
 		var attempt sql.NullInt64
+		var costUSD sql.NullFloat64
 		var errorMsg sql.NullString
 		err := rows.Scan(
 			&rec.ID,
@@ -349,21 +357,26 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 			&rec.OutputTokens,
 			&rec.CacheReadTokens,
 			&rec.CacheCreationTokens,
+			&costUSD,
 			&streaming,
 			&success,
 			&errorMsg,
 			&attempt,
 		)
+		if err != nil {
+			return nil, err
+		}
 		if attempt.Valid {
 			rec.Attempt = int(attempt.Int64)
 		} else {
 			rec.Attempt = 1
 		}
+		if costUSD.Valid {
+			rec.CostUSD = costUSD.Float64
+			rec.CostKnown = true
+		}
 		if errorMsg.Valid {
 			rec.ErrorMsg = errorMsg.String
-		}
-		if err != nil {
-			return nil, err
 		}
 
 		rec.StartTime, _ = time.Parse(time.RFC3339Nano, startTimeStr)
@@ -375,6 +388,28 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 	}
 
 	return records, rows.Err()
+}
+
+func (r *Requests) costForRecord(ctx context.Context, rec history.RequestRecord) (float64, error) {
+	if rec.CostKnown || rec.CostUSD != 0 {
+		return rec.CostUSD, nil
+	}
+	var modelsInputPerM, modelsOutputPerM float64
+	err := r.db.DB().QueryRowContext(ctx, `
+		SELECT COALESCE(cost_input_per_m, 0), COALESCE(cost_output_per_m, 0)
+		FROM models
+		WHERE id = ?
+	`, rec.Model).Scan(&modelsInputPerM, &modelsOutputPerM)
+	if err != nil && err != sql.ErrNoRows {
+		return 0, err
+	}
+	return costForTokens(rec.Model,
+		int64(rec.InputTokens),
+		int64(rec.OutputTokens),
+		int64(rec.CacheReadTokens),
+		int64(rec.CacheCreationTokens),
+		modelsInputPerM,
+		modelsOutputPerM), nil
 }
 
 func boolToInt(b bool) int {

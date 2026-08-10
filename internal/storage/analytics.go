@@ -112,6 +112,9 @@ func (a *Analytics) GetTokenSummary(days int) (*TokenSummary, error) {
 func (a *Analytics) modelCostSum(ctx context.Context, since string) (float64, error) {
 	rows, err := a.db.DB().QueryContext(ctx, `
 		SELECT r.model,
+		       COUNT(*),
+		       COUNT(r.cost_usd),
+		       COALESCE(SUM(r.cost_usd), 0),
 		       COALESCE(SUM(r.input_tokens), 0),
 		       COALESCE(SUM(r.output_tokens), 0),
 		       COALESCE(SUM(r.cache_read_tokens), 0),
@@ -130,11 +133,17 @@ func (a *Analytics) modelCostSum(ctx context.Context, since string) (float64, er
 	var cost float64
 	for rows.Next() {
 		var model string
+		var requests, costRows int64
+		var storedCost float64
 		var inToks, outToks, cacheReadToks, cacheCreateToks int64
 		var modelsInputPerM, modelsOutputPerM float64
-		if err := rows.Scan(&model, &inToks, &outToks, &cacheReadToks, &cacheCreateToks,
+		if err := rows.Scan(&model, &requests, &costRows, &storedCost, &inToks, &outToks, &cacheReadToks, &cacheCreateToks,
 			&modelsInputPerM, &modelsOutputPerM); err != nil {
 			return 0, err
+		}
+		if costRows == requests {
+			cost += storedCost
+			continue
 		}
 		cost += costForTokens(model, inToks, outToks, cacheReadToks, cacheCreateToks,
 			modelsInputPerM, modelsOutputPerM)
@@ -186,7 +195,9 @@ func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
 				ELSE 0
 			END AS success_rate,
 			COALESCE(m.cost_input_per_m, 0) AS models_cost_input_per_m,
-			COALESCE(m.cost_output_per_m, 0) AS models_cost_output_per_m
+			COALESCE(m.cost_output_per_m, 0) AS models_cost_output_per_m,
+			COUNT(r.cost_usd) AS cost_rows,
+			COALESCE(SUM(r.cost_usd), 0) AS stored_cost_usd
 		FROM requests r
 		LEFT JOIN (
 			SELECT model, AVG(latency_ms) AS avg_latency
@@ -209,6 +220,8 @@ func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
 	for rows.Next() {
 		var mb ModelBreakdown
 		var modelsInputPerM, modelsOutputPerM float64
+		var costRows int64
+		var storedCost float64
 		if err := rows.Scan(
 			&mb.Model,
 			&mb.Provider,
@@ -221,6 +234,8 @@ func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
 			&mb.SuccessRate,
 			&modelsInputPerM,
 			&modelsOutputPerM,
+			&costRows,
+			&storedCost,
 		); err != nil {
 			return nil, err
 		}
@@ -229,9 +244,13 @@ func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
 		// expression priced only input+output at the models-table rates, which
 		// silently billed every cached token at the full input rate and left
 		// the breakdown disagreeing with the headline cost.
-		mb.EstCostUSD = costForTokens(mb.Model,
-			mb.InputTokens, mb.OutputTokens, mb.CacheReadTokens, mb.CacheCreationTokens,
-			modelsInputPerM, modelsOutputPerM)
+		if costRows == mb.Requests {
+			mb.EstCostUSD = storedCost
+		} else {
+			mb.EstCostUSD = costForTokens(mb.Model,
+				mb.InputTokens, mb.OutputTokens, mb.CacheReadTokens, mb.CacheCreationTokens,
+				modelsInputPerM, modelsOutputPerM)
+		}
 		result = append(result, mb)
 	}
 	return result, rows.Err()
@@ -300,7 +319,9 @@ func (a *Analytics) GetProviderBreakdown(days int) ([]ProviderBreakdown, error) 
 			-- Fallback rate: attempts > 1 are fallbacks; old rows (NULL/0) treated as primary (rate 0)
 			COUNT(CASE WHEN COALESCE(r.attempt, 1) > 1 THEN 1 END) AS fallback_count,
 			COALESCE(m.cost_input_per_m, 0) AS models_cost_input_per_m,
-			COALESCE(m.cost_output_per_m, 0) AS models_cost_output_per_m
+			COALESCE(m.cost_output_per_m, 0) AS models_cost_output_per_m,
+			COUNT(r.cost_usd) AS cost_rows,
+			COALESCE(SUM(r.cost_usd), 0) AS stored_cost_usd
 		FROM requests r
 		LEFT JOIN models m ON m.id = r.model
 		WHERE r.start_time >= ?
@@ -320,13 +341,13 @@ func (a *Analytics) GetProviderBreakdown(days int) ([]ProviderBreakdown, error) 
 
 	for rows.Next() {
 		var (
-			provider, model                        string
-			requests, in, out, cacheRead, cacheNew int64
-			fallbacks                              int64
-			modelsInRate, modelsOutRate            float64
+			provider, model                         string
+			requests, in, out, cacheRead, cacheNew  int64
+			fallbacks, costRows                     int64
+			modelsInRate, modelsOutRate, storedCost float64
 		)
 		if err := rows.Scan(&provider, &model, &requests, &in, &out, &cacheRead, &cacheNew,
-			&fallbacks, &modelsInRate, &modelsOutRate); err != nil {
+			&fallbacks, &modelsInRate, &modelsOutRate, &costRows, &storedCost); err != nil {
 			return nil, err
 		}
 
@@ -339,7 +360,11 @@ func (a *Analytics) GetProviderBreakdown(days int) ([]ProviderBreakdown, error) 
 		agg.pb.Requests += requests
 		agg.pb.InputTokens += in
 		agg.pb.OutputTokens += out
-		agg.pb.EstCostUSD += costForTokens(model, in, out, cacheRead, cacheNew, modelsInRate, modelsOutRate)
+		if costRows == requests {
+			agg.pb.EstCostUSD += storedCost
+		} else {
+			agg.pb.EstCostUSD += costForTokens(model, in, out, cacheRead, cacheNew, modelsInRate, modelsOutRate)
+		}
 		agg.fallbacks += fallbacks
 	}
 	if err := rows.Err(); err != nil {

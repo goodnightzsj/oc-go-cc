@@ -44,32 +44,47 @@
   </nav>
 
   <!-- Overview Tab -->
-  <div class="tab-content flex-1 overflow-y-auto p-4 active" id="tab-overview">
-    <div class="metric-band metric-grid mb-5">
+  <div class="tab-content flex-1 overflow-y-auto active" id="tab-overview">
+    <div class="page-shell overview-page">
+    <div class="page-heading">
+      <div><h1 data-i18n="overview.title">Dashboard</h1><span class="page-meta" id="overview-generated"></span></div>
+    </div>
+    <div class="metric-band metric-grid overview-metrics">
       <div class="metric-cell overview-metric">
         <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="metric.total">Total Requests</div>
         <div class="text-[26px] font-bold tabular-nums" id="m-total">--</div>
       </div>
       <div class="metric-cell overview-metric">
-        <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="metric.success">Success</div>
-        <div class="text-[26px] font-bold tabular-nums text-[#30d158]" id="m-success">--</div>
+        <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="analytics.cost">Cost</div>
+        <div class="text-[26px] font-bold tabular-nums" id="m-cost">--</div>
       </div>
       <div class="metric-cell overview-metric">
-        <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="metric.failed">Failed</div>
-        <div class="text-[26px] font-bold tabular-nums text-[#ff453a]" id="m-failed">--</div>
+        <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="analytics.totalTokens">Total Tokens</div>
+        <div class="text-[26px] font-bold tabular-nums" id="m-tokens">--</div>
       </div>
       <div class="metric-cell overview-metric">
-        <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="metric.streamed">Streamed</div>
-        <div class="text-[26px] font-bold tabular-nums" id="m-streamed">--</div>
+        <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="analytics.cacheHitShort">Cache hit</div>
+        <div class="text-[26px] font-bold tabular-nums" id="m-cache-hit">--</div>
       </div>
     </div>
 
-    <div class="data-surface p-3.5">
-      <div class="text-xs font-semibold text-[#98989d] uppercase tracking-wider mb-3" data-i18n="section.modelDist">Model Distribution</div>
-      <div class="flex flex-col gap-2" id="model-list">
-        <div class="empty-state text-center text-[#98989d] py-6 text-[13px]" data-i18n="empty.noData">No data yet</div>
-      </div>
+    <div class="metric-band metric-grid overview-token-metrics">
+      <div class="metric-cell"><div class="metric-label" data-i18n="analytics.inputTokens">Input tokens</div><div class="metric-value" id="m-input">--</div></div>
+      <div class="metric-cell"><div class="metric-label" data-i18n="detail.cacheRead">Cache read</div><div class="metric-value" id="m-cache-read">--</div></div>
+      <div class="metric-cell"><div class="metric-label" data-i18n="detail.cacheCreation">Cache write</div><div class="metric-value" id="m-cache-write">--</div></div>
+      <div class="metric-cell"><div class="metric-label" data-i18n="analytics.outputTokens">Output tokens</div><div class="metric-value" id="m-output">--</div></div>
     </div>
+
+    <section class="analytics-section analytics-trend-section">
+      <div class="section-heading" data-i18n="analytics.dailyTrend">Daily Token Trend</div>
+      <div class="analytics-chart analytics-trend" id="overview-token-trend"><div class="empty-state" data-i18n="analytics.noTrend">No trend data</div></div>
+    </section>
+    <div class="analytics-comparison-grid">
+      <section class="analytics-section"><div class="section-heading" data-i18n="analytics.byModel">Model distribution</div><div class="analytics-chart" id="overview-model-donut"></div></section>
+      <section class="analytics-section"><div class="section-heading" data-i18n="analytics.byProvider">Platform distribution</div><div class="analytics-chart" id="overview-provider-donut"></div></section>
+    </div>
+    <div id="model-list" hidden></div>
+      </div>
   </div>
 
   <!-- History Tab -->
@@ -89,12 +104,28 @@
           <div><span data-i18n="history.filteredTokens">Tokens</span><strong id="history-summary-tokens">--</strong></div>
           <div><span data-i18n="history.filteredCost">Recorded cost</span><strong id="history-summary-cost">--</strong></div>
         </div>
+        <div class="insight-toolbar">
+          <span data-i18n="history.distribution">Distribution details</span>
+          <div class="metric-segment" id="history-breakdown-metric" role="group" aria-label="History distribution metric">
+            <button type="button" data-metric="tokens" class="active" data-i18n="analytics.totalTokens">Tokens</button>
+            <button type="button" data-metric="cost" data-i18n="analytics.cost">Cost</button>
+            <button type="button" data-metric="requests" data-i18n="analytics.requests">Requests</button>
+          </div>
+        </div>
         <div class="history-breakdown-grid">
           <section><h2 data-i18n="history.modelDistribution">Models</h2><div id="history-model-breakdown" class="compact-breakdown"></div></section>
           <section><h2 data-i18n="history.providerDistribution">Platforms</h2><div id="history-provider-breakdown" class="compact-breakdown"></div></section>
           <section><h2 data-i18n="history.scenarioDistribution">Scenarios</h2><div id="history-scenario-breakdown" class="compact-breakdown"></div></section>
         </div>
-        <div class="history-mini-trend" id="history-filter-trend" aria-label="Filtered token trend"></div>
+        <div class="history-trend-heading">
+          <span data-i18n="history.dailyTrend">Daily trend</span>
+          <div class="metric-segment" id="history-trend-metric" role="group" aria-label="History trend metric">
+            <button type="button" data-metric="tokens" class="active" data-i18n="analytics.totalTokens">Tokens</button>
+            <button type="button" data-metric="cost" data-i18n="analytics.cost">Cost</button>
+            <button type="button" data-metric="requests" data-i18n="analytics.requests">Requests</button>
+          </div>
+        </div>
+        <div class="history-filter-trend" id="history-filter-trend" aria-label="Filtered daily trend"></div>
       </div>
       <div class="history-filter-band" aria-label="History filters">
         <div class="history-search-wrap">
@@ -137,11 +168,6 @@
           <option value="" data-i18n-option="filter.allStreams">All request types</option>
           <option value="true" data-i18n-option="filter.streaming">Streaming only</option>
           <option value="false" data-i18n-option="filter.nonStreaming">Non-streaming only</option>
-        </select>
-        <select class="filter-select" id="cost-source-filter" aria-label="Filter by cost source">
-          <option value="" data-i18n-option="filter.allCostSources">All cost sources</option>
-          <option value="provider" data-i18n-option="filter.providerCost">Provider-reported</option>
-          <option value="estimated" data-i18n-option="filter.estimatedCost">Estimated</option>
         </select>
         <button class="btn btn-small" id="history-reset" data-i18n="filter.reset">Reset</button>
       </div>
@@ -349,7 +375,6 @@
           <span class="page-meta" id="analytics-generated"></span>
         </div>
         <div class="analytics-controls">
-          <span class="analytics-source" id="analytics-source" data-i18n="analytics.sourceOpenCode">Source: OpenCode usage</span>
           <select id="analytics-days" class="filter-select" aria-label="Time range">
             <option value="7" data-i18n-option="analytics.last7d">Last 7 days</option>
             <option value="30" selected data-i18n-option="analytics.last30d">Last 30 days</option>
@@ -384,12 +409,12 @@
         <div class="metric-cell">
           <div class="metric-label" data-i18n="analytics.cost">Cost</div>
           <div class="metric-value" id="kpi-cost">--</div>
-          <div class="metric-note cost-coverage" id="kpi-cost-source" data-i18n="analytics.costEstimated">Estimated</div>
+          <div class="metric-note" data-i18n="analytics.currencyUSD">USD</div>
         </div>
         <div class="metric-cell">
-          <div class="metric-label" data-i18n="analytics.reasoningTokens">Reasoning Tokens</div>
-          <div class="metric-value" id="kpi-reasoning">--</div>
-          <div class="metric-note" data-i18n="analytics.reasoningNote">included in output</div>
+          <div class="metric-label" data-i18n="detail.cacheRead">Cache read</div>
+          <div class="metric-value" id="kpi-cache-read">--</div>
+          <div class="metric-note" id="kpi-cache-rate">--</div>
         </div>
       </div>
 
@@ -400,7 +425,15 @@
         </div>
       </section>
 
-      <div class="analytics-comparison-grid analytics-comparison-grid-three">
+      <div class="insight-toolbar analytics-breakdown-toolbar">
+        <span data-i18n="history.distribution">Distribution details</span>
+        <div class="metric-segment" id="analytics-breakdown-metric" role="group" aria-label="Analytics distribution metric">
+          <button type="button" data-metric="tokens" class="active" data-i18n="analytics.totalTokens">Tokens</button>
+          <button type="button" data-metric="cost" data-i18n="analytics.cost">Cost</button>
+          <button type="button" data-metric="requests" data-i18n="analytics.requests">Requests</button>
+        </div>
+      </div>
+      <div class="analytics-comparison-grid">
         <section class="analytics-section">
           <div class="section-heading" data-i18n="analytics.byModel">Tokens by Model</div>
           <div class="analytics-chart" id="model-donut">
@@ -413,17 +446,7 @@
             <div class="empty-state" data-i18n="analytics.noData">No data</div>
           </div>
         </section>
-        <section class="analytics-section">
-          <div class="section-heading" data-i18n="analytics.byPlan">Usage by Plan</div>
-          <div class="analytics-chart" id="plan-donut">
-            <div class="empty-state" data-i18n="analytics.noData">No data</div>
-          </div>
-        </section>
       </div>
-      <section class="analytics-section recent-usage-section">
-        <div class="section-heading" data-i18n="analytics.recentUsage">Recent Usage</div>
-        <div class="recent-usage-list" id="analytics-recent"></div>
-      </section>
     </div>
   </div>
 

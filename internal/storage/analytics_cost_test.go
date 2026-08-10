@@ -116,9 +116,6 @@ func TestModelBreakdownSumsToSummary(t *testing.T) {
 	if math.Abs(sum-summary.EstCostUSD) > 1e-9 {
 		t.Errorf("breakdown sum %v != summary %v", sum, summary.EstCostUSD)
 	}
-	if summary.ProviderCostRows != 0 || summary.EstimatedCostRows != 3 {
-		t.Errorf("cost provenance = provider:%d estimated:%d, want 0/3", summary.ProviderCostRows, summary.EstimatedCostRows)
-	}
 
 	// Independently: cached tokens must cost far less than the same volume of
 	// raw input, which is what the old SQL path got wrong.

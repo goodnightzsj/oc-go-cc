@@ -25,6 +25,22 @@ func costsCmd() *cobra.Command {
 	}
 	cmd.AddCommand(costsReconcileCmd())
 	cmd.AddCommand(costsImportCmd())
+	cmd.AddCommand(costsSyncRequestsCmd())
+	return cmd
+}
+
+func costsSyncRequestsCmd() *cobra.Command {
+	var configPath string
+	var apply bool
+	cmd := &cobra.Command{
+		Use:   "sync-requests",
+		Short: "Dry-run or correct request history from the persisted usage snapshot",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCostsSyncRequests(cmd, configPath, apply)
+		},
+	}
+	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Path to config file")
+	cmd.Flags().BoolVar(&apply, "apply", false, "Apply the transactional request correction")
 	return cmd
 }
 
@@ -111,6 +127,36 @@ func runCostsImport(cmd *cobra.Command, configPath, inputPath string) error {
 	encoder := json.NewEncoder(cmd.OutOrStdout())
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(analytics.Summary)
+}
+
+func runCostsSyncRequests(cmd *cobra.Command, configPath string, apply bool) error {
+	if configPath != "" {
+		_ = os.Setenv("ROUTATIC_PROXY_CONFIG", configPath)
+	}
+	cfgPath := config.ResolveConfigPath()
+	cfg, err := config.LoadFromPath(cfgPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	db, err := storage.Open(storageConfig(cfg))
+	if err != nil {
+		return fmt.Errorf("open storage: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	parent := cmd.Context()
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
+	defer cancel()
+	report, err := db.SyncProviderUsageRequests(ctx, apply)
+	if err != nil {
+		return err
+	}
+	encoder := json.NewEncoder(cmd.OutOrStdout())
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(report)
 }
 
 func openProviderCapture(configPath, inputPath string) (providerCostCapture, *storage.Database, error) {

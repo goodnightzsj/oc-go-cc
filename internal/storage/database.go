@@ -165,6 +165,14 @@ func Open(cfg Config) (*Database, error) {
 		_ = database.Close()
 		return nil, fmt.Errorf("migrate request cost source column: %w", err)
 	}
+	if err := database.migrateAddRequestDetailsKnownColumn(ctx); err != nil {
+		_ = database.Close()
+		return nil, fmt.Errorf("migrate request details marker: %w", err)
+	}
+	if err := database.migrateAddUsageTrustedColumn(ctx); err != nil {
+		_ = database.Close()
+		return nil, fmt.Errorf("migrate trusted usage marker: %w", err)
+	}
 	if err := database.clearCatalogAPIKeys(ctx); err != nil {
 		_ = database.Close()
 		return nil, fmt.Errorf("clear persisted catalog API keys: %w", err)
@@ -230,6 +238,8 @@ func (d *Database) initSchema(ctx context.Context) error {
 		cache_creation_tokens INTEGER DEFAULT 0,
 		cost_usd REAL,
 		cost_source TEXT,
+		details_known INTEGER NOT NULL DEFAULT 1,
+		usage_trusted INTEGER NOT NULL DEFAULT 0,
 		streaming INTEGER,
 		success INTEGER,
 		error_msg TEXT,
@@ -388,6 +398,22 @@ func (d *Database) migrateAddCostSourceColumn(ctx context.Context) error {
 		WHERE cost_usd IS NOT NULL AND (cost_source IS NULL OR cost_source = '')
 	`)
 	return err
+}
+
+func (d *Database) migrateAddRequestDetailsKnownColumn(ctx context.Context) error {
+	_, err := d.db.ExecContext(ctx, `ALTER TABLE requests ADD COLUMN details_known INTEGER NOT NULL DEFAULT 1`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		return err
+	}
+	return nil
+}
+
+func (d *Database) migrateAddUsageTrustedColumn(ctx context.Context) error {
+	_, err := d.db.ExecContext(ctx, `ALTER TABLE requests ADD COLUMN usage_trusted INTEGER NOT NULL DEFAULT 0`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		return err
+	}
+	return nil
 }
 
 // clearCatalogAPIKeys removes credentials written by versions that treated the

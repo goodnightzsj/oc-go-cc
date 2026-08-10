@@ -2,13 +2,13 @@
 
 ## Context Recovery Block
 
-- **Current milestone**: Complete
-- **Current status**: DONE
-- **Last completed**: #10 - Complete Sub2API parity, custom controls, and refresh behavior
+- **Current milestone**: Child #10 - correct production request truth and finish the data experience
+- **Current status**: IN_PROGRESS
+- **Last completed**: Child #10 prior release review
 - **Current artifact**: `SUBTASKS.csv`
-- **Key context**: Production `d0d8fa5` uses the imported 1,390-row OpenCode snapshot and `$3.03965577` as the authoritative Analytics baseline; local History remains the request-detail surface.
-- **Known issues**: None in the requested scope; the unrelated remote `.ace-tool/` directory remains untouched.
-- **Next action**: None.
+- **Key context**: Production `d0d8fa5` has the complete 1,390-row provider snapshot, but the primary History table still contains 1,062 mixed-quality rows and `$24.56317345`.
+- **Known issues**: Child #10 is reopened for one-time request correction, source-neutral Analytics, removal of recent usage, and a fuller Sub2API-informed chart pass; the unrelated remote `.ace-tool/` directory remains untouched.
+- **Next action**: Execute child #10 tasks #6-#10 in order.
 
 ## Child 1: Finalize storage overlay regression
 
@@ -72,10 +72,10 @@
 
 ## Child 10: Complete Sub2API parity, custom controls, and refresh behavior
 
-- **Status**: DONE
-- **Key context**: OpenCode is the current usage authority; Analytics now uses its snapshot for headline totals, models, providers, plans, trends, and recent rows. History keeps local filtered summaries and scenario data without inventing unavailable fields.
-- **Validation**: Full tests, vet, production build, formatting, JavaScript syntax, database backup/import, API checks, and public-domain Edge desktop/mobile visual and interaction checks pass.
-- **Next step**: None.
+- **Status**: IN_PROGRESS
+- **Key context**: The provider snapshot must now correct primary History once, then remain an invisible implementation detail while future proxy traffic follows the normal request path.
+- **Validation**: Pending transactional sync tests, complete local gates, production backup/dry-run/apply, API checks, and public-domain Edge desktop/mobile validation.
+- **Next step**: Child task #6 - reference and contract re-audit.
 
 ## Session Start
 

@@ -37,6 +37,7 @@
 - Protect SQLite catalog credentials at rest or remove the unnecessary plaintext persistence path.
 - Recapture current OpenCode subscription and per-request usage, then reconcile provider-reported costs with trustworthy proxy rows.
 - Finish the sub2api-informed Analytics and History design with responsive, keyboard-accessible drill-down workflows.
+- Complete the reopened Sub2API parity request with an OpenCode-authoritative usage baseline, themed controls, Chinese request details, and browser-native refresh behavior.
 - Run full validation, commit, push, deploy, and smoke-test production.
 
 ## Dependency Notes

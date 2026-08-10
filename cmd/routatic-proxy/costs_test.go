@@ -83,3 +83,37 @@ func TestRunCostsReconcileDryRunAndApply(t *testing.T) {
 		t.Fatalf("cost source = %q, want %q", source, storage.CostSourceProvider)
 	}
 }
+
+func TestRunCostsImportReplacesProviderUsage(t *testing.T) {
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "data.db")
+	configPath := writeTestConfigWithDB(t, tmp, dbPath)
+	capturedAt := time.Now().UTC().Truncate(time.Second)
+	inputPath := filepath.Join(tmp, "usage.json")
+	capture := providerCostCapture{
+		CapturedAt: capturedAt,
+		Rows: []storage.ProviderCostRecord{{
+			Time: capturedAt.Add(-time.Minute), Model: "deepseek-v4-flash",
+			Provider: "inf-go.oa-compat", Plan: "lite", InputTokens: 10,
+			OutputTokens: 2, CacheReadTokens: 30, ProviderCostUnits: 1234,
+		}},
+	}
+	data, err := json.Marshal(capture)
+	if err != nil {
+		t.Fatalf("marshal capture: %v", err)
+	}
+	if err := os.WriteFile(inputPath, data, 0600); err != nil {
+		t.Fatalf("write capture: %v", err)
+	}
+	cmd, output := newCaptureCommand(t)
+	if err := runCostsImport(cmd, configPath, inputPath); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	var summary storage.ProviderUsageSummary
+	if err := json.Unmarshal(output.Bytes(), &summary); err != nil {
+		t.Fatalf("decode summary: %v", err)
+	}
+	if summary.TotalRequests != 1 || summary.CostUSD != 0.00001234 || summary.Provider != "inf-go.oa-compat" {
+		t.Fatalf("unexpected imported summary: %+v", summary)
+	}
+}

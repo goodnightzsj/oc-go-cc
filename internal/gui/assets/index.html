@@ -82,18 +82,50 @@
         </div>
         <button class="btn btn-small command-button" id="history-export" data-i18n="export.csv">Export CSV</button>
       </div>
+      <div class="history-summary-band" aria-label="Filtered history summary">
+        <div class="history-summary-metrics">
+          <div><span data-i18n="history.filteredRequests">Filtered requests</span><strong id="history-summary-requests">--</strong></div>
+          <div><span data-i18n="history.successRate">Success rate</span><strong id="history-summary-success">--</strong></div>
+          <div><span data-i18n="history.filteredTokens">Tokens</span><strong id="history-summary-tokens">--</strong></div>
+          <div><span data-i18n="history.filteredCost">Recorded cost</span><strong id="history-summary-cost">--</strong></div>
+        </div>
+        <div class="history-breakdown-grid">
+          <section><h2 data-i18n="history.modelDistribution">Models</h2><div id="history-model-breakdown" class="compact-breakdown"></div></section>
+          <section><h2 data-i18n="history.providerDistribution">Platforms</h2><div id="history-provider-breakdown" class="compact-breakdown"></div></section>
+          <section><h2 data-i18n="history.scenarioDistribution">Scenarios</h2><div id="history-scenario-breakdown" class="compact-breakdown"></div></section>
+        </div>
+        <div class="history-mini-trend" id="history-filter-trend" aria-label="Filtered token trend"></div>
+      </div>
       <div class="history-filter-band" aria-label="History filters">
         <div class="history-search-wrap">
           <input type="search" id="history-search" placeholder="Search requests..." data-i18n-placeholder="history.searchPlaceholder" aria-label="Search history" class="history-filter-input">
           <span class="history-shortcut" aria-hidden="true">⌘F</span>
         </div>
-        <div class="history-date-range">
-          <input type="date" id="history-start" class="history-filter-input history-date" aria-label="Start date" title="Start date">
-          <span aria-hidden="true">–</span>
-          <input type="date" id="history-end" class="history-filter-input history-date" aria-label="End date" title="End date">
+        <div class="history-date-range" id="history-date-range">
+          <input type="hidden" id="history-start">
+          <input type="hidden" id="history-end">
+          <button type="button" class="date-range-trigger" id="history-date-trigger" aria-haspopup="dialog" aria-expanded="false">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M16 3v4M8 3v4M3 10h18"></path></svg>
+            <span id="history-date-label" data-i18n="filter.dateRange">Date range</span>
+          </button>
+          <div class="date-range-popover" id="history-date-popover" role="dialog" aria-label="Date range" hidden>
+            <div class="date-range-fields">
+              <label><span data-i18n="filter.startDate">Start date</span><input type="text" id="history-start-display" inputmode="numeric" placeholder="YYYY-MM-DD" autocomplete="off"></label>
+              <span aria-hidden="true">–</span>
+              <label><span data-i18n="filter.endDate">End date</span><input type="text" id="history-end-display" inputmode="numeric" placeholder="YYYY-MM-DD" autocomplete="off"></label>
+            </div>
+            <div class="date-range-presets">
+              <button type="button" data-days="0" data-i18n="filter.today">Today</button>
+              <button type="button" data-days="7" data-i18n="analytics.last7d">Last 7 days</button>
+              <button type="button" data-days="30" data-i18n="analytics.last30d">Last 30 days</button>
+            </div>
+            <div class="date-range-actions">
+              <button type="button" id="history-date-clear" data-i18n="filter.clear">Clear</button>
+              <button type="button" class="primary" id="history-date-apply" data-i18n="filter.apply">Apply</button>
+            </div>
+          </div>
         </div>
-        <input type="text" id="model-filter" class="history-filter-input" list="history-model-options" placeholder="Model" data-i18n-placeholder="filter.model" aria-label="Filter by model">
-        <datalist id="history-model-options"></datalist>
+        <input type="text" id="model-filter" class="history-filter-input" placeholder="Model" data-i18n-placeholder="filter.model" aria-label="Filter by model">
         <input type="text" id="provider-filter" class="history-filter-input" placeholder="Provider" data-i18n-placeholder="filter.provider" aria-label="Filter by provider">
         <input type="text" id="scenario-filter" class="history-filter-input" placeholder="Scenario" data-i18n-placeholder="filter.scenario" aria-label="Filter by scenario">
         <select class="filter-select" id="status-filter" aria-label="Filter by status">
@@ -188,10 +220,10 @@
 
   <!-- History Detail Modal -->
   <dialog class="modal-overlay" id="history-modal" aria-labelledby="modal-title">
-    <div class="modal-content">
+    <div class="modal-content history-detail-content">
       <div class="modal-header">
-        <h3 class="modal-title" id="modal-title">Request Details</h3>
-        <button class="modal-close" id="modal-close" aria-label="Close modal">
+        <div><h3 class="modal-title" id="modal-title" data-i18n="detail.title">Request details</h3><p class="modal-subtitle" data-i18n="detail.subtitle">Routing, billing, and token details</p></div>
+        <button class="modal-close" id="modal-close" aria-label="Close modal" data-i18n-aria-label="detail.close">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -242,7 +274,6 @@
         </div>
         <div class="command-item" data-action="refresh" role="option" id="cmd-refresh">
           <span class="command-item-label" data-i18n="cmd.refreshData">Refresh Data</span>
-          <span class="command-item-shortcut"><kbd aria-keyshortcuts="Meta+R">⌘R</kbd></span>
         </div>
       </div>
     </div>
@@ -318,6 +349,7 @@
           <span class="page-meta" id="analytics-generated"></span>
         </div>
         <div class="analytics-controls">
+          <span class="analytics-source" id="analytics-source" data-i18n="analytics.sourceOpenCode">Source: OpenCode usage</span>
           <select id="analytics-days" class="filter-select" aria-label="Time range">
             <option value="7" data-i18n-option="analytics.last7d">Last 7 days</option>
             <option value="30" selected data-i18n-option="analytics.last30d">Last 30 days</option>
@@ -355,9 +387,9 @@
           <div class="metric-note cost-coverage" id="kpi-cost-source" data-i18n="analytics.costEstimated">Estimated</div>
         </div>
         <div class="metric-cell">
-          <div class="metric-label" data-i18n="analytics.p95Latency">p95 Latency</div>
-          <div class="metric-value" id="kpi-p95">--</div>
-          <div class="metric-note" data-i18n="analytics.latencyUnit">request-weighted</div>
+          <div class="metric-label" data-i18n="analytics.reasoningTokens">Reasoning Tokens</div>
+          <div class="metric-value" id="kpi-reasoning">--</div>
+          <div class="metric-note" data-i18n="analytics.reasoningNote">included in output</div>
         </div>
       </div>
 
@@ -368,7 +400,7 @@
         </div>
       </section>
 
-      <div class="analytics-comparison-grid">
+      <div class="analytics-comparison-grid analytics-comparison-grid-three">
         <section class="analytics-section">
           <div class="section-heading" data-i18n="analytics.byModel">Tokens by Model</div>
           <div class="analytics-chart" id="model-donut">
@@ -381,7 +413,17 @@
             <div class="empty-state" data-i18n="analytics.noData">No data</div>
           </div>
         </section>
+        <section class="analytics-section">
+          <div class="section-heading" data-i18n="analytics.byPlan">Usage by Plan</div>
+          <div class="analytics-chart" id="plan-donut">
+            <div class="empty-state" data-i18n="analytics.noData">No data</div>
+          </div>
+        </section>
       </div>
+      <section class="analytics-section recent-usage-section">
+        <div class="section-heading" data-i18n="analytics.recentUsage">Recent Usage</div>
+        <div class="recent-usage-list" id="analytics-recent"></div>
+      </section>
     </div>
   </div>
 

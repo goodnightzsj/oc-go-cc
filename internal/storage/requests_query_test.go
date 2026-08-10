@@ -64,6 +64,14 @@ func TestRequestsQueryFiltersAndSortsFullDataset(t *testing.T) {
 	if total != 1 || len(rows) != 1 || rows[0].ID != "r3" {
 		t.Fatalf("provider-cost rows = %+v, total = %d; want only r3", rows, total)
 	}
+	summary, err := repo.Summary(RequestQuery{Provider: "provider-b", Scenario: "complex"})
+	if err != nil {
+		t.Fatalf("filtered summary: %v", err)
+	}
+	if summary.TotalRequests != 1 || summary.TotalTokens != 110 || summary.CostUSD != 0.25 ||
+		len(summary.Models) != 1 || summary.Models[0].Name != "model-b" || len(summary.Trend) != 1 {
+		t.Fatalf("filtered summary = %+v; want r3 aggregates", summary)
+	}
 
 	rows, total, err = repo.Query(RequestQuery{Page: 1, PageSize: 50, SortBy: "cost_usd", SortOrder: "desc"})
 	if err != nil {

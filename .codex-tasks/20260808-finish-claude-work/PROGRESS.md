@@ -2,13 +2,13 @@
 
 ## Context Recovery Block
 
-- **Current milestone**: Child #10 - correct production request truth and finish the data experience
-- **Current status**: IN_PROGRESS
-- **Last completed**: Child #10 prior release review
+- **Current milestone**: All resumed requirements completed
+- **Current status**: DONE
+- **Last completed**: Child #10 - Sub2API parity, production request truth, and Edge validation
 - **Current artifact**: `SUBTASKS.csv`
-- **Key context**: Production `d0d8fa5` has the complete 1,390-row provider snapshot, but the primary History table still contains 1,062 mixed-quality rows and `$24.56317345`.
-- **Known issues**: Child #10 is reopened for one-time request correction, source-neutral Analytics, removal of recent usage, and a fuller Sub2API-informed chart pass; the unrelated remote `.ace-tool/` directory remains untouched.
-- **Next action**: Execute child #10 tasks #6-#10 in order.
+- **Key context**: Production `3c0ded5` has 1,390 primary History rows, 463,249,833 Tokens, `$3.03965577`, and a single normalized `override` scenario.
+- **Known issues**: None. The unrelated remote `.ace-tool/` directory remains untouched.
+- **Next action**: None.
 
 ## Child 1: Finalize storage overlay regression
 
@@ -72,10 +72,10 @@
 
 ## Child 10: Complete Sub2API parity, custom controls, and refresh behavior
 
-- **Status**: IN_PROGRESS
-- **Key context**: The provider snapshot must now correct primary History once, then remain an invisible implementation detail while future proxy traffic follows the normal request path.
-- **Validation**: Pending transactional sync tests, complete local gates, production backup/dry-run/apply, API checks, and public-domain Edge desktop/mobile validation.
-- **Next step**: Child task #6 - reference and contract re-audit.
+- **Status**: DONE
+- **Key context**: The provider snapshot corrected primary History once and remains invisible; future proxy traffic follows the normal request path.
+- **Validation**: Full local gates pass. Production backup/dry-run/apply/idempotence, public APIs, existing-Edge desktop/400px layouts, Chinese modal/tooltips, and real browser reload shortcuts all pass on `3c0ded5`.
+- **Next step**: None.
 
 ## Session Start
 

@@ -42,6 +42,7 @@ type providerRequestCandidate struct {
 	id           string
 	completedAt  time.Time
 	model        string
+	provider     string
 	input        int64
 	output       int64
 	cacheRead    int64
@@ -153,6 +154,7 @@ func (d *Database) SyncProviderUsageRequests(ctx context.Context, apply bool) (P
 		usedCandidates[candidateIndex] = true
 		report.MatchedDetails++
 	}
+	canonicalProviders := providerRequestProviderMappings(providerRows, candidates, mapped)
 
 	var currentRequests int64
 	var currentCost float64
@@ -182,7 +184,8 @@ func (d *Database) SyncProviderUsageRequests(ctx context.Context, apply bool) (P
 		}
 		candidate := candidates[candidateIndex]
 		cost := row.costUSD()
-		if !candidate.usageTrusted || !candidate.cost.Valid || !candidate.costSource.Valid || candidate.costSource.String != CostSourceProvider || math.Abs(candidate.cost.Float64-cost) > 1e-12 {
+		provider := canonicalProvider(row.Provider, canonicalProviders)
+		if providerRequestNeedsUpdate(candidate, cost, provider) {
 			report.WouldUpdate++
 			if candidate.cost.Valid {
 				report.ProjectedCostUSD -= candidate.cost.Float64
@@ -194,7 +197,7 @@ func (d *Database) SyncProviderUsageRequests(ctx context.Context, apply bool) (P
 	if !apply {
 		return report, nil
 	}
-	if err := applyProviderRequestSync(ctx, tx, providerRows, candidates, requestIDs, mapped, usedCandidates, &report); err != nil {
+	if err := applyProviderRequestSync(ctx, tx, providerRows, candidates, requestIDs, mapped, usedCandidates, canonicalProviders, &report); err != nil {
 		return report, err
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(cost_usd), 0) FROM requests`).Scan(&report.ProjectedRequests, &report.ProjectedCostUSD); err != nil {
@@ -241,7 +244,7 @@ func providerUsageRowsForSync(ctx context.Context, tx *sql.Tx) ([]providerReques
 
 func providerRequestCandidatesForSync(ctx context.Context, tx *sql.Tx, minTime, maxTime, snapshotAt time.Time) ([]providerRequestCandidate, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, start_time, COALESCE(duration_ms, 0), model,
+		SELECT id, start_time, COALESCE(duration_ms, 0), model, COALESCE(provider, ''),
 		       COALESCE(input_tokens, 0), COALESCE(output_tokens, 0),
 		       COALESCE(cache_read_tokens, 0), COALESCE(cache_creation_tokens, 0),
 		       cost_usd, cost_source, details_known, usage_trusted
@@ -262,7 +265,7 @@ func providerRequestCandidatesForSync(ctx context.Context, tx *sql.Tx, minTime, 
 		var startTime string
 		var durationMS int64
 		var detailsKnown, usageTrusted int
-		if err := rows.Scan(&row.id, &startTime, &durationMS, &row.model, &row.input, &row.output,
+		if err := rows.Scan(&row.id, &startTime, &durationMS, &row.model, &row.provider, &row.input, &row.output,
 			&row.cacheRead, &row.cacheNew, &row.cost, &row.costSource, &detailsKnown, &usageTrusted); err != nil {
 			return nil, err
 		}
@@ -278,7 +281,7 @@ func providerRequestCandidatesForSync(ctx context.Context, tx *sql.Tx, minTime, 
 	return out, rows.Err()
 }
 
-func applyProviderRequestSync(ctx context.Context, tx *sql.Tx, providerRows []providerRequestSyncRow, candidates []providerRequestCandidate, requestIDs []string, mapped map[int]int, usedCandidates map[int]bool, report *ProviderRequestSyncReport) error {
+func applyProviderRequestSync(ctx context.Context, tx *sql.Tx, providerRows []providerRequestSyncRow, candidates []providerRequestCandidate, requestIDs []string, mapped map[int]int, usedCandidates map[int]bool, canonicalProviders map[string]string, report *ProviderRequestSyncReport) error {
 	for i, candidate := range candidates {
 		if usedCandidates[i] {
 			continue
@@ -291,11 +294,12 @@ func applyProviderRequestSync(ctx context.Context, tx *sql.Tx, providerRows []pr
 		report.Removed += int(removed)
 	}
 	for providerIndex, row := range providerRows {
+		provider := canonicalProvider(row.Provider, canonicalProviders)
 		if candidateIndex, ok := mapped[providerIndex]; ok {
 			candidate := candidates[candidateIndex]
 			cost := row.costUSD()
-			if !candidate.usageTrusted || !candidate.cost.Valid || !candidate.costSource.Valid || candidate.costSource.String != CostSourceProvider || math.Abs(candidate.cost.Float64-cost) > 1e-12 {
-				result, err := tx.ExecContext(ctx, `UPDATE requests SET cost_usd = ?, cost_source = ?, usage_trusted = 1 WHERE id = ?`, cost, CostSourceProvider, candidate.id)
+			if providerRequestNeedsUpdate(candidate, cost, provider) {
+				result, err := tx.ExecContext(ctx, `UPDATE requests SET provider = ?, cost_usd = ?, cost_source = ?, usage_trusted = 1 WHERE id = ?`, provider, cost, CostSourceProvider, candidate.id)
 				if err != nil {
 					return err
 				}
@@ -310,7 +314,7 @@ func applyProviderRequestSync(ctx context.Context, tx *sql.Tx, providerRows []pr
 				input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
 				cost_usd, cost_source, details_known, usage_trusted, streaming, success, error_msg, attempt, created_at
 			) VALUES (?, ?, ?, '', ?, 0, ?, ?, ?, ?, ?, ?, 0, 1, 0, 0, '', 1, ?)`,
-			requestIDs[providerIndex], row.Model, row.Provider, row.Time.UTC().Format(time.RFC3339Nano),
+			requestIDs[providerIndex], row.Model, provider, row.Time.UTC().Format(time.RFC3339Nano),
 			row.InputTokens, row.OutputTokens, row.CacheReadTokens,
 			row.CacheWrite5mTokens+row.CacheWrite1hTokens, row.costUSD(), CostSourceProvider,
 			row.snapshotAt.UTC().Format(time.RFC3339Nano))
@@ -321,6 +325,44 @@ func applyProviderRequestSync(ctx context.Context, tx *sql.Tx, providerRows []pr
 		report.Inserted += int(inserted)
 	}
 	return nil
+}
+
+func providerRequestProviderMappings(providerRows []providerRequestSyncRow, candidates []providerRequestCandidate, mapped map[int]int) map[string]string {
+	observed := map[string]map[string]bool{}
+	for providerIndex, candidateIndex := range mapped {
+		candidate := candidates[candidateIndex]
+		if !candidate.detailsKnown || providerRows[providerIndex].Provider == "" || candidate.provider == "" {
+			continue
+		}
+		raw := providerRows[providerIndex].Provider
+		if observed[raw] == nil {
+			observed[raw] = map[string]bool{}
+		}
+		observed[raw][candidate.provider] = true
+	}
+	canonical := map[string]string{}
+	for raw, providers := range observed {
+		if len(providers) != 1 {
+			continue
+		}
+		for provider := range providers {
+			canonical[raw] = provider
+		}
+	}
+	return canonical
+}
+
+func canonicalProvider(provider string, mappings map[string]string) string {
+	if canonical := mappings[provider]; canonical != "" {
+		return canonical
+	}
+	return provider
+}
+
+func providerRequestNeedsUpdate(candidate providerRequestCandidate, cost float64, provider string) bool {
+	return !candidate.usageTrusted || candidate.provider != provider || !candidate.cost.Valid ||
+		!candidate.costSource.Valid || candidate.costSource.String != CostSourceProvider ||
+		math.Abs(candidate.cost.Float64-cost) > 1e-12
 }
 
 func providerRequestCanonical(row ProviderCostRecord) string {

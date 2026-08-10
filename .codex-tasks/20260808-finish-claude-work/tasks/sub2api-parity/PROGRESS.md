@@ -30,6 +30,11 @@
 - Dashboard and Analytics now share request-backed KPIs, four-series Token trend, model/platform distributions, Token/cost/request metric switching, and themed pointer/keyboard/touch tooltips.
 - History now exposes four filtered KPIs, full model/platform/scenario rows, metric switching, a labelled trend, and unknown-detail semantics for fields the one-time correction cannot reconstruct.
 
+## Production Retry
+
+- Backup `20260810-175229-before-a9879e1.db` is mode `0600` and passed `PRAGMA integrity_check`.
+- The first production dry run stopped before request writes because full config validation required a runtime API-key environment variable. The maintenance command now decodes only the storage block; a regression test confirms unresolved credential placeholders are irrelevant and never read.
+
 ## Production Validation
 
 - Backup `20260810-165925-before-cc7b0d9.db` passed `PRAGMA integrity_check` and is mode `0600`.

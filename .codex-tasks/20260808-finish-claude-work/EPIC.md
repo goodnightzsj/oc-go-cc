@@ -51,6 +51,6 @@
 
 ## Done-When
 
-- [ ] Every row in `SUBTASKS.csv` is `DONE`.
-- [ ] Full Go validation and focused frontend checks pass.
-- [ ] Production service, health endpoint, GUI, and analytics JSON smoke tests pass.
+- [x] Every row in `SUBTASKS.csv` is `DONE`.
+- [x] Full Go validation and focused frontend checks pass.
+- [x] Production service, health endpoint, GUI, and analytics JSON smoke tests pass.

@@ -43,8 +43,8 @@ func TestSyncProviderUsageRequestsCorrectsHistoryAndIsIdempotent(t *testing.T) {
 	}
 
 	providerRows := []ProviderCostRecord{
-		{Time: observedAt, Model: "deepseek-v4-flash", Provider: "platform-a", Plan: "lite", InputTokens: 10, OutputTokens: 2, CacheReadTokens: 30, ProviderCostUnits: 1234},
-		{Time: observedAt.Add(time.Second), Model: "kimi-k2.6", Provider: "platform-a", Plan: "lite", InputTokens: 20, OutputTokens: 4, CacheWrite5mTokens: 5, ProviderCostUnits: 5678},
+		{Time: observedAt, Model: "deepseek-v4-flash", Provider: "snapshot-platform", Plan: "lite", InputTokens: 10, OutputTokens: 2, CacheReadTokens: 30, ProviderCostUnits: 1234},
+		{Time: observedAt.Add(time.Second), Model: "kimi-k2.6", Provider: "snapshot-platform", Plan: "lite", InputTokens: 20, OutputTokens: 4, CacheWrite5mTokens: 5, ProviderCostUnits: 5678},
 	}
 	if err := db.ReplaceProviderUsage(context.Background(), capturedAt, providerRows); err != nil {
 		t.Fatalf("replace provider usage: %v", err)
@@ -92,8 +92,11 @@ func TestSyncProviderUsageRequestsCorrectsHistoryAndIsIdempotent(t *testing.T) {
 			imported = rec
 		}
 	}
-	if imported.ID == "" || imported.DetailsKnown || imported.Model != "kimi-k2.6" || imported.CacheCreationTokens != 5 {
+	if imported.ID == "" || imported.DetailsKnown || imported.Model != "kimi-k2.6" || imported.Provider != "platform-a" || imported.CacheCreationTokens != 5 {
 		t.Fatalf("unexpected imported row: %+v", imported)
+	}
+	if byID["exact-local"].Provider != "platform-a" {
+		t.Fatalf("exact request provider changed: %+v", byID["exact-local"])
 	}
 	analytics := NewAnalytics(db)
 	analytics.SetBaseline(observedAt.Add(30 * time.Minute))

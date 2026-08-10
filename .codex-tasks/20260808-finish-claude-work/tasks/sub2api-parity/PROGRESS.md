@@ -2,13 +2,13 @@
 
 ## Context Recovery Block
 
-- **Current milestone**: Verified CompactGate port released
-- **Current status**: DONE
-- **Last completed**: #13 - Deploy and validate the final UI in the existing Edge session
+- **Current milestone**: Chart interaction and visual polish
+- **Current status**: IN_PROGRESS
+- **Last completed**: #18 - Run complete local release validation
 - **Current artifact**: `TODO.csv`
-- **Key context**: Production History and Analytics now share 1,390 trusted request rows totaling `$3.03965577`; provider labels are normalized to `opencode-go`.
+- **Key context**: Production data is correct; this pass changes only presentation and line-chart interaction, preserving all request and cost semantics.
 - **Known issues**: None. The unrelated remote `.ace-tool/` directory remains untouched.
-- **Next action**: None.
+- **Next action**: #19 - Deploy and validate polished charts in the existing Edge session.
 
 ## Reopened Production Findings
 

@@ -20,7 +20,7 @@ func TestHistoryAssetsKeepKeyboardDialogAndPromptTokens(t *testing.T) {
 		"historyQueryParams", "record.error_msg", "cost_usd", `colspan="7"`,
 		"window.CustomSelect", "window.HistoryDateRange", "renderHistorySummary", "detail.title",
 		"historyBreakdownMetric", "bindChartTooltip", "details_known",
-		"history-token-trigger", "bindHistoryTokenTooltips",
+		"history-token-trigger", "bindHistoryTokenTooltips", "document.querySelectorAll('.chart-tip')",
 	} {
 		if !strings.Contains(string(app), marker) {
 			t.Errorf("app.js missing History accessibility marker %q", marker)

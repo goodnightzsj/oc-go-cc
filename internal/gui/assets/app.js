@@ -909,6 +909,7 @@ const PerfModule = {
 // panel is deep-linkable / resumable (#overview, #analytics, #history, ...).
 function activateTab(name) {
   if (!name) return;
+  document.querySelectorAll('.chart-tip').forEach(tip => { tip.style.display = 'none'; });
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
   const tabEl = document.querySelector('.tab[data-tab="' + name + '"]');

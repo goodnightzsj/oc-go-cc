@@ -2,13 +2,14 @@
 
 ## Goal
 
-- Complete the verified unfinished requirements from Claude session `78af710c-35ca-4fc2-8aa0-a30f6273dc16`, then validate and deploy them.
+- Complete the verified unfinished requirements across the full continuation chain, reconcile production request costs with a fresh authenticated OpenCode usage capture, finish the sub2api-informed dashboard and History experience, then validate and deploy them.
 
 ## Non-Goals
 
 - Reconstruct analytics rows recorded before `analytics_baseline`.
 - Port sub2api backend, billing, tenancy, or unrelated SaaS features.
 - Replace the existing dependency-free dashboard stack.
+- Persist browser credentials, request content, or provider authentication material.
 
 ## Constraints
 
@@ -24,6 +25,7 @@
 - Analytics token/cost definitions must stay consistent across summary, charts, and history.
 - Remote deployment changes live service state and must retain rollback and health checks.
 - OpenCode usage reconciliation depends on an authenticated local Edge session.
+- Production data correction requires a backup, deterministic dry-run matching, and an explicit mismatch report before writes.
 
 ## Child Deliverables
 
@@ -32,12 +34,18 @@
 - Fix verified analytics/dashboard correctness and accessibility issues.
 - Port only the useful sub2api data-presentation patterns.
 - Reconcile estimated costs with real OpenCode usage data.
+- Protect SQLite catalog credentials at rest or remove the unnecessary plaintext persistence path.
+- Recapture current OpenCode subscription and per-request usage, then reconcile provider-reported costs with trustworthy proxy rows.
+- Finish the sub2api-informed Analytics and History design with responsive, keyboard-accessible drill-down workflows.
 - Run full validation, commit, push, deploy, and smoke-test production.
 
 ## Dependency Notes
 
 - Security and dashboard work start after the current storage regression is locked down.
 - Frontend porting follows dashboard correctness and design-context setup.
+- SQLite secret hardening precedes provider-data import work.
+- Provider reconciliation defines the cost provenance shown by the final dashboard.
+- Dashboard and History implementation precede the final release validation.
 - Deployment follows every local deliverable and validation gate.
 
 ## Done-When

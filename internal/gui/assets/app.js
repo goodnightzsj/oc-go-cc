@@ -1480,6 +1480,12 @@ function markPollFail() {
 
 /* ── Helpers ───────────────────────────────────────────────────── */
 function fmt(n) { return n != null ? Number(n).toLocaleString() : '—'; }
+function fmtTok(n) {
+  const value = Number(n || 0);
+  if (value >= 1_000_000) return (value / 1_000_000).toFixed(1) + 'M';
+  if (value >= 1000) return (value / 1000).toFixed(1) + 'K';
+  return String(value);
+}
 
 // Costs here are often fractions of a cent, so a fixed 2-decimal format
 // collapses real spend to "$0.00". Widen the precision for small amounts
@@ -2880,9 +2886,6 @@ const AnalyticsModule = {
     // correctly instead of degenerating (coincident arc endpoints draw nothing).
     const C = 120, R = 82, STROKE = 34;
     const CIRC = 2 * Math.PI * R;
-    const fmtTok = (n) => n >= 1_000_000 ? (n/1_000_000).toFixed(1)+'M'
-      : n >= 1000 ? (n/1000).toFixed(1)+'K' : String(n);
-
     const tooltipId = containerId + '-tip';
     const legend = [];
     // Floor tiny-but-nonzero shares so a <0.5% sector stays visible/hoverable.

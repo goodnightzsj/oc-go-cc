@@ -17,9 +17,10 @@ func TestHistoryAssetsKeepKeyboardDialogAndPromptTokens(t *testing.T) {
 
 	for _, marker := range []string{
 		`tabindex="0" aria-haspopup="dialog"`, "modal.showModal()", "prompt_tokens",
-		"historyQueryParams", "record.error_msg", "legend-drilldown", "cost_usd", `colspan="8"`,
+		"historyQueryParams", "record.error_msg", "cost_usd", `colspan="7"`,
 		"window.CustomSelect", "window.HistoryDateRange", "renderHistorySummary", "detail.title",
 		"historyBreakdownMetric", "historyTrendMetric", "bindChartTooltip", "details_known",
+		"history-token-trigger", "bindHistoryTokenTooltips",
 	} {
 		if !strings.Contains(string(app), marker) {
 			t.Errorf("app.js missing History accessibility marker %q", marker)

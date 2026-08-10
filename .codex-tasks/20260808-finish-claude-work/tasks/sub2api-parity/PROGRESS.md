@@ -2,13 +2,13 @@
 
 ## Context Recovery Block
 
-- **Current milestone**: Correct request truth and finish the Sub2API-informed data experience
+- **Current milestone**: Deploy and validate the verified CompactGate port
 - **Current status**: IN_PROGRESS
-- **Last completed**: #9 - Complete local release validation
+- **Last completed**: #12 - Port verified dashboard, usage, and log patterns
 - **Current artifact**: `TODO.csv`
-- **Key context**: Production Analytics has 1,390 provider rows totaling `$3.03965577`, but History still has 1,062 mixed-quality local rows totaling `$24.56317345`; 772 pre-baseline costs are estimates.
-- **Known issues**: The data-source and recent-usage sections conflict with the clarified product contract; the History mini trend degenerates into an unlabeled single bar; charts and tooltips remain incomplete.
-- **Next action**: #10 - back up, deploy, dry-run/apply the production correction, and validate the public domain with Edge.
+- **Key context**: Production History and Analytics now share 1,390 trusted request rows totaling `$3.03965577`; provider labels are normalized to `opencode-go`.
+- **Known issues**: None in local checks; production still runs the previous release until task #13 deploys this commit.
+- **Next action**: #13 - deploy and verify the public-domain desktop/narrow layouts, custom tooltips, dialog, and browser refresh in the existing Edge session.
 
 ## Reopened Production Findings
 
@@ -41,3 +41,17 @@
 - Product commits `cc7b0d9`, `60bc714`, and `d0d8fa5` are pushed; production runs `d0d8fa5` through the existing health/rollback deployment gate.
 - Edge on `https://opencode.9962510.xyz/` verified the Chinese request dialog, themed selects/date range, model/provider/plan charts, token trend, recent usage, History summaries, and zero desktop/mobile document overflow.
 - Provider and plan labels resolve to `inf-go.oa-compat` and `lite`; refresh events for `Meta+R`, `F5`, and `Meta+Shift+R` are not prevented.
+
+## Verified Local Reference
+
+- Running CompactGate `#analytics` contains six metrics, request and Token trends, platform/model distributions, and a model-path table.
+- Running CompactGate `#usage` contains seven metrics, a four-series Token/cache-rate trend, a period table, a model table, and endpoint distribution.
+- Running CompactGate `#logs` contains themed filters, a compact request table, a structured Token tooltip, and expandable request details.
+- This project can truthfully port all of those except endpoint, first-Token, and model-path fields, which are not present in its request contract.
+
+## Verified Port
+
+- Dashboard now follows the real CompactGate analytics structure: six KPIs, request and Token line trends, and model/platform horizontal distributions.
+- Usage now follows the real CompactGate usage structure: custom date range, hour/day granularity, Token/cache-rate trend, period details, model details, and platform distribution.
+- Request History now keeps model/platform visible and exposes a themed structured Token tooltip; source provenance and recent-usage sections remain absent.
+- The guessed donut and single-bucket stacked-bar implementations were deleted. Full Go tests, build, JavaScript syntax, and diff checks pass.

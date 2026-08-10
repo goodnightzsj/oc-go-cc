@@ -14,6 +14,7 @@ func TestHistoryEntriesExposeRawAndPromptTokens(t *testing.T) {
 		CacheCreationTokens: 30,
 		CostUSD:             0.000123,
 		CostSource:          "provider",
+		DetailsKnown:        true,
 		OutputTokens:        40,
 		Attempt:             2,
 		ErrorMsg:            "upstream failed",
@@ -36,6 +37,9 @@ func TestHistoryEntriesExposeRawAndPromptTokens(t *testing.T) {
 	}
 	if got.CostSource != "provider" {
 		t.Errorf("cost_source = %q, want provider", got.CostSource)
+	}
+	if !got.DetailsKnown {
+		t.Error("details_known = false, want true")
 	}
 	if entries[1].CostUSD != nil {
 		t.Errorf("unknown cost_usd = %v, want nil", entries[1].CostUSD)

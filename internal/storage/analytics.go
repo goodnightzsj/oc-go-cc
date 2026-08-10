@@ -37,14 +37,16 @@ func (a *Analytics) Baseline() time.Time {
 	return a.baseline
 }
 
-// windowStart clamps a requested "last N days" start to the baseline, so all
-// aggregates share one definition of where trustworthy data begins.
-func (a *Analytics) windowStart(days int) time.Time {
-	since := time.Now().AddDate(0, 0, -days)
-	if !a.baseline.IsZero() && a.baseline.After(since) {
-		return a.baseline
+// windowStarts keeps the requested range while applying the trust baseline to
+// locally observed rows. Corrected rows have usage_trusted=1 and remain in
+// usage/cost analytics even when their timestamp predates it.
+func (a *Analytics) windowStarts(days int) (requested, trusted time.Time) {
+	requested = time.Now().AddDate(0, 0, -days)
+	trusted = requested
+	if !a.baseline.IsZero() && a.baseline.After(trusted) {
+		trusted = a.baseline
 	}
-	return since
+	return requested, trusted
 }
 
 // TokenSummary holds high-level token and request metrics for a time window.
@@ -56,8 +58,6 @@ type TokenSummary struct {
 	CacheCreationTokens int64     `json:"cache_creation_tokens"`
 	SuccessRate         float64   `json:"success_rate"` // 0-1
 	EstCostUSD          float64   `json:"est_cost_usd"`
-	ProviderCostRows    int64     `json:"provider_cost_rows"`
-	EstimatedCostRows   int64     `json:"estimated_cost_rows"`
 	PeriodStart         time.Time `json:"period_start"`
 	PeriodEnd           time.Time `json:"period_end"`
 }
@@ -67,13 +67,13 @@ func (a *Analytics) GetTokenSummary(days int) (*TokenSummary, error) {
 	if days <= 0 {
 		days = 30
 	}
-	since := a.windowStart(days)
+	requested, trusted := a.windowStarts(days)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	var summary TokenSummary
-	summary.PeriodStart = since
+	summary.PeriodStart = trusted
 	summary.PeriodEnd = time.Now()
 
 	row := a.db.DB().QueryRowContext(ctx, `
@@ -84,18 +84,17 @@ func (a *Analytics) GetTokenSummary(days int) (*TokenSummary, error) {
 			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
 			CASE
-				WHEN COUNT(*) > 0 THEN CAST(SUM(success) AS FLOAT) / COUNT(*)
+				WHEN SUM(details_known) > 0 THEN CAST(SUM(CASE WHEN details_known = 1 THEN success ELSE 0 END) AS FLOAT) / SUM(details_known)
 				ELSE 0
-			END AS success_rate,
-			COUNT(CASE WHEN cost_source = 'provider' THEN 1 END) AS provider_cost_rows,
-			COUNT(CASE WHEN cost_usd IS NOT NULL AND COALESCE(cost_source, 'estimated') != 'provider' THEN 1 END) AS estimated_cost_rows
+			END AS success_rate
 		FROM requests r
-		WHERE r.start_time >= ?
-	`, since.Format(time.RFC3339Nano))
+		WHERE julianday(r.start_time) >= julianday(?)
+		  AND (julianday(r.start_time) >= julianday(?) OR r.usage_trusted = 1)
+	`, requested.Format(time.RFC3339Nano), trusted.Format(time.RFC3339Nano))
 
 	var scanErr error
 	if scanErr = row.Scan(&summary.TotalRequests, &summary.InputTokens, &summary.OutputTokens, &summary.CacheReadTokens, &summary.CacheCreationTokens,
-		&summary.SuccessRate, &summary.ProviderCostRows, &summary.EstimatedCostRows); scanErr != nil {
+		&summary.SuccessRate); scanErr != nil {
 		return nil, scanErr
 	}
 
@@ -103,7 +102,7 @@ func (a *Analytics) GetTokenSummary(days int) (*TokenSummary, error) {
 	// correct even when the catalog/models table is empty (fresh installs):
 	// each model's input/output is priced from the embedded seed rules and
 	// summed, instead of a single models-table JOIN that yields NULL/0.
-	cost, costErr := a.modelCostSum(ctx, since.Format(time.RFC3339Nano))
+	cost, costErr := a.modelCostSum(ctx, requested.Format(time.RFC3339Nano), trusted.Format(time.RFC3339Nano))
 	if costErr != nil {
 		return nil, costErr
 	}
@@ -114,7 +113,7 @@ func (a *Analytics) GetTokenSummary(days int) (*TokenSummary, error) {
 // modelCostSum sums estimated USD cost across requests using price rules from
 // seed_prices.json, keyed per model. Falls back to the models table for
 // input/output rates when a model has no seed rule.
-func (a *Analytics) modelCostSum(ctx context.Context, since string) (float64, error) {
+func (a *Analytics) modelCostSum(ctx context.Context, requested, trusted string) (float64, error) {
 	rows, err := a.db.DB().QueryContext(ctx, `
 		SELECT r.model,
 		       COUNT(*),
@@ -128,9 +127,10 @@ func (a *Analytics) modelCostSum(ctx context.Context, since string) (float64, er
 		       COALESCE(m.cost_output_per_m, 0)
 		FROM requests r
 		LEFT JOIN models m ON m.id = r.model
-		WHERE r.start_time >= ?
+		WHERE julianday(r.start_time) >= julianday(?)
+		  AND (julianday(r.start_time) >= julianday(?) OR r.usage_trusted = 1)
 		GROUP BY r.model
-	`, since)
+	`, requested, trusted)
 	if err != nil {
 		return 0, err
 	}
@@ -180,7 +180,7 @@ func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
 	if days <= 0 {
 		days = 30
 	}
-	since := a.windowStart(days)
+	requested, trusted := a.windowStarts(days)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -196,7 +196,7 @@ func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
 			COALESCE(SUM(r.cache_creation_tokens), 0) AS cache_creation_tokens,
 			COALESCE(l.avg_latency, 0) AS avg_latency_ms,
 			CASE
-				WHEN COUNT(*) > 0 THEN CAST(SUM(r.success) AS FLOAT) / COUNT(*)
+				WHEN SUM(r.details_known) > 0 THEN CAST(SUM(CASE WHEN r.details_known = 1 THEN r.success ELSE 0 END) AS FLOAT) / SUM(r.details_known)
 				ELSE 0
 			END AS success_rate,
 			COALESCE(m.cost_input_per_m, 0) AS models_cost_input_per_m,
@@ -207,15 +207,16 @@ func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
 		LEFT JOIN (
 			SELECT model, AVG(latency_ms) AS avg_latency
 			FROM latency_samples
-			WHERE recorded_at >= ?
+			WHERE julianday(recorded_at) >= julianday(?)
 			GROUP BY model
 		) l ON l.model = r.model
 		LEFT JOIN models m
 			ON m.id = r.model
-		WHERE r.start_time >= ?
+		WHERE julianday(r.start_time) >= julianday(?)
+		  AND (julianday(r.start_time) >= julianday(?) OR r.usage_trusted = 1)
 		GROUP BY r.model, r.provider
 		ORDER BY requests DESC
-	`, since.Format(time.RFC3339Nano), since.Format(time.RFC3339Nano))
+	`, trusted.Format(time.RFC3339Nano), requested.Format(time.RFC3339Nano), trusted.Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, err
 	}
@@ -319,7 +320,7 @@ func (a *Analytics) GetScenarioBreakdown(days int) ([]ScenarioBreakdown, error) 
 	if days <= 0 {
 		days = 30
 	}
-	since := a.windowStart(days)
+	requested, trusted := a.windowStarts(days)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	rows, err := a.db.DB().QueryContext(ctx, `
@@ -330,9 +331,10 @@ func (a *Analytics) GetScenarioBreakdown(days int) ([]ScenarioBreakdown, error) 
 		       COALESCE(m.cost_input_per_m, 0), COALESCE(m.cost_output_per_m, 0)
 		FROM requests r
 		LEFT JOIN models m ON m.id = r.model
-		WHERE r.start_time >= ?
+		WHERE julianday(r.start_time) >= julianday(?)
+		  AND (julianday(r.start_time) >= julianday(?) OR r.usage_trusted = 1)
 		GROUP BY r.scenario, r.model
-	`, since.Format(time.RFC3339Nano))
+	`, requested.Format(time.RFC3339Nano), trusted.Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, err
 	}
@@ -397,7 +399,7 @@ func (a *Analytics) GetProviderBreakdown(days int) ([]ProviderBreakdown, error) 
 	if days <= 0 {
 		days = 30
 	}
-	since := a.windowStart(days)
+	requested, trusted := a.windowStarts(days)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -422,9 +424,10 @@ func (a *Analytics) GetProviderBreakdown(days int) ([]ProviderBreakdown, error) 
 			COALESCE(SUM(r.cost_usd), 0) AS stored_cost_usd
 		FROM requests r
 		LEFT JOIN models m ON m.id = r.model
-		WHERE r.start_time >= ?
+		WHERE julianday(r.start_time) >= julianday(?)
+		  AND (julianday(r.start_time) >= julianday(?) OR r.usage_trusted = 1)
 		GROUP BY r.provider, r.model
-	`, since.Format(time.RFC3339Nano))
+	`, requested.Format(time.RFC3339Nano), trusted.Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, err
 	}
@@ -490,12 +493,13 @@ func (a *Analytics) GetProviderBreakdown(days int) ([]ProviderBreakdown, error) 
 
 // DailyTokenPoint is a single day in the token trend.
 type DailyTokenPoint struct {
-	Date                string `json:"date"` // YYYY-MM-DD
-	Requests            int64  `json:"requests"`
-	InputTokens         int64  `json:"input_tokens"`
-	OutputTokens        int64  `json:"output_tokens"`
-	CacheReadTokens     int64  `json:"cache_read_tokens"`
-	CacheCreationTokens int64  `json:"cache_creation_tokens"`
+	Date                string  `json:"date"` // YYYY-MM-DD
+	Requests            int64   `json:"requests"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	CacheReadTokens     int64   `json:"cache_read_tokens"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	CostUSD             float64 `json:"cost_usd"`
 }
 
 // GetDailyTokenTrend returns daily token/request aggregates for the last N days.
@@ -503,7 +507,7 @@ func (a *Analytics) GetDailyTokenTrend(days int) ([]DailyTokenPoint, error) {
 	if days <= 0 {
 		days = 30
 	}
-	since := a.windowStart(days)
+	requested, trusted := a.windowStarts(days)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -515,12 +519,14 @@ func (a *Analytics) GetDailyTokenTrend(days int) ([]DailyTokenPoint, error) {
 			COALESCE(SUM(input_tokens), 0) AS input_tokens,
 			COALESCE(SUM(output_tokens), 0) AS output_tokens,
 			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
-			COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens
-		FROM requests
-		WHERE start_time >= ?
-		GROUP BY DATE(start_time)
+			COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
+			COALESCE(SUM(cost_usd), 0) AS cost_usd
+		FROM requests r
+		WHERE julianday(r.start_time) >= julianday(?)
+		  AND (julianday(r.start_time) >= julianday(?) OR r.usage_trusted = 1)
+		GROUP BY DATE(r.start_time)
 		ORDER BY day ASC
-	`, since.Format(time.RFC3339Nano))
+	`, requested.Format(time.RFC3339Nano), trusted.Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, err
 	}
@@ -529,7 +535,7 @@ func (a *Analytics) GetDailyTokenTrend(days int) ([]DailyTokenPoint, error) {
 	var result []DailyTokenPoint
 	for rows.Next() {
 		var p DailyTokenPoint
-		if err := rows.Scan(&p.Date, &p.Requests, &p.InputTokens, &p.OutputTokens, &p.CacheReadTokens, &p.CacheCreationTokens); err != nil {
+		if err := rows.Scan(&p.Date, &p.Requests, &p.InputTokens, &p.OutputTokens, &p.CacheReadTokens, &p.CacheCreationTokens, &p.CostUSD); err != nil {
 			return nil, err
 		}
 		result = append(result, p)

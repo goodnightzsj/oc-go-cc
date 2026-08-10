@@ -6,7 +6,7 @@
 
 ## Non-Goals
 
-- Reconstruct analytics rows recorded before `analytics_baseline`.
+- Keep provider provenance or reconciliation details visible in the product UI.
 - Port sub2api backend, billing, tenancy, or unrelated SaaS features.
 - Replace the existing dependency-free dashboard stack.
 - Persist browser credentials, request content, or provider authentication material.
@@ -38,6 +38,7 @@
 - Recapture current OpenCode subscription and per-request usage, then reconcile provider-reported costs with trustworthy proxy rows.
 - Finish the sub2api-informed Analytics and History design with responsive, keyboard-accessible drill-down workflows.
 - Complete the reopened Sub2API parity request with an OpenCode-authoritative usage baseline, themed controls, Chinese request details, and browser-native refresh behavior.
+- Correct primary request history once from the complete provider snapshot and finish the dense source-neutral chart experience.
 - Run full validation, commit, push, deploy, and smoke-test production.
 
 ## Dependency Notes
@@ -51,6 +52,6 @@
 
 ## Done-When
 
-- [x] Every row in `SUBTASKS.csv` is `DONE`.
-- [x] Full Go validation and focused frontend checks pass.
-- [x] Production service, health endpoint, GUI, and analytics JSON smoke tests pass.
+- [ ] Every row in `SUBTASKS.csv` is `DONE`.
+- [ ] Full Go validation and focused frontend checks pass.
+- [ ] Production service, health endpoint, GUI, analytics JSON, History totals, and Edge interactions pass.

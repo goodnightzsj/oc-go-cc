@@ -42,8 +42,8 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 		INSERT OR REPLACE INTO requests (
 			id, model, provider, scenario, start_time, duration_ms,
 			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-			cost_usd, cost_source, streaming, success, error_msg, attempt
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			cost_usd, cost_source, details_known, usage_trusted, streaming, success, error_msg, attempt
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?)
 	`,
 		rec.ID,
 		rec.Model,
@@ -86,7 +86,7 @@ func (r *Requests) Last(n int) ([]history.RequestRecord, error) {
 	rows, err := r.db.DB().QueryContext(ctx, `
 		SELECT id, model, provider, scenario, start_time, duration_ms,
 		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-		       cost_usd, cost_source, streaming, success, error_msg, attempt
+		       cost_usd, cost_source, details_known, streaming, success, error_msg, attempt
 		FROM requests
 		ORDER BY start_time DESC
 		LIMIT ?
@@ -108,7 +108,7 @@ func (r *Requests) Since(since time.Time) ([]history.RequestRecord, error) {
 	rows, err := r.db.DB().QueryContext(ctx, `
 		SELECT id, model, provider, scenario, start_time, duration_ms,
 		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-		       cost_usd, cost_source, streaming, success, error_msg, attempt
+		       cost_usd, cost_source, details_known, streaming, success, error_msg, attempt
 		FROM requests
 		WHERE start_time >= ?
 		ORDER BY start_time DESC
@@ -147,6 +147,7 @@ type RequestQuery struct {
 type RequestSummary struct {
 	TotalRequests int64              `json:"total_requests"`
 	SuccessRate   float64            `json:"success_rate"`
+	SuccessRows   int64              `json:"success_rows"`
 	TotalTokens   int64              `json:"total_tokens"`
 	CostUSD       float64            `json:"cost_usd"`
 	CostRows      int64              `json:"cost_rows"`
@@ -178,15 +179,16 @@ func (r *Requests) Summary(q RequestQuery) (*RequestSummary, error) {
 	out := &RequestSummary{}
 	var successes int64
 	if err := r.db.DB().QueryRowContext(ctx, `
-		SELECT COUNT(*), COALESCE(SUM(success), 0),
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN details_known = 1 THEN success ELSE 0 END), 0),
+		       COALESCE(SUM(CASE WHEN details_known = 1 THEN 1 ELSE 0 END), 0),
 		       COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) +
 		                    COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0)), 0),
 		       COALESCE(SUM(cost_usd), 0), COUNT(cost_usd)
-		FROM requests`+where, args...).Scan(&out.TotalRequests, &successes, &out.TotalTokens, &out.CostUSD, &out.CostRows); err != nil {
+		FROM requests`+where, args...).Scan(&out.TotalRequests, &successes, &out.SuccessRows, &out.TotalTokens, &out.CostUSD, &out.CostRows); err != nil {
 		return nil, err
 	}
-	if out.TotalRequests > 0 {
-		out.SuccessRate = float64(successes) / float64(out.TotalRequests)
+	if out.SuccessRows > 0 {
+		out.SuccessRate = float64(successes) / float64(out.SuccessRows)
 	}
 	for _, spec := range []struct {
 		column string
@@ -282,7 +284,7 @@ func (r *Requests) Query(q RequestQuery) ([]history.RequestRecord, int64, error)
 	rows, err := r.db.DB().QueryContext(ctx, `
 		SELECT id, model, provider, scenario, start_time, duration_ms,
 		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-		       cost_usd, cost_source, streaming, success, error_msg, attempt
+		       cost_usd, cost_source, details_known, streaming, success, error_msg, attempt
 		FROM requests`+where+`
 		ORDER BY `+orderBy+`
 		LIMIT ? OFFSET ?
@@ -335,11 +337,11 @@ func requestWhere(q RequestQuery) (string, []any) {
 		args = append(args, q.End.UTC().Format(time.RFC3339Nano))
 	}
 	if q.Success != nil {
-		clauses = append(clauses, "success = ?")
+		clauses = append(clauses, "details_known = 1 AND success = ?")
 		args = append(args, boolToInt(*q.Success))
 	}
 	if q.Streaming != nil {
-		clauses = append(clauses, "streaming = ?")
+		clauses = append(clauses, "details_known = 1 AND streaming = ?")
 		args = append(args, boolToInt(*q.Streaming))
 	}
 	if len(clauses) == 0 {
@@ -392,9 +394,9 @@ func (r *Requests) Totals() (*Totals, error) {
 	row := r.db.DB().QueryRowContext(ctx, `
 		SELECT
 			COUNT(*),
-			COALESCE(SUM(CASE WHEN streaming = 1 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END), 0)
+			COALESCE(SUM(CASE WHEN details_known = 1 AND streaming = 1 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN details_known = 1 AND success = 1 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN details_known = 1 AND success = 0 THEN 1 ELSE 0 END), 0)
 		FROM requests
 	`)
 	if err := row.Scan(&t.Received, &t.Streamed, &t.Success, &t.Failed); err != nil {
@@ -451,7 +453,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 	for rows.Next() {
 		var rec history.RequestRecord
 		var startTimeStr string
-		var streaming, success int
+		var detailsKnown, streaming, success int
 
 		var attempt sql.NullInt64
 		var costUSD sql.NullFloat64
@@ -470,6 +472,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 			&rec.CacheCreationTokens,
 			&costUSD,
 			&costSource,
+			&detailsKnown,
 			&streaming,
 			&success,
 			&errorMsg,
@@ -499,6 +502,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		rec.StartTime, _ = time.Parse(time.RFC3339Nano, startTimeStr)
 		rec.Streaming = streaming == 1
 		rec.Success = success == 1
+		rec.DetailsKnown = detailsKnown == 1
 		rec.Duration = time.Duration(rec.Duration) * time.Millisecond
 
 		records = append(records, rec)

@@ -18,6 +18,7 @@ type RequestRecord struct {
 	CostUSD             float64       // provider cost in USD, estimated when CostSource is "estimated"
 	CostKnown           bool          // whether CostUSD is available
 	CostSource          string        // "estimated" or "provider"
+	DetailsKnown        bool          // whether routing/status/latency fields were observed locally
 	Streaming           bool          // whether this was a streaming request
 
 	Success  bool   // whether it completed successfully

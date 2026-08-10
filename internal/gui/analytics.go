@@ -67,18 +67,11 @@ func (h *AnalyticsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	account, err := h.store.GetProviderUsageAnalytics(days)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
 	resp := map[string]any{
 		"summary":      summary,
 		"models":       models,
 		"providers":    providers,
 		"scenarios":    scenarios,
-		"account":      account,
 		"generated_at": time.Now().Format(time.RFC3339),
 	}
 	h.writeJSON(w, resp)

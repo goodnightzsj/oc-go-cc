@@ -17,8 +17,9 @@ func TestHistoryAssetsKeepKeyboardDialogAndPromptTokens(t *testing.T) {
 
 	for _, marker := range []string{
 		`tabindex="0" aria-haspopup="dialog"`, "modal.showModal()", "prompt_tokens",
-		"historyQueryParams", "record.error_msg", "legend-drilldown", "cost_usd", "cost_source", `colspan="8"`,
+		"historyQueryParams", "record.error_msg", "legend-drilldown", "cost_usd", `colspan="8"`,
 		"window.CustomSelect", "window.HistoryDateRange", "renderHistorySummary", "detail.title",
+		"historyBreakdownMetric", "historyTrendMetric", "bindChartTooltip", "details_known",
 	} {
 		if !strings.Contains(string(app), marker) {
 			t.Errorf("app.js missing History accessibility marker %q", marker)
@@ -33,9 +34,12 @@ func TestHistoryAssetsKeepKeyboardDialogAndPromptTokens(t *testing.T) {
 	if !strings.Contains(string(page), `<dialog class="modal-overlay" id="history-modal"`) {
 		t.Error("History detail must remain a native dialog")
 	}
-	for _, marker := range []string{`type="hidden" id="history-start"`, `type="hidden" id="history-end"`, `id="history-date-popover"`, `id="history-summary-requests"`, `id="status-filter"`, `id="streaming-filter"`, `id="cost-source-filter"`, `data-sort="cost_usd"`} {
+	for _, marker := range []string{`type="hidden" id="history-start"`, `type="hidden" id="history-end"`, `id="history-date-popover"`, `id="history-summary-requests"`, `id="status-filter"`, `id="streaming-filter"`, `id="history-breakdown-metric"`, `id="history-trend-metric"`, `data-sort="cost_usd"`} {
 		if !strings.Contains(string(page), marker) {
 			t.Errorf("index.html missing server-side History filter %q", marker)
 		}
+	}
+	if strings.Contains(string(page), `id="cost-source-filter"`) || strings.Contains(string(app), "costSourceLabel") {
+		t.Error("History must not expose internal cost provenance")
 	}
 }

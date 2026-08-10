@@ -1648,13 +1648,40 @@ function chartTooltipMarkup(title, rows, footer) {
   return `<div class="tip-title">${escapeHtml(title)}</div><div class="tip-body">${body}</div>${tail}`;
 }
 
-function bindChartTooltip(root, tip, selector, contentFor) {
-  if (!root || !tip) return;
-  const place = (target, event) => {
+function bindPlotTooltip(root, tip, options) {
+  const svg = root?.querySelector('svg');
+  const target = root?.querySelector('.usage-chart-scrub');
+  const cursor = root?.querySelector('.usage-chart-cursor');
+  const cursorLine = cursor?.querySelector('.usage-chart-crosshair');
+  const cursorPoints = [...(cursor?.querySelectorAll('.usage-chart-cursor-point') || [])];
+  if (!svg || !target || !tip || !cursor || !cursorLine || !options?.pointCount) return;
+
+  let currentIndex = 0;
+  let pinnedIndex = -1;
+  let pointerInside = false;
+  const maxIndex = options.pointCount - 1;
+  const clampIndex = index => Math.max(0, Math.min(maxIndex, index));
+  const indexFromPointer = event => {
+    const bounds = svg.getBoundingClientRect();
+    const viewBox = svg.viewBox.baseVal;
+    const svgX = viewBox.x + (event.clientX - bounds.left) / Math.max(1, bounds.width) * viewBox.width;
+    const progress = (svgX - options.plotLeft) / Math.max(1, options.plotWidth);
+    return clampIndex(Math.round(progress * maxIndex));
+  };
+  const clientPoint = index => {
+    const bounds = svg.getBoundingClientRect();
+    const viewBox = svg.viewBox.baseVal;
+    const x = options.xForIndex(index);
+    return {
+      x: bounds.left + (x - viewBox.x) / viewBox.width * bounds.width,
+      y: bounds.top + (options.plotTop - viewBox.y) / viewBox.height * bounds.height,
+    };
+  };
+  const place = (index, event) => {
     const bounds = root.getBoundingClientRect();
-    const targetBounds = target.getBoundingClientRect();
-    const x = event?.clientX || targetBounds.left + targetBounds.width / 2;
-    const y = event?.clientY || targetBounds.top + targetBounds.height / 2;
+    const fallback = clientPoint(index);
+    const x = Number.isFinite(event?.clientX) ? event.clientX : fallback.x;
+    const y = Number.isFinite(event?.clientY) ? event.clientY : fallback.y;
     tip.style.display = 'block';
     const tipBounds = tip.getBoundingClientRect();
     const localX = x - bounds.left;
@@ -1667,34 +1694,76 @@ function bindChartTooltip(root, tip, selector, contentFor) {
     tip.style.left = `${left}px`;
     tip.style.top = `${top}px`;
   };
-  const hide = (target) => {
-    if (tip.dataset.pinned === target.dataset.tipIndex) return;
+  const hide = () => {
     tip.style.display = 'none';
-    target.classList.remove('is-active');
+    cursor.classList.remove('is-visible');
   };
-  root.querySelectorAll(selector).forEach((target, index) => {
-    target.dataset.tipIndex = String(index);
-    const show = (event, pin) => {
-      tip.innerHTML = contentFor(target, index);
-      if (pin) tip.dataset.pinned = tip.dataset.pinned === String(index) ? '' : String(index);
-      target.classList.add('is-active');
-      place(target, event);
-    };
-    target.addEventListener('pointerenter', event => show(event, false));
-    target.addEventListener('pointermove', event => place(target, event));
-    target.addEventListener('pointerleave', () => hide(target));
-    target.addEventListener('focus', event => show(event, false));
-    target.addEventListener('blur', () => {
-      if (tip.dataset.pinned !== String(index)) hide(target);
+  const show = (index, event) => {
+    currentIndex = clampIndex(index);
+    const x = options.xForIndex(currentIndex);
+    cursorLine.setAttribute('x1', x);
+    cursorLine.setAttribute('x2', x);
+    const markers = options.markersForIndex(currentIndex);
+    cursorPoints.forEach((point, markerIndex) => {
+      const marker = markers[markerIndex];
+      point.classList.toggle('is-visible', Boolean(marker));
+      if (!marker) return;
+      point.setAttribute('cx', marker.x);
+      point.setAttribute('cy', marker.y);
     });
-    target.addEventListener('click', event => show(event, true));
-    target.addEventListener('keydown', event => {
-      if (event.key === 'Escape') {
-        tip.dataset.pinned = '';
-        tip.style.display = 'none';
-        target.classList.remove('is-active');
-      }
-    });
+    cursor.classList.add('is-visible');
+    tip.innerHTML = options.contentForIndex(currentIndex);
+    target.setAttribute('aria-valuenow', String(currentIndex + 1));
+    target.setAttribute('aria-valuetext', options.labelForIndex(currentIndex));
+    place(currentIndex, event);
+  };
+
+  target.addEventListener('pointerenter', event => {
+    pointerInside = true;
+    show(pinnedIndex >= 0 ? pinnedIndex : indexFromPointer(event), event);
+  });
+  target.addEventListener('pointermove', event => {
+    if (pinnedIndex < 0) show(indexFromPointer(event), event);
+  });
+  target.addEventListener('pointerleave', () => {
+    pointerInside = false;
+    if (pinnedIndex < 0) hide();
+  });
+  target.addEventListener('focus', () => show(currentIndex));
+  target.addEventListener('blur', () => {
+    if (pinnedIndex < 0 && !pointerInside) hide();
+  });
+  target.addEventListener('click', event => {
+    const index = indexFromPointer(event);
+    pinnedIndex = pinnedIndex === index ? -1 : index;
+    tip.dataset.pinned = pinnedIndex < 0 ? '' : String(pinnedIndex);
+    show(index, event);
+  });
+  target.addEventListener('keydown', event => {
+    let nextIndex = currentIndex;
+    if (event.key === 'ArrowLeft') nextIndex--;
+    else if (event.key === 'ArrowRight') nextIndex++;
+    else if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = maxIndex;
+    else if (event.key === 'Enter' || event.key === ' ') {
+      pinnedIndex = pinnedIndex === currentIndex ? -1 : currentIndex;
+      tip.dataset.pinned = pinnedIndex < 0 ? '' : String(pinnedIndex);
+      show(currentIndex);
+      event.preventDefault();
+      return;
+    } else if (event.key === 'Escape') {
+      pinnedIndex = -1;
+      tip.dataset.pinned = '';
+      hide();
+      return;
+    } else return;
+    event.preventDefault();
+    currentIndex = clampIndex(nextIndex);
+    if (pinnedIndex >= 0) {
+      pinnedIndex = currentIndex;
+      tip.dataset.pinned = String(pinnedIndex);
+    }
+    show(currentIndex);
   });
 }
 
@@ -2852,6 +2921,7 @@ const AnalyticsModule = {
   granularity: 'day',
   currentView: null,
   currentTrend: [],
+  seriesVisibility: {},
 
   init() {
     const refreshBtn = document.getElementById('btn-refresh-analytics');
@@ -3076,6 +3146,7 @@ const AnalyticsModule = {
       total_tokens: item.total_tokens ?? totalUsageTokens(item),
       cost_usd: item.cost_usd ?? item.est_cost_usd ?? 0,
     })).sort((a, b) => Number(b[valueKey] || 0) - Number(a[valueKey] || 0)).slice(0, 12);
+    root.classList.toggle('is-single', normalized.length === 1);
     if (!normalized.length) {
       root.innerHTML = `<div class="empty-state">${t('analytics.noData')}</div>`;
       return;
@@ -3151,29 +3222,65 @@ const AnalyticsModule = {
       if (index % stride !== 0 && index !== points.length - 1) return;
       markup += `<text class="usage-axis-label" x="${x(index)}" y="${height-7}" text-anchor="middle">${this.escapeHtml(this.trendLabel(point.date))}</text>`;
     });
-    return {markup, x, y, plotH};
+    return {markup, x, y, plotW, plotH};
+  },
+
+  visibleChartSeries(containerId, series) {
+    const state = this.seriesVisibility[containerId] || (this.seriesVisibility[containerId] = {});
+    series.forEach(item => {
+      if (typeof state[item.key] !== 'boolean') state[item.key] = true;
+    });
+    return series.filter(item => state[item.key]);
+  },
+
+  chartLegend(series, visible) {
+    const visibleKeys = new Set(visible.map(item => item.key));
+    return series.map(item => `<button type="button" class="usage-legend-toggle ${item.className}" data-series="${item.key}" aria-pressed="${visibleKeys.has(item.key)}"><span>${item.label}</span></button>`).join('');
+  },
+
+  bindChartLegend(root, containerId, series, render) {
+    root?.querySelectorAll('.usage-legend-toggle').forEach(button => {
+      button.addEventListener('click', () => {
+        const visible = this.visibleChartSeries(containerId, series);
+        const key = button.dataset.series;
+        if (visible.length === 1 && visible[0].key === key) return;
+        this.seriesVisibility[containerId][key] = !this.seriesVisibility[containerId][key];
+        render();
+      });
+    });
   },
 
   renderRequestTrend(points, containerId) {
     const root = document.getElementById(containerId);
     if (!root) return;
-    if (!points.length || points.every(point => Number(point.requests || 0) === 0)) {
+    if (!points.length || points.every(point => Number(point.requests || 0) === 0 && Number(point.error_requests || 0) === 0)) {
       root.innerHTML = `<div class="empty-state">${t('analytics.noTrend')}</div>`;
       return;
     }
+    const series = [
+      {key:'requests',label:t('analytics.requests'),className:'is-requests',color:'#818cf8'},
+      {key:'error_requests',label:t('analytics.knownErrors'),className:'is-errors',color:'#fb7185'},
+    ];
+    const visible = this.visibleChartSeries(containerId, series);
     const width=720, height=236, inset={top:16,right:18,bottom:32,left:52};
-    const max = Math.max(1, ...points.map(point => Number(point.requests || 0)));
+    const max = Math.max(1, ...visible.flatMap(item => points.map(point => Number(point[item.key] || 0))));
     const chart = this.chartGrid(points, width, height, inset, max, value => fmtTok(Math.round(value)));
-    const requestPoints = points.map((point,index) => `${chart.x(index)},${chart.y(point.requests)}`).join(' ');
-    const errorPoints = points.map((point,index) => `${chart.x(index)},${chart.y(point.error_requests)}`).join(' ');
-    const dots = points.map((point,index) => `<circle class="usage-chart-point" cx="${chart.x(index)}" cy="${chart.y(point.requests)}" r="3"></circle><circle class="usage-chart-hit" cx="${chart.x(index)}" cy="${chart.y(point.requests)}" r="13" tabindex="0" role="button" aria-label="${this.escapeHtml(point.date)}"></circle>`).join('');
-    root.innerHTML = `<div class="usage-chart-stage"><div class="usage-chart-legend"><span class="is-requests">${t('analytics.requests')}</span><span class="is-errors">${t('analytics.knownErrors')}</span></div><svg viewBox="0 0 ${width} ${height}" role="img">${chart.markup}<polyline class="usage-chart-line is-requests" points="${requestPoints}"></polyline><polyline class="usage-chart-line is-errors" points="${errorPoints}"></polyline>${dots}</svg><div class="chart-tip" id="${containerId}-tip"></div></div>`;
-    bindChartTooltip(root.querySelector('.usage-chart-stage'), root.querySelector('.chart-tip'), '.usage-chart-hit', (_hit,index) => {
+    const lines = visible.map(item => `<polyline class="usage-chart-line ${item.className}" points="${points.map((point,index) => `${chart.x(index)},${chart.y(point[item.key])}`).join(' ')}"></polyline>`).join('');
+    const dots = visible.map(item => points.map((point,index) => item.key === 'requests' || Number(point[item.key] || 0) > 0 ? `<circle class="usage-chart-point ${item.className}" cx="${chart.x(index)}" cy="${chart.y(point[item.key])}" r="${item.key === 'requests' ? 3 : 2.6}"></circle>` : '').join('')).join('');
+    root.innerHTML = `<div class="usage-chart-stage"><div class="usage-chart-legend">${this.chartLegend(series, visible)}</div><svg viewBox="0 0 ${width} ${height}" role="img">${chart.markup}${lines}${dots}<g class="usage-chart-cursor" aria-hidden="true"><line class="usage-chart-crosshair" y1="${inset.top}" y2="${inset.top+chart.plotH}"></line>${visible.map(item=>`<circle class="usage-chart-cursor-point ${item.className}" r="4"></circle>`).join('')}</g><rect class="usage-chart-scrub" x="${inset.left}" y="${inset.top}" width="${chart.plotW}" height="${chart.plotH}" tabindex="0" role="slider" aria-label="${this.escapeHtml(t('analytics.requests'))}" aria-valuemin="1" aria-valuemax="${points.length}" aria-valuenow="1"></rect></svg><div class="chart-tip" id="${containerId}-tip"></div></div>`;
+    this.bindChartLegend(root, containerId, series, () => this.renderRequestTrend(points, containerId));
+    bindPlotTooltip(root.querySelector('.usage-chart-stage'), root.querySelector('.chart-tip'), {
+      pointCount: points.length,
+      plotLeft: inset.left,
+      plotTop: inset.top,
+      plotWidth: chart.plotW,
+      xForIndex: chart.x,
+      labelForIndex: index => this.trendLabel(points[index].date),
+      markersForIndex: index => visible.map(item => ({x:chart.x(index),y:chart.y(points[index][item.key])})),
+      contentForIndex: index => {
       const point=points[index];
-      return chartTooltipMarkup(this.trendLabel(point.date), [
-        {label:t('analytics.requests'),value:Number(point.requests||0).toLocaleString(),color:'#818cf8'},
-        {label:t('analytics.knownErrors'),value:Number(point.error_requests||0).toLocaleString(),color:'#fb7185'},
-      ], [{label:t('analytics.cost'),value:fmtCost(point.cost_usd||0)}]);
+      return chartTooltipMarkup(this.trendLabel(point.date), visible.map(item => ({label:item.label,value:Number(point[item.key]||0).toLocaleString(),color:item.color})), [{label:t('analytics.cost'),value:fmtCost(point.cost_usd||0)}]);
+      },
     });
   },
 
@@ -3189,28 +3296,42 @@ const AnalyticsModule = {
       {key:'output_tokens',label:t('analytics.outputTokens'),className:'is-output',color:'#34d399'},
       {key:'cache_read_tokens',label:t('detail.cacheRead'),className:'is-cache-read',color:'#fbbf24'},
       {key:'cache_creation_tokens',label:t('detail.cacheCreation'),className:'is-cache-write',color:'#fb7185'},
+      {key:'cache_rate',label:t('analytics.cacheHitShort'),className:'is-cache-rate',color:'#22d3ee',rate:true},
     ];
+    const visible = this.visibleChartSeries(containerId, series);
+    const visibleTokens = visible.filter(item => !item.rate);
+    const showRate = visible.some(item => item.rate);
     const width=720, height=252, inset={top:18,right:50,bottom:32,left:56};
-    const max = Math.max(1, ...series.flatMap(item => points.map(point => Number(point[item.key]||0))));
+    const max = Math.max(1, ...visibleTokens.flatMap(item => points.map(point => Number(point[item.key]||0))));
     const chart = this.chartGrid(points,width,height,inset,max,value=>fmtTok(Math.round(value)));
     const rateY = value => inset.top + (1 - Number(value||0)/100) * chart.plotH;
     const rate = point => {
       const prompt=Number(point.input_tokens||0)+Number(point.cache_read_tokens||0)+Number(point.cache_creation_tokens||0);
       return prompt > 0 ? Number(point.cache_read_tokens||0)/prompt*100 : 0;
     };
-    const lines = series.map(item => `<polyline class="usage-chart-line ${item.className}" points="${points.map((point,index)=>`${chart.x(index)},${chart.y(point[item.key])}`).join(' ')}"></polyline>`).join('');
-    const rateLine = `<polyline class="usage-chart-line is-cache-rate" points="${points.map((point,index)=>`${chart.x(index)},${rateY(rate(point))}`).join(' ')}"></polyline>`;
-    const dots = series.map(item => points.map((point,index)=>Number(point[item.key]||0)>0?`<circle class="usage-chart-point ${item.className}" cx="${chart.x(index)}" cy="${chart.y(point[item.key])}" r="2.6"></circle>`:'').join('')).join('');
-    const hits = points.map((point,index)=>`<circle class="usage-chart-hit" cx="${chart.x(index)}" cy="${chart.y(point.cache_read_tokens)}" r="13" tabindex="0" role="button" aria-label="${this.escapeHtml(point.date)}"></circle>`).join('');
-    const rightAxis = [0,25,50,75,100].map(value=>`<text class="usage-axis-label is-rate" x="${width-inset.right+8}" y="${rateY(value)+3}">${value}%</text>`).join('');
-    root.innerHTML=`<div class="usage-chart-stage"><div class="usage-chart-legend">${series.map(item=>`<span class="${item.className}">${item.label}</span>`).join('')}<span class="is-cache-rate">${t('analytics.cacheHitShort')}</span></div><svg viewBox="0 0 ${width} ${height}" role="img">${chart.markup}${rightAxis}${lines}${rateLine}${dots}${hits}</svg><div class="chart-tip" id="${containerId}-tip"></div></div>`;
-    bindChartTooltip(root.querySelector('.usage-chart-stage'),root.querySelector('.chart-tip'),'.usage-chart-hit',(_hit,index)=>{
+    const lines = visibleTokens.map(item => `<polyline class="usage-chart-line ${item.className}" points="${points.map((point,index)=>`${chart.x(index)},${chart.y(point[item.key])}`).join(' ')}"></polyline>`).join('');
+    const rateLine = showRate ? `<polyline class="usage-chart-line is-cache-rate" points="${points.map((point,index)=>`${chart.x(index)},${rateY(rate(point))}`).join(' ')}"></polyline>` : '';
+    const dots = visibleTokens.map(item => points.map((point,index)=>Number(point[item.key]||0)>0?`<circle class="usage-chart-point ${item.className}" cx="${chart.x(index)}" cy="${chart.y(point[item.key])}" r="2.6"></circle>`:'').join('')).join('');
+    const rightAxis = showRate ? [0,25,50,75,100].map(value=>`<text class="usage-axis-label is-rate" x="${width-inset.right+8}" y="${rateY(value)+3}">${value}%</text>`).join('') : '';
+    root.innerHTML=`<div class="usage-chart-stage"><div class="usage-chart-legend">${this.chartLegend(series, visible)}</div><svg viewBox="0 0 ${width} ${height}" role="img">${chart.markup}${rightAxis}${lines}${rateLine}${dots}<g class="usage-chart-cursor" aria-hidden="true"><line class="usage-chart-crosshair" y1="${inset.top}" y2="${inset.top+chart.plotH}"></line>${visible.map(item=>`<circle class="usage-chart-cursor-point ${item.className}" r="4"></circle>`).join('')}</g><rect class="usage-chart-scrub" x="${inset.left}" y="${inset.top}" width="${chart.plotW}" height="${chart.plotH}" tabindex="0" role="slider" aria-label="${this.escapeHtml(t('analytics.totalTokens'))}" aria-valuemin="1" aria-valuemax="${points.length}" aria-valuenow="1"></rect></svg><div class="chart-tip" id="${containerId}-tip"></div></div>`;
+    this.bindChartLegend(root, containerId, series, () => this.renderTokenLines(points, containerId));
+    bindPlotTooltip(root.querySelector('.usage-chart-stage'),root.querySelector('.chart-tip'),{
+      pointCount: points.length,
+      plotLeft: inset.left,
+      plotTop: inset.top,
+      plotWidth: chart.plotW,
+      xForIndex: chart.x,
+      labelForIndex: index => this.trendLabel(points[index].date),
+      markersForIndex: index => visible.map(item => ({x:chart.x(index),y:item.rate ? rateY(rate(points[index])) : chart.y(points[index][item.key])})),
+      contentForIndex: index => {
       const point=points[index];
-      return chartTooltipMarkup(this.trendLabel(point.date),series.map(item=>({label:item.label,value:Number(point[item.key]||0).toLocaleString(),color:item.color})),[
-        {label:t('analytics.cacheHitShort'),value:`${rate(point).toFixed(1)}%`},
+      const footer = [
         {label:t('analytics.requests'),value:Number(point.requests||0).toLocaleString()},
         {label:t('analytics.cost'),value:fmtCost(point.cost_usd||0)},
-      ]);
+      ];
+      if (showRate) footer.unshift({label:t('analytics.cacheHitShort'),value:`${rate(point).toFixed(1)}%`});
+      return chartTooltipMarkup(this.trendLabel(point.date),visibleTokens.map(item=>({label:item.label,value:Number(point[item.key]||0).toLocaleString(),color:item.color})),footer);
+      },
     });
   },
 

@@ -2,13 +2,13 @@
 
 ## Context Recovery Block
 
-- **Current milestone**: All resumed requirements completed
-- **Current status**: DONE
+- **Current milestone**: Final Analytics chart polish
+- **Current status**: IN_PROGRESS
 - **Last completed**: Child #10 - Sub2API parity, production request truth, and Edge validation
 - **Current artifact**: `SUBTASKS.csv`
-- **Key context**: Production `3c0ded5` has 1,390 primary History rows, 463,249,833 Tokens, `$3.03965577`, and a single normalized `override` scenario.
+- **Key context**: Production `3c0ded5` data is authoritative; child #10 is reopened only for chart interaction and UI polish.
 - **Known issues**: None. The unrelated remote `.ace-tool/` directory remains untouched.
-- **Next action**: None.
+- **Next action**: Complete child #10 tasks #14-#19 in order.
 
 ## Child 1: Finalize storage overlay regression
 

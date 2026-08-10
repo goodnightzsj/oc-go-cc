@@ -19,7 +19,7 @@ func TestHistoryAssetsKeepKeyboardDialogAndPromptTokens(t *testing.T) {
 		`tabindex="0" aria-haspopup="dialog"`, "modal.showModal()", "prompt_tokens",
 		"historyQueryParams", "record.error_msg", "cost_usd", `colspan="7"`,
 		"window.CustomSelect", "window.HistoryDateRange", "renderHistorySummary", "detail.title",
-		"historyBreakdownMetric", "bindChartTooltip", "details_known",
+		"historyBreakdownMetric", "bindPlotTooltip", "details_known",
 		"history-token-trigger", "bindHistoryTokenTooltips", "document.querySelectorAll('.chart-tip')",
 	} {
 		if !strings.Contains(string(app), marker) {

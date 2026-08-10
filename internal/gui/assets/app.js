@@ -51,6 +51,50 @@ const TRANSLATIONS = {
     'analytics.inputTokens': 'Input tokens',
     'analytics.outputTokens': 'Output tokens',
     'analytics.cacheTokens': 'Cache tokens',
+    'analytics.sourceOpenCode': 'Source: OpenCode usage',
+    'analytics.sourceLocalFallback': 'Source: local proxy (OpenCode snapshot unavailable)',
+    'analytics.byPlan': 'Usage by Plan',
+    'analytics.recentUsage': 'Recent Usage',
+    'analytics.reasoningTokens': 'Reasoning Tokens',
+    'analytics.reasoningNote': 'included in output',
+    'analytics.capturedAt': 'Captured {time}',
+    'analytics.requests': 'Requests',
+    'analytics.avgLatency': 'Average latency',
+    'analytics.successRate': 'Success rate',
+    'analytics.fallbackRate': 'Fallback rate',
+    'history.filteredRequests': 'Filtered requests',
+    'history.successRate': 'Success rate',
+    'history.filteredTokens': 'Tokens',
+    'history.filteredCost': 'Recorded cost',
+    'history.modelDistribution': 'Models',
+    'history.providerDistribution': 'Platforms',
+    'history.scenarioDistribution': 'Scenarios',
+    'filter.dateRange': 'Date range',
+    'filter.today': 'Today',
+    'filter.clear': 'Clear',
+    'filter.apply': 'Apply',
+    'detail.title': 'Request details',
+    'detail.subtitle': 'Routing, billing, and token details',
+    'detail.close': 'Close request details',
+    'detail.requestId': 'Request ID',
+    'detail.time': 'Time',
+    'detail.model': 'Model',
+    'detail.provider': 'Provider',
+    'detail.scenario': 'Scenario',
+    'detail.requestType': 'Request type',
+    'detail.streaming': 'Streaming',
+    'detail.nonStreaming': 'Non-streaming',
+    'detail.attempt': 'Attempt',
+    'detail.inputTokens': 'Input',
+    'detail.promptTokens': 'Prompt',
+    'detail.cacheRead': 'Cache read',
+    'detail.cacheCreation': 'Cache write',
+    'detail.outputTokens': 'Output',
+    'detail.duration': 'Duration',
+    'detail.status': 'Status',
+    'detail.success': 'Success',
+    'detail.failed': 'Failed',
+    'detail.error': 'Error',
     'cmd.startProxy': 'Start Proxy',
     'cmd.stopProxy': 'Stop Proxy',
     'cmd.gotoOverview': 'Go to Overview',
@@ -244,6 +288,50 @@ const TRANSLATIONS = {
     'analytics.outputTokens': '输出 Token',
     'analytics.cacheTokens': '缓存 Token',
     'analytics.cacheTokensLegend': '缓存',
+    'analytics.sourceOpenCode': '数据源：OpenCode 用量账单',
+    'analytics.sourceLocalFallback': '数据源：本地代理（尚未导入 OpenCode 基线）',
+    'analytics.byPlan': '按套餐拆分',
+    'analytics.recentUsage': '最近使用',
+    'analytics.reasoningTokens': '推理 Token',
+    'analytics.reasoningNote': '已包含在输出 Token 中',
+    'analytics.capturedAt': '采集于 {time}',
+    'analytics.requests': '请求数',
+    'analytics.avgLatency': '平均延迟',
+    'analytics.successRate': '成功率',
+    'analytics.fallbackRate': '降级率',
+    'history.filteredRequests': '筛选请求数',
+    'history.successRate': '成功率',
+    'history.filteredTokens': 'Token 总量',
+    'history.filteredCost': '已记录费用',
+    'history.modelDistribution': '模型分布',
+    'history.providerDistribution': '平台分布',
+    'history.scenarioDistribution': '场景分布',
+    'filter.dateRange': '日期范围',
+    'filter.today': '今天',
+    'filter.clear': '清除',
+    'filter.apply': '应用',
+    'detail.title': '请求详情',
+    'detail.subtitle': '路由、费用与 Token 明细',
+    'detail.close': '关闭请求详情',
+    'detail.requestId': '请求 ID',
+    'detail.time': '请求时间',
+    'detail.model': '模型',
+    'detail.provider': '供应商',
+    'detail.scenario': '使用场景',
+    'detail.requestType': '请求类型',
+    'detail.streaming': '流式请求',
+    'detail.nonStreaming': '非流式请求',
+    'detail.attempt': '尝试次数',
+    'detail.inputTokens': '输入',
+    'detail.promptTokens': 'Prompt',
+    'detail.cacheRead': '缓存读取',
+    'detail.cacheCreation': '缓存写入',
+    'detail.outputTokens': '输出',
+    'detail.duration': '耗时',
+    'detail.status': '状态',
+    'detail.success': '成功',
+    'detail.failed': '失败',
+    'detail.error': '错误信息',
     'cmd.startProxy': '启动代理',
     'cmd.stopProxy': '停止代理',
     'cmd.gotoOverview': '前往概览',
@@ -407,6 +495,9 @@ function applyTranslations() {
     const key = el.getAttribute('data-i18n-placeholder');
     el.placeholder = t(key);
   });
+  document.querySelectorAll('[data-i18n-aria-label]').forEach(el => {
+    el.setAttribute('aria-label', t(el.getAttribute('data-i18n-aria-label')));
+  });
   // Update <option> labels (data-i18n-option)
   document.querySelectorAll('[data-i18n-option]').forEach(el => {
     const key = el.getAttribute('data-i18n-option');
@@ -417,6 +508,8 @@ function applyTranslations() {
   if (langBtn) {
     langBtn.innerHTML = '<span data-i18n="lang.toggle">' + t('lang.toggle') + '</span>';
   }
+  window.CustomSelect?.syncAll();
+  window.HistoryDateRange?.syncLabel();
 }
 
 function toggleLanguage() {
@@ -439,6 +532,255 @@ document.addEventListener('DOMContentLoaded', () => {
   applyTranslations();
   const exportBtn = document.getElementById('history-export');
   if (exportBtn) exportBtn.addEventListener('click', exportHistoryCSV);
+});
+
+/* ── Themed form controls ─────────────────────────────────────── */
+window.CustomSelect = {
+  instances: new Map(),
+
+  init() {
+    document.querySelectorAll('select').forEach(select => this.enhance(select));
+    document.addEventListener('pointerdown', event => {
+      if (!event.target.closest('.theme-select')) this.closeAll();
+    });
+  },
+
+  enhance(select) {
+    if (this.instances.has(select)) return;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'theme-select';
+    if (select.classList.contains('flex-1')) wrapper.classList.add('theme-select-flex');
+    if (select.classList.contains('w-full')) wrapper.classList.add('theme-select-full');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'theme-select-trigger';
+    button.setAttribute('aria-haspopup', 'listbox');
+    button.setAttribute('aria-expanded', 'false');
+    const label = document.createElement('span');
+    label.className = 'theme-select-label';
+    const chevron = document.createElement('span');
+    chevron.className = 'theme-select-chevron';
+    chevron.setAttribute('aria-hidden', 'true');
+    chevron.textContent = '⌄';
+    button.append(label, chevron);
+    const list = document.createElement('div');
+    list.className = 'theme-select-list';
+    list.setAttribute('role', 'listbox');
+    list.hidden = true;
+    select.parentNode.insertBefore(wrapper, select);
+    wrapper.append(button, list, select);
+    select.classList.add('native-select-source');
+    select.tabIndex = -1;
+    select.setAttribute('aria-hidden', 'true');
+    const state = { select, wrapper, button, label, list };
+    this.instances.set(select, state);
+    select.addEventListener('change', () => this.sync(select));
+    button.addEventListener('click', () => this.toggle(state));
+    button.addEventListener('keydown', event => {
+      if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+        event.preventDefault();
+        this.open(state, event.key === 'ArrowUp' || event.key === 'End');
+      } else if (event.key === 'Escape') {
+        this.close(state);
+      }
+    });
+    list.addEventListener('keydown', event => this.onListKeydown(event, state));
+    new MutationObserver(() => this.render(state)).observe(select, {
+      childList: true, subtree: true, characterData: true, attributes: true,
+    });
+    this.render(state);
+  },
+
+  render(state) {
+    const { select, list } = state;
+    list.replaceChildren();
+    Array.from(select.options).forEach((option, index) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'theme-select-option';
+      item.setAttribute('role', 'option');
+      item.dataset.index = String(index);
+      item.textContent = option.textContent;
+      item.disabled = option.disabled;
+      item.addEventListener('click', () => {
+        select.selectedIndex = index;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        this.close(state);
+        state.button.focus();
+      });
+      list.append(item);
+    });
+    this.sync(select);
+  },
+
+  sync(select) {
+    const state = this.instances.get(select);
+    if (!state) return;
+    const option = select.options[select.selectedIndex];
+    state.label.textContent = option?.textContent || '';
+    state.button.disabled = select.disabled;
+    state.button.setAttribute('aria-label', select.getAttribute('aria-label') || state.label.textContent);
+    state.list.querySelectorAll('[role="option"]').forEach((item, index) => {
+      const selected = index === select.selectedIndex;
+      item.setAttribute('aria-selected', String(selected));
+      item.classList.toggle('selected', selected);
+    });
+  },
+
+  syncAll() {
+    this.instances.forEach((_, select) => this.sync(select));
+  },
+
+  toggle(state) {
+    if (state.list.hidden) this.open(state); else this.close(state);
+  },
+
+  open(state, focusLast = false) {
+    this.closeAll(state);
+    state.list.hidden = false;
+    state.wrapper.classList.add('open');
+    state.button.setAttribute('aria-expanded', 'true');
+    const options = [...state.list.querySelectorAll(':scope > button:not(:disabled)')];
+    const selected = state.list.querySelector('[aria-selected="true"]:not(:disabled)');
+    (focusLast ? options.at(-1) : selected || options[0])?.focus();
+  },
+
+  close(state) {
+    state.list.hidden = true;
+    state.wrapper.classList.remove('open');
+    state.button.setAttribute('aria-expanded', 'false');
+  },
+
+  closeAll(except) {
+    this.instances.forEach(state => { if (state !== except) this.close(state); });
+  },
+
+  onListKeydown(event, state) {
+    const options = [...state.list.querySelectorAll(':scope > button:not(:disabled)')];
+    const index = options.indexOf(document.activeElement);
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.close(state);
+      state.button.focus();
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      document.activeElement?.click();
+      return;
+    }
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 :
+      event.key === 'ArrowDown' ? Math.min(options.length - 1, index + 1) :
+      event.key === 'ArrowUp' ? Math.max(0, index - 1) : -1;
+    if (next >= 0) {
+      event.preventDefault();
+      options[next]?.focus();
+    }
+  },
+};
+
+window.HistoryDateRange = {
+  init() {
+    this.root = document.getElementById('history-date-range');
+    this.trigger = document.getElementById('history-date-trigger');
+    this.popover = document.getElementById('history-date-popover');
+    this.start = document.getElementById('history-start');
+    this.end = document.getElementById('history-end');
+    this.startDisplay = document.getElementById('history-start-display');
+    this.endDisplay = document.getElementById('history-end-display');
+    if (!this.root) return;
+    this.trigger.addEventListener('click', () => this.toggle());
+    document.getElementById('history-date-apply')?.addEventListener('click', () => this.apply());
+    document.getElementById('history-date-clear')?.addEventListener('click', () => this.clear(true));
+    this.root.querySelectorAll('[data-days]').forEach(button => {
+      button.addEventListener('click', () => this.preset(Number(button.dataset.days)));
+    });
+    document.addEventListener('pointerdown', event => {
+      if (!event.target.closest('#history-date-range')) this.close();
+    });
+    this.popover.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        this.close();
+        this.trigger.focus();
+      }
+    });
+    this.syncFromHidden();
+  },
+
+  valid(value) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    return dateInputValue(new Date(`${value}T00:00:00`)) === value;
+  },
+
+  toggle() {
+    if (this.popover.hidden) this.open(); else this.close();
+  },
+
+  open() {
+    this.popover.hidden = false;
+    this.trigger.setAttribute('aria-expanded', 'true');
+    this.startDisplay.focus();
+  },
+
+  close() {
+    if (!this.popover) return;
+    this.popover.hidden = true;
+    this.trigger.setAttribute('aria-expanded', 'false');
+  },
+
+  apply() {
+    const start = this.startDisplay.value.trim();
+    const end = this.endDisplay.value.trim();
+    this.startDisplay.classList.toggle('invalid', !!start && !this.valid(start));
+    this.endDisplay.classList.toggle('invalid', !!end && !this.valid(end));
+    if ((start && !this.valid(start)) || (end && !this.valid(end)) || (start && end && start > end)) return;
+    this.start.value = start;
+    this.end.value = end;
+    this.start.dispatchEvent(new Event('change', { bubbles: true }));
+    this.end.dispatchEvent(new Event('change', { bubbles: true }));
+    this.syncLabel();
+    this.close();
+  },
+
+  clear(notify) {
+    this.start.value = '';
+    this.end.value = '';
+    this.startDisplay.value = '';
+    this.endDisplay.value = '';
+    this.syncLabel();
+    this.close();
+    if (notify) this.start.dispatchEvent(new Event('change', { bubbles: true }));
+  },
+
+  preset(days) {
+    const end = new Date();
+    const start = new Date(end);
+    start.setDate(start.getDate() - Math.max(0, days - 1));
+    this.startDisplay.value = dateInputValue(start);
+    this.endDisplay.value = dateInputValue(end);
+    this.apply();
+  },
+
+  syncFromHidden() {
+    if (!this.root) return;
+    this.startDisplay.value = this.start.value;
+    this.endDisplay.value = this.end.value;
+    this.syncLabel();
+  },
+
+  syncLabel() {
+    const label = document.getElementById('history-date-label');
+    if (!label) return;
+    label.textContent = this.start?.value || this.end?.value
+      ? `${this.start.value || '…'} – ${this.end.value || '…'}`
+      : t('filter.dateRange');
+  },
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+  window.CustomSelect.init();
+  window.HistoryDateRange.init();
 });
 
 /* global state */
@@ -766,14 +1108,20 @@ function resetHistoryFilters(refresh = true) {
     'scenario-filter', 'status-filter', 'streaming-filter', 'cost-source-filter'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = '';
-    });
+  });
+  window.CustomSelect?.syncAll();
+  window.HistoryDateRange?.syncFromHidden();
   historyPage = 1;
   if (refresh) refreshHistory();
 }
 
 async function refreshHistory() {
   try {
-    const r = await fetch(`/api/history?${historyQueryParams()}`);
+    const params = historyQueryParams();
+    const [r, summaryResponse] = await Promise.all([
+      fetch(`/api/history?${params}`),
+      fetch(`/api/history/summary?${params}`),
+    ]);
     if (!r.ok) return;
     const data = await r.json();
     // New paginated shape: { items, total, page, size }. Tolerate the old
@@ -790,9 +1138,60 @@ async function refreshHistory() {
       if (historyPage > maxPage) historyPage = maxPage;
     }
     renderHistory();
-    updateHistoryModelSuggestions();
     renderHistoryPager();
+    if (summaryResponse.ok) renderHistorySummary(await summaryResponse.json());
   } catch(e) {}
+}
+
+function renderHistorySummary(summary) {
+  const set = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  };
+  set('history-summary-requests', Number(summary.total_requests || 0).toLocaleString());
+  set('history-summary-success', `${(Number(summary.success_rate || 0) * 100).toFixed(1)}%`);
+  set('history-summary-tokens', fmtTok(Number(summary.total_tokens || 0)));
+  set('history-summary-cost', fmtCost(Number(summary.cost_usd || 0)));
+  renderCompactBreakdown('history-model-breakdown', summary.models || []);
+  renderCompactBreakdown('history-provider-breakdown', summary.providers || []);
+  renderCompactBreakdown('history-scenario-breakdown', summary.scenarios || []);
+  renderHistoryMiniTrend(summary.trend || []);
+}
+
+function renderCompactBreakdown(id, items) {
+  const root = document.getElementById(id);
+  if (!root) return;
+  const top = [...items].sort((a, b) => (b.tokens || 0) - (a.tokens || 0)).slice(0, 4);
+  if (!top.length) {
+    root.innerHTML = `<span class="compact-breakdown-value">${t('analytics.noData')}</span>`;
+    return;
+  }
+  const max = Math.max(1, ...top.map(item => Number(item.tokens || 0)));
+  root.innerHTML = top.map(item => `
+    <div class="compact-breakdown-row" title="${escapeHtml(item.name)} · ${Number(item.requests || 0).toLocaleString()} ${t('analytics.requests')}">
+      <span class="compact-breakdown-name">${escapeHtml(item.name)}</span>
+      <span class="compact-breakdown-track"><i class="compact-breakdown-fill" style="width:${Math.max(3, Number(item.tokens || 0) / max * 100).toFixed(1)}%"></i></span>
+      <span class="compact-breakdown-value">${fmtTok(Number(item.tokens || 0))}</span>
+    </div>`).join('');
+}
+
+function renderHistoryMiniTrend(points) {
+  const root = document.getElementById('history-filter-trend');
+  if (!root) return;
+  if (!points.length) {
+    root.innerHTML = '';
+    return;
+  }
+  const width = 760, height = 72, pad = 4;
+  const max = Math.max(1, ...points.map(point => Number(point.tokens || 0)));
+  const slot = (width - pad * 2) / points.length;
+  const bars = points.map((point, index) => {
+    const barHeight = Math.max(2, Number(point.tokens || 0) / max * (height - 16));
+    const x = pad + index * slot + slot * .16;
+    const y = height - barHeight - 4;
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(2, slot * .68).toFixed(1)}" height="${barHeight.toFixed(1)}" rx="1"><title>${escapeHtml(point.date)} · ${Number(point.tokens || 0).toLocaleString()} Token</title></rect>`;
+  }).join('');
+  root.innerHTML = `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img">${bars}</svg>`;
 }
 
 function historyGoToPage(p) {
@@ -870,13 +1269,6 @@ function renderHistory() {
       }
     });
   });
-}
-
-function updateHistoryModelSuggestions() {
-  const list = document.getElementById('history-model-options');
-  if (!list) return;
-  const models = [...new Set(allHistory.map(h => h.model).filter(Boolean))].sort();
-  list.innerHTML = models.map(m => `<option value="${escapeHtml(m)}"></option>`).join('');
 }
 
 /* ── /api/config ───────────────────────────────────────────────── */
@@ -1413,71 +1805,38 @@ let modalReturnFocus = null;
 function showHistoryDetail(record) {
   const costSource = record.cost_source === 'provider' ? 'provider' : 'estimated';
   const costSourceLabel = t(costSource === 'provider' ? 'analytics.costSourceProvider' : 'analytics.costSourceEstimated');
+  const tokenValue = value => value != null ? Number(value).toLocaleString() : '—';
+  const statusLabel = record.success ? t('detail.success') : t('detail.failed');
   modalBody.innerHTML = `
-    <div class="detail-row">
-      <span class="detail-label">Request ID</span>
-      <span class="detail-value">${escapeHtml(record.id || '—')}</span>
+    <div class="detail-summary">
+      <div>
+        <div class="detail-model">${escapeHtml(record.model || '—')}</div>
+        <div class="detail-context">
+          <span>${escapeHtml(record.provider || '—')}</span>
+          <span>${escapeHtml(record.scenario || '—')}</span>
+          <span>${fmtTime(record.start_time)}</span>
+        </div>
+      </div>
+      <div class="detail-outcome">
+        <strong class="detail-cost">${record.cost_usd != null ? fmtCost(record.cost_usd) : '—'}</strong>
+        <span class="detail-status ${record.success ? 'success' : ''}">${statusLabel}</span>
+      </div>
     </div>
-    <div class="detail-row">
-      <span class="detail-label">Time</span>
-      <span class="detail-value">${fmtTime(record.start_time)}</span>
+    <div class="detail-token-grid">
+      <div class="detail-token"><span>${t('detail.inputTokens')}</span><strong>${tokenValue(record.input_tokens)}</strong></div>
+      <div class="detail-token"><span>${t('detail.promptTokens')}</span><strong>${tokenValue(record.prompt_tokens)}</strong></div>
+      <div class="detail-token"><span>${t('detail.cacheRead')}</span><strong>${tokenValue(record.cache_read_tokens)}</strong></div>
+      <div class="detail-token"><span>${t('detail.cacheCreation')}</span><strong>${tokenValue(record.cache_creation_tokens)}</strong></div>
+      <div class="detail-token"><span>${t('detail.outputTokens')}</span><strong>${tokenValue(record.output_tokens)}</strong></div>
     </div>
-    <div class="detail-row">
-      <span class="detail-label">Model</span>
-      <span class="detail-value">${escapeHtml(record.model || '—')}</span>
+    <div class="detail-metadata">
+      <div class="detail-row"><span class="detail-label">${t('detail.requestId')}</span><span class="detail-value">${escapeHtml(record.id || '—')}</span></div>
+      <div class="detail-row"><span class="detail-label">${t('detail.requestType')}</span><span class="detail-value">${t(record.streaming ? 'detail.streaming' : 'detail.nonStreaming')}</span></div>
+      <div class="detail-row"><span class="detail-label">${t('detail.attempt')}</span><span class="detail-value">${record.attempt || 1}</span></div>
+      <div class="detail-row"><span class="detail-label">${t('detail.duration')}</span><span class="detail-value">${fmtDuration(record.duration_ms)}</span></div>
+      <div class="detail-row"><span class="detail-label">${t('analytics.cost')}</span><span class="detail-value"><span class="cost-source-badge ${costSource === 'provider' ? 'provider' : ''}">${escapeHtml(costSourceLabel)}</span></span></div>
     </div>
-    <div class="detail-row">
-      <span class="detail-label">Provider</span>
-      <span class="detail-value">${escapeHtml(record.provider || '—')}</span>
-    </div>
-    <div class="detail-row">
-      <span class="detail-label">Scenario</span>
-      <span class="detail-value">${escapeHtml(record.scenario || '—')}</span>
-    </div>
-    <div class="detail-row">
-      <span class="detail-label">Request Type</span>
-      <span class="detail-value">${record.streaming ? 'Streaming' : 'Non-streaming'}</span>
-    </div>
-    <div class="detail-row">
-      <span class="detail-label">Attempt</span>
-      <span class="detail-value">${record.attempt || 1}</span>
-    </div>
-    <div class="detail-row">
-      <span class="detail-label">Input Tokens</span>
-      <span class="detail-value">${record.input_tokens != null ? record.input_tokens.toLocaleString() : '—'}</span>
-    </div>
-    <div class="detail-row">
-      <span class="detail-label">Prompt Tokens</span>
-      <span class="detail-value">${record.prompt_tokens != null ? record.prompt_tokens.toLocaleString() : '—'}</span>
-    </div>
-    <div class="detail-row">
-      <span class="detail-label">Cache Read</span>
-      <span class="detail-value">${record.cache_read_tokens != null ? record.cache_read_tokens.toLocaleString() : '—'}</span>
-    </div>
-    <div class="detail-row">
-      <span class="detail-label">Cache Creation</span>
-      <span class="detail-value">${record.cache_creation_tokens != null ? record.cache_creation_tokens.toLocaleString() : '—'}</span>
-    </div>
-    <div class="detail-row">
-      <span class="detail-label">Output Tokens</span>
-      <span class="detail-value">${record.output_tokens != null ? record.output_tokens.toLocaleString() : '—'}</span>
-    </div>
-    <div class="detail-row">
-      <span class="detail-label">${t('analytics.cost')}</span>
-      <span class="detail-value">${record.cost_usd != null ? fmtCost(record.cost_usd) : '—'} ${record.cost_usd != null ? `<span class="cost-source-badge ${costSource === 'provider' ? 'provider' : ''}">${escapeHtml(costSourceLabel)}</span>` : ''}</span>
-    </div>
-    <div class="detail-row">
-      <span class="detail-label">Duration</span>
-      <span class="detail-value">${fmtDuration(record.duration_ms)}</span>
-    </div>
-    <div class="detail-row">
-      <span class="detail-label">Status</span>
-      <span class="detail-value" style="color: ${record.success ? '#30d158' : '#ff453a'}">${record.success ? 'Success' : 'Failed'}</span>
-    </div>
-    ${record.error_msg ? `<div class="detail-row">
-      <span class="detail-label">Error</span>
-      <span class="detail-value" style="color:#ff453a">${escapeHtml(record.error_msg)}</span>
-    </div>` : ''}
+    ${record.error_msg ? `<div class="detail-error"><strong>${t('detail.error')}</strong><br>${escapeHtml(record.error_msg)}</div>` : ''}
   `;
   modalReturnFocus = document.activeElement;
   if (typeof modal?.showModal === 'function' && !modal.open) modal.showModal();
@@ -1606,11 +1965,6 @@ document.addEventListener('keydown', function(e) {
     } else {
       openCommandPalette();
     }
-  }
-  // Refresh: Cmd/Ctrl + R
-  if ((e.metaKey || e.ctrlKey) && e.key === 'r') {
-    e.preventDefault();
-    debouncedRefresh();
   }
   // Search history: Cmd/Ctrl + F
   if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
@@ -2357,7 +2711,7 @@ const AnalyticsModule = {
     const genEl = document.getElementById('analytics-generated');
     if (!this.ready) {
       if (genEl) genEl.textContent = '';
-      ['kpi-requests','kpi-tokens','kpi-tokens-in','kpi-tokens-out','kpi-cost','kpi-p95'].forEach(id => {
+      ['kpi-requests','kpi-tokens','kpi-tokens-in','kpi-tokens-out','kpi-cost','kpi-reasoning'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.textContent = '…';
       });
@@ -2365,23 +2719,23 @@ const AnalyticsModule = {
     }
 
     try {
-      const [summaryRes, trendRes, latencyRes] = await Promise.all([
+      const [summaryRes, trendRes] = await Promise.all([
         fetch(`/api/analytics/summary?days=${days}`),
-        fetch(`/api/analytics/tokens/trend?days=${days}`),
-        fetch(`/api/analytics/latency?days=${days}`)
+        fetch(`/api/analytics/tokens/trend?days=${days}`)
       ]);
       if (!summaryRes.ok) throw new Error('summary fetch failed');
       const summary = await summaryRes.json();
       const trend = trendRes.ok ? await trendRes.json() : { trend: [] };
-      const latencyData = latencyRes.ok ? await latencyRes.json() : { stats: [] };
 
       if (seq !== this.loadSeq) return;
-
-      summary.latency = latencyData;
-
-      this.renderKPIs(summary);
-      this.renderDonuts(summary);
-      this.renderTrend(trend.trend || []);
+      const account = summary.account || {};
+      const hasAccount = Number(account.summary?.total_requests || 0) > 0;
+      const view = hasAccount ? this.accountView(account) : summary;
+      this.renderSource(account.summary, hasAccount);
+      this.renderKPIs(view, hasAccount);
+      this.renderDonuts(view);
+      this.renderTrend(hasAccount ? (account.trend || []) : (trend.trend || []));
+      this.renderRecent(hasAccount ? (account.recent || []) : []);
       this.ready = true;
       if (genEl) {
         const ts = summary.generated_at ? new Date(summary.generated_at) : new Date();
@@ -2398,13 +2752,45 @@ const AnalyticsModule = {
   },
 
   showLoading() {
-    ['model-donut','provider-donut','token-trend'].forEach(id => {
+    ['model-donut','provider-donut','plan-donut','token-trend','analytics-recent'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.innerHTML = this.loadingHtml();
     });
   },
 
-  renderKPIs(data) {
+  accountView(account) {
+    const normalize = (items, field) => (items || []).map(item => ({
+      ...item,
+      [field]: item.name,
+      est_cost_usd: item.cost_usd,
+      account_usage: true,
+    }));
+    return {
+      summary: {
+        ...(account.summary || {}),
+        est_cost_usd: account.summary?.cost_usd || 0,
+        provider_cost_rows: account.summary?.total_requests || 0,
+        estimated_cost_rows: 0,
+      },
+      models: normalize(account.models, 'model'),
+      providers: normalize(account.providers, 'provider'),
+      plans: normalize(account.plans, 'plan'),
+    };
+  },
+
+  renderSource(summary, hasAccount) {
+    const source = document.getElementById('analytics-source');
+    if (!source) return;
+    source.classList.toggle('local', !hasAccount);
+    if (!hasAccount) {
+      source.textContent = t('analytics.sourceLocalFallback');
+      return;
+    }
+    const captured = summary?.snapshot_at ? fmtTime(summary.snapshot_at) : '';
+    source.textContent = `${t('analytics.sourceOpenCode')}${captured ? ` · ${t('analytics.capturedAt').replace('{time}', captured)}` : ''}`;
+  },
+
+  renderKPIs(data, hasAccount) {
     const s = data.summary || {};
     const fmt = (n) => n != null ? Number(n).toLocaleString() : '—';
     document.getElementById('kpi-requests').textContent = fmt(s.total_requests);
@@ -2456,8 +2842,7 @@ const AnalyticsModule = {
       }
     }
 
-    const stats = (data.latency && data.latency.stats) || [];
-    document.getElementById('kpi-p95').textContent = aggregateP95(stats);
+    document.getElementById('kpi-reasoning').textContent = hasAccount ? fmt(s.reasoning_tokens || 0) : '—';
   },
 
   renderDonuts(summary) {
@@ -2470,6 +2855,7 @@ const AnalyticsModule = {
     }));
     this.renderDonutChart('model-donut', withTotal(summary.models), 'total_tokens');
     this.renderDonutChart('provider-donut', withTotal(summary.providers), 'total_tokens');
+    this.renderDonutChart('plan-donut', withTotal(summary.plans), 'total_tokens');
   },
 
   renderDonutChart(containerId, items, valKey) {
@@ -2478,7 +2864,7 @@ const AnalyticsModule = {
     wrap.innerHTML = '';
 
     if (!items.length) {
-      wrap.innerHTML = '<div class="empty-state">No usage data yet</div>';
+      wrap.innerHTML = '<div class="empty-state">' + t('analytics.noData') + '</div>';
       return;
     }
 
@@ -2507,36 +2893,29 @@ const AnalyticsModule = {
       const frac = v / total;
       const drawFrac = Math.min(1, Math.max(frac, v > 0 ? MIN_FRAC : 0));
       const col = this.palette[idx % this.palette.length];
-      const label = it.model || it.provider || it.name || 'Unknown';
+      const label = it.model || it.provider || it.plan || it.name || 'Unknown';
       const pctTxt = (frac * 100).toFixed(1) + '%';
       const tip = `${this.escapeHtml(label)} · ${v.toLocaleString()} (${pctTxt})`;
-      const metrics = containerId === 'model-donut' ? [
-        ['Total tokens', v, fmt],
-        ['Requests', it.requests, fmt],
-        ['Input tokens', it.input_tokens, fmt],
-        ['Cache read', it.cache_read_tokens, fmt],
-        ['Cache creation', it.cache_creation_tokens, fmt],
-        ['Output tokens', it.output_tokens, fmt],
-        ['Avg latency', it.avg_latency_ms, n => `${Number(n).toFixed(0)} ms`],
-        ['Success rate', it.success_rate, n => `${(Number(n) * 100).toFixed(1)}%`],
-        ['Cost', it.est_cost_usd, fmtCost],
-      ] : [
-        ['Total tokens', v, fmt],
-        ['Requests', it.requests, fmt],
-        ['Input tokens', it.input_tokens, fmt],
-        ['Cache read', it.cache_read_tokens, fmt],
-        ['Cache creation', it.cache_creation_tokens, fmt],
-        ['Output tokens', it.output_tokens, fmt],
-        ['Fallback rate', it.fallback_rate, n => `${Number(n).toFixed(1)}%`],
-        ['Cost', it.est_cost_usd, fmtCost],
+      const metrics = [
+        [t('analytics.totalTokens'), v, fmt],
+        [t('analytics.requests'), it.requests, fmt],
+        [t('analytics.inputTokens'), it.input_tokens, fmt],
+        [t('detail.cacheRead'), it.cache_read_tokens, fmt],
+        [t('detail.cacheCreation'), it.cache_creation_tokens, fmt],
+        [t('analytics.outputTokens'), it.output_tokens, fmt],
+        [t('analytics.reasoningTokens'), it.reasoning_tokens, fmt],
+        [t('analytics.avgLatency'), it.avg_latency_ms, n => `${Number(n).toFixed(0)} ms`],
+        [t('analytics.successRate'), it.success_rate, n => `${(Number(n) * 100).toFixed(1)}%`],
+        [t('analytics.fallbackRate'), it.fallback_rate, n => `${Number(n).toFixed(1)}%`],
+        [t('analytics.cost'), it.est_cost_usd, fmtCost],
       ];
       const detailId = `${containerId}-legend-details-${idx}`;
       const detailRows = metrics.filter(([, value]) => value != null)
         .map(([name, value, format]) =>
           `<div class="legend-detail"><span>${name}</span><strong>${format(value)}</strong></div>`)
         .join('');
-      const filterKind = containerId === 'model-donut' ? 'model' : 'provider';
-      const drilldown = label === 'Other' ? '' :
+      const filterKind = containerId === 'model-donut' ? 'model' : containerId === 'provider-donut' ? 'provider' : '';
+      const drilldown = label === 'Other' || !filterKind || it.account_usage ? '' :
         `<button type="button" class="legend-drilldown" data-filter-kind="${filterKind}" data-filter-value="${this.escapeHtml(label)}">${t('analytics.viewRequests')}</button>`;
       legend.push(
         `<div class="legend-entry">` +
@@ -2565,7 +2944,7 @@ const AnalyticsModule = {
             <circle cx="${C}" cy="${C}" r="${R}" fill="none" stroke="#343a41" stroke-width="${STROKE}" opacity=".55"></circle>
             <g transform="rotate(-90 ${C} ${C})">${arcs}</g>
             <text x="${C}" y="${C - 4}" text-anchor="middle" class="donut-center-value">${fmtTok(total)}</text>
-            <text x="${C}" y="${C + 16}" text-anchor="middle" class="donut-center-label">tokens</text>
+            <text x="${C}" y="${C + 16}" text-anchor="middle" class="donut-center-label">Token</text>
           </svg>
           <div id="${tooltipId}" class="chart-tip"></div>
         </div>
@@ -2770,8 +3149,28 @@ const AnalyticsModule = {
     });
   },
 
+  renderRecent(items) {
+    const root = document.getElementById('analytics-recent');
+    if (!root) return;
+    if (!items.length) {
+      root.innerHTML = `<div class="empty-state">${t('analytics.noData')}</div>`;
+      return;
+    }
+    root.innerHTML = items.map(item => {
+      const cache = Number(item.cache_read_tokens || 0) + Number(item.cache_write_5m_tokens || 0) + Number(item.cache_write_1h_tokens || 0);
+      const tokens = Number(item.input_tokens || 0) + Number(item.output_tokens || 0) + cache;
+      const cost = Number(item.cost_units || 0) / 1e8 || Number(item.cost_usd || 0);
+      return `<div class="recent-usage-row">
+        <div class="recent-usage-model"><strong>${this.escapeHtml(item.model || '—')}</strong><span>${this.escapeHtml(item.provider || '—')} · ${this.escapeHtml(item.plan || '—')}</span></div>
+        <div class="recent-usage-meta">${fmtTime(item.time)}</div>
+        <div class="recent-usage-tokens">${fmtTok(tokens)} Token</div>
+        <div class="recent-usage-cost">${fmtCost(cost)}</div>
+      </div>`;
+    }).join('');
+  },
+
   renderEmpty(msg = 'No usage data yet. Run some requests or configure a model to see analytics.') {
-    ['model-donut','provider-donut','token-trend'].forEach(id => {
+    ['model-donut','provider-donut','plan-donut','token-trend','analytics-recent'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.innerHTML = `<div class="empty-state">${msg}</div>`;
     });

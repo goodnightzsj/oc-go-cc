@@ -182,6 +182,7 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 	// API endpoints.
 	mux.HandleFunc("/api/metrics", s.handleMetrics)
 	mux.HandleFunc("/api/history", s.handleHistory)
+	mux.HandleFunc("/api/history/summary", s.handleHistorySummary)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/proxy/config", s.handleProxyConfig)
 	mux.HandleFunc("/api/proxy/start", s.handleProxyStart)
@@ -485,6 +486,28 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		"page":  page,
 		"size":  size,
 	})
+}
+
+func (s *Server) handleHistorySummary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	query, err := historyRequestQuery(r, 1, 1)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if s.storage == nil {
+		http.Error(w, "persistent history is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	summary, err := storage.NewRequests(s.storage).Summary(query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, summary)
 }
 
 func historyRequestQuery(r *http.Request, page, size int) (storage.RequestQuery, error) {

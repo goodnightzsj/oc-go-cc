@@ -15,12 +15,17 @@ func TestAnalyticsAssetsKeepRefreshAndDrillDownBehavior(t *testing.T) {
 		t.Fatalf("read index.html: %v", err)
 	}
 
-	for _, marker := range []string{"loadSeq", "scheduleRefresh()", `aria-expanded="false"`, "legend-details", "provider_cost_rows", "kpi-cost-source"} {
+	for _, marker := range []string{"loadSeq", "scheduleRefresh()", `aria-expanded="false"`, "legend-details", "provider_cost_rows", "kpi-cost-source", "accountView", "renderRecent", "plan-donut"} {
 		if !strings.Contains(string(app), marker) {
 			t.Errorf("app.js missing analytics marker %q", marker)
 		}
 	}
 	if !strings.Contains(string(page), `id="analytics-refresh-interval"`) {
 		t.Error("Analytics auto-refresh control is missing")
+	}
+	for _, marker := range []string{`id="analytics-source"`, `id="plan-donut"`, `id="analytics-recent"`, `id="kpi-reasoning"`} {
+		if !strings.Contains(string(page), marker) {
+			t.Errorf("Analytics account view is missing %q", marker)
+		}
 	}
 }

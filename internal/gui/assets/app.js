@@ -2896,7 +2896,10 @@ const AnalyticsModule = {
       const frac = v / total;
       const drawFrac = Math.min(1, Math.max(frac, v > 0 ? MIN_FRAC : 0));
       const col = this.palette[idx % this.palette.length];
-      const label = it.model || it.provider || it.plan || it.name || 'Unknown';
+      const label = containerId === 'model-donut' ? (it.model || it.name) :
+        containerId === 'provider-donut' ? (it.provider || it.name) :
+        containerId === 'plan-donut' ? (it.plan || it.name) :
+        (it.name || 'Unknown');
       const pctTxt = (frac * 100).toFixed(1) + '%';
       const tip = `${this.escapeHtml(label)} · ${v.toLocaleString()} (${pctTxt})`;
       const metrics = [

@@ -15,7 +15,7 @@ func TestAnalyticsAssetsKeepRefreshAndDrillDownBehavior(t *testing.T) {
 		t.Fatalf("read index.html: %v", err)
 	}
 
-	for _, marker := range []string{"loadSeq", "scheduleRefresh()", `aria-expanded="false"`, "legend-details", "provider_cost_rows", "kpi-cost-source", "accountView", "renderRecent", "plan-donut", "function fmtTok"} {
+	for _, marker := range []string{"loadSeq", "scheduleRefresh()", `aria-expanded="false"`, "legend-details", "provider_cost_rows", "kpi-cost-source", "accountView", "renderRecent", "plan-donut", "function fmtTok", "containerId === 'provider-donut'", "containerId === 'plan-donut'"} {
 		if !strings.Contains(string(app), marker) {
 			t.Errorf("app.js missing analytics marker %q", marker)
 		}

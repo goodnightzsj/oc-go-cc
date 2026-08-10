@@ -43,6 +43,7 @@ type providerRequestCandidate struct {
 	completedAt  time.Time
 	model        string
 	provider     string
+	scenario     string
 	input        int64
 	output       int64
 	cacheRead    int64
@@ -244,7 +245,7 @@ func providerUsageRowsForSync(ctx context.Context, tx *sql.Tx) ([]providerReques
 
 func providerRequestCandidatesForSync(ctx context.Context, tx *sql.Tx, minTime, maxTime, snapshotAt time.Time) ([]providerRequestCandidate, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, start_time, COALESCE(duration_ms, 0), model, COALESCE(provider, ''),
+		SELECT id, start_time, COALESCE(duration_ms, 0), model, COALESCE(provider, ''), COALESCE(scenario, ''),
 		       COALESCE(input_tokens, 0), COALESCE(output_tokens, 0),
 		       COALESCE(cache_read_tokens, 0), COALESCE(cache_creation_tokens, 0),
 		       cost_usd, cost_source, details_known, usage_trusted
@@ -265,7 +266,7 @@ func providerRequestCandidatesForSync(ctx context.Context, tx *sql.Tx, minTime, 
 		var startTime string
 		var durationMS int64
 		var detailsKnown, usageTrusted int
-		if err := rows.Scan(&row.id, &startTime, &durationMS, &row.model, &row.provider, &row.input, &row.output,
+		if err := rows.Scan(&row.id, &startTime, &durationMS, &row.model, &row.provider, &row.scenario, &row.input, &row.output,
 			&row.cacheRead, &row.cacheNew, &row.cost, &row.costSource, &detailsKnown, &usageTrusted); err != nil {
 			return nil, err
 		}
@@ -299,7 +300,11 @@ func applyProviderRequestSync(ctx context.Context, tx *sql.Tx, providerRows []pr
 			candidate := candidates[candidateIndex]
 			cost := row.costUSD()
 			if providerRequestNeedsUpdate(candidate, cost, provider) {
-				result, err := tx.ExecContext(ctx, `UPDATE requests SET provider = ?, cost_usd = ?, cost_source = ?, usage_trusted = 1 WHERE id = ?`, provider, cost, CostSourceProvider, candidate.id)
+				scenario := candidate.scenario
+				if !candidate.detailsKnown {
+					scenario = "override"
+				}
+				result, err := tx.ExecContext(ctx, `UPDATE requests SET provider = ?, scenario = ?, cost_usd = ?, cost_source = ?, usage_trusted = 1 WHERE id = ?`, provider, scenario, cost, CostSourceProvider, candidate.id)
 				if err != nil {
 					return err
 				}
@@ -313,7 +318,7 @@ func applyProviderRequestSync(ctx context.Context, tx *sql.Tx, providerRows []pr
 				id, model, provider, scenario, start_time, duration_ms,
 				input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
 				cost_usd, cost_source, details_known, usage_trusted, streaming, success, error_msg, attempt, created_at
-			) VALUES (?, ?, ?, '', ?, 0, ?, ?, ?, ?, ?, ?, 0, 1, 0, 0, '', 1, ?)`,
+			) VALUES (?, ?, ?, 'override', ?, 0, ?, ?, ?, ?, ?, ?, 0, 1, 0, 0, '', 1, ?)`,
 			requestIDs[providerIndex], row.Model, provider, row.Time.UTC().Format(time.RFC3339Nano),
 			row.InputTokens, row.OutputTokens, row.CacheReadTokens,
 			row.CacheWrite5mTokens+row.CacheWrite1hTokens, row.costUSD(), CostSourceProvider,
@@ -362,7 +367,8 @@ func canonicalProvider(provider string, mappings map[string]string) string {
 func providerRequestNeedsUpdate(candidate providerRequestCandidate, cost float64, provider string) bool {
 	return !candidate.usageTrusted || candidate.provider != provider || !candidate.cost.Valid ||
 		!candidate.costSource.Valid || candidate.costSource.String != CostSourceProvider ||
-		math.Abs(candidate.cost.Float64-cost) > 1e-12
+		math.Abs(candidate.cost.Float64-cost) > 1e-12 ||
+		(!candidate.detailsKnown && candidate.scenario != "override")
 }
 
 func providerRequestCanonical(row ProviderCostRecord) string {

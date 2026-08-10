@@ -676,11 +676,15 @@ func boolToCompare(a, b bool) int {
 func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 	out := make([]historyEntry, len(records))
 	for i, rec := range records {
+		scenario := strings.TrimSpace(rec.Scenario)
+		if scenario == "" || strings.EqualFold(scenario, "unknown") {
+			scenario = "override"
+		}
 		entry := historyEntry{
 			ID:                  rec.ID,
 			Model:               rec.Model,
 			Provider:            rec.Provider,
-			Scenario:            rec.Scenario,
+			Scenario:            scenario,
 			StartTime:           rec.StartTime.Format("2006-01-02T15:04:05Z07:00"),
 			DurationMs:          rec.Duration.Milliseconds(),
 			InputTokens:         rec.InputTokens,

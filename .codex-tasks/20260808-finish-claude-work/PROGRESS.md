@@ -2,13 +2,13 @@
 
 ## Context Recovery Block
 
-- **Current milestone**: #6 - Validate, commit, push, deploy, and smoke-test
-- **Current status**: IN_PROGRESS
-- **Last completed**: #5 - OpenCode usage reconciliation validated
+- **Current milestone**: Complete
+- **Current status**: DONE
+- **Last completed**: #6 - Validate, deploy, correct production data, and smoke-test
 - **Current artifact**: `SUBTASKS.csv`
-- **Key context**: Children 1-5 are complete. Child 6 local tests, vet, formatting, and diff checks pass; commit review and remote release remain.
-- **Known issues**: Production access and target identity must be verified before remote writes.
-- **Next action**: Review and commit the scoped diff, then verify the configured deployment target; do not repeat the Edge capture.
+- **Key context**: Fresh provider usage is captured; exact matching, cost provenance, secret hardening, and the redesigned Analytics/History assets are implemented and fully checked locally.
+- **Known issues**: None in the requested scope; the pre-existing remote `.ace-tool/` remains untouched.
+- **Next action**: None.
 
 ## Child 1: Finalize storage overlay regression
 
@@ -44,6 +44,31 @@
 - **Completed**: 03:06
 - **Validation**: Existing authenticated Edge capture yielded 290 post-baseline requests and `$0.44185497` provider cost; proxy and provider token aggregates match (`458090` input, `114821` output, `123418752` cache read). No credentials or request content were persisted.
 - **Next step**: Child 6 - Full validation, commit, push, deploy, and smoke-test.
+
+## Child 7: Harden SQLite secret persistence
+
+- **Status**: DONE
+- **Started**: 2026-08-10
+- **Key context**: The original SQLite review explicitly left `providers.api_key` plaintext persistence for later documentation or encryption; current code still writes it and does not enforce an owner-only database mode.
+- **Validation**: SQLite-loaded catalog metadata no longer contains API keys; legacy values are scrubbed; database/WAL/SHM modes are tested at `0600`; storage, catalog, router, GUI tests and focused vet/format checks pass.
+- **Next step**: Child #8 - fresh OpenCode usage capture and reconciliation.
+
+## Child 8: Recapture and reconcile OpenCode request costs
+
+- **Status**: DONE
+- **Key context**: Fresh authenticated Edge capture contains 1,390 sanitized rows and `$3.03965577`; deterministic matching and explicit cost provenance are implemented and tested.
+- **Validation**: Production dry run/apply/second dry run were 290 exact with zero ambiguous/missing/conflicting; provider total is `$0.44185497`.
+
+## Child 9: Complete sub2api-informed Analytics and History design
+
+- **Status**: DONE
+- **Key context**: The complete Analytics/History hierarchy, dense filters, responsive behavior, and cost provenance are implemented; static and automated tests pass.
+- **Validation**: Production Edge desktop/mobile screenshots and History keyboard/filter checks pass; model/provider charts both total `124.0M`.
+
+## Child 6: Validate, deploy, correct production data, and smoke-test
+
+- **Status**: DONE
+- **Validation**: Full local checks pass; commits through `aecbe1c` are pushed; final production release, health, GUI/API, SQLite permissions, exact costs, and Edge workflows pass.
 
 ## Session Start
 

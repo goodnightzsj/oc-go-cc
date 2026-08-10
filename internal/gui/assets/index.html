@@ -46,42 +46,61 @@
   <!-- Overview Tab -->
   <div class="tab-content flex-1 overflow-y-auto active" id="tab-overview">
     <div class="page-shell overview-page">
-    <div class="page-heading">
+    <div class="page-heading analytics-heading">
       <div><h1 data-i18n="overview.title">Dashboard</h1><span class="page-meta" id="overview-generated"></span></div>
+      <div class="metric-segment range-segment" id="overview-range" role="group" aria-label="Dashboard range">
+        <button type="button" data-days="7" class="active" data-i18n="analytics.last7d">Last 7 days</button>
+        <button type="button" data-days="30" data-i18n="analytics.last30d">Last 30 days</button>
+        <button type="button" data-days="90" data-i18n="analytics.last90d">Last 90 days</button>
+      </div>
     </div>
-    <div class="metric-band metric-grid overview-metrics">
+    <div class="metric-band metric-grid overview-metrics reference-metrics">
       <div class="metric-cell overview-metric">
         <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="metric.total">Total Requests</div>
         <div class="text-[26px] font-bold tabular-nums" id="m-total">--</div>
-      </div>
-      <div class="metric-cell overview-metric">
-        <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="analytics.cost">Cost</div>
-        <div class="text-[26px] font-bold tabular-nums" id="m-cost">--</div>
+        <div class="metric-note" id="m-total-note"></div>
       </div>
       <div class="metric-cell overview-metric">
         <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="analytics.totalTokens">Total Tokens</div>
         <div class="text-[26px] font-bold tabular-nums" id="m-tokens">--</div>
+        <div class="metric-note" id="m-tokens-note"></div>
       </div>
       <div class="metric-cell overview-metric">
         <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="analytics.cacheHitShort">Cache hit</div>
         <div class="text-[26px] font-bold tabular-nums" id="m-cache-hit">--</div>
+        <div class="metric-note" id="m-cache-hit-note"></div>
+      </div>
+      <div class="metric-cell overview-metric">
+        <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="analytics.throughput">Average throughput</div>
+        <div class="text-[26px] font-bold tabular-nums" id="m-throughput">--</div>
+        <div class="metric-note" id="m-throughput-note"></div>
+      </div>
+      <div class="metric-cell overview-metric">
+        <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="history.successRate">Success rate</div>
+        <div class="text-[26px] font-bold tabular-nums" id="m-success">--</div>
+        <div class="metric-note" id="m-success-note"></div>
+      </div>
+      <div class="metric-cell overview-metric">
+        <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="analytics.cost">Cost</div>
+        <div class="text-[26px] font-bold tabular-nums" id="m-cost">--</div>
+        <div class="metric-note" data-i18n="analytics.currencyUSD">USD</div>
       </div>
     </div>
-
-    <div class="metric-band metric-grid overview-token-metrics">
-      <div class="metric-cell"><div class="metric-label" data-i18n="analytics.inputTokens">Input tokens</div><div class="metric-value" id="m-input">--</div></div>
-      <div class="metric-cell"><div class="metric-label" data-i18n="detail.cacheRead">Cache read</div><div class="metric-value" id="m-cache-read">--</div></div>
-      <div class="metric-cell"><div class="metric-label" data-i18n="detail.cacheCreation">Cache write</div><div class="metric-value" id="m-cache-write">--</div></div>
-      <div class="metric-cell"><div class="metric-label" data-i18n="analytics.outputTokens">Output tokens</div><div class="metric-value" id="m-output">--</div></div>
+    <div class="analytics-chart-grid">
+      <section class="analytics-section analytics-trend-section"><div class="section-heading" data-i18n="analytics.requestTrend">Request trend</div><div class="analytics-chart analytics-trend" id="overview-request-trend"></div></section>
+      <section class="analytics-section analytics-trend-section"><div class="section-heading" data-i18n="analytics.tokenTrend">Token trend</div><div class="analytics-chart analytics-trend" id="overview-token-trend"></div></section>
     </div>
-
-    <section class="analytics-section analytics-trend-section">
-      <div class="section-heading" data-i18n="analytics.dailyTrend">Daily Token Trend</div>
-      <div class="analytics-chart analytics-trend" id="overview-token-trend"><div class="empty-state" data-i18n="analytics.noTrend">No trend data</div></div>
-    </section>
+    <div class="insight-toolbar analytics-breakdown-toolbar">
+      <span data-i18n="history.distribution">Distribution details</span>
+      <div class="metric-segment" id="overview-breakdown-metric" role="group" aria-label="Dashboard distribution metric">
+        <button type="button" data-metric="requests" class="active" data-i18n="analytics.requests">Requests</button>
+        <button type="button" data-metric="tokens" data-i18n="analytics.totalTokens">Tokens</button>
+        <button type="button" data-metric="cost" data-i18n="analytics.cost">Cost</button>
+      </div>
+    </div>
     <div class="analytics-comparison-grid">
-      <section class="analytics-section"><div class="section-heading" data-i18n="analytics.byModel">Model distribution</div><div class="analytics-chart" id="overview-model-donut"></div></section>
-      <section class="analytics-section"><div class="section-heading" data-i18n="analytics.byProvider">Platform distribution</div><div class="analytics-chart" id="overview-provider-donut"></div></section>
+      <section class="analytics-section"><div class="section-heading" data-i18n="analytics.byProvider">Platform distribution</div><div class="analytics-distribution" id="overview-provider-distribution"></div></section>
+      <section class="analytics-section"><div class="section-heading" data-i18n="analytics.byModel">Model distribution</div><div class="analytics-distribution" id="overview-model-distribution"></div></section>
     </div>
     <div id="model-list" hidden></div>
       </div>
@@ -176,17 +195,16 @@
           <thead>
             <tr>
               <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="start_time" data-i18n="th.time" aria-sort="none">Time <span class="sort-icon opacity-40 ml-1">↕</span></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="model" data-i18n="th.model" aria-sort="none">Model <span class="sort-icon opacity-40 ml-1">↕</span></th>
+              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="success" data-i18n="th.status" aria-sort="none">Status <span class="sort-icon opacity-40 ml-1">↕</span></th>
+              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="model" data-i18n="th.modelPlatform" aria-sort="none">Model / Platform <span class="sort-icon opacity-40 ml-1">↕</span></th>
               <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="scenario" data-i18n="th.scenario" aria-sort="none">Scenario <span class="sort-icon opacity-40 ml-1">↕</span></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="prompt_tokens" data-i18n="th.promptTokens" aria-sort="none">Prompt Tokens <span class="sort-icon opacity-40 ml-1">↕</span></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="output_tokens" data-i18n="th.outputTokens" aria-sort="none">Output Tokens <span class="sort-icon opacity-40 ml-1">↕</span></th>
+              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="prompt_tokens" data-i18n="th.tokens" aria-sort="none">Tokens <span class="sort-icon opacity-40 ml-1">↕</span></th>
               <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="cost_usd" data-i18n="th.cost" aria-sort="none">Cost <span class="sort-icon opacity-40 ml-1">↕</span></th>
               <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="duration_ms" data-i18n="th.duration" aria-sort="none">Duration <span class="sort-icon opacity-40 ml-1">↕</span></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="success" data-i18n="th.status" aria-sort="none">Status <span class="sort-icon opacity-40 ml-1">↕</span></th>
             </tr>
           </thead>
           <tbody id="history-tbody">
-            <tr><td colspan="8" class="empty-state text-center text-[#98989d] py-6 text-[13px]" data-i18n="empty.noHistory">No history yet</td></tr>
+            <tr><td colspan="7" class="empty-state text-center text-[#98989d] py-6 text-[13px]" data-i18n="empty.noHistory">No history yet</td></tr>
           </tbody>
         </table>
       </div>
@@ -375,36 +393,48 @@
           <span class="page-meta" id="analytics-generated"></span>
         </div>
         <div class="analytics-controls">
-          <select id="analytics-days" class="filter-select" aria-label="Time range">
-            <option value="7" data-i18n-option="analytics.last7d">Last 7 days</option>
-            <option value="30" selected data-i18n-option="analytics.last30d">Last 30 days</option>
-            <option value="90" data-i18n-option="analytics.last90d">Last 90 days</option>
-          </select>
-          <select id="analytics-refresh-interval" class="filter-select" aria-label="Analytics auto-refresh interval">
-            <option value="0" data-i18n-option="analytics.autoRefreshOff">Auto-refresh: Off</option>
-            <option value="5" data-i18n-option="analytics.autoRefresh5s">Auto-refresh: 5s</option>
-            <option value="30" selected data-i18n-option="analytics.autoRefresh30s">Auto-refresh: 30s</option>
-            <option value="60" data-i18n-option="analytics.autoRefresh60s">Auto-refresh: 60s</option>
-          </select>
           <button class="btn btn-small" id="btn-refresh-analytics" data-i18n="analytics.refresh">Refresh</button>
         </div>
       </div>
 
-      <div class="metric-band metric-grid analytics-metrics">
+      <div class="usage-filter-bar">
+        <div class="history-date-range" id="analytics-date-range">
+          <input type="hidden" id="analytics-start">
+          <input type="hidden" id="analytics-end">
+          <button type="button" class="date-range-trigger" id="analytics-date-trigger" aria-haspopup="dialog" aria-expanded="false">
+            <span aria-hidden="true">⌁</span><span id="analytics-date-label" data-i18n="filter.dateRange">Date range</span>
+          </button>
+          <div class="date-range-popover" id="analytics-date-popover" role="dialog" aria-label="Analytics date range" hidden>
+            <div class="date-range-fields">
+              <label><span data-i18n="filter.startDate">Start date</span><input type="text" id="analytics-start-display" inputmode="numeric" placeholder="YYYY-MM-DD" autocomplete="off"></label>
+              <span aria-hidden="true">→</span>
+              <label><span data-i18n="filter.endDate">End date</span><input type="text" id="analytics-end-display" inputmode="numeric" placeholder="YYYY-MM-DD" autocomplete="off"></label>
+            </div>
+            <div class="date-range-presets">
+              <button type="button" data-days="7" data-i18n="analytics.last7d">Last 7 days</button>
+              <button type="button" data-days="30" data-i18n="analytics.last30d">Last 30 days</button>
+              <button type="button" data-days="90" data-i18n="analytics.last90d">Last 90 days</button>
+            </div>
+            <div class="date-range-actions"><button type="button" id="analytics-date-cancel" data-i18n="action.cancel">Cancel</button><button type="button" class="primary" id="analytics-date-apply" data-i18n="filter.apply">Apply</button></div>
+          </div>
+        </div>
+        <div class="usage-granularity">
+          <span data-i18n="analytics.granularity">Granularity</span>
+          <div class="metric-segment" id="analytics-granularity" role="group" aria-label="Usage granularity">
+            <button type="button" data-granularity="hour" data-i18n="analytics.hour">Hour</button>
+            <button type="button" data-granularity="day" class="active" data-i18n="analytics.day">Day</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="metric-band metric-grid analytics-metrics usage-metrics">
         <div class="metric-cell">
           <div class="metric-label" data-i18n="analytics.totalRequests">Total Requests</div>
           <div class="metric-value" id="kpi-requests">--</div>
           <div class="metric-note" data-i18n="analytics.requestsUnit">requests</div>
         </div>
         <div class="metric-cell">
-          <div class="metric-label" data-i18n="analytics.totalTokens">Total Tokens</div>
-          <div class="metric-value" id="kpi-tokens">--</div>
-          <div class="metric-note token-composition">
-            <span><i class="token-dot token-dot-input"></i><span id="kpi-tokens-in" class="tabular-nums">0</span></span>
-            <span><i class="token-dot token-dot-cache"></i><span id="kpi-tokens-cache" class="tabular-nums">0</span></span>
-            <span><i class="token-dot token-dot-output"></i><span id="kpi-tokens-out" class="tabular-nums">0</span></span>
-            <span class="cache-hit" id="kpi-cache-hit-wrap" hidden><span data-i18n="analytics.cacheHitShort">cache</span> <span id="kpi-cache-hit" class="tabular-nums font-medium">—</span></span>
-          </div>
+          <div class="metric-label" data-i18n="analytics.totalTokens">Total Tokens</div><div class="metric-value" id="kpi-tokens">--</div><div class="metric-note" id="kpi-tokens-note"></div>
         </div>
         <div class="metric-cell">
           <div class="metric-label" data-i18n="analytics.cost">Cost</div>
@@ -412,17 +442,26 @@
           <div class="metric-note" data-i18n="analytics.currencyUSD">USD</div>
         </div>
         <div class="metric-cell">
-          <div class="metric-label" data-i18n="detail.cacheRead">Cache read</div>
-          <div class="metric-value" id="kpi-cache-read">--</div>
-          <div class="metric-note" id="kpi-cache-rate">--</div>
+          <div class="metric-label" data-i18n="analytics.inputTokens">Input tokens</div><div class="metric-value" id="kpi-input">--</div><div class="metric-note" data-i18n="analytics.freshInput">Fresh input</div>
         </div>
+        <div class="metric-cell"><div class="metric-label" data-i18n="analytics.cacheHitShort">Cache hit</div><div class="metric-value" id="kpi-cache-rate">--</div><div class="metric-note" id="kpi-cache-rate-note"></div></div>
+        <div class="metric-cell"><div class="metric-label" data-i18n="analytics.outputTokens">Output tokens</div><div class="metric-value" id="kpi-output">--</div><div class="metric-note" data-i18n="analytics.generatedOutput">Generated output</div></div>
+        <div class="metric-cell"><div class="metric-label" data-i18n="detail.cacheRead">Cache read</div><div class="metric-value" id="kpi-cache-read">--</div><div class="metric-note" data-i18n="analytics.reusedInput">Reused input</div></div>
+        <div class="metric-cell"><div class="metric-label" data-i18n="detail.cacheCreation">Cache write</div><div class="metric-value" id="kpi-cache-write">--</div><div class="metric-note" data-i18n="analytics.newCacheInput">New cached input</div></div>
       </div>
 
       <section class="analytics-section analytics-trend-section">
-        <div class="section-heading" data-i18n="analytics.dailyTrend">Daily Token Trend</div>
+        <div class="section-heading" data-i18n="analytics.tokenTrend">Token trend</div>
         <div class="analytics-chart analytics-trend" id="token-trend">
           <div class="empty-state" data-i18n="analytics.noTrend">No trend data</div>
         </div>
+      </section>
+
+      <section class="analytics-section">
+        <div class="section-heading"><span data-i18n="analytics.periodDetails">Period details</span><span class="section-meta" id="analytics-period-count"></span></div>
+        <div class="analytics-table-scroll"><table class="analytics-table usage-detail-table"><thead><tr>
+          <th data-i18n="analytics.period">Period</th><th data-i18n="analytics.requests">Requests</th><th data-i18n="analytics.knownErrors">Known errors</th><th data-i18n="analytics.inputTokens">Input</th><th data-i18n="analytics.outputTokens">Output</th><th data-i18n="detail.cacheRead">Cache read</th><th data-i18n="detail.cacheCreation">Cache write</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="analytics.cost">Cost</th>
+        </tr></thead><tbody id="analytics-period-tbody"></tbody></table></div>
       </section>
 
       <div class="insight-toolbar analytics-breakdown-toolbar">
@@ -435,18 +474,15 @@
       </div>
       <div class="analytics-comparison-grid">
         <section class="analytics-section">
-          <div class="section-heading" data-i18n="analytics.byModel">Tokens by Model</div>
-          <div class="analytics-chart" id="model-donut">
-            <div class="empty-state" data-i18n="analytics.noData">No data</div>
-          </div>
+          <div class="section-heading" data-i18n="analytics.modelDetails">Model details</div>
+          <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th data-i18n="filter.model">Model</th><th data-i18n="analytics.requests">Requests</th><th data-i18n="analytics.cacheHitShort">Cache hit</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="analytics.cost">Cost</th></tr></thead><tbody id="analytics-model-tbody"></tbody></table></div>
         </section>
         <section class="analytics-section">
-          <div class="section-heading" data-i18n="analytics.byProvider">Tokens by Provider</div>
-          <div class="analytics-chart" id="provider-donut">
-            <div class="empty-state" data-i18n="analytics.noData">No data</div>
-          </div>
+          <div class="section-heading" data-i18n="analytics.byProvider">Platform distribution</div>
+          <div class="analytics-distribution" id="provider-distribution"></div>
         </section>
       </div>
+      <span class="analytics-retained-range" id="analytics-retained-range"></span>
     </div>
   </div>
 

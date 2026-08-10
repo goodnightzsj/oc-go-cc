@@ -42,6 +42,22 @@ const TRANSLATIONS = {
     'analytics.noTrend': 'No trend data',
     'analytics.singleDay': '(single-day data)',
     'analytics.dailyTrend': 'Daily Token Trend',
+    'analytics.requestTrend': 'Request trend',
+    'analytics.tokenTrend': 'Token trend',
+    'analytics.throughput': 'Average throughput',
+    'analytics.granularity': 'Granularity',
+    'analytics.hour': 'Hour',
+    'analytics.day': 'Day',
+    'analytics.freshInput': 'Fresh input',
+    'analytics.generatedOutput': 'Generated output',
+    'analytics.reusedInput': 'Reused input',
+    'analytics.newCacheInput': 'New cached input',
+    'analytics.periodDetails': 'Period details',
+    'analytics.period': 'Period',
+    'analytics.knownErrors': 'Known errors',
+    'analytics.modelDetails': 'Model details',
+    'analytics.knownRecords': '{n} records with details',
+    'analytics.retainedRange': 'Request records {from} - {to}',
     'analytics.last7d': 'Last 7 days',
     'analytics.last30d': 'Last 30 days',
     'analytics.last90d': 'Last 90 days',
@@ -67,6 +83,7 @@ const TRANSLATIONS = {
     'filter.today': 'Today',
     'filter.clear': 'Clear',
     'filter.apply': 'Apply',
+    'action.cancel': 'Cancel',
     'detail.title': 'Request details',
     'detail.subtitle': 'Routing, billing, and token details',
     'detail.close': 'Close request details',
@@ -124,6 +141,8 @@ const TRANSLATIONS = {
     'analytics.viewRequests': 'View requests',
     'th.time': 'Time',
     'th.model': 'Model',
+    'th.modelPlatform': 'Model / Platform',
+    'th.tokens': 'Tokens',
     'th.scenario': 'Scenario',
     'th.inputTokens': 'Input Tokens',
     'th.promptTokens': 'Prompt Tokens',
@@ -271,6 +290,22 @@ const TRANSLATIONS = {
     'analytics.noTrend': '暂无趋势数据',
     'analytics.singleDay': '（仅单日数据）',
     'analytics.dailyTrend': '每日 Token 趋势',
+    'analytics.requestTrend': '请求趋势',
+    'analytics.tokenTrend': 'Token 趋势',
+    'analytics.throughput': '平均速率',
+    'analytics.granularity': '粒度',
+    'analytics.hour': '小时',
+    'analytics.day': '天',
+    'analytics.freshInput': '未命中缓存的输入',
+    'analytics.generatedOutput': '模型生成输出',
+    'analytics.reusedInput': '已复用输入',
+    'analytics.newCacheInput': '新增缓存输入',
+    'analytics.periodDetails': '时段明细',
+    'analytics.period': '时段',
+    'analytics.knownErrors': '已知错误',
+    'analytics.modelDetails': '模型明细',
+    'analytics.knownRecords': '{n} 条有详情记录',
+    'analytics.retainedRange': '请求记录 {from} - {to}',
     'analytics.last7d': '最近 7 天',
     'analytics.last30d': '最近 30 天',
     'analytics.last90d': '最近 90 天',
@@ -297,6 +332,7 @@ const TRANSLATIONS = {
     'filter.today': '今天',
     'filter.clear': '清除',
     'filter.apply': '应用',
+    'action.cancel': '取消',
     'detail.title': '请求详情',
     'detail.subtitle': '路由、费用与 Token 明细',
     'detail.close': '关闭请求详情',
@@ -354,6 +390,8 @@ const TRANSLATIONS = {
     'analytics.viewRequests': '查看请求',
     'th.time': '时间',
     'th.model': '模型',
+    'th.modelPlatform': '模型 / 平台',
+    'th.tokens': 'Token',
     'th.scenario': '场景',
     'th.inputTokens': '输入 Token',
     'th.promptTokens': 'Prompt Token',
@@ -496,6 +534,7 @@ function applyTranslations() {
   }
   window.CustomSelect?.syncAll();
   window.HistoryDateRange?.syncLabel();
+  AnalyticsModule?.syncDateRange?.();
 }
 
 function toggleLanguage() {
@@ -507,9 +546,10 @@ function toggleLanguage() {
   renderModelList(lastModelCounts);
   renderHistory();
   PerfModule.render();
-  // Analytics charts (trend legend, donuts) carry inline strings; reload them
+  // Analytics charts and distributions carry inline strings; reload them
   // so they pick up the new language instead of keeping stale ones.
   if (activeTab === 'analytics') AnalyticsModule.load(true);
+  if (lastOverviewView) renderOverviewUsage(lastOverviewView.data, lastOverviewView.trend);
 }
 
 // Apply translations on load
@@ -905,6 +945,9 @@ window.addEventListener('hashchange', () => {
 let perfPollTimer = null;
 let perfPollCounter = 0;
 let activeTab = 'overview';
+let overviewDays = 7;
+let overviewBreakdownMetric = 'requests';
+let lastOverviewView = null;
 // Upper bound on how many history rows are rendered into the DOM at once.
 // Keeps long-session history tables fast while the count reflects all rows.
 const HISTORY_RENDER_LIMIT = 200;
@@ -976,8 +1019,8 @@ async function refreshMetrics() {
   try {
     const [r, usageResponse, trendResponse] = await Promise.all([
       fetch('/api/metrics'),
-      fetch('/api/analytics/summary?days=30'),
-      fetch('/api/analytics/tokens/trend?days=30'),
+      fetch(`/api/analytics/summary?days=${overviewDays}`),
+      fetch(`/api/analytics/tokens/trend?days=${overviewDays}`),
     ]);
     if (!r.ok) { markPollFail(); return; }
     const d = await r.json();
@@ -1041,10 +1084,15 @@ function renderOverviewUsage(data, trend) {
   set('m-cost', fmtCost(summary.cost_usd ?? summary.est_cost_usd ?? 0));
   set('m-tokens', fmtTok(total));
   set('m-cache-hit', prompt > 0 ? `${(cacheRead / prompt * 100).toFixed(1)}%` : '—');
-  set('m-input', fmtTok(input));
-  set('m-cache-read', fmtTok(cacheRead));
-  set('m-cache-write', fmtTok(cacheWrite));
-  set('m-output', fmtTok(output));
+  set('m-total-note', `${overviewDays} ${currentLang === 'zh' ? '天' : 'days'}`);
+  set('m-tokens-note', `${fmtTok(input)} ${currentLang === 'zh' ? '输入' : 'input'} · ${fmtTok(output)} ${currentLang === 'zh' ? '输出' : 'output'}`);
+  set('m-cache-hit-note', `${fmtTok(cacheRead)} ${currentLang === 'zh' ? '读取' : 'read'}`);
+  const minutes = Math.max(1, overviewDays * 24 * 60);
+  set('m-throughput', `${(Number(summary.total_requests || 0) / minutes).toFixed(2)} RPM`);
+  set('m-throughput-note', `${fmtTok(total / minutes)} TPM`);
+  const known = Number(summary.known_requests || 0);
+  set('m-success', known > 0 ? `${(Number(summary.success_rate || 0) * 100).toFixed(1)}%` : '—');
+  set('m-success-note', t('analytics.knownRecords').replace('{n}', known.toLocaleString()));
   set('overview-generated', new Date().toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'}));
 
   const withTotal = items => (items || []).map(item => ({
@@ -1052,9 +1100,14 @@ function renderOverviewUsage(data, trend) {
     total_tokens: Number(item.input_tokens || 0) + Number(item.output_tokens || 0)
       + Number(item.cache_read_tokens || 0) + Number(item.cache_creation_tokens || 0),
   }));
-  AnalyticsModule.renderTrend(trend || [], 'overview-token-trend');
-  AnalyticsModule.renderDonutChart('overview-model-donut', withTotal(data.models), 'total_tokens', 'model');
-  AnalyticsModule.renderDonutChart('overview-provider-donut', withTotal(data.providers), 'total_tokens', 'provider');
+  const filledTrend = fillRecentDailyTrend(trend || [], overviewDays);
+  lastOverviewView = {data, trend: trend || []};
+  AnalyticsModule.renderRequestTrend(filledTrend, 'overview-request-trend');
+  AnalyticsModule.renderTokenLines(filledTrend, 'overview-token-trend');
+  const valueKey = overviewBreakdownMetric === 'cost' ? 'cost_usd'
+    : overviewBreakdownMetric === 'tokens' ? 'total_tokens' : 'requests';
+  AnalyticsModule.renderDistribution('overview-provider-distribution', withTotal(data.providers), valueKey, 'provider');
+  AnalyticsModule.renderDistribution('overview-model-distribution', withTotal(data.models), valueKey, 'model');
 }
 
 function renderModelList(counts) {
@@ -1310,7 +1363,7 @@ function renderHistory() {
     historyTotal + t('status.count') + (historyHasFilters() ? t('status.filtered') : '');
 
   if (allHistory.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">' + t('empty.noHistory') + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">' + t('empty.noHistory') + '</td></tr>';
     return;
   }
 
@@ -1325,18 +1378,21 @@ function renderHistory() {
     const rowId = h.id || `${h.start_time}_${h.model || 'unknown'}_${h.duration_ms || 0}`;
     const cost = h.cost_usd != null ? fmtCost(h.cost_usd) : '—';
     const detailsKnown = h.details_known !== false;
+    const totalTokens = Number(h.input_tokens || 0) + Number(h.output_tokens || 0)
+      + Number(h.cache_read_tokens || 0) + Number(h.cache_creation_tokens || 0);
     return `
     <tr data-id="${escapeHtml(rowId)}" tabindex="0" aria-haspopup="dialog" style="cursor: pointer;">
       <td>${fmtTime(h.start_time)}</td>
-      <td><span title="${escapeHtml(h.provider || '')}">${escapeHtml(h.model) || '—'}</span></td>
+      <td>${detailsKnown ? `<span class="badge ${h.success ? 'badge-success' : 'badge-error'}">${h.success ? t('badge.success') : t('badge.fail')}</span>` : `<span class="badge badge-unknown">${t('detail.unknown')}</span>`}</td>
+      <td><div class="history-model-cell"><strong>${escapeHtml(h.model) || '—'}</strong><small>${escapeHtml(h.provider) || '—'}</small></div></td>
       <td><span class="badge badge-scene">${escapeHtml(h.scenario) || '—'}</span></td>
-      <td>${h.prompt_tokens != null ? h.prompt_tokens.toLocaleString() : '—'}</td>
-      <td>${h.output_tokens != null ? h.output_tokens.toLocaleString() : '—'}</td>
+      <td><button type="button" class="history-token-trigger" data-token-id="${escapeHtml(rowId)}" aria-label="${t('detail.title')}">${totalTokens.toLocaleString()}</button></td>
       <td>${cost}</td>
       <td>${detailsKnown ? fmtDuration(h.duration_ms) : '—'}</td>
-      <td>${detailsKnown ? `<span class="badge ${h.success ? 'badge-success' : 'badge-error'}">${h.success ? t('badge.success') : t('badge.fail')}</span>` : `<span class="badge badge-unknown">${t('detail.unknown')}</span>`}</td>
     </tr>
   `}).join('');
+
+  bindHistoryTokenTooltips(tbody);
 
   // Add pointer and keyboard handlers for detail modal.
   tbody.querySelectorAll('tr[data-id]').forEach(row => {
@@ -1355,6 +1411,50 @@ function renderHistory() {
         open.call(this);
       }
     });
+  });
+}
+
+function bindHistoryTokenTooltips(root) {
+  let tip = document.getElementById('history-token-tip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.id = 'history-token-tip';
+    tip.className = 'chart-tip history-token-tip';
+    document.body.appendChild(tip);
+  }
+  const hide = () => { tip.style.display = 'none'; };
+  root.querySelectorAll('.history-token-trigger').forEach(trigger => {
+    const show = () => {
+      const record = allHistory.find(item => {
+        const id = item.id || `${item.start_time}_${item.model || 'unknown'}_${item.duration_ms || 0}`;
+        return id === trigger.dataset.tokenId;
+      });
+      if (!record) return;
+      const prompt = Number(record.input_tokens || 0) + Number(record.cache_read_tokens || 0) + Number(record.cache_creation_tokens || 0);
+      const total = prompt + Number(record.output_tokens || 0);
+      const rate = prompt > 0 ? Number(record.cache_read_tokens || 0) / prompt * 100 : 0;
+      tip.innerHTML = chartTooltipMarkup(currentLang === 'zh' ? 'Token 明细' : 'Token details', [
+        {label:t('detail.inputTokens'),value:Number(record.input_tokens||0).toLocaleString(),color:'#818cf8'},
+        {label:t('detail.cacheRead'),value:Number(record.cache_read_tokens||0).toLocaleString(),color:'#fbbf24'},
+        {label:t('detail.cacheCreation'),value:Number(record.cache_creation_tokens||0).toLocaleString(),color:'#fb7185'},
+        {label:t('detail.outputTokens'),value:Number(record.output_tokens||0).toLocaleString(),color:'#34d399'},
+      ], [
+        {label:t('analytics.cacheHitShort'),value:prompt>0?`${rate.toFixed(1)}%`:'—'},
+        {label:t('analytics.totalTokens'),value:total.toLocaleString()},
+      ]);
+      tip.style.display = 'block';
+      const rect = trigger.getBoundingClientRect();
+      const bounds = tip.getBoundingClientRect();
+      const left = Math.max(12, Math.min(innerWidth - bounds.width - 12, rect.right - bounds.width));
+      const top = rect.bottom + bounds.height + 10 <= innerHeight ? rect.bottom + 8 : Math.max(12, rect.top - bounds.height - 8);
+      tip.style.left = `${left}px`;
+      tip.style.top = `${top}px`;
+    };
+    trigger.addEventListener('pointerenter', show);
+    trigger.addEventListener('pointerleave', hide);
+    trigger.addEventListener('focus', show);
+    trigger.addEventListener('blur', hide);
+    trigger.addEventListener('click', hide);
   });
 }
 
@@ -1571,6 +1671,25 @@ function fmtTok(n) {
   if (value >= 1_000_000) return (value / 1_000_000).toFixed(1) + 'M';
   if (value >= 1000) return (value / 1000).toFixed(1) + 'K';
   return String(value);
+}
+
+function totalUsageTokens(item) {
+  return Number(item?.input_tokens || 0) + Number(item?.output_tokens || 0)
+    + Number(item?.cache_read_tokens || 0) + Number(item?.cache_creation_tokens || 0);
+}
+
+function fillRecentDailyTrend(points, days) {
+  const byDate = new Map((points || []).map(point => [point.date, point]));
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - Math.max(0, days - 1));
+  const result = [];
+  while (start <= end) {
+    const date = dateInputValue(start);
+    result.push(byDate.get(date) || {date, requests:0, known_requests:0, error_requests:0, input_tokens:0, output_tokens:0, cache_read_tokens:0, cache_creation_tokens:0, cost_usd:0});
+    start.setDate(start.getDate() + 1);
+  }
+  return result;
 }
 
 // Costs here are often fractions of a cent, so a fixed 2-decimal format
@@ -2796,69 +2915,133 @@ document.addEventListener('DOMContentLoaded', () => TestModule.init());
 /* ── Analytics Tab (minimal, vanilla JS + SVG/CSS) ─────────────── */
 const AnalyticsModule = {
   palette: ['#818cf8', '#34d399', '#fbbf24', '#fb7185', '#22d3ee', '#c084fc'],
-  refreshStorageKey: 'routatic-analytics-refresh-interval',
-  refreshTimer: null,
-  refreshInterval: 30,
   loadSeq: 0,
   ready: false,
   breakdownMetric: 'tokens',
+  granularity: 'day',
   currentView: null,
+  currentTrend: [],
 
   init() {
-    const daysSel = document.getElementById('analytics-days');
     const refreshBtn = document.getElementById('btn-refresh-analytics');
-    const intervalSel = document.getElementById('analytics-refresh-interval');
-    if (daysSel) daysSel.addEventListener('change', () => this.load(true));
     if (refreshBtn) refreshBtn.addEventListener('click', () => this.load(true));
     document.querySelectorAll('#analytics-breakdown-metric button').forEach(button => {
       button.addEventListener('click', () => {
         this.breakdownMetric = button.dataset.metric;
         button.parentElement.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
-        if (this.currentView) this.renderDonuts(this.currentView);
+        if (this.currentView) this.renderDistributions(this.currentView);
       });
     });
-    this.refreshInterval = this.readRefreshInterval();
-    if (intervalSel) {
-      intervalSel.value = String(this.refreshInterval);
-      intervalSel.addEventListener('change', () => {
-        const value = Number(intervalSel.value);
-        this.refreshInterval = [0, 5, 30, 60].includes(value) ? value : 30;
-        try {
-          localStorage.setItem(this.refreshStorageKey, String(this.refreshInterval));
-        } catch (_) {}
-        this.scheduleRefresh();
+    document.querySelectorAll('#analytics-granularity button').forEach(button => {
+      button.addEventListener('click', () => {
+        this.granularity = button.dataset.granularity;
+        button.parentElement.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
+        this.load(true);
       });
+    });
+    document.querySelectorAll('#overview-range button').forEach(button => {
+      button.addEventListener('click', () => {
+        overviewDays = Number(button.dataset.days || 7);
+        button.parentElement.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
+        refreshMetrics();
+      });
+    });
+    document.querySelectorAll('#overview-breakdown-metric button').forEach(button => {
+      button.addEventListener('click', () => {
+        overviewBreakdownMetric = button.dataset.metric;
+        button.parentElement.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
+        if (lastOverviewView) renderOverviewUsage(lastOverviewView.data, lastOverviewView.trend);
+      });
+    });
+    this.initDateRange();
+  },
+
+  initDateRange() {
+    const end = new Date();
+    const start = new Date(end);
+    start.setDate(start.getDate() - 6);
+    document.getElementById('analytics-start').value = dateInputValue(start);
+    document.getElementById('analytics-end').value = dateInputValue(end);
+    this.syncDateRange();
+    document.getElementById('analytics-date-trigger')?.addEventListener('click', () => this.toggleDateRange());
+    document.getElementById('analytics-date-cancel')?.addEventListener('click', () => this.closeDateRange());
+    document.getElementById('analytics-date-apply')?.addEventListener('click', () => this.applyDateRange());
+    document.querySelectorAll('#analytics-date-popover [data-days]').forEach(button => {
+      button.addEventListener('click', () => this.presetDateRange(Number(button.dataset.days || 7)));
+    });
+    document.addEventListener('pointerdown', event => {
+      if (!event.target.closest('#analytics-date-range')) this.closeDateRange();
+    });
+  },
+
+  toggleDateRange() {
+    const popover = document.getElementById('analytics-date-popover');
+    if (!popover) return;
+    if (popover.hidden) {
+      this.syncDateRange();
+      popover.hidden = false;
+      document.getElementById('analytics-date-trigger')?.setAttribute('aria-expanded', 'true');
+      document.getElementById('analytics-start-display')?.focus();
+    } else {
+      this.closeDateRange();
     }
-    document.addEventListener('visibilitychange', () => this.scheduleRefresh());
-    this.scheduleRefresh();
   },
 
-  readRefreshInterval() {
-    try {
-      const stored = localStorage.getItem(this.refreshStorageKey);
-      const value = Number(stored);
-      if (stored !== null && [0, 5, 30, 60].includes(value)) return value;
-    } catch (_) {}
-    return 30;
+  closeDateRange() {
+    const popover = document.getElementById('analytics-date-popover');
+    if (popover) popover.hidden = true;
+    document.getElementById('analytics-date-trigger')?.setAttribute('aria-expanded', 'false');
   },
 
-  refreshPaused() {
-    return activeTab !== 'analytics' || document.hidden ||
-      !!document.querySelector('.modal-overlay.visible, dialog[open]');
+  syncDateRange() {
+    const start = document.getElementById('analytics-start')?.value || '';
+    const end = document.getElementById('analytics-end')?.value || '';
+    const startDisplay = document.getElementById('analytics-start-display');
+    const endDisplay = document.getElementById('analytics-end-display');
+    if (startDisplay) startDisplay.value = start;
+    if (endDisplay) endDisplay.value = end;
+    const label = document.getElementById('analytics-date-label');
+    if (label) label.textContent = start && end ? `${start} → ${end}` : t('filter.dateRange');
   },
 
-  scheduleRefresh() {
-    if (this.refreshTimer) {
-      clearTimeout(this.refreshTimer);
-      this.refreshTimer = null;
+  presetDateRange(days) {
+    const end = new Date();
+    const start = new Date(end);
+    start.setDate(start.getDate() - Math.max(0, days - 1));
+    document.getElementById('analytics-start-display').value = dateInputValue(start);
+    document.getElementById('analytics-end-display').value = dateInputValue(end);
+  },
+
+  applyDateRange() {
+    const start = document.getElementById('analytics-start-display');
+    const end = document.getElementById('analytics-end-display');
+    const valid = value => /^\d{4}-\d{2}-\d{2}$/.test(value) && dateInputValue(new Date(`${value}T00:00:00`)) === value;
+    start.classList.toggle('invalid', !valid(start.value));
+    end.classList.toggle('invalid', !valid(end.value));
+    if (!valid(start.value) || !valid(end.value) || start.value > end.value) return;
+    const span = (new Date(`${end.value}T00:00:00`) - new Date(`${start.value}T00:00:00`)) / 86400000 + 1;
+    if (span > 92) {
+      end.classList.add('invalid');
+      return;
     }
-    if (!this.refreshInterval) return;
-    const delay = this.refreshPaused() ? 1000 : this.refreshInterval * 1000;
-    this.refreshTimer = setTimeout(async () => {
-      this.refreshTimer = null;
-      if (!this.refreshPaused()) await this.load(false);
-      this.scheduleRefresh();
-    }, delay);
+    document.getElementById('analytics-start').value = start.value;
+    document.getElementById('analytics-end').value = end.value;
+    this.syncDateRange();
+    this.closeDateRange();
+    this.load(true);
+  },
+
+  queryParams() {
+    const start = document.getElementById('analytics-start')?.value;
+    const end = document.getElementById('analytics-end')?.value;
+    const from = new Date(`${start}T00:00:00`);
+    const to = new Date(`${end}T00:00:00`);
+    to.setDate(to.getDate() + 1);
+    return new URLSearchParams({
+      from: from.toISOString(),
+      to: to.toISOString(),
+      granularity: this.granularity,
+    });
   },
 
   loadingHtml() {
@@ -2867,12 +3050,11 @@ const AnalyticsModule = {
 
   async load(force) {
     const seq = ++this.loadSeq;
-    const daysEl = document.getElementById('analytics-days');
-    const days = daysEl ? daysEl.value : 30;
+    const params = this.queryParams();
     const genEl = document.getElementById('analytics-generated');
     if (!this.ready) {
       if (genEl) genEl.textContent = '';
-      ['kpi-requests','kpi-tokens','kpi-tokens-in','kpi-tokens-out','kpi-cost','kpi-cache-read','kpi-cache-rate'].forEach(id => {
+      ['kpi-requests','kpi-tokens','kpi-cost','kpi-input','kpi-cache-rate','kpi-output','kpi-cache-read','kpi-cache-write'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.textContent = '…';
       });
@@ -2881,8 +3063,8 @@ const AnalyticsModule = {
 
     try {
       const [summaryRes, trendRes] = await Promise.all([
-        fetch(`/api/analytics/summary?days=${days}`),
-        fetch(`/api/analytics/tokens/trend?days=${days}`)
+        fetch(`/api/analytics/summary?${params}`),
+        fetch(`/api/analytics/tokens/trend?${params}`)
       ]);
       if (!summaryRes.ok) throw new Error('summary fetch failed');
       const summary = await summaryRes.json();
@@ -2890,9 +3072,13 @@ const AnalyticsModule = {
 
       if (seq !== this.loadSeq) return;
       this.currentView = summary;
+      this.currentTrend = this.fillTrend(trend.trend || []);
       this.renderKPIs(summary);
-      this.renderDonuts(summary);
-      this.renderTrend(trend.trend || []);
+      this.renderDistributions(summary);
+      this.renderTokenLines(this.currentTrend, 'token-trend');
+      this.renderPeriodTable(this.currentTrend);
+      this.renderModelTable(summary.models || []);
+      this.renderRetainedRange(summary.summary || {});
       this.ready = true;
       if (genEl) {
         const ts = summary.generated_at ? new Date(summary.generated_at) : new Date();
@@ -2903,13 +3089,11 @@ const AnalyticsModule = {
       console.error('Analytics error:', e);
       if (!this.ready) this.renderEmpty('Failed to load analytics');
       if (genEl) genEl.textContent = 'Error';
-    } finally {
-      if (seq === this.loadSeq) this.scheduleRefresh();
     }
   },
 
   showLoading() {
-    ['model-donut','provider-donut','token-trend'].forEach(id => {
+    ['provider-distribution','token-trend'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.innerHTML = this.loadingHtml();
     });
@@ -2925,39 +3109,24 @@ const AnalyticsModule = {
     const totTok = (s.input_tokens||0) + (s.output_tokens||0)
       + (s.cache_read_tokens||0) + (s.cache_creation_tokens||0);
     document.getElementById('kpi-tokens').textContent = fmt(totTok);
-    document.getElementById('kpi-tokens-in').textContent = fmt(s.input_tokens);
-    const cacheTok = (s.cache_read_tokens||0) + (s.cache_creation_tokens||0);
-    const cacheEl = document.getElementById('kpi-tokens-cache');
-    if (cacheEl) cacheEl.textContent = fmt(cacheTok);
-    document.getElementById('kpi-tokens-out').textContent = fmt(s.output_tokens);
+    document.getElementById('kpi-tokens-note').textContent = t('analytics.knownRecords').replace('{n}', Number(s.known_requests || 0).toLocaleString());
+    document.getElementById('kpi-input').textContent = fmt(s.input_tokens);
+    document.getElementById('kpi-output').textContent = fmt(s.output_tokens);
 
     // Cache hit rate is an input-side ratio: the denominator is everything that
     // arrived as prompt (fresh input + cache read + cache creation). Dividing by
     // total tokens instead would fold output in and drift with response length.
     const promptTok = (s.input_tokens||0) + (s.cache_read_tokens||0) + (s.cache_creation_tokens||0);
-    const hitWrap = document.getElementById('kpi-cache-hit-wrap');
-    const hitEl = document.getElementById('kpi-cache-hit');
-    if (hitWrap && hitEl) {
-      if (promptTok > 0) {
-        const pct = ((s.cache_read_tokens||0) / promptTok) * 100;
-        hitEl.textContent = (pct >= 10 ? pct.toFixed(0) : pct.toFixed(1)) + '%';
-        hitWrap.hidden = false;
-        hitWrap.title = t('analytics.cacheHitTitle');
-      } else {
-        hitWrap.hidden = true;
-      }
-    }
     document.getElementById('kpi-cost').textContent = fmtCost(s.cost_usd ?? s.est_cost_usd ?? 0);
     document.getElementById('kpi-cache-read').textContent = fmt(s.cache_read_tokens || 0);
     document.getElementById('kpi-cache-rate').textContent = promptTok > 0
-      ? `${((s.cache_read_tokens || 0) / promptTok * 100).toFixed(1)}% ${t('analytics.cacheHitShort')}`
+      ? `${((s.cache_read_tokens || 0) / promptTok * 100).toFixed(1)}%`
       : '—';
-
+    document.getElementById('kpi-cache-rate-note').textContent = `${fmt(s.cache_read_tokens || 0)} ${currentLang === 'zh' ? '读取' : 'read'}`;
+    document.getElementById('kpi-cache-write').textContent = fmt(s.cache_creation_tokens || 0);
   },
 
-  renderDonuts(summary) {
-    // Weight both ring charts by total tokens consumed (input + output +
-    // cache) rather than request count, which better reflects real usage.
+  renderDistributions(summary) {
     const withTotal = (items) => (items || []).map(it => ({
       ...it,
       total_tokens: (it.input_tokens||0) + (it.output_tokens||0)
@@ -2965,280 +3134,183 @@ const AnalyticsModule = {
     }));
     const valueKey = this.breakdownMetric === 'cost' ? 'cost_usd'
       : this.breakdownMetric === 'requests' ? 'requests' : 'total_tokens';
-    this.renderDonutChart('model-donut', withTotal(summary.models), valueKey, 'model');
-    this.renderDonutChart('provider-donut', withTotal(summary.providers), valueKey, 'provider');
+    this.renderDistribution('provider-distribution', withTotal(summary.providers), valueKey, 'provider');
   },
 
-  renderDonutChart(containerId, items, valKey, dimension) {
-    const wrap = document.getElementById(containerId);
-    if (!wrap) return;
-    wrap.innerHTML = '';
-
-    if (!items.length) {
-      wrap.innerHTML = '<div class="empty-state">' + t('analytics.noData') + '</div>';
+  renderDistribution(containerId, items, valueKey, dimension) {
+    const root = document.getElementById(containerId);
+    if (!root) return;
+    const normalized = (items || []).map(item => ({
+      ...item,
+      total_tokens: item.total_tokens ?? totalUsageTokens(item),
+      cost_usd: item.cost_usd ?? item.est_cost_usd ?? 0,
+    })).sort((a, b) => Number(b[valueKey] || 0) - Number(a[valueKey] || 0)).slice(0, 12);
+    if (!normalized.length) {
+      root.innerHTML = `<div class="empty-state">${t('analytics.noData')}</div>`;
       return;
     }
-
-    const normalized = items.map(item => ({...item, cost_usd: item.cost_usd ?? item.est_cost_usd ?? 0}));
-    const sorted = [...normalized].sort((a,b) => Number(b[valKey]||0) - Number(a[valKey]||0));
-    let top = sorted.slice(0,5);
-    const rest = sorted.slice(5);
-    if (rest.length) {
-      const other = {name: currentLang === 'zh' ? '其他' : 'Other'};
-      ['requests','total_tokens','input_tokens','output_tokens','cache_read_tokens','cache_creation_tokens','cost_usd'].forEach(key => {
-        other[key] = rest.reduce((sum, item) => sum + Number(item[key] || 0), 0);
-      });
-      top.push(other);
-    }
-    const total = top.reduce((sum,item) => sum + Number(item[valKey]||0), 0) || 1;
-    const formatMetric = value => valKey === 'cost_usd' ? fmtCost(value)
-      : valKey === 'requests' ? Number(value || 0).toLocaleString() : fmtTok(value);
-    const centerLabel = valKey === 'cost_usd' ? t('analytics.cost')
-      : valKey === 'requests' ? t('analytics.requests') : 'Token';
-
-    // Donut drawn with stroke-dasharray on <circle> arcs rather than <path>
-    // wedges: a 100% share is just a full-circumference dash, so it renders
-    // correctly instead of degenerating (coincident arc endpoints draw nothing).
-    const C = 120, R = 82, STROKE = 34;
-    const CIRC = 2 * Math.PI * R;
-    const tooltipId = containerId + '-tip';
-    const legend = [];
-    const tooltipContent = [];
-    // Floor tiny-but-nonzero shares so a <0.5% sector stays visible/hoverable.
-    const MIN_FRAC = 0.005;
-    let offset = 0;
-    const arcs = top.map((it, idx) => {
-      const v = Number(it[valKey] || 0);
-      const frac = v / total;
-      const drawFrac = Math.min(1, Math.max(frac, v > 0 ? MIN_FRAC : 0));
-      const col = this.palette[idx % this.palette.length];
-      const rawLabel = dimension === 'model' ? (it.model || it.name) :
-        dimension === 'provider' ? (it.provider || it.name) : it.name;
+    const max = Math.max(1, ...normalized.map(item => Number(item[valueKey] || 0)));
+    const total = Math.max(1, normalized.reduce((sum, item) => sum + Number(item[valueKey] || 0), 0));
+    const formatValue = value => valueKey === 'cost_usd' ? fmtCost(value)
+      : valueKey === 'requests' ? Number(value || 0).toLocaleString() : fmtTok(value);
+    root.innerHTML = normalized.map((item, index) => {
+      const rawLabel = dimension === 'model' ? item.model : item.provider;
       const label = !rawLabel || rawLabel === 'unknown' ? t('detail.unknown') : rawLabel;
-      const pctTxt = (frac * 100).toFixed(1) + '%';
-      const metrics = [
-        [t('analytics.totalTokens'), it.total_tokens, n => Number(n || 0).toLocaleString()],
-        [t('analytics.requests'), it.requests, fmt],
-        [t('analytics.inputTokens'), it.input_tokens, fmt],
-        [t('detail.cacheRead'), it.cache_read_tokens, fmt],
-        [t('detail.cacheCreation'), it.cache_creation_tokens, fmt],
-        [t('analytics.outputTokens'), it.output_tokens, fmt],
-        [t('analytics.cost'), it.cost_usd, fmtCost],
-      ];
-      tooltipContent.push(chartTooltipMarkup(label, [
-        {label: t('analytics.requests'), value: Number(it.requests || 0).toLocaleString(), color: col},
-        {label: t('analytics.totalTokens'), value: Number(it.total_tokens || 0).toLocaleString(), color: '#22d3ee'},
-        {label: t('analytics.cost'), value: fmtCost(Number(it.cost_usd || 0)), color: '#34d399'},
-      ], [{label: currentLang === 'zh' ? '当前占比' : 'Share', value: pctTxt}]));
-      const detailId = `${containerId}-legend-details-${idx}`;
-      const detailRows = metrics.filter(([, value]) => value != null)
-        .map(([name, value, format]) =>
-          `<div class="legend-detail"><span>${name}</span><strong>${format(value)}</strong></div>`)
-        .join('');
-      const filterKind = dimension === 'model' ? 'model' : dimension === 'provider' ? 'provider' : '';
-      const isOther = it.name === 'Other' || it.name === '其他';
-      const drilldown = isOther || !filterKind ? '' :
-        `<button type="button" class="legend-drilldown" data-filter-kind="${filterKind}" data-filter-value="${this.escapeHtml(label)}">${t('analytics.viewRequests')}</button>`;
-      legend.push(
-        `<div class="legend-entry">` +
-          `<button type="button" class="legend-item" data-slice="${idx}" aria-expanded="false" aria-controls="${detailId}">` +
-          `<span class="legend-swatch" style="background:${col}"></span>` +
-          `<span class="legend-label">${this.escapeHtml(label)}</span>` +
-          `<span class="legend-value">${formatMetric(v)}</span>` +
-          `<span class="legend-pct">${pctTxt}</span>` +
-          `</button>` +
-          `<div class="legend-details" id="${detailId}" hidden>${detailRows}${drilldown}</div>` +
-        `</div>`);
-      const dash = `${(drawFrac * CIRC).toFixed(2)} ${((1 - drawFrac) * CIRC).toFixed(2)}`;
-      // Negative dashoffset advances clockwise from 12 o'clock (rotate -90).
-      const arc = `<circle class="donut-arc" cx="${C}" cy="${C}" r="${R}" fill="none"` +
-        ` stroke="${col}" stroke-width="${STROKE}"` +
-        ` stroke-dasharray="${dash}" stroke-dashoffset="${(-offset * CIRC).toFixed(2)}"` +
-        ` tabindex="0" role="button" aria-label="${this.escapeHtml(label)} ${pctTxt}" id="slice-${containerId}-${idx}"></circle>`;
-      offset += drawFrac;
-      return arc;
-    }).join('');
-
-    const html = `
-      <div class="donut-layout">
-        <div class="donut-svg-wrap">
-          <svg viewBox="0 0 240 240" class="donut-svg" role="img">
-            <circle cx="${C}" cy="${C}" r="${R}" fill="none" stroke="#343a41" stroke-width="${STROKE}" opacity=".55"></circle>
-            <g transform="rotate(-90 ${C} ${C})">${arcs}</g>
-            <text x="${C}" y="${C - 4}" text-anchor="middle" class="donut-center-value">${formatMetric(total)}</text>
-            <text x="${C}" y="${C + 16}" text-anchor="middle" class="donut-center-label">${centerLabel}</text>
-          </svg>
-          <div id="${tooltipId}" class="chart-tip"></div>
-        </div>
-        <div class="donut-legend">${legend.join('')}</div>
+      const value = Number(item[valueKey] || 0);
+      const share = value / total * 100;
+      const meta = `${Number(item.requests || 0).toLocaleString()} ${t('analytics.requests')} · ${fmtTok(item.total_tokens)} Token · ${fmtCost(item.cost_usd)}`;
+      return `<div class="analytics-distribution-row">
+        <div class="analytics-distribution-label"><span title="${this.escapeHtml(label)}">${this.escapeHtml(label)}</span><strong>${formatValue(value)}</strong></div>
+        <div class="analytics-distribution-track"><span style="width:${Math.max(value > 0 ? 2 : 0, value / max * 100).toFixed(1)}%;--distribution-color:${this.palette[index % this.palette.length]}"></span></div>
+        <small>${meta} · ${share.toFixed(1)}%</small>
       </div>`;
-    wrap.innerHTML = html;
-
-    const tipEl = wrap.querySelector('#' + CSS.escape(tooltipId));
-    const wrapEl = wrap.querySelector('.donut-svg-wrap');
-    bindChartTooltip(wrapEl, tipEl, '.donut-arc', (_arc, index) => tooltipContent[index]);
-    wrap.querySelectorAll('.legend-item').forEach(row => {
-      const details = wrap.querySelector('#' + CSS.escape(row.getAttribute('aria-controls')));
-      row.addEventListener('click', () => {
-        const expanded = row.getAttribute('aria-expanded') === 'true';
-        row.setAttribute('aria-expanded', String(!expanded));
-        if (details) details.hidden = expanded;
-      });
-    });
-    wrap.querySelectorAll('.legend-drilldown').forEach(button => {
-      button.addEventListener('click', () => {
-        this.drillDown(button.dataset.filterKind, button.dataset.filterValue);
-      });
-    });
+    }).join('');
   },
 
-  drillDown(kind, value) {
-    resetHistoryFilters(false);
-    const days = Number(document.getElementById('analytics-days')?.value || 30);
-    const end = new Date();
-    const start = new Date(end);
-    start.setDate(start.getDate() - Math.max(0, days - 1));
-    document.getElementById('history-start').value = dateInputValue(start);
-    document.getElementById('history-end').value = dateInputValue(end);
-    const target = document.getElementById(kind === 'provider' ? 'provider-filter' : 'model-filter');
-    if (target) target.value = value;
-    historyPage = 1;
-    if (location.hash !== '#history') location.hash = 'history';
-    else activateTab('history');
+  fillTrend(points) {
+    const byKey = new Map((points || []).map(point => [point.date, point]));
+    const startValue = document.getElementById('analytics-start')?.value;
+    const endValue = document.getElementById('analytics-end')?.value;
+    if (!startValue || !endValue) return points || [];
+    const rows = [];
+    const blank = date => ({date, requests:0, known_requests:0, error_requests:0, input_tokens:0, output_tokens:0, cache_read_tokens:0, cache_creation_tokens:0, cost_usd:0});
+    if (this.granularity === 'hour') {
+      const cursor = new Date(`${startValue}T00:00:00`);
+      const end = new Date(`${endValue}T00:00:00`);
+      end.setDate(end.getDate() + 1);
+      while (cursor < end) {
+        const key = cursor.toISOString().slice(0, 13) + ':00:00Z';
+        rows.push(byKey.get(key) || blank(key));
+        cursor.setHours(cursor.getHours() + 1);
+      }
+      return rows;
+    }
+    const cursor = new Date(`${startValue}T00:00:00`);
+    const end = new Date(`${endValue}T00:00:00`);
+    while (cursor <= end) {
+      const key = dateInputValue(cursor);
+      rows.push(byKey.get(key) || blank(key));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return rows;
   },
 
-  renderTrend(points, containerId = 'token-trend') {
-    const wrap = document.getElementById(containerId);
-    if (!wrap) return;
-    wrap.innerHTML = '';
-    if (!points.length) {
-      wrap.innerHTML = '<div class="empty-state">' + t('analytics.noTrend') + '</div>';
+  trendLabel(value) {
+    const date = String(value || '');
+    if (date.includes('T')) {
+      return new Date(date).toLocaleString(undefined, {month:'2-digit', day:'2-digit', hour:'2-digit'});
+    }
+    return date.slice(5);
+  },
+
+  chartGrid(points, width, height, inset, max, formatValue) {
+    const plotW = width - inset.left - inset.right;
+    const plotH = height - inset.top - inset.bottom;
+    const y = value => inset.top + (1 - Number(value || 0) / Math.max(1, max)) * plotH;
+    const x = index => points.length <= 1 ? inset.left + plotW / 2 : inset.left + index / (points.length - 1) * plotW;
+    let markup = '';
+    for (let step = 0; step <= 4; step++) {
+      const value = max * step / 4;
+      const yy = y(value);
+      markup += `<line class="usage-grid-line" x1="${inset.left}" x2="${width-inset.right}" y1="${yy}" y2="${yy}"></line>`;
+      markup += `<text class="usage-axis-label" x="${inset.left-8}" y="${yy+3}" text-anchor="end">${this.escapeHtml(formatValue(value))}</text>`;
+    }
+    const stride = Math.max(1, Math.ceil(points.length / 5));
+    points.forEach((point, index) => {
+      if (index % stride !== 0 && index !== points.length - 1) return;
+      markup += `<text class="usage-axis-label" x="${x(index)}" y="${height-7}" text-anchor="middle">${this.escapeHtml(this.trendLabel(point.date))}</text>`;
+    });
+    return {markup, x, y, plotH};
+  },
+
+  renderRequestTrend(points, containerId) {
+    const root = document.getElementById(containerId);
+    if (!root) return;
+    if (!points.length || points.every(point => Number(point.requests || 0) === 0)) {
+      root.innerHTML = `<div class="empty-state">${t('analytics.noTrend')}</div>`;
       return;
     }
+    const width=720, height=236, inset={top:16,right:18,bottom:32,left:52};
+    const max = Math.max(1, ...points.map(point => Number(point.requests || 0)));
+    const chart = this.chartGrid(points, width, height, inset, max, value => fmtTok(Math.round(value)));
+    const requestPoints = points.map((point,index) => `${chart.x(index)},${chart.y(point.requests)}`).join(' ');
+    const errorPoints = points.map((point,index) => `${chart.x(index)},${chart.y(point.error_requests)}`).join(' ');
+    const dots = points.map((point,index) => `<circle class="usage-chart-point" cx="${chart.x(index)}" cy="${chart.y(point.requests)}" r="3"></circle><circle class="usage-chart-hit" cx="${chart.x(index)}" cy="${chart.y(point.requests)}" r="13" tabindex="0" role="button" aria-label="${this.escapeHtml(point.date)}"></circle>`).join('');
+    root.innerHTML = `<div class="usage-chart-stage"><div class="usage-chart-legend"><span class="is-requests">${t('analytics.requests')}</span><span class="is-errors">${t('analytics.knownErrors')}</span></div><svg viewBox="0 0 ${width} ${height}" role="img">${chart.markup}<polyline class="usage-chart-line is-requests" points="${requestPoints}"></polyline><polyline class="usage-chart-line is-errors" points="${errorPoints}"></polyline>${dots}</svg><div class="chart-tip" id="${containerId}-tip"></div></div>`;
+    bindChartTooltip(root.querySelector('.usage-chart-stage'), root.querySelector('.chart-tip'), '.usage-chart-hit', (_hit,index) => {
+      const point=points[index];
+      return chartTooltipMarkup(this.trendLabel(point.date), [
+        {label:t('analytics.requests'),value:Number(point.requests||0).toLocaleString(),color:'#818cf8'},
+        {label:t('analytics.knownErrors'),value:Number(point.error_requests||0).toLocaleString(),color:'#fb7185'},
+      ], [{label:t('analytics.cost'),value:fmtCost(point.cost_usd||0)}]);
+    });
+  },
 
-    // Layout: leave room for a y-axis label column (left) and an x-axis date
-    // row (bottom) so the chart reads as a real axes plot even with few points.
-    const w = 648, h = 224;
-    const ml = 56, mb = 22, mt = 10, mr = 12;
-    const plotW = w - ml - mr;
-    const plotH = h - mt - mb;
-    const AXIS = '#49515b', GRID = '#2a3036', TXT = '#9aa3ad';
-
-    // Bars are stacked, so the axis must span the stacked TOTAL of a day, not
-    // the largest single series — otherwise tall columns overflow the plot.
-    const dayTotal = (p) => (p.input_tokens||0) + (p.output_tokens||0)
-      + (p.cache_read_tokens||0) + (p.cache_creation_tokens||0);
-    const maxV = Math.max(1, ...points.map(dayTotal));
-    const y = (v) => mt + plotH - (v || 0) / maxV * plotH;
-
-    const fmt = (n) => {
-      if (n >= 1_000_000) return (n/1_000_000).toFixed(n>=10_000_000?0:1) + 'M';
-      if (n >= 1000) return (n/1000).toFixed(n>=100_000?0:1) + 'K';
-      return String(n);
+  renderTokenLines(points, containerId='token-trend') {
+    const root = document.getElementById(containerId);
+    if (!root) return;
+    if (!points.length || points.every(point => totalUsageTokens(point) === 0)) {
+      root.innerHTML = `<div class="empty-state">${t('analytics.noTrend')}</div>`;
+      return;
+    }
+    const series = [
+      {key:'input_tokens',label:t('analytics.inputTokens'),className:'is-input',color:'#818cf8'},
+      {key:'output_tokens',label:t('analytics.outputTokens'),className:'is-output',color:'#34d399'},
+      {key:'cache_read_tokens',label:t('detail.cacheRead'),className:'is-cache-read',color:'#fbbf24'},
+      {key:'cache_creation_tokens',label:t('detail.cacheCreation'),className:'is-cache-write',color:'#fb7185'},
+    ];
+    const width=720, height=252, inset={top:18,right:50,bottom:32,left:56};
+    const max = Math.max(1, ...series.flatMap(item => points.map(point => Number(point[item.key]||0))));
+    const chart = this.chartGrid(points,width,height,inset,max,value=>fmtTok(Math.round(value)));
+    const rateY = value => inset.top + (1 - Number(value||0)/100) * chart.plotH;
+    const rate = point => {
+      const prompt=Number(point.input_tokens||0)+Number(point.cache_read_tokens||0)+Number(point.cache_creation_tokens||0);
+      return prompt > 0 ? Number(point.cache_read_tokens||0)/prompt*100 : 0;
     };
-    const fmtDay = (d) => { const parts=String(d).split('-'); return parts.length>=2 ? parts[1]+'-'+parts[2] : d; };
-
-    // Y gridlines + labels (0..maxV, 4 steps)
-    let yGrid = '';
-    for (let s = 0; s <= 4; s++) {
-      const v = maxV * s / 4;
-      const yy = y(v).toFixed(1);
-      yGrid += `<line x1="${ml}" y1="${yy}" x2="${w-mr}" y2="${yy}" stroke="${GRID}" stroke-width="1"/>`;
-      yGrid += `<text x="${ml-8}" y="${(+yy+3).toFixed(1)}" text-anchor="end" font-size="9.5" fill="${TXT}">${fmt(Math.round(v))}</text>`;
-    }
-    // X date labels + vertical gridlines (stride so labels don't collide)
-    const maxLabels = 7;
-    const stride = Math.max(1, Math.ceil(points.length / maxLabels));
-    let xGrid = '';
-    for (let i = 0; i < points.length; i += stride) {
-      const lx = (points.length === 1 ? ml + plotW / 2 : ml + i * plotW / (points.length - 1)).toFixed(1);
-      xGrid += `<line x1="${lx}" y1="${mt}" x2="${lx}" y2="${h-mb}" stroke="${GRID}" stroke-width="1"/>`;
-      xGrid += `<text x="${lx}" y="${h-mb+14}" text-anchor="middle" font-size="9.5" fill="${TXT}">${fmtDay(points[i].date||'')}</text>`;
-    }
-    // last point label included even if skipped
-    if ((points.length-1) % stride !== 0) {
-      const lx = (ml + plotW).toFixed(1);
-      xGrid += `<text x="${lx}" y="${h-mb+14}" text-anchor="middle" font-size="9.5" fill="${TXT}">${fmtDay(points[points.length-1].date||'')}</text>`;
-    }
-
-    // Deepseek-style STACKED daily bars: one column per day, segmented by
-    // output (bottom), cache (middle), and input (top) in distinct colors.
-    // A single day renders a full-height stacked column; each segment has its
-    // own native hover tooltip.
-    const baseY = (h - mb);
-    const slotW = plotW / points.length;
-    const colW = Math.min(42, Math.max(10, slotW * 0.55));
-    const bars = points.map((p, i) => {
-      const cx = ml + i * slotW + (slotW - colW) / 2;
-      const inV = p.input_tokens || 0;
-      const cacheReadV = p.cache_read_tokens || 0;
-      const cacheWriteV = p.cache_creation_tokens || 0;
-      const outV = p.output_tokens || 0;
-      const segs = [
-        { v: outV, col: '#34d399', label: t('analytics.outputTokens') },
-        { v: cacheReadV, col: '#22d3ee', label: t('detail.cacheRead') },
-        { v: cacheWriteV, col: '#fbbf24', label: t('detail.cacheCreation') },
-        { v: inV, col: '#818cf8', label: t('analytics.inputTokens') },
-      ];
-      let yy = baseY;
-      const rects = segs.filter(s => (s.v || 0) > 0).map(s => {
-        // Enforce a ~2px floor so a tiny-but-real segment (e.g. output is 0.2%
-        // of a huge input day) stays visible instead of collapsing to a
-        // sub-pixel sliver that reads as "only one color". Auto-adjusts yy so
-        // the stacked column still sits on the baseline.
-        const rawH = (s.v || 0) / maxV * plotH;
-        const segH = Math.max(rawH, 2);
-        const yTop = yy - segH;
-        const r = `<rect x="${(cx).toFixed(1)}" y="${yTop.toFixed(1)}" width="${colW.toFixed(1)}" height="${segH.toFixed(1)}" rx="1" fill="${s.col}"></rect>`;
-        yy = yTop;
-        return r;
-      }).join('');
-      // Full-height transparent hit area: hovering anywhere in the day's column
-      // (not just an individual segment) opens one tooltip listing all three
-      // series, matching how the deepseek usage page behaves.
-      const hit = `<rect class="trend-hit" x="${(cx - colW * 0.35).toFixed(1)}" y="${mt}"` +
-        ` width="${(colW * 1.7).toFixed(1)}" height="${plotH.toFixed(1)}"` +
-        ` fill="transparent" tabindex="0" role="button" aria-label="${this.escapeHtml(p.date || '')}"></rect>`;
-      return rects + hit;
-    }).join('');
-
-    const svg = `
-      <div style="position:relative;">
-        <svg class="trend-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
-          ${yGrid}
-          ${xGrid}
-          <line x1="${ml}" y1="${mt}" x2="${ml}" y2="${h-mb}" stroke="${AXIS}" stroke-width="1"/>
-          <line x1="${ml}" y1="${h-mb}" x2="${w-mr}" y2="${h-mb}" stroke="${AXIS}" stroke-width="1"/>
-          ${bars}
-        </svg>
-        <div class="chart-tip" id="${containerId}-tip"></div>
-      </div>
-      <div class="trend-legend">
-        <span><span class="swatch" style="background:#818cf8;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.inputTokens')}</span>
-        <span><span class="swatch" style="background:#22d3ee;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('detail.cacheRead')}</span>
-        <span><span class="swatch" style="background:#fbbf24;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('detail.cacheCreation')}</span>
-        <span><span class="swatch" style="background:#34d399;height:10px;width:14px;display:inline-block;border-radius:3px;margin-right:4px;"></span>${t('analytics.outputTokens')}</span>
-      </div>`;
-    wrap.innerHTML = svg;
-
-    const tipEl = wrap.querySelector('#' + CSS.escape(containerId + '-tip'));
-    const svgWrap = wrap.querySelector('svg').parentElement;
-    bindChartTooltip(svgWrap, tipEl, '.trend-hit', (_hit, index) => {
-      const point = points[index];
-      return chartTooltipMarkup(point.date || '', [
-        {label: t('analytics.inputTokens'), value: Number(point.input_tokens || 0).toLocaleString(), color: '#818cf8'},
-        {label: t('detail.cacheRead'), value: Number(point.cache_read_tokens || 0).toLocaleString(), color: '#22d3ee'},
-        {label: t('detail.cacheCreation'), value: Number(point.cache_creation_tokens || 0).toLocaleString(), color: '#fbbf24'},
-        {label: t('analytics.outputTokens'), value: Number(point.output_tokens || 0).toLocaleString(), color: '#34d399'},
-      ], [
-        {label: t('analytics.requests'), value: Number(point.requests || 0).toLocaleString()},
-        {label: t('analytics.cost'), value: fmtCost(Number(point.cost_usd ?? point.est_cost_usd ?? 0))},
+    const lines = series.map(item => `<polyline class="usage-chart-line ${item.className}" points="${points.map((point,index)=>`${chart.x(index)},${chart.y(point[item.key])}`).join(' ')}"></polyline>`).join('');
+    const rateLine = `<polyline class="usage-chart-line is-cache-rate" points="${points.map((point,index)=>`${chart.x(index)},${rateY(rate(point))}`).join(' ')}"></polyline>`;
+    const dots = series.map(item => points.map((point,index)=>Number(point[item.key]||0)>0?`<circle class="usage-chart-point ${item.className}" cx="${chart.x(index)}" cy="${chart.y(point[item.key])}" r="2.6"></circle>`:'').join('')).join('');
+    const hits = points.map((point,index)=>`<circle class="usage-chart-hit" cx="${chart.x(index)}" cy="${chart.y(point.cache_read_tokens)}" r="13" tabindex="0" role="button" aria-label="${this.escapeHtml(point.date)}"></circle>`).join('');
+    const rightAxis = [0,25,50,75,100].map(value=>`<text class="usage-axis-label is-rate" x="${width-inset.right+8}" y="${rateY(value)+3}">${value}%</text>`).join('');
+    root.innerHTML=`<div class="usage-chart-stage"><div class="usage-chart-legend">${series.map(item=>`<span class="${item.className}">${item.label}</span>`).join('')}<span class="is-cache-rate">${t('analytics.cacheHitShort')}</span></div><svg viewBox="0 0 ${width} ${height}" role="img">${chart.markup}${rightAxis}${lines}${rateLine}${dots}${hits}</svg><div class="chart-tip" id="${containerId}-tip"></div></div>`;
+    bindChartTooltip(root.querySelector('.usage-chart-stage'),root.querySelector('.chart-tip'),'.usage-chart-hit',(_hit,index)=>{
+      const point=points[index];
+      return chartTooltipMarkup(this.trendLabel(point.date),series.map(item=>({label:item.label,value:Number(point[item.key]||0).toLocaleString(),color:item.color})),[
+        {label:t('analytics.cacheHitShort'),value:`${rate(point).toFixed(1)}%`},
+        {label:t('analytics.requests'),value:Number(point.requests||0).toLocaleString()},
+        {label:t('analytics.cost'),value:fmtCost(point.cost_usd||0)},
       ]);
     });
   },
 
+  renderPeriodTable(points) {
+    const body=document.getElementById('analytics-period-tbody');
+    if (!body) return;
+    body.innerHTML=points.map(point=>`<tr><td>${this.escapeHtml(this.trendLabel(point.date))}</td><td>${Number(point.requests||0).toLocaleString()}</td><td>${Number(point.known_requests||0)>0?Number(point.error_requests||0).toLocaleString():'—'}</td><td>${Number(point.input_tokens||0).toLocaleString()}</td><td>${Number(point.output_tokens||0).toLocaleString()}</td><td>${Number(point.cache_read_tokens||0).toLocaleString()}</td><td>${Number(point.cache_creation_tokens||0).toLocaleString()}</td><td><strong>${totalUsageTokens(point).toLocaleString()}</strong></td><td>${fmtCost(point.cost_usd||0)}</td></tr>`).join('');
+    const count=document.getElementById('analytics-period-count');
+    if (count) count.textContent=`${points.length} ${this.granularity==='hour'?t('analytics.hour'):t('analytics.day')}`;
+  },
+
+  renderModelTable(models) {
+    const body=document.getElementById('analytics-model-tbody');
+    if (!body) return;
+    body.innerHTML=(models||[]).map(item=>{
+      const prompt=Number(item.input_tokens||0)+Number(item.cache_read_tokens||0)+Number(item.cache_creation_tokens||0);
+      const rate=prompt>0?Number(item.cache_read_tokens||0)/prompt*100:0;
+      return `<tr><td><code>${this.escapeHtml(item.model||t('detail.unknown'))}</code></td><td>${Number(item.requests||0).toLocaleString()}</td><td>${prompt>0?rate.toFixed(1)+'%':'—'}</td><td>${totalUsageTokens(item).toLocaleString()}</td><td>${fmtCost(item.est_cost_usd||0)}</td></tr>`;
+    }).join('') || `<tr><td colspan="5" class="empty-state">${t('analytics.noData')}</td></tr>`;
+  },
+
+  renderRetainedRange(summary) {
+    const root=document.getElementById('analytics-retained-range');
+    if (!root) return;
+    const from=document.getElementById('analytics-start')?.value||'';
+    const to=document.getElementById('analytics-end')?.value||'';
+    root.textContent=t('analytics.retainedRange').replace('{from}',from).replace('{to}',to);
+  },
+
   renderEmpty(msg = 'No usage data yet. Run some requests or configure a model to see analytics.') {
-    ['model-donut','provider-donut','token-trend'].forEach(id => {
+    ['provider-distribution','token-trend'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.innerHTML = `<div class="empty-state">${msg}</div>`;
     });

@@ -36,8 +36,8 @@ const TRANSLATIONS = {
     'analytics.latencyUnit': 'request-weighted',
     'analytics.cacheHitShort': 'cache hit',
     'analytics.cacheHitTitle': 'Cache read as a share of all prompt tokens (input + cache read + cache write)',
-    'analytics.byModel': 'Tokens by Model',
-    'analytics.byProvider': 'Tokens by Provider',
+    'analytics.byModel': 'Model distribution',
+    'analytics.byProvider': 'Platform distribution',
     'analytics.noData': 'No data',
     'analytics.noTrend': 'No trend data',
     'analytics.singleDay': '(single-day data)',
@@ -265,8 +265,8 @@ const TRANSLATIONS = {
     'analytics.latencyUnit': '按请求数加权',
     'analytics.cacheHitShort': '缓存命中',
     'analytics.cacheHitTitle': '缓存读取占全部输入 Token 的比例（输入 + 缓存读 + 缓存写）',
-    'analytics.byModel': '按模型 Token 用量',
-    'analytics.byProvider': '按供应商 Token 用量',
+    'analytics.byModel': '模型分布',
+    'analytics.byProvider': '平台分布',
     'analytics.noData': '暂无数据',
     'analytics.noTrend': '暂无趋势数据',
     'analytics.singleDay': '（仅单日数据）',
@@ -2985,7 +2985,7 @@ const AnalyticsModule = {
     const rest = sorted.slice(5);
     if (rest.length) {
       const other = {name: currentLang === 'zh' ? '其他' : 'Other'};
-      ['requests','total_tokens','input_tokens','output_tokens','reasoning_tokens','cache_read_tokens','cache_creation_tokens','cost_usd'].forEach(key => {
+      ['requests','total_tokens','input_tokens','output_tokens','cache_read_tokens','cache_creation_tokens','cost_usd'].forEach(key => {
         other[key] = rest.reduce((sum, item) => sum + Number(item[key] || 0), 0);
       });
       top.push(other);
@@ -3023,10 +3023,6 @@ const AnalyticsModule = {
         [t('detail.cacheRead'), it.cache_read_tokens, fmt],
         [t('detail.cacheCreation'), it.cache_creation_tokens, fmt],
         [t('analytics.outputTokens'), it.output_tokens, fmt],
-        [t('analytics.reasoningTokens'), it.reasoning_tokens, fmt],
-        [t('analytics.avgLatency'), it.avg_latency_ms, n => `${Number(n).toFixed(0)} ms`],
-        [t('analytics.successRate'), it.success_rate, n => `${(Number(n) * 100).toFixed(1)}%`],
-        [t('analytics.fallbackRate'), it.fallback_rate, n => `${Number(n).toFixed(1)}%`],
         [t('analytics.cost'), it.cost_usd, fmtCost],
       ];
       tooltipContent.push(chartTooltipMarkup(label, [

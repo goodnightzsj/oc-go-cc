@@ -188,7 +188,7 @@ func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
 	rows, err := a.db.DB().QueryContext(ctx, `
 		SELECT
 			r.model,
-			COALESCE(r.provider, '') AS provider,
+			COALESCE(MAX(r.provider), '') AS provider,
 			COUNT(*) AS requests,
 			COALESCE(SUM(r.input_tokens), 0) AS input_tokens,
 			COALESCE(SUM(r.output_tokens), 0) AS output_tokens,
@@ -214,7 +214,7 @@ func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
 			ON m.id = r.model
 		WHERE julianday(r.start_time) >= julianday(?)
 		  AND (julianday(r.start_time) >= julianday(?) OR r.usage_trusted = 1)
-		GROUP BY r.model, r.provider
+		GROUP BY r.model
 		ORDER BY requests DESC
 	`, trusted.Format(time.RFC3339Nano), requested.Format(time.RFC3339Nano), trusted.Format(time.RFC3339Nano))
 	if err != nil {

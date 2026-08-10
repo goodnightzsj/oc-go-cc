@@ -148,3 +148,25 @@ func TestRunCostsSyncRequestsUsesPersistedSnapshot(t *testing.T) {
 		t.Fatalf("unexpected sync report: %+v", report)
 	}
 }
+
+func TestRunCostsSyncRequestsDoesNotRequireRuntimeCredentials(t *testing.T) {
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "data.db")
+	configPath := writeTestConfig(t, tmp, `{"api_key":"${MISSING_API_KEY}","storage":{"database_path":"`+dbPath+`"}}`)
+	db, err := storage.Open(storage.Config{DatabasePath: dbPath})
+	if err != nil {
+		t.Fatalf("open storage: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := db.ReplaceProviderUsage(context.Background(), now.Add(time.Minute), []storage.ProviderCostRecord{{
+		Time: now, Model: "model-a", InputTokens: 1,
+	}}); err != nil {
+		t.Fatalf("replace provider usage: %v", err)
+	}
+	_ = db.Close()
+
+	cmd, _ := newCaptureCommand(t)
+	if err := runCostsSyncRequests(cmd, configPath, false); err != nil {
+		t.Fatalf("credential-independent sync dry run: %v", err)
+	}
+}

@@ -130,17 +130,9 @@ func runCostsImport(cmd *cobra.Command, configPath, inputPath string) error {
 }
 
 func runCostsSyncRequests(cmd *cobra.Command, configPath string, apply bool) error {
-	if configPath != "" {
-		_ = os.Setenv("ROUTATIC_PROXY_CONFIG", configPath)
-	}
-	cfgPath := config.ResolveConfigPath()
-	cfg, err := config.LoadFromPath(cfgPath)
+	db, err := openSyncRequestStorage(configPath)
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	db, err := storage.Open(storageConfig(cfg))
-	if err != nil {
-		return fmt.Errorf("open storage: %w", err)
+		return err
 	}
 	defer func() { _ = db.Close() }()
 
@@ -157,6 +149,41 @@ func runCostsSyncRequests(cmd *cobra.Command, configPath string, apply bool) err
 	encoder := json.NewEncoder(cmd.OutOrStdout())
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(report)
+}
+
+// sync-requests only needs the storage block. Decoding the full runtime config
+// would unnecessarily require API-key environment variables for an offline
+// database maintenance command.
+func openSyncRequestStorage(configPath string) (*storage.Database, error) {
+	if configPath == "" {
+		configPath = config.ResolveConfigPath()
+	}
+	input, err := os.Open(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("open config: %w", err)
+	}
+	defer func() { _ = input.Close() }()
+	var file struct {
+		Storage *config.StorageConfig `json:"storage"`
+	}
+	if err := json.NewDecoder(input).Decode(&file); err != nil {
+		return nil, fmt.Errorf("decode storage config: %w", err)
+	}
+	cfg := storage.DefaultConfig
+	if file.Storage != nil {
+		cfg = cfg.WithOverlay(storage.Overlay{
+			DatabasePath:      file.Storage.DatabasePath,
+			RetentionDays:     file.Storage.RetentionDays,
+			VacuumOnStartup:   file.Storage.VacuumOnStartup,
+			WALEnabled:        file.Storage.WALEnabled,
+			AnalyticsBaseline: file.Storage.AnalyticsBaseline,
+		})
+	}
+	db, err := storage.Open(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("open storage: %w", err)
+	}
+	return db, nil
 }
 
 func openProviderCapture(configPath, inputPath string) (providerCostCapture, *storage.Database, error) {

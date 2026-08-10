@@ -241,6 +241,25 @@ func (d *Database) initSchema(ctx context.Context) error {
 	CREATE INDEX IF NOT EXISTS idx_requests_model ON requests(model);
 	CREATE INDEX IF NOT EXISTS idx_requests_created_at ON requests(created_at);
 
+	CREATE TABLE IF NOT EXISTS provider_usage (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		snapshot_at TIMESTAMP NOT NULL,
+		observed_at TIMESTAMP NOT NULL,
+		provider TEXT,
+		plan TEXT,
+		model TEXT NOT NULL,
+		input_tokens INTEGER NOT NULL DEFAULT 0,
+		output_tokens INTEGER NOT NULL DEFAULT 0,
+		reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+		cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+		cache_write_5m_tokens INTEGER NOT NULL DEFAULT 0,
+		cache_write_1h_tokens INTEGER NOT NULL DEFAULT 0,
+		cost_units INTEGER NOT NULL DEFAULT 0
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_provider_usage_observed_at ON provider_usage(observed_at);
+	CREATE INDEX IF NOT EXISTS idx_provider_usage_model ON provider_usage(model);
+
 	CREATE TABLE IF NOT EXISTS latency_samples (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		model TEXT NOT NULL,

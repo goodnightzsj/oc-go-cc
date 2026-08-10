@@ -20,8 +20,11 @@ var ErrAmbiguousProviderCosts = errors.New("provider cost reconciliation contain
 type ProviderCostRecord struct {
 	Time               time.Time `json:"time"`
 	Model              string    `json:"model"`
+	Provider           string    `json:"provider,omitempty"`
+	Plan               string    `json:"plan,omitempty"`
 	InputTokens        int64     `json:"input_tokens"`
 	OutputTokens       int64     `json:"output_tokens"`
+	ReasoningTokens    int64     `json:"reasoning_tokens,omitempty"`
 	CacheReadTokens    int64     `json:"cache_read_tokens"`
 	CacheWrite5mTokens int64     `json:"cache_write_5m_tokens"`
 	CacheWrite1hTokens int64     `json:"cache_write_1h_tokens"`
@@ -222,6 +225,7 @@ func validateProviderCostRecord(row ProviderCostRecord) error {
 	}
 	for name, value := range map[string]int64{
 		"input_tokens": row.InputTokens, "output_tokens": row.OutputTokens,
+		"reasoning_tokens":  row.ReasoningTokens,
 		"cache_read_tokens": row.CacheReadTokens, "cache_write_5m_tokens": row.CacheWrite5mTokens,
 		"cache_write_1h_tokens": row.CacheWrite1hTokens, "cost_units": row.ProviderCostUnits,
 	} {

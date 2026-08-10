@@ -144,6 +144,105 @@ type RequestQuery struct {
 	SortBy, SortOrder  string
 }
 
+type RequestSummary struct {
+	TotalRequests int64              `json:"total_requests"`
+	SuccessRate   float64            `json:"success_rate"`
+	TotalTokens   int64              `json:"total_tokens"`
+	CostUSD       float64            `json:"cost_usd"`
+	CostRows      int64              `json:"cost_rows"`
+	Models        []RequestBreakdown `json:"models"`
+	Providers     []RequestBreakdown `json:"providers"`
+	Scenarios     []RequestBreakdown `json:"scenarios"`
+	Trend         []RequestTrend     `json:"trend"`
+}
+
+type RequestBreakdown struct {
+	Name     string  `json:"name"`
+	Requests int64   `json:"requests"`
+	Tokens   int64   `json:"tokens"`
+	CostUSD  float64 `json:"cost_usd"`
+}
+
+type RequestTrend struct {
+	Date     string  `json:"date"`
+	Requests int64   `json:"requests"`
+	Tokens   int64   `json:"tokens"`
+	CostUSD  float64 `json:"cost_usd"`
+}
+
+// Summary aggregates the exact same population as Query, without pagination.
+func (r *Requests) Summary(q RequestQuery) (*RequestSummary, error) {
+	where, args := requestWhere(q)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out := &RequestSummary{}
+	var successes int64
+	if err := r.db.DB().QueryRowContext(ctx, `
+		SELECT COUNT(*), COALESCE(SUM(success), 0),
+		       COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) +
+		                    COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0)), 0),
+		       COALESCE(SUM(cost_usd), 0), COUNT(cost_usd)
+		FROM requests`+where, args...).Scan(&out.TotalRequests, &successes, &out.TotalTokens, &out.CostUSD, &out.CostRows); err != nil {
+		return nil, err
+	}
+	if out.TotalRequests > 0 {
+		out.SuccessRate = float64(successes) / float64(out.TotalRequests)
+	}
+	for _, spec := range []struct {
+		column string
+		into   *[]RequestBreakdown
+	}{
+		{"model", &out.Models}, {"provider", &out.Providers}, {"scenario", &out.Scenarios},
+	} {
+		rows, err := r.db.DB().QueryContext(ctx, `
+			SELECT COALESCE(NULLIF(`+spec.column+`, ''), 'unknown'), COUNT(*),
+			       COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) +
+			                    COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0)), 0),
+			       COALESCE(SUM(cost_usd), 0)
+			FROM requests`+where+` GROUP BY `+spec.column+` ORDER BY COUNT(*) DESC, `+spec.column, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var item RequestBreakdown
+			if err := rows.Scan(&item.Name, &item.Requests, &item.Tokens, &item.CostUSD); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			*spec.into = append(*spec.into, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	rows, err := r.db.DB().QueryContext(ctx, `
+		SELECT DATE(start_time), COUNT(*),
+		       COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) +
+		                    COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0)), 0),
+		       COALESCE(SUM(cost_usd), 0)
+		FROM requests`+where+` GROUP BY DATE(start_time) ORDER BY DATE(start_time)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var point RequestTrend
+		if err := rows.Scan(&point.Date, &point.Requests, &point.Tokens, &point.CostUSD); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		out.Trend = append(out.Trend, point)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	return out, rows.Close()
+}
+
 // Page returns records for a single history page (1-based page, pageSize per
 // page, newest first) plus the total number of records.
 func (r *Requests) Page(page, pageSize int) ([]history.RequestRecord, int64, error) {

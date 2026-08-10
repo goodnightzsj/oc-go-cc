@@ -301,6 +301,97 @@ type ProviderBreakdown struct {
 	EstCostUSD          float64 `json:"est_cost_usd"`
 }
 
+// ScenarioBreakdown holds proxy-owned request aggregates. Scenarios are not
+// available in the OpenCode account export, so this remains a local drill-down.
+type ScenarioBreakdown struct {
+	Scenario            string  `json:"scenario"`
+	Requests            int64   `json:"requests"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	CacheReadTokens     int64   `json:"cache_read_tokens"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	SuccessRate         float64 `json:"success_rate"`
+	EstCostUSD          float64 `json:"est_cost_usd"`
+}
+
+// GetScenarioBreakdown returns local usage grouped by routing scenario.
+func (a *Analytics) GetScenarioBreakdown(days int) ([]ScenarioBreakdown, error) {
+	if days <= 0 {
+		days = 30
+	}
+	since := a.windowStart(days)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	rows, err := a.db.DB().QueryContext(ctx, `
+		SELECT COALESCE(NULLIF(r.scenario, ''), 'unknown'), r.model,
+		       COUNT(*), COALESCE(SUM(r.input_tokens), 0), COALESCE(SUM(r.output_tokens), 0),
+		       COALESCE(SUM(r.cache_read_tokens), 0), COALESCE(SUM(r.cache_creation_tokens), 0),
+		       COALESCE(SUM(r.success), 0), COUNT(r.cost_usd), COALESCE(SUM(r.cost_usd), 0),
+		       COALESCE(m.cost_input_per_m, 0), COALESCE(m.cost_output_per_m, 0)
+		FROM requests r
+		LEFT JOIN models m ON m.id = r.model
+		WHERE r.start_time >= ?
+		GROUP BY r.scenario, r.model
+	`, since.Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	type scenarioAgg struct {
+		row       ScenarioBreakdown
+		successes int64
+	}
+	byScenario := make(map[string]*scenarioAgg)
+	for rows.Next() {
+		var scenario, model string
+		var requests, in, out, cacheRead, cacheCreate, successes, costRows int64
+		var storedCost, inputRate, outputRate float64
+		if err := rows.Scan(&scenario, &model, &requests, &in, &out, &cacheRead, &cacheCreate,
+			&successes, &costRows, &storedCost, &inputRate, &outputRate); err != nil {
+			return nil, err
+		}
+		agg := byScenario[scenario]
+		if agg == nil {
+			agg = &scenarioAgg{row: ScenarioBreakdown{Scenario: scenario}}
+			byScenario[scenario] = agg
+		}
+		agg.row.Requests += requests
+		agg.row.InputTokens += in
+		agg.row.OutputTokens += out
+		agg.row.CacheReadTokens += cacheRead
+		agg.row.CacheCreationTokens += cacheCreate
+		agg.successes += successes
+		if costRows == requests {
+			agg.row.EstCostUSD += storedCost
+		} else {
+			agg.row.EstCostUSD += costForTokens(model, in, out, cacheRead, cacheCreate, inputRate, outputRate)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	result := make([]ScenarioBreakdown, 0, len(byScenario))
+	for _, agg := range byScenario {
+		if agg.row.Requests > 0 {
+			agg.row.SuccessRate = float64(agg.successes) / float64(agg.row.Requests)
+		}
+		result = append(result, agg.row)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Requests != result[j].Requests {
+			return result[i].Requests > result[j].Requests
+		}
+		return result[i].Scenario < result[j].Scenario
+	})
+	return result, nil
+}
+
+func (a *Analytics) GetProviderUsageAnalytics(days int) (*ProviderUsageAnalytics, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return a.db.GetProviderUsageAnalytics(ctx, days)
+}
+
 // GetProviderBreakdown returns usage by provider (with fallback rate).
 func (a *Analytics) GetProviderBreakdown(days int) ([]ProviderBreakdown, error) {
 	if days <= 0 {

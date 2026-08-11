@@ -2,13 +2,13 @@
 
 ## Context Recovery Block
 
-- **Current milestone**: Chart interaction and visual polish
-- **Current status**: IN_PROGRESS
-- **Last completed**: #18 - Run complete local release validation
+- **Current milestone**: Chart interaction and visual polish released
+- **Current status**: DONE
+- **Last completed**: #19 - Deploy and validate polished charts in existing Edge
 - **Current artifact**: `TODO.csv`
-- **Key context**: Production `f64fa05` serves UI build `7387222085ba`; remote JS/CSS hashes match local and the data remains 1,390 requests totaling `$3.03965577` on one platform.
-- **Known issues**: The existing Edge public-domain tab is present, but macOS reports `IOConsoleLocked=true`, so its interaction channel is suspended. The unrelated remote `.ace-tool/` directory remains untouched.
-- **Next action**: After the user unlocks macOS, validate #19 in that same Edge tab without starting another browser session.
+- **Key context**: Production `3ba7fba` serves UI build `e46ee4637aa8`; the existing Edge public-domain tab verified compact Token KPIs and chart interactions while the data remains 1,390 requests totaling `$3.03965577` on one platform.
+- **Known issues**: None. The unrelated remote `.ace-tool/` directory remains untouched.
+- **Next action**: None.
 
 ## Reopened Production Findings
 

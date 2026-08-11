@@ -2,13 +2,13 @@
 
 ## Context Recovery Block
 
-- **Current milestone**: Chart interaction and visual polish released
-- **Current status**: DONE
-- **Last completed**: #19 - Deploy and validate polished charts in existing Edge
+- **Current milestone**: High-value Sub2API data presentation follow-up
+- **Current status**: IN_PROGRESS
+- **Last completed**: #24 - Show streaming type in history rows
 - **Current artifact**: `TODO.csv`
-- **Key context**: Production `3ba7fba` serves UI build `e46ee4637aa8`; the existing Edge public-domain tab verified compact Token KPIs and chart interactions while the data remains 1,390 requests totaling `$3.03965577` on one platform.
+- **Key context**: Production `3ba7fba` is correct; this follow-up adds only source-backed comparisons and request summaries, preserving the 1,390 request / `$3.03965577` data contract.
 - **Known issues**: None. The unrelated remote `.ace-tool/` directory remains untouched.
-- **Next action**: None.
+- **Next action**: #26 - Deploy and validate all migrated value in existing Edge.
 
 ## Reopened Production Findings
 
@@ -56,4 +56,6 @@
 - Dashboard now follows the real CompactGate analytics structure: six KPIs, request and Token line trends, and model/platform horizontal distributions.
 - Usage now follows the real CompactGate usage structure: custom date range, hour/day granularity, Token/cache-rate trend, period details, model details, and platform distribution.
 - Request History now keeps model/platform visible and exposes a themed structured Token tooltip; source provenance and recent-usage sections remain absent.
+- History status cells now identify streaming and non-streaming requests while preserving unknown imported details.
+- Full repository tests, vet, formatting, JavaScript syntax, diff checks, and the CGO-disabled production build pass locally.
 - The guessed donut and single-bucket stacked-bar implementations were deleted. Full Go tests, build, JavaScript syntax, and diff checks pass.

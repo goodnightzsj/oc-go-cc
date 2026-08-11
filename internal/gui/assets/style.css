@@ -513,6 +513,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: none;
   background: rgba(129, 140, 248, 0.1);
   box-shadow: inset 0 1px var(--ui-indigo), inset 0 -1px var(--ui-indigo);
 }
+.history-status-stack { display: grid; justify-items: start; gap: 3px; }
+.history-stream-state { color: var(--ui-muted); font-size: 9px; line-height: 1; white-space: nowrap; }
 .history-pager {
   display: flex;
   align-items: center;
@@ -522,6 +524,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: none;
   color: var(--ui-muted);
   font-size: 11px;
 }
+.history-page-size { display: inline-flex; align-items: center; gap: 5px; color: var(--ui-muted); font-size: 10px; white-space: nowrap; }
+.history-page-size .filter-select { min-width: 62px; }
 .cost-value { display: inline-flex; align-items: center; gap: 6px; }
 .cost-source-dot {
   width: 7px;
@@ -764,6 +768,7 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .history-summary-metrics > div:last-child { border-right: 0; }
 .history-summary-metrics span { display: block; color: var(--ui-muted); font-size: 10px; }
 .history-summary-metrics strong { display: block; margin-top: 3px; font-size: 16px; font-variant-numeric: tabular-nums; }
+.history-summary-note { display: block; margin-top: 3px; overflow: hidden; color: var(--ui-muted); font-size: 9px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 .insight-toolbar {
   min-height: 42px;
   display: flex;

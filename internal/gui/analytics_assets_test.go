@@ -20,7 +20,7 @@ func TestAnalyticsAssetsMatchUsageDashboardContract(t *testing.T) {
 		"renderOverviewUsage", "renderRequestTrend", "renderTokenLines",
 		"renderDistribution", "renderPeriodTable", "fillTrend", "queryParams",
 		"bindHistoryTokenTooltips", "usage-chart-scrub", "usage-chart-crosshair",
-		"seriesVisibility", "usage-legend-toggle", "aria-pressed", "classList.toggle('is-single'",
+		"seriesVisibility", "usage-legend-toggle", "aria-pressed", "classList.toggle('is-single'", "compare=1", "m-cost-note", "data.today", "data.retained", "api/perf/aggregate", "overview-latency", "avg_latency_ms",
 	} {
 		if !strings.Contains(string(app), marker) {
 			t.Errorf("app.js missing analytics marker %q", marker)

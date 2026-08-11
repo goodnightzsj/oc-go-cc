@@ -19,8 +19,8 @@ func TestHistoryAssetsKeepKeyboardDialogAndPromptTokens(t *testing.T) {
 		`tabindex="0" aria-haspopup="dialog"`, "modal.showModal()", "prompt_tokens",
 		"historyQueryParams", "record.error_msg", "cost_usd", `colspan="7"`,
 		"window.CustomSelect", "window.HistoryDateRange", "renderHistorySummary", "detail.title",
-		"historyBreakdownMetric", "bindPlotTooltip", "details_known",
-		"history-token-trigger", "bindHistoryTokenTooltips", "document.querySelectorAll('.chart-tip')",
+		"historyBreakdownMetric", "history-summary-token-note", "input_tokens", "cache_creation_tokens", "history-page-size", "bindPlotTooltip", "details_known",
+		"history-token-trigger", "bindHistoryTokenTooltips", "history-stream-state", "h.streaming", "document.querySelectorAll('.chart-tip')",
 	} {
 		if !strings.Contains(string(app), marker) {
 			t.Errorf("app.js missing History accessibility marker %q", marker)
@@ -35,7 +35,7 @@ func TestHistoryAssetsKeepKeyboardDialogAndPromptTokens(t *testing.T) {
 	if !strings.Contains(string(page), `<dialog class="modal-overlay" id="history-modal"`) {
 		t.Error("History detail must remain a native dialog")
 	}
-	for _, marker := range []string{`type="hidden" id="history-start"`, `type="hidden" id="history-end"`, `id="history-date-popover"`, `id="history-summary-requests"`, `id="status-filter"`, `id="streaming-filter"`, `id="history-breakdown-metric"`, `data-sort="cost_usd"`} {
+	for _, marker := range []string{`type="hidden" id="history-start"`, `type="hidden" id="history-end"`, `id="history-date-popover"`, `id="history-summary-requests"`, `id="history-summary-token-note"`, `id="history-page-size"`, `id="status-filter"`, `id="streaming-filter"`, `id="history-breakdown-metric"`, `data-sort="cost_usd"`} {
 		if !strings.Contains(string(page), marker) {
 			t.Errorf("index.html missing server-side History filter %q", marker)
 		}

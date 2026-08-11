@@ -3111,7 +3111,7 @@ const AnalyticsModule = {
     // fraction of input is served from cache at lower cost.
     const totTok = (s.input_tokens||0) + (s.output_tokens||0)
       + (s.cache_read_tokens||0) + (s.cache_creation_tokens||0);
-    document.getElementById('kpi-tokens').textContent = fmt(totTok);
+    document.getElementById('kpi-tokens').textContent = fmtTok(totTok);
     document.getElementById('kpi-tokens-note').textContent = t('analytics.knownRecords').replace('{n}', Number(s.known_requests || 0).toLocaleString());
     document.getElementById('kpi-input').textContent = fmtTok(s.input_tokens);
     document.getElementById('kpi-output').textContent = fmtTok(s.output_tokens);

@@ -1599,6 +1599,8 @@ function markPollFail() {
 function fmt(n) { return n != null ? Number(n).toLocaleString() : '—'; }
 function fmtTok(n) {
   const value = Number(n || 0);
+  if (value >= 1_000_000_000_000) return (value / 1_000_000_000_000).toFixed(1) + 'T';
+  if (value >= 1_000_000_000) return (value / 1_000_000_000).toFixed(1) + 'B';
   if (value >= 1_000_000) return (value / 1_000_000).toFixed(1) + 'M';
   if (value >= 1000) return (value / 1000).toFixed(1) + 'K';
   return String(value);
@@ -3111,20 +3113,20 @@ const AnalyticsModule = {
       + (s.cache_read_tokens||0) + (s.cache_creation_tokens||0);
     document.getElementById('kpi-tokens').textContent = fmt(totTok);
     document.getElementById('kpi-tokens-note').textContent = t('analytics.knownRecords').replace('{n}', Number(s.known_requests || 0).toLocaleString());
-    document.getElementById('kpi-input').textContent = fmt(s.input_tokens);
-    document.getElementById('kpi-output').textContent = fmt(s.output_tokens);
+    document.getElementById('kpi-input').textContent = fmtTok(s.input_tokens);
+    document.getElementById('kpi-output').textContent = fmtTok(s.output_tokens);
 
     // Cache hit rate is an input-side ratio: the denominator is everything that
     // arrived as prompt (fresh input + cache read + cache creation). Dividing by
     // total tokens instead would fold output in and drift with response length.
     const promptTok = (s.input_tokens||0) + (s.cache_read_tokens||0) + (s.cache_creation_tokens||0);
     document.getElementById('kpi-cost').textContent = fmtCost(s.cost_usd ?? s.est_cost_usd ?? 0);
-    document.getElementById('kpi-cache-read').textContent = fmt(s.cache_read_tokens || 0);
+    document.getElementById('kpi-cache-read').textContent = fmtTok(s.cache_read_tokens || 0);
     document.getElementById('kpi-cache-rate').textContent = promptTok > 0
       ? `${((s.cache_read_tokens || 0) / promptTok * 100).toFixed(1)}%`
       : '—';
-    document.getElementById('kpi-cache-rate-note').textContent = `${fmt(s.cache_read_tokens || 0)} ${currentLang === 'zh' ? '读取' : 'read'}`;
-    document.getElementById('kpi-cache-write').textContent = fmt(s.cache_creation_tokens || 0);
+    document.getElementById('kpi-cache-rate-note').textContent = `${fmtTok(s.cache_read_tokens || 0)} ${currentLang === 'zh' ? '读取' : 'read'}`;
+    document.getElementById('kpi-cache-write').textContent = fmtTok(s.cache_creation_tokens || 0);
   },
 
   renderDistributions(summary) {

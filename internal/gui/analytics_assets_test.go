@@ -16,7 +16,7 @@ func TestAnalyticsAssetsMatchUsageDashboardContract(t *testing.T) {
 	}
 
 	for _, marker := range []string{
-		"loadSeq", "function fmtTok", "bindPlotTooltip", "breakdownMetric",
+		"loadSeq", "function fmtTok", "1_000_000_000", "kpi-input').textContent = fmtTok", "bindPlotTooltip", "breakdownMetric",
 		"renderOverviewUsage", "renderRequestTrend", "renderTokenLines",
 		"renderDistribution", "renderPeriodTable", "fillTrend", "queryParams",
 		"bindHistoryTokenTooltips", "usage-chart-scrub", "usage-chart-crosshair",

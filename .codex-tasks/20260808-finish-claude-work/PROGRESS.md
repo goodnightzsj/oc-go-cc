@@ -2,13 +2,13 @@
 
 ## Context Recovery Block
 
-- **Current milestone**: Final Analytics chart polish
-- **Current status**: IN_PROGRESS
+- **Current milestone**: Final Analytics chart polish released
+- **Current status**: DONE
 - **Last completed**: Child #10 - Sub2API parity, production request truth, and Edge validation
 - **Current artifact**: `SUBTASKS.csv`
-- **Key context**: Production `f64fa05` now contains the chart interaction and UI polish; exact public-domain assets and authoritative request totals pass remote checks.
-- **Known issues**: Final existing-Edge interaction validation waits on the user's currently locked macOS console; no independent browser session will be started. The unrelated remote `.ace-tool/` directory remains untouched.
-- **Next action**: Unlock macOS, then complete child #10 task #19 in the already open public-domain Edge tab.
+- **Key context**: Production `3ba7fba` now contains the chart interaction, UI polish, and compact `K/M/B/T` Token KPIs; exact public-domain assets, data totals, and existing-Edge interactions pass remote checks.
+- **Known issues**: None. The unrelated remote `.ace-tool/` directory remains untouched.
+- **Next action**: None.
 
 ## Child 1: Finalize storage overlay regression
 

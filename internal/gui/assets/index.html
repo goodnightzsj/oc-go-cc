@@ -47,7 +47,7 @@
   <div class="tab-content flex-1 overflow-y-auto active" id="tab-overview">
     <div class="page-shell overview-page">
     <div class="page-heading analytics-heading">
-      <div><h1 data-i18n="overview.title">Dashboard</h1><span class="page-meta" id="overview-generated"></span></div>
+      <div><h1 data-i18n="overview.title">Dashboard</h1><span class="page-meta" id="overview-generated"></span><span class="page-meta" id="overview-latency"></span></div>
       <div class="metric-segment range-segment" id="overview-range" role="group" aria-label="Dashboard range">
         <button type="button" data-days="7" class="active" data-i18n="analytics.last7d">Last 7 days</button>
         <button type="button" data-days="30" data-i18n="analytics.last30d">Last 30 days</button>
@@ -83,7 +83,7 @@
       <div class="metric-cell overview-metric">
         <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="analytics.cost">Cost</div>
         <div class="text-[26px] font-bold tabular-nums" id="m-cost">--</div>
-        <div class="metric-note" data-i18n="analytics.currencyUSD">USD</div>
+        <div class="metric-note" id="m-cost-note" data-i18n="analytics.currencyUSD">USD</div>
       </div>
     </div>
     <div class="analytics-chart-grid">
@@ -120,7 +120,7 @@
         <div class="history-summary-metrics">
           <div><span data-i18n="history.filteredRequests">Filtered requests</span><strong id="history-summary-requests">--</strong></div>
           <div><span data-i18n="history.successRate">Success rate</span><strong id="history-summary-success">--</strong></div>
-          <div><span data-i18n="history.filteredTokens">Tokens</span><strong id="history-summary-tokens">--</strong></div>
+          <div><span data-i18n="history.filteredTokens">Tokens</span><strong id="history-summary-tokens">--</strong><small class="history-summary-note" id="history-summary-token-note"></small></div>
           <div><span data-i18n="history.filteredCost">Recorded cost</span><strong id="history-summary-cost">--</strong></div>
         </div>
         <div class="insight-toolbar">
@@ -202,6 +202,7 @@
       <div class="history-pager">
         <span id="history-pageinfo"></span>
         <div class="flex items-center gap-2">
+          <label class="history-page-size"><span data-i18n="history.perPage">Rows per page</span><select class="filter-select" id="history-page-size" aria-label="Rows per page"><option value="25">25</option><option value="50" selected>50</option><option value="100">100</option></select></label>
           <button type="button" id="btn-history-prev" class="btn btn-small">Prev</button>
           <span id="history-pagetotal"></span>
           <button type="button" id="btn-history-next" class="btn btn-small">Next</button>

@@ -2,13 +2,13 @@
 
 ## Context Recovery Block
 
-- **Current milestone**: Final Analytics chart polish released
-- **Current status**: DONE
+- **Current milestone**: High-value Sub2API data presentation follow-up
+- **Current status**: IN_PROGRESS
 - **Last completed**: Child #10 - Sub2API parity, production request truth, and Edge validation
 - **Current artifact**: `SUBTASKS.csv`
-- **Key context**: Production `3ba7fba` now contains the chart interaction, UI polish, and compact `K/M/B/T` Token KPIs; exact public-domain assets, data totals, and existing-Edge interactions pass remote checks.
+- **Key context**: Production `3ba7fba` data and UI are correct; child #10 is reopened for five source-backed presentation improvements, not new provider fields.
 - **Known issues**: None. The unrelated remote `.ace-tool/` directory remains untouched.
-- **Next action**: None.
+- **Next action**: Complete child #10 tasks #20–#26 in order.
 
 ## Child 1: Finalize storage overlay regression
 

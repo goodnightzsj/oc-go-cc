@@ -128,6 +128,24 @@ func (h *AnalyticsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		"scenarios":    scenarios,
 		"generated_at": time.Now().Format(time.RFC3339),
 	}
+	if r.URL.Query().Get("compare") == "1" && !explicitRange {
+		now := time.Now()
+		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		today, err := h.store.GetTokenSummaryBetween(todayStart, now.Add(time.Second))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// The storage baseline still governs this wide window, so retained means
+		// every trustworthy row rather than an arbitrary client-side date limit.
+		retained, err := h.store.GetTokenSummary(36500)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		resp["today"] = today
+		resp["retained"] = retained
+	}
 	h.writeJSON(w, resp)
 }
 

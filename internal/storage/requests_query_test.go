@@ -68,7 +68,8 @@ func TestRequestsQueryFiltersAndSortsFullDataset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("filtered summary: %v", err)
 	}
-	if summary.TotalRequests != 1 || summary.TotalTokens != 110 || summary.CostUSD != 0.25 ||
+	if summary.TotalRequests != 1 || summary.TotalTokens != 110 || summary.InputTokens != 100 ||
+		summary.OutputTokens != 10 || summary.CacheReadTokens != 0 || summary.CacheCreationTokens != 0 || summary.CostUSD != 0.25 ||
 		len(summary.Models) != 1 || summary.Models[0].Name != "model-b" || len(summary.Trend) != 1 {
 		t.Fatalf("filtered summary = %+v; want r3 aggregates", summary)
 	}

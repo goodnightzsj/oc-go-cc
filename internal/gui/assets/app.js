@@ -78,6 +78,9 @@ const TRANSLATIONS = {
     'history.providerDistribution': 'Platforms',
     'history.scenarioDistribution': 'Scenarios',
     'history.distribution': 'Distribution details',
+    'history.perPage': 'Rows per page',
+    'history.streaming': 'Streaming',
+    'history.nonStreaming': 'Non-streaming',
     'filter.dateRange': 'Date range',
     'filter.today': 'Today',
     'filter.clear': 'Clear',
@@ -326,6 +329,9 @@ const TRANSLATIONS = {
     'history.providerDistribution': '平台分布',
     'history.scenarioDistribution': '场景分布',
     'history.distribution': '分布明细',
+    'history.perPage': '每页',
+    'history.streaming': '流式',
+    'history.nonStreaming': '非流式',
     'filter.dateRange': '日期范围',
     'filter.today': '今天',
     'filter.clear': '清除',
@@ -547,7 +553,7 @@ function toggleLanguage() {
   // Analytics charts and distributions carry inline strings; reload them
   // so they pick up the new language instead of keeping stale ones.
   if (activeTab === 'analytics') AnalyticsModule.load(true);
-  if (lastOverviewView) renderOverviewUsage(lastOverviewView.data, lastOverviewView.trend);
+  if (lastOverviewView) renderOverviewUsage(lastOverviewView.data, lastOverviewView.trend, lastOverviewView.latency);
 }
 
 // Apply translations on load
@@ -1016,10 +1022,12 @@ function debouncedRefresh() {
 /* ── /api/metrics ──────────────────────────────────────────────── */
 async function refreshMetrics() {
   try {
-    const [r, usageResponse, trendResponse] = await Promise.all([
+    const latencyRange = overviewDays === 7 ? '7d' : overviewDays === 30 ? '30d' : 'all';
+    const [r, usageResponse, trendResponse, latencyResponse] = await Promise.all([
       fetch('/api/metrics'),
-      fetch(`/api/analytics/summary?days=${overviewDays}`),
+      fetch(`/api/analytics/summary?days=${overviewDays}&compare=1`),
       fetch(`/api/analytics/tokens/trend?days=${overviewDays}`),
+      fetch(`/api/perf/aggregate?range=${latencyRange}`),
     ]);
     if (!r.ok) { markPollFail(); return; }
     const d = await r.json();
@@ -1044,7 +1052,8 @@ async function refreshMetrics() {
     if (usageResponse.ok) {
       const usage = await usageResponse.json();
       const trend = trendResponse.ok ? await trendResponse.json() : {trend: []};
-      if (activeTab === 'overview') renderOverviewUsage(usage, trend.trend || []);
+      const latency = latencyResponse.ok ? await latencyResponse.json() : null;
+      if (activeTab === 'overview') renderOverviewUsage(usage, trend.trend || [], latency);
     }
 
     // port info
@@ -1067,7 +1076,7 @@ async function refreshMetrics() {
   }
 }
 
-function renderOverviewUsage(data, trend) {
+function renderOverviewUsage(data, trend, latency) {
   const summary = data.summary || {};
   const input = Number(summary.input_tokens || 0);
   const output = Number(summary.output_tokens || 0);
@@ -1075,6 +1084,9 @@ function renderOverviewUsage(data, trend) {
   const cacheWrite = Number(summary.cache_creation_tokens || 0);
   const total = input + output + cacheRead + cacheWrite;
   const prompt = input + cacheRead + cacheWrite;
+  const today = data.today || {};
+  const retained = data.retained || {};
+  const compactTotal = value => fmtTok(Number(value || 0));
   const set = (id, value) => {
     const el = document.getElementById(id);
     if (el) el.textContent = value;
@@ -1083,9 +1095,16 @@ function renderOverviewUsage(data, trend) {
   set('m-cost', fmtCost(summary.cost_usd ?? summary.est_cost_usd ?? 0));
   set('m-tokens', fmtTok(total));
   set('m-cache-hit', prompt > 0 ? `${(cacheRead / prompt * 100).toFixed(1)}%` : '—');
-  set('m-total-note', `${overviewDays} ${currentLang === 'zh' ? '天' : 'days'}`);
-  set('m-tokens-note', `${fmtTok(input)} ${currentLang === 'zh' ? '输入' : 'input'} · ${fmtTok(output)} ${currentLang === 'zh' ? '输出' : 'output'}`);
+  set('m-total-note', today.total_requests != null
+    ? `${currentLang === 'zh' ? '今日' : 'Today'} ${fmt(Number(today.total_requests || 0))} · ${currentLang === 'zh' ? '保留' : 'Retained'} ${fmt(Number(retained.total_requests || 0))}`
+    : `${overviewDays} ${currentLang === 'zh' ? '天' : 'days'}`);
+  set('m-tokens-note', today.input_tokens != null
+    ? `${currentLang === 'zh' ? '今日' : 'Today'} ${compactTotal(totalUsageTokens(today))} · ${currentLang === 'zh' ? '保留' : 'Retained'} ${compactTotal(totalUsageTokens(retained))}`
+    : `${fmtTok(input)} ${currentLang === 'zh' ? '输入' : 'input'} · ${fmtTok(output)} ${currentLang === 'zh' ? '输出' : 'output'}`);
   set('m-cache-hit-note', `${fmtTok(cacheRead)} ${currentLang === 'zh' ? '读取' : 'read'}`);
+  set('m-cost-note', today.est_cost_usd != null
+    ? `${currentLang === 'zh' ? '今日' : 'Today'} ${fmtCost(today.est_cost_usd)} · ${currentLang === 'zh' ? '保留' : 'Retained'} ${fmtCost(retained.est_cost_usd)}`
+    : t('analytics.currencyUSD'));
   const minutes = Math.max(1, overviewDays * 24 * 60);
   set('m-throughput', `${(Number(summary.total_requests || 0) / minutes).toFixed(2)} RPM`);
   set('m-throughput-note', `${fmtTok(total / minutes)} TPM`);
@@ -1093,6 +1112,9 @@ function renderOverviewUsage(data, trend) {
   set('m-success', known > 0 ? `${(Number(summary.success_rate || 0) * 100).toFixed(1)}%` : '—');
   set('m-success-note', t('analytics.knownRecords').replace('{n}', known.toLocaleString()));
   set('overview-generated', new Date().toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'}));
+  set('overview-latency', Number(latency?.avg_latency_ms || 0) > 0
+    ? `· ${t('analytics.avgLatency')} ${fmtDuration(latency.avg_latency_ms)}`
+    : '');
 
   const withTotal = items => (items || []).map(item => ({
     ...item,
@@ -1100,7 +1122,7 @@ function renderOverviewUsage(data, trend) {
       + Number(item.cache_read_tokens || 0) + Number(item.cache_creation_tokens || 0),
   }));
   const filledTrend = fillRecentDailyTrend(trend || [], overviewDays);
-  lastOverviewView = {data, trend: trend || []};
+  lastOverviewView = {data, trend: trend || [], latency};
   AnalyticsModule.renderRequestTrend(filledTrend, 'overview-request-trend');
   AnalyticsModule.renderTokenLines(filledTrend, 'overview-token-trend');
   const valueKey = overviewBreakdownMetric === 'cost' ? 'cost_usd'
@@ -1232,6 +1254,12 @@ function renderHistorySummary(summary) {
     ? `${(Number(summary.success_rate || 0) * 100).toFixed(1)}%`
     : '—');
   set('history-summary-tokens', fmtTok(Number(summary.total_tokens || 0)));
+  set('history-summary-token-note', [
+    `${t('analytics.inputTokens')} ${fmtTok(summary.input_tokens || 0)}`,
+    `${t('analytics.outputTokens')} ${fmtTok(summary.output_tokens || 0)}`,
+    `${t('detail.cacheRead')} ${fmtTok(summary.cache_read_tokens || 0)}`,
+    `${t('detail.cacheCreation')} ${fmtTok(summary.cache_creation_tokens || 0)}`,
+  ].join(' · '));
   set('history-summary-cost', fmtCost(Number(summary.cost_usd || 0)));
   renderCompactBreakdown('history-model-breakdown', summary.models || []);
   renderCompactBreakdown('history-provider-breakdown', summary.providers || []);
@@ -1309,12 +1337,15 @@ function renderHistory() {
     const rowId = h.id || `${h.start_time}_${h.model || 'unknown'}_${h.duration_ms || 0}`;
     const cost = h.cost_usd != null ? fmtCost(h.cost_usd) : '—';
     const detailsKnown = h.details_known !== false;
+    const streamLabel = detailsKnown
+      ? (h.streaming ? t('history.streaming') : t('history.nonStreaming'))
+      : t('detail.unknown');
     const totalTokens = Number(h.input_tokens || 0) + Number(h.output_tokens || 0)
       + Number(h.cache_read_tokens || 0) + Number(h.cache_creation_tokens || 0);
     return `
     <tr data-id="${escapeHtml(rowId)}" tabindex="0" aria-haspopup="dialog" style="cursor: pointer;">
       <td>${fmtTime(h.start_time)}</td>
-      <td>${detailsKnown ? `<span class="badge ${h.success ? 'badge-success' : 'badge-error'}">${h.success ? t('badge.success') : t('badge.fail')}</span>` : `<span class="badge badge-unknown">${t('detail.unknown')}</span>`}</td>
+      <td><div class="history-status-stack">${detailsKnown ? `<span class="badge ${h.success ? 'badge-success' : 'badge-error'}">${h.success ? t('badge.success') : t('badge.fail')}</span>` : `<span class="badge badge-unknown">${t('detail.unknown')}</span>`}<small class="history-stream-state">${streamLabel}</small></div></td>
       <td><div class="history-model-cell"><strong>${escapeHtml(h.model) || '—'}</strong><small>${escapeHtml(h.provider) || '—'}</small></div></td>
       <td><span class="badge badge-scene">${escapeHtml(h.scenario) || '—'}</span></td>
       <td><button type="button" class="history-token-trigger" data-token-id="${escapeHtml(rowId)}" aria-label="${t('detail.title')}">${totalTokens.toLocaleString()}</button></td>
@@ -2043,6 +2074,13 @@ function scheduleHistoryRefresh() {
   document.getElementById(id)?.addEventListener('change', scheduleHistoryRefresh);
 });
 document.getElementById('history-reset')?.addEventListener('click', () => resetHistoryFilters());
+document.getElementById('history-page-size')?.addEventListener('change', event => {
+  const nextSize = Number(event.target.value);
+  if (![25, 50, 100].includes(nextSize)) return;
+  historySize = nextSize;
+  historyPage = 1;
+  refreshHistory();
+});
 
 /* ── History Sorting ───────────────────────────────────────────── */
 let currentSort = { field: 'start_time', dir: 'desc' };
@@ -2953,7 +2991,7 @@ const AnalyticsModule = {
       button.addEventListener('click', () => {
         overviewBreakdownMetric = button.dataset.metric;
         button.parentElement.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
-        if (lastOverviewView) renderOverviewUsage(lastOverviewView.data, lastOverviewView.trend);
+        if (lastOverviewView) renderOverviewUsage(lastOverviewView.data, lastOverviewView.trend, lastOverviewView.latency);
       });
     });
     this.initDateRange();

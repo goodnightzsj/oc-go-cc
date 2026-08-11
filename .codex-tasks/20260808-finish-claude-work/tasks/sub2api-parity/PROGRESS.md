@@ -3,12 +3,12 @@
 ## Context Recovery Block
 
 - **Current milestone**: High-value Sub2API data presentation follow-up
-- **Current status**: IN_PROGRESS
-- **Last completed**: #24 - Show streaming type in history rows
+- **Current status**: DONE
+- **Last completed**: #26 - Deploy and validate all migrated value in existing Edge
 - **Current artifact**: `TODO.csv`
 - **Key context**: Production `3ba7fba` is correct; this follow-up adds only source-backed comparisons and request summaries, preserving the 1,390 request / `$3.03965577` data contract.
 - **Known issues**: None. The unrelated remote `.ace-tool/` directory remains untouched.
-- **Next action**: #26 - Deploy and validate all migrated value in existing Edge.
+- **Next action**: None.
 
 ## Reopened Production Findings
 
@@ -58,4 +58,5 @@
 - Request History now keeps model/platform visible and exposes a themed structured Token tooltip; source provenance and recent-usage sections remain absent.
 - History status cells now identify streaming and non-streaming requests while preserving unknown imported details.
 - Full repository tests, vet, formatting, JavaScript syntax, diff checks, and the CGO-disabled production build pass locally.
+- Production `3bb6961` is deployed; public health and API checks pass, and the existing Edge public-domain session verified the new Dashboard and History behavior.
 - The guessed donut and single-bucket stacked-bar implementations were deleted. Full Go tests, build, JavaScript syntax, and diff checks pass.

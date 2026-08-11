@@ -2,13 +2,13 @@
 
 ## Context Recovery Block
 
-- **Current milestone**: High-value Sub2API data presentation follow-up
-- **Current status**: DONE
+- **Current milestone**: Rolling dashboard throughput semantics
+- **Current status**: IN_PROGRESS
 - **Last completed**: Child #10 - Sub2API parity, source-backed presentation follow-up, production deploy, and Edge validation
 - **Current artifact**: `SUBTASKS.csv`
-- **Key context**: Production `3bb6961` data and UI are correct; child #10's five source-backed presentation improvements are complete without new provider fields.
+- **Key context**: Production `3bb6961` data remains correct; child #10 is reopened only to correct RPM/TPM from a selected-range average to a rolling 60-second value.
 - **Known issues**: None. The unrelated remote `.ace-tool/` directory remains untouched.
-- **Next action**: None.
+- **Next action**: Complete child #10 tasks #27-#29 in order.
 
 ## Child 1: Finalize storage overlay regression
 

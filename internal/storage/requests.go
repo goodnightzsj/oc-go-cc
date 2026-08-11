@@ -145,16 +145,20 @@ type RequestQuery struct {
 }
 
 type RequestSummary struct {
-	TotalRequests int64              `json:"total_requests"`
-	SuccessRate   float64            `json:"success_rate"`
-	SuccessRows   int64              `json:"success_rows"`
-	TotalTokens   int64              `json:"total_tokens"`
-	CostUSD       float64            `json:"cost_usd"`
-	CostRows      int64              `json:"cost_rows"`
-	Models        []RequestBreakdown `json:"models"`
-	Providers     []RequestBreakdown `json:"providers"`
-	Scenarios     []RequestBreakdown `json:"scenarios"`
-	Trend         []RequestTrend     `json:"trend"`
+	TotalRequests       int64              `json:"total_requests"`
+	SuccessRate         float64            `json:"success_rate"`
+	SuccessRows         int64              `json:"success_rows"`
+	TotalTokens         int64              `json:"total_tokens"`
+	InputTokens         int64              `json:"input_tokens"`
+	OutputTokens        int64              `json:"output_tokens"`
+	CacheReadTokens     int64              `json:"cache_read_tokens"`
+	CacheCreationTokens int64              `json:"cache_creation_tokens"`
+	CostUSD             float64            `json:"cost_usd"`
+	CostRows            int64              `json:"cost_rows"`
+	Models              []RequestBreakdown `json:"models"`
+	Providers           []RequestBreakdown `json:"providers"`
+	Scenarios           []RequestBreakdown `json:"scenarios"`
+	Trend               []RequestTrend     `json:"trend"`
 }
 
 type RequestBreakdown struct {
@@ -181,10 +185,16 @@ func (r *Requests) Summary(q RequestQuery) (*RequestSummary, error) {
 	if err := r.db.DB().QueryRowContext(ctx, `
 		SELECT COUNT(*), COALESCE(SUM(CASE WHEN details_known = 1 THEN success ELSE 0 END), 0),
 		       COALESCE(SUM(CASE WHEN details_known = 1 THEN 1 ELSE 0 END), 0),
+		       COALESCE(SUM(COALESCE(input_tokens, 0)), 0),
+		       COALESCE(SUM(COALESCE(output_tokens, 0)), 0),
+		       COALESCE(SUM(COALESCE(cache_read_tokens, 0)), 0),
+		       COALESCE(SUM(COALESCE(cache_creation_tokens, 0)), 0),
 		       COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) +
 		                    COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0)), 0),
 		       COALESCE(SUM(cost_usd), 0), COUNT(cost_usd)
-		FROM requests`+where, args...).Scan(&out.TotalRequests, &successes, &out.SuccessRows, &out.TotalTokens, &out.CostUSD, &out.CostRows); err != nil {
+		FROM requests`+where, args...).Scan(&out.TotalRequests, &successes, &out.SuccessRows,
+		&out.InputTokens, &out.OutputTokens, &out.CacheReadTokens, &out.CacheCreationTokens,
+		&out.TotalTokens, &out.CostUSD, &out.CostRows); err != nil {
 		return nil, err
 	}
 	if out.SuccessRows > 0 {

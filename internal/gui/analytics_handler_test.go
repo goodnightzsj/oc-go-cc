@@ -30,13 +30,26 @@ func TestAnalyticsSummaryUsesPrimaryRequestHistory(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
 	var response struct {
-		Summary storage.TokenSummary `json:"summary"`
+		Summary  storage.TokenSummary  `json:"summary"`
+		Today    *storage.TokenSummary `json:"today"`
+		Retained *storage.TokenSummary `json:"retained"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if response.Summary.TotalRequests != 1 || response.Summary.EstCostUSD != 0.00001234 {
 		t.Fatalf("unexpected request summary: %+v", response.Summary)
+	}
+	compareRecorder := httptest.NewRecorder()
+	NewAnalyticsHandler(db).Summary(compareRecorder, httptest.NewRequest("GET", "/api/analytics/summary?days=30&compare=1", nil))
+	if compareRecorder.Code != 200 {
+		t.Fatalf("comparison status = %d, body = %s", compareRecorder.Code, compareRecorder.Body.String())
+	}
+	if err := json.Unmarshal(compareRecorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode comparison response: %v", err)
+	}
+	if response.Today == nil || response.Retained == nil || response.Today.TotalRequests != 1 || response.Retained.TotalRequests != 1 {
+		t.Fatalf("unexpected comparison summaries: today=%+v retained=%+v", response.Today, response.Retained)
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(recorder.Body.Bytes(), &fields); err != nil {

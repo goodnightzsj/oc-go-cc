@@ -130,6 +130,11 @@ func (h *AnalyticsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Query().Get("compare") == "1" && !explicitRange {
 		now := time.Now()
+		lastMinute, err := h.store.GetTokenSummaryBetween(now.Add(-time.Minute), now.Add(time.Second))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 		today, err := h.store.GetTokenSummaryBetween(todayStart, now.Add(time.Second))
 		if err != nil {
@@ -143,6 +148,7 @@ func (h *AnalyticsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		resp["last_minute"] = lastMinute
 		resp["today"] = today
 		resp["retained"] = retained
 	}

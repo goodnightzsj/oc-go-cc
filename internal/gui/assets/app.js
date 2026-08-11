@@ -44,7 +44,7 @@ const TRANSLATIONS = {
     'analytics.dailyTrend': 'Daily Token Trend',
     'analytics.requestTrend': 'Request trend',
     'analytics.tokenTrend': 'Token trend',
-    'analytics.throughput': 'Average throughput',
+    'analytics.throughput': 'Last-minute throughput',
     'analytics.granularity': 'Granularity',
     'analytics.hour': 'Hour',
     'analytics.day': 'Day',
@@ -294,7 +294,7 @@ const TRANSLATIONS = {
     'analytics.dailyTrend': '每日 Token 趋势',
     'analytics.requestTrend': '请求趋势',
     'analytics.tokenTrend': 'Token 趋势',
-    'analytics.throughput': '平均速率',
+    'analytics.throughput': '近一分钟吞吐',
     'analytics.granularity': '粒度',
     'analytics.hour': '小时',
     'analytics.day': '天',
@@ -961,9 +961,7 @@ function startPolling() {
   refreshAll();
   PerfModule.init();
   PerfModule.refresh();
-  // Core metrics always refresh so overview badges stay warm; history,
-  // config and catalog-age are only refreshed when their tab is active so we
-  // don't rebuild DOM or hammer SQLite on views the user isn't looking at.
+  // Core metrics stay warm globally; tab-specific work only runs when visible.
   setInterval(refreshCore, 3000);
   setInterval(refreshCurrentTab, 3000);
   perfPollTimer = setInterval(() => {
@@ -986,25 +984,14 @@ async function refreshAll() {
   await Promise.all([refreshMetrics(), refreshHistory(), refreshConfig(), refreshCatalogAge()]);
 }
 
-// Refresh only what the current tab needs. Turns expensive/rare refreshes
-// (config, catalog-age) off when the user is on Overview/History/Analytics,
-// and gates history's DOM-heavy render to the History tab.
+// Refresh only tab-specific data; refreshCore already handles shared metrics.
 async function refreshCurrentTab() {
   switch (activeTab) {
     case 'history':
-      await Promise.all([refreshMetrics(), refreshHistory(), refreshCatalogAge()]);
+      await refreshHistory();
       break;
     case 'settings':
-      await Promise.all([refreshMetrics(), refreshConfig(), refreshCatalogAge()]);
-      break;
-    case 'analytics':
-    case 'performance':
-    case 'fallback':
-      await refreshMetrics();
-      break;
-    case 'overview':
-    default:
-      await refreshMetrics();
+      await refreshConfig();
       break;
   }
 }
@@ -1086,6 +1073,7 @@ function renderOverviewUsage(data, trend, latency) {
   const prompt = input + cacheRead + cacheWrite;
   const today = data.today || {};
   const retained = data.retained || {};
+  const lastMinute = data.last_minute || {};
   const compactTotal = value => fmtTok(Number(value || 0));
   const set = (id, value) => {
     const el = document.getElementById(id);
@@ -1105,9 +1093,8 @@ function renderOverviewUsage(data, trend, latency) {
   set('m-cost-note', today.est_cost_usd != null
     ? `${currentLang === 'zh' ? '今日' : 'Today'} ${fmtCost(today.est_cost_usd)} · ${currentLang === 'zh' ? '保留' : 'Retained'} ${fmtCost(retained.est_cost_usd)}`
     : t('analytics.currencyUSD'));
-  const minutes = Math.max(1, overviewDays * 24 * 60);
-  set('m-throughput', `${(Number(summary.total_requests || 0) / minutes).toFixed(2)} RPM`);
-  set('m-throughput-note', `${fmtTok(total / minutes)} TPM`);
+  set('m-throughput', `${Number(lastMinute.total_requests || 0).toLocaleString()} RPM`);
+  set('m-throughput-note', `${fmtTok(totalUsageTokens(lastMinute))} TPM`);
   const known = Number(summary.known_requests || 0);
   set('m-success', known > 0 ? `${(Number(summary.success_rate || 0) * 100).toFixed(1)}%` : '—');
   set('m-success-note', t('analytics.knownRecords').replace('{n}', known.toLocaleString()));

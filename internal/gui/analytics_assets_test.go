@@ -20,7 +20,7 @@ func TestAnalyticsAssetsMatchUsageDashboardContract(t *testing.T) {
 		"renderOverviewUsage", "renderRequestTrend", "renderTokenLines",
 		"renderDistribution", "renderPeriodTable", "fillTrend", "queryParams",
 		"bindHistoryTokenTooltips", "usage-chart-scrub", "usage-chart-crosshair",
-		"seriesVisibility", "usage-legend-toggle", "aria-pressed", "classList.toggle('is-single'", "compare=1", "m-cost-note", "data.today", "data.retained", "api/perf/aggregate", "overview-latency", "avg_latency_ms",
+		"seriesVisibility", "usage-legend-toggle", "aria-pressed", "classList.toggle('is-single'", "compare=1", "m-cost-note", "data.last_minute", "data.today", "data.retained", "api/perf/aggregate", "overview-latency", "avg_latency_ms",
 	} {
 		if !strings.Contains(string(app), marker) {
 			t.Errorf("app.js missing analytics marker %q", marker)
@@ -51,5 +51,8 @@ func TestAnalyticsAssetsMatchUsageDashboardContract(t *testing.T) {
 		if strings.Contains(string(app), forbidden) {
 			t.Errorf("app.js still contains superseded chart behavior %q", forbidden)
 		}
+	}
+	if strings.Contains(string(app), "overviewDays * 24 * 60") {
+		t.Error("Dashboard throughput must not use the selected analytics range")
 	}
 }

@@ -30,9 +30,10 @@ func TestAnalyticsSummaryUsesPrimaryRequestHistory(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
 	var response struct {
-		Summary  storage.TokenSummary  `json:"summary"`
-		Today    *storage.TokenSummary `json:"today"`
-		Retained *storage.TokenSummary `json:"retained"`
+		Summary    storage.TokenSummary  `json:"summary"`
+		LastMinute *storage.TokenSummary `json:"last_minute"`
+		Today      *storage.TokenSummary `json:"today"`
+		Retained   *storage.TokenSummary `json:"retained"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -48,8 +49,19 @@ func TestAnalyticsSummaryUsesPrimaryRequestHistory(t *testing.T) {
 	if err := json.Unmarshal(compareRecorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode comparison response: %v", err)
 	}
-	if response.Today == nil || response.Retained == nil || response.Today.TotalRequests != 1 || response.Retained.TotalRequests != 1 {
-		t.Fatalf("unexpected comparison summaries: today=%+v retained=%+v", response.Today, response.Retained)
+	if response.LastMinute == nil || response.Today == nil || response.Retained == nil || response.LastMinute.TotalRequests != 1 || response.Today.TotalRequests != 1 || response.Retained.TotalRequests != 1 {
+		t.Fatalf("unexpected comparison summaries: last_minute=%+v today=%+v retained=%+v", response.LastMinute, response.Today, response.Retained)
+	}
+	if _, err := db.DB().Exec(`UPDATE requests SET start_time = ? WHERE id = ?`, time.Now().UTC().Add(-2*time.Minute).Format(time.RFC3339Nano), "request-a"); err != nil {
+		t.Fatalf("age request: %v", err)
+	}
+	idleRecorder := httptest.NewRecorder()
+	NewAnalyticsHandler(db).Summary(idleRecorder, httptest.NewRequest("GET", "/api/analytics/summary?days=30&compare=1", nil))
+	if err := json.Unmarshal(idleRecorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode idle comparison: %v", err)
+	}
+	if response.LastMinute == nil || response.LastMinute.TotalRequests != 0 {
+		t.Fatalf("idle last-minute requests = %+v, want zero", response.LastMinute)
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(recorder.Body.Bytes(), &fields); err != nil {

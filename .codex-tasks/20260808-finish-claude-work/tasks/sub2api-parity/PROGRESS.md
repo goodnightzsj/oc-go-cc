@@ -2,13 +2,13 @@
 
 ## Context Recovery Block
 
-- **Current milestone**: High-value Sub2API data presentation follow-up
-- **Current status**: DONE
-- **Last completed**: #26 - Deploy and validate all migrated value in existing Edge
+- **Current milestone**: Rolling dashboard throughput semantics
+- **Current status**: IN_PROGRESS
+- **Last completed**: #28 - Implement and test rolling throughput
 - **Current artifact**: `TODO.csv`
-- **Key context**: Production `3ba7fba` is correct; this follow-up adds only source-backed comparisons and request summaries, preserving the 1,390 request / `$3.03965577` data contract.
+- **Key context**: Production `3bb6961` incorrectly labels selected-range average throughput as RPM/TPM; the fix must use the authoritative last 60 seconds without changing retained usage totals.
 - **Known issues**: None. The unrelated remote `.ace-tool/` directory remains untouched.
-- **Next action**: None.
+- **Next action**: #29 - Validate, deploy, and smoke-test rolling throughput.
 
 ## Reopened Production Findings
 

@@ -3,12 +3,12 @@
 ## Context Recovery Block
 
 - **Current milestone**: High-value Sub2API data presentation follow-up
-- **Current status**: IN_PROGRESS
-- **Last completed**: Child #10 - Sub2API parity, production request truth, and Edge validation
+- **Current status**: DONE
+- **Last completed**: Child #10 - Sub2API parity, source-backed presentation follow-up, production deploy, and Edge validation
 - **Current artifact**: `SUBTASKS.csv`
-- **Key context**: Production `3ba7fba` data and UI are correct; child #10 is reopened for five source-backed presentation improvements, not new provider fields.
+- **Key context**: Production `3bb6961` data and UI are correct; child #10's five source-backed presentation improvements are complete without new provider fields.
 - **Known issues**: None. The unrelated remote `.ace-tool/` directory remains untouched.
-- **Next action**: Complete child #10 tasks #20–#26 in order.
+- **Next action**: None.
 
 ## Child 1: Finalize storage overlay regression
 
@@ -74,7 +74,7 @@
 
 - **Status**: DONE
 - **Key context**: The provider snapshot corrected primary History once and remains invisible; future proxy traffic follows the normal request path.
-- **Validation**: Full local gates pass. Production backup/dry-run/apply/idempotence, public APIs, existing-Edge desktop/400px layouts, Chinese modal/tooltips, and real browser reload shortcuts all pass on `3c0ded5`.
+- **Validation**: Full local gates pass. Production backup/dry-run/apply/idempotence, public APIs, existing-Edge desktop/400px layouts, Chinese modal/tooltips, real browser reload shortcuts, and the five source-backed presentation improvements all pass on `3bb6961`.
 - **Next step**: None.
 
 ## Session Start

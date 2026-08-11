@@ -3,12 +3,12 @@
 ## Context Recovery Block
 
 - **Current milestone**: Rolling dashboard throughput semantics
-- **Current status**: IN_PROGRESS
-- **Last completed**: Child #10 - Sub2API parity, source-backed presentation follow-up, production deploy, and Edge validation
+- **Current status**: DONE
+- **Last completed**: Child #10 - Rolling dashboard throughput semantics and production validation
 - **Current artifact**: `SUBTASKS.csv`
-- **Key context**: Production `3bb6961` data remains correct; child #10 is reopened only to correct RPM/TPM from a selected-range average to a rolling 60-second value.
+- **Key context**: Production `4f2ce10` data remains correct and Dashboard RPM/TPM now use a rolling 60-second request window.
 - **Known issues**: None. The unrelated remote `.ace-tool/` directory remains untouched.
-- **Next action**: Complete child #10 tasks #27-#29 in order.
+- **Next action**: None.
 
 ## Child 1: Finalize storage overlay regression
 
@@ -74,7 +74,7 @@
 
 - **Status**: DONE
 - **Key context**: The provider snapshot corrected primary History once and remains invisible; future proxy traffic follows the normal request path.
-- **Validation**: Full local gates pass. Production backup/dry-run/apply/idempotence, public APIs, existing-Edge desktop/400px layouts, Chinese modal/tooltips, real browser reload shortcuts, and the five source-backed presentation improvements all pass on `3bb6961`.
+- **Validation**: Full local gates pass. Production public APIs and the existing Edge session verify rolling 60-second `0 RPM / 0 TPM` when idle, without changing the retained 1,390 requests, on `4f2ce10`.
 - **Next step**: None.
 
 ## Session Start

@@ -3,12 +3,12 @@
 ## Context Recovery Block
 
 - **Current milestone**: Rolling dashboard throughput semantics
-- **Current status**: IN_PROGRESS
-- **Last completed**: #28 - Implement and test rolling throughput
+- **Current status**: DONE
+- **Last completed**: #29 - Validate, deploy, and smoke-test rolling throughput
 - **Current artifact**: `TODO.csv`
-- **Key context**: Production `3bb6961` incorrectly labels selected-range average throughput as RPM/TPM; the fix must use the authoritative last 60 seconds without changing retained usage totals.
+- **Key context**: Production `4f2ce10` uses the authoritative last 60 seconds for RPM/TPM without changing retained usage totals.
 - **Known issues**: None. The unrelated remote `.ace-tool/` directory remains untouched.
-- **Next action**: #29 - Validate, deploy, and smoke-test rolling throughput.
+- **Next action**: None.
 
 ## Reopened Production Findings
 
@@ -59,4 +59,5 @@
 - History status cells now identify streaming and non-streaming requests while preserving unknown imported details.
 - Full repository tests, vet, formatting, JavaScript syntax, diff checks, and the CGO-disabled production build pass locally.
 - Production `3bb6961` is deployed; public health and API checks pass, and the existing Edge public-domain session verified the new Dashboard and History behavior.
+- Production `4f2ce10` returns `last_minute` from request history, shows `0 RPM / 0 TPM` when idle, and avoids duplicate core metric polling.
 - The guessed donut and single-bucket stacked-bar implementations were deleted. Full Go tests, build, JavaScript syntax, and diff checks pass.

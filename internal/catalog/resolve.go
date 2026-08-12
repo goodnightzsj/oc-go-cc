@@ -93,6 +93,15 @@ func (ic *IndexedCatalog) ResolveShort(short string) (ResolvedModel, error) {
 		return ic.resolveFromMatches(short, matches)
 	}
 
+	for key, model := range ic.Models {
+		if strings.EqualFold(key, short) || strings.EqualFold(model.Name, short) || strings.EqualFold(modelNameFromKey(key), short) {
+			matches = append(matches, key)
+		}
+	}
+	if len(matches) > 0 {
+		return ic.resolveFromMatches(short, matches)
+	}
+
 	return ResolvedModel{}, fmt.Errorf("unknown short model id: %q", short)
 }
 

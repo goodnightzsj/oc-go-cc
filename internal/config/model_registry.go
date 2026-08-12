@@ -1,5 +1,7 @@
 package config
 
+import "strings"
+
 const DefaultContextMargin = 8192
 
 // ModelMetadata describes a known model's capabilities (context window size,
@@ -38,6 +40,28 @@ var modelMetadata = map[string]ModelMetadata{
 	"qwen3.5-plus":           {ContextWindow: 1000000, MaxOutputTokens: 8192, Vision: true, SupportsTools: true},
 }
 
+// CanonicalModelID returns the registered spelling for a known model ID.
+// Unknown and ambiguously cased custom IDs are preserved unchanged.
+func CanonicalModelID(modelID string) string {
+	if _, ok := modelMetadata[modelID]; ok {
+		return modelID
+	}
+	match := ""
+	for known := range modelMetadata {
+		if !strings.EqualFold(known, modelID) {
+			continue
+		}
+		if match != "" {
+			return modelID
+		}
+		match = known
+	}
+	if match != "" {
+		return match
+	}
+	return modelID
+}
+
 // ResolveModelConfig fills in default capability values (context window,
 // max output tokens, vision, tool support) for a ModelConfig by consulting
 // the built-in modelMetadata registry. If the model is unknown or a field
@@ -45,6 +69,7 @@ var modelMetadata = map[string]ModelMetadata{
 // a ModelConfig so capacity filtering and scenario routing see accurate
 // per-model limits.
 func ResolveModelConfig(model ModelConfig) ModelConfig {
+	model.ModelID = CanonicalModelID(model.ModelID)
 	if model.ModelRef == "" {
 		if meta, ok := modelMetadata[model.ModelID]; ok {
 			if model.ContextWindow == 0 {

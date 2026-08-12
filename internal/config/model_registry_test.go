@@ -29,6 +29,26 @@ func TestResolveModelConfig(t *testing.T) {
 			},
 		},
 		{
+			name:  "known mixed-case model uses canonical ID and metadata",
+			input: ModelConfig{ModelID: "DeepSeek-V4-Pro"},
+			expected: ModelConfig{
+				ModelID:         "deepseek-v4-pro",
+				ContextWindow:   1000000,
+				MaxOutputTokens: 8192,
+				ContextMargin:   DefaultContextMargin,
+				SupportsTools:   boolPtr(true),
+			},
+		},
+		{
+			name:  "unknown custom model preserves case",
+			input: ModelConfig{ModelID: "Vendor-Custom-Pro"},
+			expected: ModelConfig{
+				ModelID:       "Vendor-Custom-Pro",
+				ContextMargin: DefaultContextMargin,
+				SupportsTools: boolPtr(true),
+			},
+		},
+		{
 			name: "kimi-k3 gets hardcoded metadata (1M context, 131K output, vision)",
 			input: ModelConfig{
 				ModelID: "kimi-k3",

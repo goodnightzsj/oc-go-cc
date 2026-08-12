@@ -30,6 +30,33 @@
 routatic-proxy ui
 ```
 
+### 控制台预览
+
+以下截图使用固定的合成演示数据，不包含生产请求、账户数据或凭证。
+
+#### 概览
+
+![包含请求趋势和 Token 趋势的仪表盘概览](docs/assets/dashboard-overview.png)
+
+#### 历史请求
+
+![包含筛选和分布统计的分页历史请求](docs/assets/dashboard-history.png)
+
+#### 用量分析
+
+![包含 Token 趋势和平台分布的用量分析](docs/assets/dashboard-analytics.png)
+
+<details>
+<summary>性能、降级策略和设置</summary>
+
+![模型性能页面](docs/assets/dashboard-performance.png)
+
+![降级策略编辑器](docs/assets/dashboard-fallback.png)
+
+![代理设置页面](docs/assets/dashboard-settings.png)
+
+</details>
+
 ---
 
 ## 为什么选择 routatic-proxy？

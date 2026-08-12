@@ -11,13 +11,13 @@
 
 ## Context Recovery Block
 
-- **Current milestone**: #7 - Issue replies and task closure
-- **Current status**: IN_PROGRESS
-- **Last completed**: #6 - Focused upstream branch and PR
+- **Current milestone**: Complete
+- **Current status**: DONE
+- **Last completed**: #7 - Issue replies and task closure
 - **Current artifact**: `TODO.csv`
 - **Key context**: Redacted gitleaks scans found only the `YOUR_GITHUB_TOKEN` documentation placeholder and API-key redaction-test fixtures; no active secret is present.
 - **Known issues**: Existing historical task records contain low-risk local path/public deployment metadata; these are excluded from the upstream PR and the new task spec uses a relative root.
-- **Next action**: Commit and push the fork documentation/task artifacts, verify the issue comments and PR state, then close all task records.
+- **Next action**: None.
 
 ## Milestone 1: Anthropic thinking signature and terminal delta
 
@@ -133,3 +133,18 @@
 - **Validation**: Full Go tests, vet, formatting, JavaScript syntax, and diff checks pass on the upstream-based worktree.
 - **External artifact**: https://github.com/routatic/proxy/pull/133
 - **Next step**: Milestone 7 - Issue replies and task closure.
+
+## Milestone 7: Issue replies and task closure
+
+- **Status**: DONE
+- **Completed**: 2026-08-12 12:57
+- **What was done**:
+  - Linked PR #133 from upstream issues #51 and #131 with concise fix details.
+  - Committed and pushed the fork implementation, six sanitized screenshots, bilingual README updates, and redacted audit record.
+  - Verified the PR is open and mergeable and its automated Kilo review completed successfully.
+- **External artifacts**:
+  - PR: https://github.com/routatic/proxy/pull/133
+  - Issue #51 reply: https://github.com/routatic/proxy/issues/51#issuecomment-5262348762
+  - Issue #131 reply: https://github.com/routatic/proxy/issues/131#issuecomment-5262348545
+- **Validation**: Fork `main` equals `origin/main`; the worktree is clean; all seven milestones are DONE.
+- **Next step**: None.

@@ -2,13 +2,13 @@
 
 ## Context Recovery Block
 
-- **Current milestone**: Child #11 / Milestone 4 - Current UI screenshots and README updates
-- **Current status**: IN_PROGRESS
-- **Last completed**: Child #10 - Rolling dashboard throughput semantics and production validation
-- **Current artifact**: `tasks/upstream-remediation/TODO.csv`
-- **Key context**: Open upstream issues #51 and #131 have reproducible code paths suitable for focused fixes; external writes are gated on a clean sensitive-information audit.
-- **Known issues**: #54 lacks request identity evidence and unspecified localization lacks an acceptance contract, so neither is changed in this child.
-- **Next action**: Capture sanitized overview/history/analytics screenshots from the existing Edge session and update README files.
+- **Current milestone**: Complete
+- **Current status**: DONE
+- **Last completed**: Child #11 - Upstream remediation, secret audit, and UI documentation
+- **Current artifact**: `SUBTASKS.csv`
+- **Key context**: All 11 children are complete. Upstream PR #133 contains only the #51/#131 protocol and model fixes; the fork retains its separate request-history and dashboard work.
+- **Known issues**: Upstream #54 lacks request identity evidence and #30 lacks a localization acceptance contract; neither was changed speculatively.
+- **Next action**: None.
 
 ## Child 1: Finalize storage overlay regression
 
@@ -79,11 +79,12 @@
 
 ## Child 11: Fix upstream issues, audit secrets, document UI, and submit PR
 
-- **Status**: IN_PROGRESS
+- **Status**: DONE
 - **Started**: 2026-08-11 15:28
-- **Key context**: Implement only evidence-backed #51 and #131 fixes. Audit the worktree and history before any upstream write, capture the existing public UI through the already-open Edge session, and keep the upstream PR limited to generally applicable fixes.
-- **Validation**: Pending focused transformer/router tests, full Go gates, JavaScript syntax, secret scanners, screenshot inspection, and GitHub PR/issue verification.
-- **Next step**: Milestone 1 - Anthropic thinking signature and terminal delta.
+- **Completed**: 2026-08-12 12:57
+- **Key context**: PR #133 is open and mergeable with a successful automated review; it contains one upstream-based commit and only the intended protocol/model files.
+- **Validation**: Full Go tests, vet, formatting, JavaScript syntax, diff checks, secret scans, screenshot inspection, fork push, PR scope, and issue replies all verified.
+- **Next step**: None.
 
 ## Session Start
 

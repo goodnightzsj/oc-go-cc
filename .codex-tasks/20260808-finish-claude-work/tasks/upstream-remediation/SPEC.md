@@ -54,11 +54,11 @@
 
 ## Done-When
 
-- [ ] Focused and full validation pass.
-- [ ] Sensitive-information audit reports no active secret exposure in the proposed changes or repository history.
-- [ ] README screenshots are current, legible, and contain no sensitive information.
-- [ ] Upstream PR contains only generally applicable fixes and documents fork differences without proposing their wholesale merge.
-- [ ] Issues #51 and #131 link to the submitted PR.
+- [x] Focused and full validation pass.
+- [x] Sensitive-information audit reports no active secret exposure in the proposed changes or repository history.
+- [x] README screenshots are current, legible, and contain no sensitive information.
+- [x] Upstream PR contains only generally applicable fixes and documents fork differences without proposing their wholesale merge.
+- [x] Issues #51 and #131 link to the submitted PR.
 
 ## Final Validation Command
 

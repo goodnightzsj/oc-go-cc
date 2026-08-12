@@ -2,13 +2,13 @@
 
 ## Context Recovery Block
 
-- **Current milestone**: Rolling dashboard throughput semantics
-- **Current status**: DONE
+- **Current milestone**: Child #11 / Milestone 4 - Current UI screenshots and README updates
+- **Current status**: IN_PROGRESS
 - **Last completed**: Child #10 - Rolling dashboard throughput semantics and production validation
-- **Current artifact**: `SUBTASKS.csv`
-- **Key context**: Production `4f2ce10` data remains correct and Dashboard RPM/TPM now use a rolling 60-second request window.
-- **Known issues**: None. The unrelated remote `.ace-tool/` directory remains untouched.
-- **Next action**: None.
+- **Current artifact**: `tasks/upstream-remediation/TODO.csv`
+- **Key context**: Open upstream issues #51 and #131 have reproducible code paths suitable for focused fixes; external writes are gated on a clean sensitive-information audit.
+- **Known issues**: #54 lacks request identity evidence and unspecified localization lacks an acceptance contract, so neither is changed in this child.
+- **Next action**: Capture sanitized overview/history/analytics screenshots from the existing Edge session and update README files.
 
 ## Child 1: Finalize storage overlay regression
 
@@ -76,6 +76,14 @@
 - **Key context**: The provider snapshot corrected primary History once and remains invisible; future proxy traffic follows the normal request path.
 - **Validation**: Full local gates pass. Production public APIs and the existing Edge session verify rolling 60-second `0 RPM / 0 TPM` when idle, without changing the retained 1,390 requests, on `4f2ce10`.
 - **Next step**: None.
+
+## Child 11: Fix upstream issues, audit secrets, document UI, and submit PR
+
+- **Status**: IN_PROGRESS
+- **Started**: 2026-08-11 15:28
+- **Key context**: Implement only evidence-backed #51 and #131 fixes. Audit the worktree and history before any upstream write, capture the existing public UI through the already-open Edge session, and keep the upstream PR limited to generally applicable fixes.
+- **Validation**: Pending focused transformer/router tests, full Go gates, JavaScript syntax, secret scanners, screenshot inspection, and GitHub PR/issue verification.
+- **Next step**: Milestone 1 - Anthropic thinking signature and terminal delta.
 
 ## Session Start
 

@@ -65,13 +65,40 @@ This repository provides a cross-platform GUI for `routatic-proxy`:
 - **Linux** — Browser-based GUI via `xdg-open` (default, no CGO required). For system tray: build with `CGO_ENABLED=1` and install `libappindicator-gtk3-devel` (Fedora) or `libayatana-appindicator3-dev` (Ubuntu/Debian).
 - **Windows** — GUI not supported (CLI only).
 
-**Dashboard tabs:** Overview (real-time metrics & model distribution), History (last 1000 requests with filters), Settings (edit config with hot-reload).
+**Dashboard tabs:** Overview, History, Performance, Fallback, Usage Analytics, and Settings.
 
 ```bash
 routatic-proxy ui
 ```
 
 On macOS, this opens a native window. On Linux, it opens your default browser.
+
+### Dashboard Preview
+
+The screenshots below use fixed synthetic demonstration data. They do not contain production requests, account data, or credentials.
+
+#### Overview
+
+![Dashboard overview with request and token trends](docs/assets/dashboard-overview.png)
+
+#### Request History
+
+![Paginated request history with filters and breakdowns](docs/assets/dashboard-history.png)
+
+#### Usage Analytics
+
+![Usage analytics with token trends and platform breakdowns](docs/assets/dashboard-analytics.png)
+
+<details>
+<summary>Performance, fallback, and settings</summary>
+
+![Model performance view](docs/assets/dashboard-performance.png)
+
+![Fallback policy editor](docs/assets/dashboard-fallback.png)
+
+![Proxy settings](docs/assets/dashboard-settings.png)
+
+</details>
 
 ## Quick Start
 

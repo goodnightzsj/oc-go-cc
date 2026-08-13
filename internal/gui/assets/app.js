@@ -3400,7 +3400,5 @@ const AnalyticsModule = {
   }
 };
 
-// Boot analytics module (listeners only; data loads when tab is clicked)
-setTimeout(() => {
-  AnalyticsModule.init();
-}, 250);
+// Initialize dates and listeners before the queued hash activation runs.
+AnalyticsModule.init();

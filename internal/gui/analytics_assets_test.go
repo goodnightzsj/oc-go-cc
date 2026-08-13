@@ -52,6 +52,12 @@ func TestAnalyticsAssetsMatchUsageDashboardContract(t *testing.T) {
 			t.Errorf("app.js still contains superseded chart behavior %q", forbidden)
 		}
 	}
+	if !strings.Contains(string(app), "// Initialize dates and listeners before the queued hash activation runs.\nAnalyticsModule.init();") {
+		t.Error("Analytics must initialize synchronously before direct hash activation")
+	}
+	if strings.Contains(string(app), "setTimeout(() => {\n  AnalyticsModule.init();\n}, 250);") {
+		t.Error("Delayed analytics initialization reintroduces the direct-refresh race")
+	}
 	if strings.Contains(string(app), "overviewDays * 24 * 60") {
 		t.Error("Dashboard throughput must not use the selected analytics range")
 	}

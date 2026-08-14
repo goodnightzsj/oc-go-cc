@@ -3103,7 +3103,6 @@ const AnalyticsModule = {
       this.currentTrend = this.fillTrend(trend.trend || []);
       this.renderKPIs(summary);
       this.renderDistributions(summary);
-      this.renderTokenLines(this.currentTrend, 'token-trend');
       this.renderPeriodTable(this.currentTrend);
       this.renderModelTable(summary.models || []);
       this.renderRetainedRange(summary.summary || {});
@@ -3121,7 +3120,7 @@ const AnalyticsModule = {
   },
 
   showLoading() {
-    ['provider-distribution','token-trend'].forEach(id => {
+    ['provider-distribution'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.innerHTML = this.loadingHtml();
     });
@@ -3389,7 +3388,7 @@ const AnalyticsModule = {
   },
 
   renderEmpty(msg = 'No usage data yet. Run some requests or configure a model to see analytics.') {
-    ['provider-distribution','token-trend'].forEach(id => {
+    ['provider-distribution'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.innerHTML = `<div class="empty-state">${msg}</div>`;
     });

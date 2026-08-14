@@ -51,6 +51,8 @@ prune_releases() {
 GO_BIN="$(resolve_go_bin)"
 HASHER="$(hash_cmd)"
 VERSION="$(git -C "${ROOT_DIR}" describe --tags --always --dirty 2>/dev/null || echo dev)"
+COMMIT="$(git -C "${ROOT_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)"
+BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 FINGERPRINT="$(source_fingerprint "${ROOT_DIR}" "${HASHER}")"
 STAMP="$(date +%Y%m%d%H%M%S)"
 RELEASE_DIR="${RELEASES_DIR}/${STAMP}-${FINGERPRINT:0:12}"
@@ -68,7 +70,9 @@ fi
 echo "[prod] building ${BUILD_PATH}"
 (
   cd "${ROOT_DIR}"
-  GOTOOLCHAIN=local "${GO_BIN}" build -ldflags "-X main.version=${VERSION}" -o "${BUILD_PATH}" ./cmd/routatic-proxy
+	GOTOOLCHAIN=local "${GO_BIN}" build \
+		-ldflags "-X main.version=${VERSION} -X github.com/routatic/proxy/internal/buildinfo.Version=${VERSION} -X github.com/routatic/proxy/internal/buildinfo.Commit=${COMMIT} -X github.com/routatic/proxy/internal/buildinfo.Date=${BUILD_TIME} -X github.com/routatic/proxy/internal/buildinfo.BuildTime=${BUILD_TIME}" \
+		-o "${BUILD_PATH}" ./cmd/routatic-proxy
 )
 
 ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"

@@ -19,7 +19,7 @@ build-ui: build-css
 
 build-css:
 	@echo "Building Tailwind CSS..."
-	@npx tailwindcss -i internal/gui/assets/tailwind-input.css -o internal/gui/assets/compiled-tailwind.css --minify 2>&1 | grep -v "Browserslist:"
+	@./scripts/build-css.sh
 
 dmg: build-ui
 	@./scripts/build_dmg.sh "$(VERSION)"

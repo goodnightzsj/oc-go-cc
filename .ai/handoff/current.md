@@ -15,7 +15,7 @@
 
 ## Sources of Truth
 - llmdoc: Missing; project rules recommend Claude `llmdoc:init`
-- task files: `.codex-tasks/20260808-finish-claude-work/`
+- task files: removed after completion; see git history for `.codex-tasks/20260808-finish-claude-work/`
 - key paths: `internal/storage/database.go`, `internal/storage/catalog.go`, `internal/gui/`, `scripts/prod-deploy.sh`
 
 ## Why Handoff

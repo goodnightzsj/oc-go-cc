@@ -17,5 +17,3 @@ func Run(cb Callbacks) {}
 func SetRunning(running bool) {}
 
 func SetAutostart(enabled bool) {}
-
-func Quit() {}

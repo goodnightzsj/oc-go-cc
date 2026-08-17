@@ -18,6 +18,7 @@ import (
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/internal/metrics"
+	"github.com/routatic/proxy/internal/provider"
 	"github.com/routatic/proxy/internal/router"
 	"github.com/routatic/proxy/internal/token"
 	"github.com/routatic/proxy/internal/transformer"
@@ -25,6 +26,25 @@ import (
 )
 
 func boolPtr(b bool) *bool { return &b }
+
+// newTestProviderRegistry mirrors production wiring (internal/server/server.go),
+// which registers all three providers unconditionally. Tests that pass a nil
+// registry exercise the OpenAI-compatible path reserved for unregistered
+// providers such as OpenRouter, which is not what most of these tests intend.
+func newTestProviderRegistry(t *testing.T, atomicCfg *config.AtomicConfig) *core.ProviderRegistry {
+	t.Helper()
+	reg := core.NewProviderRegistry()
+	for _, p := range []core.Provider{
+		provider.NewOpenCodeGoProvider(atomicCfg),
+		provider.NewOpenCodeZenProvider(atomicCfg),
+		provider.NewAWSBedrockProvider(atomicCfg),
+	} {
+		if err := reg.Register(p); err != nil {
+			t.Fatalf("register provider %s: %v", p.Name(), err)
+		}
+	}
+	return reg
+}
 
 func TestDecodeMessageUsageIncludesCacheTokens(t *testing.T) {
 	usage := decodeMessageUsage([]byte(`{
@@ -440,30 +460,18 @@ type usageLimitStreamProvider struct {
 }
 
 func (p *usageLimitStreamProvider) Name() string { return p.name }
-func (p *usageLimitStreamProvider) Capabilities() core.ProviderCapabilities {
-	return core.ProviderCapabilities{SupportsStreaming: true, SupportsTools: true}
-}
-func (p *usageLimitStreamProvider) ModelCapabilities(string) (core.ProviderCapabilities, bool) {
-	return p.Capabilities(), true
-}
 func (p *usageLimitStreamProvider) WireFormat(string) core.WireFormat {
 	return core.WireFormatAnthropic
 }
-func (p *usageLimitStreamProvider) Execute(context.Context, *core.NormalizedRequest, config.ModelConfig) (*core.ExecuteResult, error) {
+func (p *usageLimitStreamProvider) Execute(context.Context, *types.MessageRequest, config.ModelConfig) (*core.ExecuteResult, error) {
 	return nil, p.err
 }
-func (p *usageLimitStreamProvider) Stream(context.Context, *core.NormalizedRequest, config.ModelConfig) (io.ReadCloser, error) {
+func (p *usageLimitStreamProvider) Stream(context.Context, *types.MessageRequest, config.ModelConfig) (io.ReadCloser, error) {
 	*p.calls++
 	if p.err != nil {
 		return nil, p.err
 	}
 	return io.NopCloser(strings.NewReader(p.body)), nil
-}
-func (p *usageLimitStreamProvider) RoundTripName(model config.ModelConfig) string {
-	return model.ModelID
-}
-func (p *usageLimitStreamProvider) StreamIdleTimeout(config.ModelConfig) time.Duration {
-	return time.Minute
 }
 
 func TestHandleStreaming_UsageLimitSkipsRemainingProviderModels(t *testing.T) {
@@ -496,7 +504,6 @@ func TestHandleStreaming_UsageLimitSkipsRemainingProviderModels(t *testing.T) {
 		rec,
 		req,
 		&types.MessageRequest{Stream: &stream},
-		&core.NormalizedRequest{Stream: true},
 		[]config.ModelConfig{
 			{Provider: "opencode-go", ModelID: "deepseek-v4-pro"},
 			{Provider: "opencode-go", ModelID: "qwen3.7-plus"},
@@ -511,191 +518,6 @@ func TestHandleStreaming_UsageLimitSkipsRemainingProviderModels(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "message_stop") {
 		t.Fatalf("Zen stream not returned: %q", rec.Body.String())
-	}
-}
-
-func TestSanitizeAnthropicBody_RemovesToolTypeField(t *testing.T) {
-	rawBody := json.RawMessage(`{
-		"model": "minimax-m3",
-		"tools": [
-			{
-				"type": "custom",
-				"name": "my_tool",
-				"description": "A test tool",
-				"input_schema": {"type": "object"}
-			},
-			{
-				"type": "custom",
-				"name": "other_tool",
-				"description": "Another tool",
-				"input_schema": {"type": "object"}
-			}
-		]
-	}`)
-
-	result := sanitizeAnthropicBody(rawBody)
-
-	var body map[string]any
-	if err := json.Unmarshal(result, &body); err != nil {
-		t.Fatalf("failed to unmarshal result: %v", err)
-	}
-
-	tools, ok := body["tools"].([]any)
-	if !ok {
-		t.Fatal("expected tools array in result")
-	}
-
-	for i, tool := range tools {
-		toolMap, ok := tool.(map[string]any)
-		if !ok {
-			t.Fatalf("tool %d is not a map", i)
-		}
-		if _, hasType := toolMap["type"]; hasType {
-			t.Errorf("tool %d still has type field after sanitization", i)
-		}
-		if name, ok := toolMap["name"]; !ok || name != ([]string{"my_tool", "other_tool"})[i] {
-			t.Errorf("tool %d name field was corrupted", i)
-		}
-	}
-}
-
-func TestSanitizeAnthropicBody_NoTools(t *testing.T) {
-	rawBody := json.RawMessage(`{"model": "minimax-m3", "messages": []}`)
-	result := sanitizeAnthropicBody(rawBody)
-
-	// Should return the original body unchanged
-	if string(result) != string(rawBody) {
-		t.Error("body without tools should be returned unchanged")
-	}
-}
-
-func TestSanitizeAnthropicBody_ToolsWithoutType(t *testing.T) {
-	rawBody := json.RawMessage(`{
-		"tools": [
-			{
-				"name": "my_tool",
-				"description": "No type field",
-				"input_schema": {"type": "object"}
-			}
-		]
-	}`)
-	result := sanitizeAnthropicBody(rawBody)
-
-	// Should return the original body unchanged (no type field to remove)
-	if string(result) != string(rawBody) {
-		t.Error("body with tools without type should be returned unchanged")
-	}
-}
-
-func TestSanitizeAnthropicBody_InvalidJSON(t *testing.T) {
-	rawBody := json.RawMessage(`{invalid json}`)
-	result := sanitizeAnthropicBody(rawBody)
-
-	// Should return original body unchanged on invalid JSON
-	if string(result) != string(rawBody) {
-		t.Error("invalid JSON should be returned unchanged")
-	}
-}
-
-func TestSanitizeAnthropicBody_EmptyBody(t *testing.T) {
-	rawBody := json.RawMessage(`{}`)
-	result := sanitizeAnthropicBody(rawBody)
-
-	if string(result) != string(rawBody) {
-		t.Error("empty body should be returned unchanged")
-	}
-}
-
-func TestSanitizeAnthropicBody_KeepsOtherFields(t *testing.T) {
-	rawBody := json.RawMessage(`{
-		"model": "minimax-m3",
-		"system": "You are a helpful assistant",
-		"messages": [{"role": "user", "content": "hello"}],
-		"max_tokens": 4096,
-		"tools": [
-			{
-				"type": "custom",
-				"name": "test_tool",
-				"description": "desc",
-				"input_schema": {"type": "object", "properties": {}}
-			}
-		]
-	}`)
-	result := sanitizeAnthropicBody(rawBody)
-
-	var body map[string]any
-	if err := json.Unmarshal(result, &body); err != nil {
-		t.Fatalf("failed to unmarshal result: %v", err)
-	}
-
-	// Check that non-tool fields are preserved
-	if body["model"] != "minimax-m3" {
-		t.Error("model field was corrupted")
-	}
-	if body["system"] != "You are a helpful assistant" {
-		t.Error("system field was corrupted")
-	}
-	if body["max_tokens"] != float64(4096) {
-		t.Error("max_tokens field was corrupted")
-	}
-}
-
-func TestReplaceModelInRawBody_JSONBased(t *testing.T) {
-	raw := json.RawMessage(`{"model":"old-model","stream":true}`)
-	res := replaceModelInRawBody(raw, "new-model")
-	var m map[string]interface{}
-	if err := json.Unmarshal(res, &m); err != nil {
-		t.Fatal(err)
-	}
-	if got := m["model"]; got != "new-model" {
-		t.Errorf("got %q, want new-model", got)
-	}
-	if got := m["stream"]; got != true {
-		t.Errorf("got %v, want true", got)
-	}
-}
-
-func TestReplaceModelInRawBody_HandlesWhitespace(t *testing.T) {
-	raw := json.RawMessage(`{  "model"  :   "old-model"  ,   "stream": true}`)
-	res := replaceModelInRawBody(raw, "new-model")
-	var m map[string]interface{}
-	if err := json.Unmarshal(res, &m); err != nil {
-		t.Fatal(err)
-	}
-	if got := m["model"]; got != "new-model" {
-		t.Errorf("got %q, want new-model", got)
-	}
-}
-
-func TestReplaceModelInRawBody_ReturnsOriginalWhenModelMissing(t *testing.T) {
-	raw := json.RawMessage(`{"stream":true}`)
-	res := replaceModelInRawBody(raw, "new-model")
-	if string(res) != string(raw) {
-		t.Errorf("got %s, want original", string(res))
-	}
-}
-
-func TestReplaceModelInRawBody_ReturnsOriginalOnInvalidJSON(t *testing.T) {
-	raw := json.RawMessage(`{invalid json}`)
-	res := replaceModelInRawBody(raw, "new-model")
-	if string(res) != string(raw) {
-		t.Errorf("got %s, want original", string(res))
-	}
-}
-
-func TestReplaceModelInRawBody_HandlesNestedObjects(t *testing.T) {
-	raw := json.RawMessage(`{"model":"old","nested":{"model":"don't touch me"}}`)
-	res := replaceModelInRawBody(raw, "new")
-	var m map[string]interface{}
-	if err := json.Unmarshal(res, &m); err != nil {
-		t.Fatal(err)
-	}
-	if got := m["model"]; got != "new" {
-		t.Errorf("top-level model = %q, want new", got)
-	}
-	nested := m["nested"].(map[string]interface{})
-	if got := nested["model"]; got != "don't touch me" {
-		t.Errorf("nested model = %q, want 'don't touch me'", got)
 	}
 }
 
@@ -745,7 +567,7 @@ func TestHandleStreaming_GoAnthropicModel_SendsRawAnthropicBody(t *testing.T) {
 	ctx, cancel := context.WithCancel(req.Context())
 	defer cancel()
 
-	handler.handleStreaming(recorder, req.WithContext(ctx), &anthropicReq, &core.NormalizedRequest{}, chain, rawBody, router.Scenario(""), "")
+	handler.handleStreaming(recorder, req.WithContext(ctx), &anthropicReq, chain, rawBody, router.Scenario(""), "")
 
 	if len(capturedBody) == 0 {
 		t.Fatal("upstream received no body")
@@ -840,7 +662,7 @@ func TestHandleStreaming_GoAnthropicModel_FallsThroughOnError(t *testing.T) {
 	ctx, cancel := context.WithCancel(req.Context())
 	defer cancel()
 
-	handler.handleStreaming(recorder, req.WithContext(ctx), &anthropicReq, &core.NormalizedRequest{}, chain, rawBody, router.Scenario(""), "")
+	handler.handleStreaming(recorder, req.WithContext(ctx), &anthropicReq, chain, rawBody, router.Scenario(""), "")
 
 	finalCount := atomic.LoadInt32(&callCount)
 	if finalCount != 2 {
@@ -861,8 +683,13 @@ func newStreamingTestHandler(t *testing.T, upstreamURL string) *MessagesHandler 
 	atomicCfg := config.NewAtomicConfig(cfg, "/tmp/test-config.json")
 	ocClient := client.NewOpenCodeClient(atomicCfg, nil)
 
+	// Mirror production wiring: the registry is always populated, so requests
+	// dispatch through the provider path rather than the OpenAI-compatible
+	// fallback used for unregistered providers.
 	return &MessagesHandler{
 		client:              ocClient,
+		providerRegistry:    newTestProviderRegistry(t, atomicCfg),
+		streamProxy:         NewStreamProxy(),
 		logger:              slog.Default(),
 		metrics:             metrics.New(),
 		streamHandler:       transformer.NewStreamHandler(),
@@ -891,13 +718,12 @@ func TestHandleMessages_UnknownProvider(t *testing.T) {
 
 	handler := NewMessagesHandler(
 		ocClient,
-		nil, // providerRegistry
+		newTestProviderRegistry(t, atomicCfg),
 		modelRouter,
 		nil, // fallbackHandler
 		tokenCounter,
 		metrics.New(),
 		nil, // captureLogger
-		nil, // hist
 		nil, // storage
 	)
 	handler.logger = slog.Default()
@@ -974,13 +800,12 @@ func TestHandleMessages_StreamingMinimaxM3_UsesAnthropicEndpoint(t *testing.T) {
 
 	handler := NewMessagesHandler(
 		ocClient,
-		nil, // providerRegistry
+		newTestProviderRegistry(t, atomicCfg),
 		modelRouter,
 		nil, // fallbackHandler
 		tokenCounter,
 		metrics.New(),
 		nil, // captureLogger
-		nil, // hist
 		nil, // storage
 	)
 	handler.logger = slog.Default()
@@ -1089,13 +914,12 @@ func TestHandleNonStreaming_GoAnthropicModel_ReplacesModelInBody(t *testing.T) {
 
 	handler := NewMessagesHandler(
 		ocClient,
-		nil, // providerRegistry
+		newTestProviderRegistry(t, atomicCfg),
 		modelRouter,
 		router.NewFallbackHandler(slog.Default(), 3, 30*time.Second),
 		tokenCounter,
 		metrics.New(),
 		nil, // captureLogger
-		nil, // hist
 		nil, // storage
 	)
 	handler.logger = slog.Default()
@@ -1207,13 +1031,12 @@ func TestHandleNonStreaming_ZenAnthropicModel_ReplacesModelInBody(t *testing.T) 
 
 	handler := NewMessagesHandler(
 		ocClient,
-		nil, // providerRegistry
+		newTestProviderRegistry(t, atomicCfg),
 		modelRouter,
 		router.NewFallbackHandler(slog.Default(), 3, 30*time.Second),
 		tokenCounter,
 		metrics.New(),
 		nil, // captureLogger
-		nil, // hist
 		nil, // storage
 	)
 	handler.logger = slog.Default()
@@ -1329,7 +1152,7 @@ func TestHandleStreaming_ConfigurableTimeout(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		handler.handleStreaming(recorder, req.WithContext(ctx), &anthropicReq, &core.NormalizedRequest{Stream: true}, chain, rawBody, router.Scenario(""), "")
+		handler.handleStreaming(recorder, req.WithContext(ctx), &anthropicReq, chain, rawBody, router.Scenario(""), "")
 	}()
 
 	select {
@@ -1381,7 +1204,7 @@ func TestHandleStreaming_ClientContextCanceled_StopsFallback(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		handler.handleStreaming(recorder, req.WithContext(ctx), &anthropicReq, &core.NormalizedRequest{Stream: true}, chain, rawBody, router.Scenario(""), "")
+		handler.handleStreaming(recorder, req.WithContext(ctx), &anthropicReq, chain, rawBody, router.Scenario(""), "")
 	}()
 
 	select {
@@ -1438,7 +1261,7 @@ func TestHandleStreaming_ClientDisconnectsDuringStream_StopsFallback(t *testing.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		handler.handleStreaming(recorder, req.WithContext(ctx), &anthropicReq, &core.NormalizedRequest{Stream: true}, chain, rawBody, router.Scenario(""), "")
+		handler.handleStreaming(recorder, req.WithContext(ctx), &anthropicReq, chain, rawBody, router.Scenario(""), "")
 	}()
 
 	time.Sleep(100 * time.Millisecond)
@@ -1516,7 +1339,7 @@ func TestHandleStreaming_PerModelTimeoutFallback(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		handler.handleStreaming(recorder, req.WithContext(ctx), &anthropicReq, &core.NormalizedRequest{Stream: true}, chain, rawBody, router.Scenario(""), "")
+		handler.handleStreaming(recorder, req.WithContext(ctx), &anthropicReq, chain, rawBody, router.Scenario(""), "")
 	}()
 
 	select {
@@ -1572,13 +1395,12 @@ func TestHandleNonStreaming_ParentContextCanceled_No502(t *testing.T) {
 	m := metrics.New()
 	handler := NewMessagesHandler(
 		ocClient,
-		nil, // providerRegistry
+		newTestProviderRegistry(t, atomicCfg),
 		modelRouter,
 		router.NewFallbackHandler(slog.Default(), 3, 30*time.Second),
 		tokenCounter,
 		m,
 		nil, // captureLogger
-		nil, // hist
 		nil, // storage
 	)
 	handler.logger = slog.Default()
@@ -1655,13 +1477,12 @@ func TestHandleNonStreaming_ParentDeadlineExceeded_No502(t *testing.T) {
 	m := metrics.New()
 	handler := NewMessagesHandler(
 		ocClient,
-		nil, // providerRegistry
+		newTestProviderRegistry(t, atomicCfg),
 		modelRouter,
 		router.NewFallbackHandler(slog.Default(), 3, 30*time.Second),
 		tokenCounter,
 		m,
 		nil, // captureLogger
-		nil, // hist
 		nil, // storage
 	)
 	handler.logger = slog.Default()
@@ -1881,7 +1702,7 @@ func TestHandleStreaming_AnthropicRaw_NoKeepaliveInjection(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		handler.handleStreaming(recorder, req.WithContext(ctx), &anthropicReq, &core.NormalizedRequest{Stream: true}, chain, rawBody, router.Scenario(""), "")
+		handler.handleStreaming(recorder, req.WithContext(ctx), &anthropicReq, chain, rawBody, router.Scenario(""), "")
 	}()
 
 	time.Sleep(1000 * time.Millisecond)

@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/core"
+	"github.com/routatic/proxy/internal/models"
 	"github.com/routatic/proxy/internal/transformer"
 	"github.com/routatic/proxy/pkg/types"
 )
@@ -29,72 +29,16 @@ func NewOpenCodeGoProvider(atomic *config.AtomicConfig) *OpenCodeGoProvider {
 // Name returns the provider identifier.
 func (p *OpenCodeGoProvider) Name() string { return "opencode-go" }
 
-// Capabilities returns provider-level capabilities.
-func (p *OpenCodeGoProvider) Capabilities() core.ProviderCapabilities {
-	return core.ProviderCapabilities{
-		SupportsStreaming:  true,
-		SupportsTools:      true,
-		SupportsThinking:   true,
-		SupportsImageInput: true,
-		MaxContextLength:   128_000,
-		DefaultMaxTokens:   4096,
-	}
-}
-
-// ModelCapabilities returns per-model capabilities. Returns false if unknown.
-func (p *OpenCodeGoProvider) ModelCapabilities(modelID string) (core.ProviderCapabilities, bool) {
-	caps := p.Capabilities()
-	// qwen3.7-max has a larger context window on the Go provider.
-	if modelID == "qwen3.7-max" {
-		caps.MaxContextLength = 1_000_000
-	}
-	// MiniMax models support 1M context.
-	switch modelID {
-	case "minimax-m2.5", "minimax-m2.7", "minimax-m3":
-		caps.MaxContextLength = 1_000_000
-	}
-	return caps, true
-}
-
 // WireFormat returns the wire format for the given model on the Go provider.
 func (p *OpenCodeGoProvider) WireFormat(modelID string) core.WireFormat {
-	if isAnthropicNativeGo(modelID) {
+	if models.IsAnthropicModel(modelID) {
 		return core.WireFormatAnthropic
 	}
 	return core.WireFormatOpenAIChat
 }
 
-func isAnthropicNativeGo(modelID string) bool {
-	switch modelID {
-	case "minimax-m2.5", "minimax-m2.7", "minimax-m3",
-		"qwen3.5-plus", "qwen3.6-plus", "qwen3.7-plus", "qwen3.7-max":
-		return true
-	default:
-		return false
-	}
-}
-
-// RoundTripName returns the model ID to use in the upstream request.
-func (p *OpenCodeGoProvider) RoundTripName(model config.ModelConfig) string {
-	return model.ModelID
-}
-
-// StreamIdleTimeout returns the maximum gap between bytes on an active stream.
-func (p *OpenCodeGoProvider) StreamIdleTimeout(model config.ModelConfig) time.Duration {
-	const fallback = 5 * time.Minute
-	cfg := p.atomic.Get()
-	ms := cfg.OpenCodeGo.StreamTimeoutMs
-	if ms <= 0 {
-		ms = cfg.OpenCodeGo.TimeoutMs
-	}
-	if ms <= 0 {
-		return fallback
-	}
-	return time.Duration(ms) * time.Millisecond
-}
-
 // Execute sends a non-streaming request and returns the response.
-func (p *OpenCodeGoProvider) Execute(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
+func (p *OpenCodeGoProvider) Execute(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	switch p.WireFormat(model.ModelID) {
 	case core.WireFormatAnthropic:
 		return p.executeAnthropic(ctx, req, model)
@@ -104,7 +48,7 @@ func (p *OpenCodeGoProvider) Execute(ctx context.Context, req *core.NormalizedRe
 }
 
 // Stream sends a streaming request and returns an io.ReadCloser for SSE events.
-func (p *OpenCodeGoProvider) Stream(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (io.ReadCloser, error) {
+func (p *OpenCodeGoProvider) Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	switch p.WireFormat(model.ModelID) {
 	case core.WireFormatAnthropic:
 		return p.streamAnthropic(ctx, req, model)
@@ -115,16 +59,18 @@ func (p *OpenCodeGoProvider) Stream(ctx context.Context, req *core.NormalizedReq
 
 // ── OpenAI Chat Completions ────────────────────────────────────────────
 
-func (p *OpenCodeGoProvider) executeOpenAI(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
+func (p *OpenCodeGoProvider) executeOpenAI(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeGo.BaseURL
 	apiKey := p.nextAPIKey(cfg.EffectiveAPIKeys())
 
-	openaiReq := transformer.TransformRequestFromNormalized(req, model)
+	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
+	if err != nil {
+		return nil, fmt.Errorf("request transform failed: %w", err)
+	}
 	streamFalse := false
 	openaiReq.Stream = &streamFalse
 
-	start := time.Now()
 	resp, err := p.doRequest(ctx, endpoint, apiKey, openaiReq, false)
 	if err != nil {
 		return nil, err
@@ -149,18 +95,19 @@ func (p *OpenCodeGoProvider) executeOpenAI(ctx context.Context, req *core.Normal
 	}
 
 	return &core.ExecuteResult{
-		Body:    resultBody,
-		ModelID: model.ModelID,
-		Latency: time.Since(start),
+		Body: resultBody,
 	}, nil
 }
 
-func (p *OpenCodeGoProvider) streamOpenAI(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (io.ReadCloser, error) {
+func (p *OpenCodeGoProvider) streamOpenAI(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeGo.BaseURL
 	apiKey := p.nextAPIKey(cfg.EffectiveAPIKeys())
 
-	openaiReq := transformer.TransformRequestFromNormalized(req, model)
+	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
+	if err != nil {
+		return nil, fmt.Errorf("request transform failed: %w", err)
+	}
 	streamTrue := true
 	openaiReq.Stream = &streamTrue
 
@@ -174,12 +121,12 @@ func (p *OpenCodeGoProvider) streamOpenAI(ctx context.Context, req *core.Normali
 
 // ── Anthropic Messages ────────────────────────────────────────────────
 
-func (p *OpenCodeGoProvider) executeAnthropic(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
+func (p *OpenCodeGoProvider) executeAnthropic(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeGo.AnthropicBaseURL
 	apiKey := p.nextAPIKey(cfg.EffectiveAPIKeys())
 
-	anthropicReq := transformer.NormalizedToAnthropic(req, model)
+	anthropicReq := transformer.AnthropicForModel(req, model, false)
 	rawBody, err := json.Marshal(anthropicReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal anthropic request: %w", err)
@@ -193,7 +140,6 @@ func (p *OpenCodeGoProvider) executeAnthropic(ctx context.Context, req *core.Nor
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 	httpReq.Header.Set("x-api-key", apiKey)
 
-	start := time.Now()
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -210,19 +156,15 @@ func (p *OpenCodeGoProvider) executeAnthropic(ctx context.Context, req *core.Nor
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	return &core.ExecuteResult{
-		Body:    body,
-		ModelID: model.ModelID,
-		Latency: time.Since(start),
-	}, nil
+	return &core.ExecuteResult{Body: body}, nil
 }
 
-func (p *OpenCodeGoProvider) streamAnthropic(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (io.ReadCloser, error) {
+func (p *OpenCodeGoProvider) streamAnthropic(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeGo.AnthropicBaseURL
 	apiKey := p.nextAPIKey(cfg.EffectiveAPIKeys())
 
-	anthropicReq := transformer.NormalizedToAnthropic(req, model)
+	anthropicReq := transformer.AnthropicForModel(req, model, true)
 	rawBody, err := json.Marshal(anthropicReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal anthropic request: %w", err)

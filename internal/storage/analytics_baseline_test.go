@@ -1,12 +1,104 @@
 package storage
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/routatic/proxy/internal/history"
 )
+
+// TestAnalyticsWindow_DaysAndExplicitRangeAgree pins the shared window
+// construction both entry points now funnel through: "last N days" and the
+// equivalent explicit range must aggregate the same rows into the same JSON, the
+// baseline must clamp both, and a provider-corrected row (usage_trusted=1) must
+// stay in the window even though its timestamp predates the baseline.
+func TestAnalyticsWindow_DaysAndExplicitRangeAgree(t *testing.T) {
+	db := newCostTestDB(t)
+
+	baseline := time.Now().Add(-3 * time.Hour)
+	for _, rec := range []history.RequestRecord{
+		{
+			ID: "corrected", Model: "deepseek-v4-flash", Provider: "opencode-go", Success: true,
+			StartTime: baseline.Add(-time.Hour), InputTokens: 1_000, OutputTokens: 100,
+		},
+		{
+			ID: "untrustworthy", Model: "deepseek-v4-flash", Provider: "opencode-go", Success: true,
+			StartTime: baseline.Add(-time.Hour), InputTokens: 2_000, OutputTokens: 200,
+		},
+		{
+			ID: "recent", Model: "qwen3.7-plus", Provider: "opencode-go", Success: true,
+			StartTime: baseline.Add(time.Hour), InputTokens: 4_000, OutputTokens: 400,
+		},
+	} {
+		insertCostRecord(t, db, rec)
+	}
+	// Only the provider sync marks a row trusted, so do it the same way here.
+	if _, err := db.DB().Exec(`UPDATE requests SET usage_trusted = 1 WHERE id = ?`, "corrected"); err != nil {
+		t.Fatalf("mark row trusted: %v", err)
+	}
+
+	a := &Analytics{db: db, baseline: baseline}
+
+	now := time.Now()
+	explicit, err := a.WindowBetween(now.AddDate(0, 0, -7), now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("WindowBetween: %v", err)
+	}
+
+	// Everything the dashboard serves, in wire form, for one resolved window.
+	snapshot := func(label string, window Window) string {
+		t.Helper()
+		summary, err := a.TokenSummary(window)
+		if err != nil {
+			t.Fatalf("%s summary: %v", label, err)
+		}
+		if summary.TotalRequests != 2 {
+			t.Errorf("%s: requests = %d, want 2 (corrected pre-baseline row plus the recent one)",
+				label, summary.TotalRequests)
+		}
+		if summary.InputTokens != 5_000 {
+			t.Errorf("%s: input tokens = %d, want 5000 (untrustworthy pre-baseline row excluded)",
+				label, summary.InputTokens)
+		}
+		if !summary.PeriodStart.Equal(baseline) {
+			t.Errorf("%s: PeriodStart = %v, want the clamped baseline %v", label, summary.PeriodStart, baseline)
+		}
+		models, err := a.ModelBreakdown(window)
+		if err != nil {
+			t.Fatalf("%s models: %v", label, err)
+		}
+		providers, err := a.ProviderBreakdown(window)
+		if err != nil {
+			t.Fatalf("%s providers: %v", label, err)
+		}
+		scenarios, err := a.ScenarioBreakdown(window)
+		if err != nil {
+			t.Fatalf("%s scenarios: %v", label, err)
+		}
+		trend, err := a.TokenTrend(window, "day")
+		if err != nil {
+			t.Fatalf("%s trend: %v", label, err)
+		}
+		// The two windows are resolved microseconds apart, so their end instants
+		// differ by construction; nothing else may.
+		wire := *summary
+		wire.PeriodEnd = time.Time{}
+		blob, err := json.Marshal(map[string]any{
+			"summary": wire, "models": models, "providers": providers,
+			"scenarios": scenarios, "trend": trend,
+		})
+		if err != nil {
+			t.Fatalf("%s marshal: %v", label, err)
+		}
+		return string(blob)
+	}
+
+	if days, between := snapshot("days", a.Window(7)), snapshot("explicit range", explicit); days != between {
+		t.Errorf("days path and explicit range disagree:\n days = %s\nrange = %s", days, between)
+	}
+}
 
 // TestAnalyticsBaseline_ExcludesUntrustworthyRows covers the real incident this
 // mechanism exists for: an earlier build recorded whole prompts as fresh input
@@ -32,7 +124,7 @@ func TestAnalyticsBaseline_ExcludesUntrustworthyRows(t *testing.T) {
 	})
 
 	full := NewAnalytics(db)
-	fullSummary, err := full.GetTokenSummary(30)
+	fullSummary, err := full.TokenSummary(full.Window(30))
 	if err != nil {
 		t.Fatalf("GetTokenSummary (no baseline): %v", err)
 	}
@@ -40,9 +132,10 @@ func TestAnalyticsBaseline_ExcludesUntrustworthyRows(t *testing.T) {
 		t.Fatalf("without baseline: requests = %d, want 2", fullSummary.TotalRequests)
 	}
 
-	scoped := NewAnalytics(db)
-	scoped.SetBaseline(cutoff)
-	scopedSummary, err := scoped.GetTokenSummary(30)
+	// Same package: construct with the baseline directly rather than via a
+	// production setter that exists only for tests.
+	scoped := &Analytics{db: db, baseline: cutoff}
+	scopedSummary, err := scoped.TokenSummary(scoped.Window(30))
 	if err != nil {
 		t.Fatalf("GetTokenSummary (baseline): %v", err)
 	}
@@ -71,7 +164,7 @@ func TestAnalyticsBaseline_ExcludesUntrustworthyRows(t *testing.T) {
 	}
 
 	// Every aggregate must honour the same cutoff, not just the summary.
-	models, err := scoped.GetModelBreakdown(30)
+	models, err := scoped.ModelBreakdown(scoped.Window(30))
 	if err != nil {
 		t.Fatalf("GetModelBreakdown: %v", err)
 	}
@@ -83,7 +176,7 @@ func TestAnalyticsBaseline_ExcludesUntrustworthyRows(t *testing.T) {
 		t.Errorf("model breakdown requests = %d, want 1", modelRequests)
 	}
 
-	providers, err := scoped.GetProviderBreakdown(30)
+	providers, err := scoped.ProviderBreakdown(scoped.Window(30))
 	if err != nil {
 		t.Fatalf("GetProviderBreakdown: %v", err)
 	}
@@ -113,10 +206,9 @@ func TestAnalyticsBaseline_DoesNotWidenWindow(t *testing.T) {
 		InputTokens: 1_000, OutputTokens: 100,
 	})
 
-	a := NewAnalytics(db)
-	a.SetBaseline(time.Now().AddDate(0, 0, -90)) // older than the 7-day window
+	a := &Analytics{db: db, baseline: time.Now().AddDate(0, 0, -90)} // older than the 7-day window
 
-	summary, err := a.GetTokenSummary(7)
+	summary, err := a.TokenSummary(a.Window(7))
 	if err != nil {
 		t.Fatalf("GetTokenSummary: %v", err)
 	}
@@ -145,7 +237,7 @@ func TestOpen_AnalyticsBaselineConfig(t *testing.T) {
 	if got := db.AnalyticsBaseline(); !got.Equal(want) {
 		t.Errorf("Database baseline = %v, want %v", got, want)
 	}
-	if got := NewAnalytics(db).Baseline(); !got.Equal(want) {
+	if got := NewAnalytics(db).baseline; !got.Equal(want) {
 		t.Errorf("NewAnalytics did not inherit the baseline: got %v, want %v", got, want)
 	}
 

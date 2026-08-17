@@ -19,12 +19,48 @@ func selectorTestCatalog(t *testing.T) *catalog.IndexedCatalog {
 	return cat
 }
 
+// selectorTestScenarios mirrors the scenario policies these tests previously
+// read from the catalog fixture, now that cost_routing.scenarios in the config
+// is the only source. Scenario names are validated at config load time
+// (see config.validateCostScenarios); the selector itself accepts any key, so
+// these synthetic names exercise the matching logic directly.
+func selectorTestScenarios() map[string]config.CostScenario {
+	yes := true
+	return map[string]config.CostScenario{
+		"default":            {},
+		"fast":               {},
+		"tools_required":     {RequiresTools: &yes},
+		"vision_required":    {RequiresVision: &yes},
+		"reasoning_required": {RequiresReasoning: &yes},
+		"long_context":       {MinContextWindow: 500000},
+		"preferred_only":     {PreferredProviders: []string{"openrouter"}},
+		"complex":            {RequiresTools: &yes, MinContextWindow: 500000},
+		"vision":             {RequiresVision: &yes},
+		"vision_complex":     {RequiresVision: &yes, RequiresTools: &yes},
+	}
+}
+
+// withSelectorScenarios attaches the shared scenario policies to cfg while
+// preserving any cost_routing settings the caller already made.
+func withSelectorScenarios(cfg *config.Config) *config.Config {
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	if cfg.CostRouting == nil {
+		cfg.CostRouting = &config.CostRoutingConfig{}
+	}
+	if cfg.CostRouting.Scenarios == nil {
+		cfg.CostRouting.Scenarios = selectorTestScenarios()
+	}
+	return cfg
+}
+
 func TestSelectCheapest_SelectsCheapestModel(t *testing.T) {
 	cfg := &config.Config{
 		OpenCodeGo: config.OpenCodeGoConfig{APIKey: "go-key"},
 		OpenRouter: config.OpenRouterConfig{APIKey: "or-key"},
 	}
-	selector := NewSelector(selectorTestCatalog(t), cfg)
+	selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 	got, err := selector.SelectCheapest("default", ScenarioConstraints{})
 	if err != nil {
@@ -47,7 +83,7 @@ func TestSelectCheapest_FiltersByToolsConstraint(t *testing.T) {
 	cfg := &config.Config{
 		OpenCodeGo: config.OpenCodeGoConfig{APIKey: "go-key"},
 	}
-	selector := NewSelector(selectorTestCatalog(t), cfg)
+	selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 	got, err := selector.SelectCheapest("default", ScenarioConstraints{Tools: true})
 	if err != nil {
@@ -68,7 +104,7 @@ func TestSelectCheapest_FiltersByVisionConstraint(t *testing.T) {
 		OpenCodeGo: config.OpenCodeGoConfig{APIKey: "go-key"},
 		OpenRouter: config.OpenRouterConfig{APIKey: "or-key"},
 	}
-	selector := NewSelector(selectorTestCatalog(t), cfg)
+	selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 	got, err := selector.SelectCheapest("default", ScenarioConstraints{Vision: true})
 	if err != nil {
@@ -88,7 +124,7 @@ func TestSelectCheapest_FiltersByReasoningConstraint(t *testing.T) {
 	cfg := &config.Config{
 		OpenRouter: config.OpenRouterConfig{APIKey: "or-key"},
 	}
-	selector := NewSelector(selectorTestCatalog(t), cfg)
+	selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 	got, err := selector.SelectCheapest("default", ScenarioConstraints{Reasoning: true})
 	if err != nil {
@@ -109,7 +145,7 @@ func TestSelectCheapest_FiltersByContextConstraint(t *testing.T) {
 		OpenCodeGo: config.OpenCodeGoConfig{APIKey: "go-key"},
 		OpenRouter: config.OpenRouterConfig{APIKey: "or-key"},
 	}
-	selector := NewSelector(selectorTestCatalog(t), cfg)
+	selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 	got, err := selector.SelectCheapest("default", ScenarioConstraints{Context: 500000})
 	if err != nil {
@@ -129,7 +165,7 @@ func TestSelectCheapest_FiltersByScenarioRequirements(t *testing.T) {
 	cfg := &config.Config{
 		OpenRouter: config.OpenRouterConfig{APIKey: "or-key"},
 	}
-	selector := NewSelector(selectorTestCatalog(t), cfg)
+	selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 	tests := []struct {
 		scenario string
@@ -213,7 +249,7 @@ func TestSelectCheapest_EnabledProvidersOnly(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			selector := NewSelector(cat, tt.cfg)
+			selector := NewSelector(cat, withSelectorScenarios(tt.cfg))
 			got, err := selector.SelectCheapest(tt.scenario, tt.constraints)
 			if tt.wantErr {
 				if err == nil {
@@ -236,7 +272,7 @@ func TestSelectCheapest_PreferredProvidersFilter(t *testing.T) {
 		OpenCodeGo: config.OpenCodeGoConfig{APIKey: "go-key"},
 		OpenRouter: config.OpenRouterConfig{APIKey: "or-key"},
 	}
-	selector := NewSelector(selectorTestCatalog(t), cfg)
+	selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 	got, err := selector.SelectCheapest("preferred_only", ScenarioConstraints{})
 	if err != nil {
@@ -256,7 +292,7 @@ func TestSelectCheapest_NoCandidateReturnsError(t *testing.T) {
 	cfg := &config.Config{
 		OpenCodeGo: config.OpenCodeGoConfig{APIKey: "go-key"},
 	}
-	selector := NewSelector(selectorTestCatalog(t), cfg)
+	selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 	_, err := selector.SelectCheapest("default", ScenarioConstraints{Reasoning: true})
 	if err == nil {
@@ -267,28 +303,35 @@ func TestSelectCheapest_NoCandidateReturnsError(t *testing.T) {
 	}
 }
 
-func TestSelectCheapest_UnknownScenarioReturnsError(t *testing.T) {
+// An unconfigured scenario must NOT disable cost routing. Before this was
+// fixed, SelectCheapest returned "unknown scenario" for every real scenario
+// name, and the caller discarded that error, so cost routing silently did
+// nothing in production while appearing to be enabled.
+func TestSelectCheapest_UnconfiguredScenarioUsesZeroPolicy(t *testing.T) {
 	cfg := &config.Config{
 		OpenCodeGo: config.OpenCodeGoConfig{APIKey: "go-key"},
+		// Scenarios deliberately left unset.
+		CostRouting: &config.CostRoutingConfig{Enabled: true},
 	}
 	selector := NewSelector(selectorTestCatalog(t), cfg)
 
-	_, err := selector.SelectCheapest("does-not-exist", ScenarioConstraints{})
-	if err == nil {
-		t.Fatal("SelectCheapest expected error for unknown scenario, got nil")
+	for _, scenario := range config.CostScenarioNames {
+		got, err := selector.SelectCheapest(scenario, ScenarioConstraints{})
+		if err != nil {
+			t.Fatalf("SelectCheapest(%q) with no configured scenarios: %v", scenario, err)
+		}
+		if got.ModelID != "cheap-no-tools" {
+			t.Errorf("SelectCheapest(%q) = %q, want the cheapest model cheap-no-tools", scenario, got.ModelID)
+		}
 	}
 }
-
-// TestSelectCheapest_Constraints_* exercises constraint handling with the cost
-// fixture catalog, ensuring required capabilities are never sacrificed for a
-// lower price.
 
 func TestSelectCheapest_Constraints_ToolsRequired(t *testing.T) {
 	cfg := &config.Config{
 		OpenCodeGo: config.OpenCodeGoConfig{APIKey: "go-key"},
 		OpenRouter: config.OpenRouterConfig{APIKey: "or-key"},
 	}
-	selector := NewSelector(selectorTestCatalog(t), cfg)
+	selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 	got, err := selector.SelectCheapest("tools_required", ScenarioConstraints{})
 	if err != nil {
@@ -315,7 +358,7 @@ func TestSelectCheapest_Constraints_VisionRequired(t *testing.T) {
 		OpenCodeGo: config.OpenCodeGoConfig{APIKey: "go-key"},
 		OpenRouter: config.OpenRouterConfig{APIKey: "or-key"},
 	}
-	selector := NewSelector(selectorTestCatalog(t), cfg)
+	selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 	got, err := selector.SelectCheapest("vision_required", ScenarioConstraints{})
 	if err != nil {
@@ -342,7 +385,7 @@ func TestSelectCheapest_Constraints_ReasoningRequired(t *testing.T) {
 		OpenCodeGo: config.OpenCodeGoConfig{APIKey: "go-key"},
 		OpenRouter: config.OpenRouterConfig{APIKey: "or-key"},
 	}
-	selector := NewSelector(selectorTestCatalog(t), cfg)
+	selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 	got, err := selector.SelectCheapest("reasoning_required", ScenarioConstraints{})
 	if err != nil {
@@ -365,7 +408,7 @@ func TestSelectCheapest_Constraints_ContextWindow(t *testing.T) {
 		OpenCodeGo: config.OpenCodeGoConfig{APIKey: "go-key"},
 		OpenRouter: config.OpenRouterConfig{APIKey: "or-key"},
 	}
-	selector := NewSelector(selectorTestCatalog(t), cfg)
+	selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 	got, err := selector.SelectCheapest("long_context", ScenarioConstraints{})
 	if err != nil {
@@ -389,7 +432,7 @@ func TestSelectCheapest_Constraints_CombinedVisionAndTools(t *testing.T) {
 		OpenCodeGo: config.OpenCodeGoConfig{APIKey: "go-key"},
 		OpenRouter: config.OpenRouterConfig{APIKey: "or-key"},
 	}
-	selector := NewSelector(selectorTestCatalog(t), cfg)
+	selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 	got, err := selector.SelectCheapest("vision_complex", ScenarioConstraints{})
 	if err != nil {
@@ -428,7 +471,7 @@ func TestSelectCheapest_PenaltyPerProvider(t *testing.T) {
 			},
 		},
 	}
-	selector := NewSelector(selectorTestCatalog(t), cfg)
+	selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 	got, err := selector.SelectCheapest("default", ScenarioConstraints{})
 	if err != nil {
@@ -462,7 +505,7 @@ func TestSelectCheapest_PenaltyPerProvider_NoEffectOnUnlisted(t *testing.T) {
 			},
 		},
 	}
-	selector := NewSelector(selectorTestCatalog(t), cfg)
+	selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 	got, err := selector.SelectCheapest("default", ScenarioConstraints{})
 	if err != nil {
@@ -490,7 +533,7 @@ func TestSelectCheapest_MaxContextWindow(t *testing.T) {
 				MaxContextWindow: 200000,
 			},
 		}
-		selector := NewSelector(selectorTestCatalog(t), cfg)
+		selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 		got, err := selector.SelectCheapest("default", ScenarioConstraints{})
 		if err != nil {
@@ -515,7 +558,7 @@ func TestSelectCheapest_MaxContextWindow(t *testing.T) {
 				MaxContextWindow: 0,
 			},
 		}
-		selector := NewSelector(selectorTestCatalog(t), cfg)
+		selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 		got, err := selector.SelectCheapest("default", ScenarioConstraints{})
 		if err != nil {
@@ -536,7 +579,7 @@ func TestSelectCheapest_MaxContextWindow(t *testing.T) {
 				MaxContextWindow: 100,
 			},
 		}
-		selector := NewSelector(selectorTestCatalog(t), cfg)
+		selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 		_, err := selector.SelectCheapest("default", ScenarioConstraints{})
 		if err == nil {
@@ -559,7 +602,7 @@ func TestSelectCheapest_GlobalPreferProviders(t *testing.T) {
 				PreferProviders: []string{"openrouter"},
 			},
 		}
-		selector := NewSelector(selectorTestCatalog(t), cfg)
+		selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 		// "default" scenario has no scenario-level preferences, so the global
 		// prefer_providers list is used alone. Only openrouter models are eligible.
@@ -585,7 +628,7 @@ func TestSelectCheapest_GlobalPreferProviders(t *testing.T) {
 				PreferProviders: []string{"opencode-go"},
 			},
 		}
-		selector := NewSelector(selectorTestCatalog(t), cfg)
+		selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 		// "preferred_only" scenario prefers openrouter, global pref prefers
 		// opencode-go. The intersection is empty → no candidates.
@@ -603,7 +646,7 @@ func TestSelectCheapest_GlobalPreferProviders(t *testing.T) {
 			OpenCodeGo: config.OpenCodeGoConfig{APIKey: "go-key"},
 			OpenRouter: config.OpenRouterConfig{APIKey: "or-key"},
 		}
-		selector := NewSelector(selectorTestCatalog(t), cfg)
+		selector := NewSelector(selectorTestCatalog(t), withSelectorScenarios(cfg))
 
 		// No global prefer_providers, so "preferred_only" scenario's own
 		// preferred_providers (openrouter) is used.

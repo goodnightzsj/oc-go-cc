@@ -134,11 +134,8 @@ func (cb *CircuitBreaker) State() CircuitState {
 
 // FallbackResult contains the result of a fallback attempt.
 type FallbackResult struct {
-	ModelID     string
-	Success     bool
-	Error       error
-	Attempted   int
-	TotalModels int
+	ModelID   string
+	Attempted int
 }
 
 // FallbackHandler manages model fallback with circuit breaker protection.
@@ -249,10 +246,8 @@ func (h *FallbackHandler) ExecuteWithFallback(
 				"attempt", i+1,
 			)
 			return &FallbackResult{
-				ModelID:     model.ModelID,
-				Success:     true,
-				Attempted:   i + 1,
-				TotalModels: totalModels,
+				ModelID:   model.ModelID,
+				Attempted: i + 1,
 			}, body, nil
 		}
 
@@ -321,39 +316,22 @@ func (h *FallbackHandler) ExecuteWithFallback(
 
 	if authErr != nil {
 		return &FallbackResult{
-			ModelID:     models[0].ModelID,
-			Success:     false,
-			Attempted:   authAttempted,
-			TotalModels: totalModels,
+			ModelID:   models[0].ModelID,
+			Attempted: authAttempted,
 		}, nil, authErr
 	}
 
 	if usageLimitErr != nil {
 		return &FallbackResult{
-			ModelID:     models[0].ModelID,
-			Success:     false,
-			Attempted:   totalModels,
-			TotalModels: totalModels,
+			ModelID:   models[0].ModelID,
+			Attempted: totalModels,
 		}, nil, usageLimitErr
 	}
 
 	return &FallbackResult{
-		ModelID:     models[0].ModelID,
-		Success:     false,
-		Attempted:   totalModels,
-		TotalModels: totalModels,
+		ModelID:   models[0].ModelID,
+		Attempted: totalModels,
 	}, nil, fmt.Errorf("all models failed (%d attempts)", totalModels)
-}
-
-// GetFallbackChain returns the fallback chain for a given primary model.
-func GetFallbackChain(primary config.ModelConfig, fallbacks map[string][]config.ModelConfig) []config.ModelConfig {
-	chain := []config.ModelConfig{primary}
-
-	if fb, exists := fallbacks[primary.ModelID]; exists {
-		chain = append(chain, fb...)
-	}
-
-	return chain
 }
 
 // IsRetryableError determines if an error is worth retrying with a fallback.

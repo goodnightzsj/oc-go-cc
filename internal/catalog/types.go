@@ -1,12 +1,14 @@
 package catalog
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // Catalog is the parsed contents of a models.dev catalog.
 type Catalog struct {
 	Providers map[string]Provider `json:"providers"`
 	Models    map[string]Model    `json:"models"`
-	Scenarios map[string]Scenario `json:"scenarios"`
 }
 
 // Provider describes a model hosting endpoint.
@@ -60,12 +62,7 @@ func (m Model) SupportsTools() bool {
 
 // SupportsVision returns whether the model supports image inputs.
 func (m Model) SupportsVision() bool {
-	for _, mod := range m.Modalities.Input {
-		if mod == "image" {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(m.Modalities.Input, "image")
 }
 
 // ContextWindow returns the model's context window limit, or 0 if unknown.
@@ -115,17 +112,6 @@ func ModelNameFromKey(key string) string {
 // modelNameFromKey is an alias for internal use.
 func modelNameFromKey(key string) string {
 	return ModelNameFromKey(key)
-}
-
-// Scenario describes a workload that selects a model by capability.
-type Scenario struct {
-	Name               string   `json:"name"`
-	Description        string   `json:"description"`
-	RequiresTools      *bool    `json:"requires_tools,omitempty"`
-	RequiresVision     *bool    `json:"requires_vision,omitempty"`
-	RequiresReasoning  *bool    `json:"requires_reasoning,omitempty"`
-	MinContextWindow   int64    `json:"min_context_window"`
-	PreferredProviders []string `json:"preferred_providers"`
 }
 
 // Selector is a parsed model reference such as model@provider,

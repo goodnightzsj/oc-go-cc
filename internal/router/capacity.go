@@ -19,19 +19,10 @@ type SkippedModel struct {
 }
 
 // CapacityDecision captures the result of filtering a model chain by request
-// capacity. It includes the surviving models, the ones that were skipped
-// (with reasons), and metadata about the input and output token budget so
-// callers can log or inspect which constraints drove the selection.
+// capacity: the surviving models plus the ones that were skipped, with reasons.
 type CapacityDecision struct {
-	Models             []config.ModelConfig
-	Skipped            []SkippedModel
-	InputTokens        int
-	RequestedMaxTokens int
-	SelectedMaxTokens  int
-	ContextWindow      int
-	ContextMargin      int
-	NeedsVision        bool
-	NeedsTools         bool
+	Models  []config.ModelConfig
+	Skipped []SkippedModel
 }
 
 // FilterByCapacity examines each model in the fallback chain and removes those
@@ -41,12 +32,7 @@ type CapacityDecision struct {
 // no model in the chain can satisfy the request, enabling the caller to
 // surface this to the user rather than attempting a doomed upstream call.
 func FilterByCapacity(chain []config.ModelConfig, inputTokens int, requestedMaxTokens int, needsVision bool, needsTools bool) (CapacityDecision, error) {
-	decision := CapacityDecision{
-		InputTokens:        inputTokens,
-		RequestedMaxTokens: requestedMaxTokens,
-		NeedsVision:        needsVision,
-		NeedsTools:         needsTools,
-	}
+	var decision CapacityDecision
 
 	for _, raw := range chain {
 		model := config.ResolveModelConfig(raw)
@@ -76,13 +62,7 @@ func FilterByCapacity(chain []config.ModelConfig, inputTokens int, requestedMaxT
 			}
 		}
 
-		sentMax := clampOutputTokens(model, inputTokens, requestedMaxTokens)
-		model.MaxTokens = sentMax
-		if len(decision.Models) == 0 {
-			decision.SelectedMaxTokens = sentMax
-			decision.ContextWindow = model.ContextWindow
-			decision.ContextMargin = model.ContextMargin
-		}
+		model.MaxTokens = clampOutputTokens(model, inputTokens, requestedMaxTokens)
 		decision.Models = append(decision.Models, model)
 	}
 

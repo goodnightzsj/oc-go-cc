@@ -1,11 +1,13 @@
 package router
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -232,8 +234,8 @@ func (r *ModelRouter) Route(messages []MessageContent, tokenCount int, requested
 	}
 
 	// Otherwise, use scenario-based routing
-	result := DetectScenario(messages, tokenCount, cfg)
-	scenarioKey := string(result.Scenario)
+	scenario := DetectScenario(messages, tokenCount, cfg)
+	scenarioKey := string(scenario)
 
 	// Get primary model for scenario. When cost-based routing is enabled and
 	// a non-empty catalog is available, prefer the cheapest matching catalog
@@ -242,15 +244,23 @@ func (r *ModelRouter) Route(messages []MessageContent, tokenCount int, requested
 	if cat, catErr := r.catalog(context.Background()); cfg.CostBasedRoutingEnabled() && cat != nil && catErr == nil && len(cat.Models) > 0 {
 		constraints := requestConstraints(messages, tokenCount)
 		selector := NewSelector(cat, cfg)
-		if resolved, err := selector.SelectCheapest(scenarioKey, constraints); err == nil {
+		resolved, err := selector.SelectCheapest(scenarioKey, constraints)
+		switch {
+		case err == nil:
 			primary = resolvedModelToConfig(resolved)
 			ok = true
+		default:
+			// Never swallow this: a silent failure here is indistinguishable
+			// from cost routing working, which is how it went unnoticed that
+			// the feature was a no-op.
+			slog.Warn("cost-based routing found no model, using scenario model",
+				"scenario", scenarioKey, "error", err)
 		}
 	}
 
 	if !ok {
-		if isVisionScenario(result.Scenario) {
-			return RouteResult{}, fmt.Errorf("vision scenario %s is not configured", result.Scenario)
+		if isVisionScenario(scenario) {
+			return RouteResult{}, fmt.Errorf("vision scenario %s is not configured", scenario)
 		}
 		// Fall back to default if scenario model not configured
 		primary, ok = cfg.Models["default"]
@@ -262,8 +272,8 @@ func (r *ModelRouter) Route(messages []MessageContent, tokenCount int, requested
 	// Get fallbacks for scenario
 	fallbacks := cfg.Fallbacks[scenarioKey]
 	if len(fallbacks) == 0 {
-		if isVisionScenario(result.Scenario) {
-			return RouteResult{}, fmt.Errorf("vision scenario %s has no configured vision fallbacks", result.Scenario)
+		if isVisionScenario(scenario) {
+			return RouteResult{}, fmt.Errorf("vision scenario %s has no configured vision fallbacks", scenario)
 		}
 		// Fall back to default fallbacks
 		fallbacks = cfg.Fallbacks["default"]
@@ -272,7 +282,7 @@ func (r *ModelRouter) Route(messages []MessageContent, tokenCount int, requested
 	return RouteResult{
 		Primary:   primary,
 		Fallbacks: fallbacks,
-		Scenario:  result.Scenario,
+		Scenario:  scenario,
 	}, nil
 }
 
@@ -323,15 +333,10 @@ func (r *ModelRouter) RouteWithFamilyOverride(requestedModel string) (RouteResul
 		return RouteResult{}, false
 	}
 
-	families := make([]string, 0, len(cfg.ModelFamilyOverrides))
-	for family := range cfg.ModelFamilyOverrides {
-		families = append(families, family)
-	}
-	sort.Slice(families, func(i, j int) bool {
-		if len(families[i]) != len(families[j]) {
-			return len(families[i]) > len(families[j])
-		}
-		return families[i] < families[j]
+	families := slices.Collect(maps.Keys(cfg.ModelFamilyOverrides))
+	slices.SortFunc(families, func(a, b string) int {
+		// Longest key first, then lexicographic for determinism.
+		return cmp.Or(cmp.Compare(len(b), len(a)), cmp.Compare(a, b))
 	})
 
 	lower := strings.ToLower(requestedModel)
@@ -425,12 +430,9 @@ func (r *ModelRouter) ListModels(ctx context.Context) []ModelInfo {
 		}
 	}
 
-	result := make([]ModelInfo, 0, len(seen))
-	for _, info := range seen {
-		result = append(result, info)
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
-	return result
+	return slices.SortedFunc(maps.Values(seen), func(a, b ModelInfo) int {
+		return cmp.Compare(a.ID, b.ID)
+	})
 }
 
 // GetModelChain returns the full chain of models to try (primary + fallbacks).
@@ -453,8 +455,8 @@ func (r *ModelRouter) RouteForStreaming(messages []MessageContent, tokenCount in
 	}
 
 	// Otherwise, use scenario-based routing for streaming
-	result := RouteForStreaming(messages, tokenCount, cfg)
-	scenarioKey := string(result.Scenario)
+	scenario := RouteForStreaming(messages, tokenCount, cfg)
+	scenarioKey := string(scenario)
 
 	// Get primary model for scenario. When cost-based routing is enabled and
 	// a non-empty catalog is available, prefer the cheapest matching catalog
@@ -463,14 +465,22 @@ func (r *ModelRouter) RouteForStreaming(messages []MessageContent, tokenCount in
 	if cat, catErr := r.catalog(context.Background()); cfg.CostBasedRoutingEnabled() && cat != nil && catErr == nil && len(cat.Models) > 0 {
 		constraints := requestConstraints(messages, tokenCount)
 		selector := NewSelector(cat, cfg)
-		if resolved, err := selector.SelectCheapest(scenarioKey, constraints); err == nil {
+		resolved, err := selector.SelectCheapest(scenarioKey, constraints)
+		switch {
+		case err == nil:
 			primary = resolvedModelToConfig(resolved)
 			ok = true
+		default:
+			// Never swallow this: a silent failure here is indistinguishable
+			// from cost routing working, which is how it went unnoticed that
+			// the feature was a no-op.
+			slog.Warn("cost-based routing found no model, using scenario model",
+				"scenario", scenarioKey, "error", err)
 		}
 	}
 	if !ok {
-		if isVisionScenario(result.Scenario) {
-			return RouteResult{Scenario: result.Scenario}, fmt.Errorf("vision scenario %s is not configured", result.Scenario)
+		if isVisionScenario(scenario) {
+			return RouteResult{Scenario: scenario}, fmt.Errorf("vision scenario %s is not configured", scenario)
 		}
 		// Fall back to fast scenario if not configured
 		primary, ok = cfg.Models["fast"]
@@ -480,13 +490,13 @@ func (r *ModelRouter) RouteForStreaming(messages []MessageContent, tokenCount in
 		}
 	}
 	if primary.ModelID == "" {
-		return RouteResult{}, fmt.Errorf("no model configured for streaming; neither scenario %q, \"fast\", nor \"default\" exist in models map", result.Scenario)
+		return RouteResult{}, fmt.Errorf("no model configured for streaming; neither scenario %q, \"fast\", nor \"default\" exist in models map", scenario)
 	}
 
 	// Get fallbacks for scenario
 	fallbacks := cfg.Fallbacks[scenarioKey]
 	if len(fallbacks) == 0 {
-		if isVisionScenario(result.Scenario) {
+		if isVisionScenario(scenario) {
 			fallbacks = nil
 		} else {
 			// Fall back to fast fallbacks
@@ -497,7 +507,7 @@ func (r *ModelRouter) RouteForStreaming(messages []MessageContent, tokenCount in
 	return RouteResult{
 		Primary:   primary,
 		Fallbacks: fallbacks,
-		Scenario:  result.Scenario,
+		Scenario:  scenario,
 	}, nil
 }
 

@@ -10,39 +10,23 @@ import (
 
 // ── Request-side: NormalizedRequest → wire format ─────────────────────
 
-// TransformRequestFromNormalized converts a NormalizedRequest to OpenAI
-// ChatCompletionRequest by first reconstructing the Anthropic format and
-// running it through the existing TransformRequest pipeline.
-func TransformRequestFromNormalized(req *core.NormalizedRequest, model config.ModelConfig) *types.ChatCompletionRequest {
-	anthropicReq := normalizedToMessageRequest(req)
-	t := NewRequestTransformer()
-	openaiReq, err := t.TransformRequest(anthropicReq, model)
-	if err != nil {
-		// The Anthropic reconstruction should never fail for valid normalized
-		// requests, but if it does, return a minimal valid request so the
-		// upstream gets a usable payload rather than a nil pointer.
-		stream := req.Stream
-		maxTokens := req.MaxTokens
-		return &types.ChatCompletionRequest{
-			Model:     model.ModelID,
-			Messages:  []types.ChatMessage{{Role: "user", Content: types.TextContent(req.SystemPrompt + "\n" + joinMessageText(req.Messages))}},
-			Stream:    &stream,
-			MaxTokens: &maxTokens,
-		}
+// AnthropicForModel returns a copy of the request addressed to the given model
+// with the stream flag set explicitly. Providers on the Anthropic wire format
+// pass the caller's request through unchanged apart from those two fields.
+func AnthropicForModel(req *types.MessageRequest, model config.ModelConfig, stream bool) *types.MessageRequest {
+	out := *req
+	out.Model = model.ModelID
+	if stream {
+		out.Stream = &stream
+	} else {
+		out.Stream = nil
 	}
-	return openaiReq
+	return &out
 }
 
-// NormalizedToAnthropic converts a NormalizedRequest to an Anthropic MessageRequest.
-func NormalizedToAnthropic(req *core.NormalizedRequest, model config.ModelConfig) *types.MessageRequest {
-	anthropicReq := normalizedToMessageRequest(req)
-	// Override model ID with the config's model ID.
-	anthropicReq.Model = model.ModelID
-	return anthropicReq
-}
-
-// NormalizedToResponses converts a NormalizedRequest to a ResponsesRequest.
-func NormalizedToResponses(req *core.NormalizedRequest, model config.ModelConfig) *types.ResponsesRequest {
+// AnthropicToResponses converts an Anthropic request to a ResponsesRequest.
+func AnthropicToResponses(anthropicReq *types.MessageRequest, model config.ModelConfig) *types.ResponsesRequest {
+	req := core.NormalizeRequest(anthropicReq)
 	responsesReq := &types.ResponsesRequest{
 		Model: model.ModelID,
 	}
@@ -86,8 +70,9 @@ func NormalizedToResponses(req *core.NormalizedRequest, model config.ModelConfig
 	return responsesReq
 }
 
-// NormalizedToGemini converts a NormalizedRequest to a GeminiRequest.
-func NormalizedToGemini(req *core.NormalizedRequest, model config.ModelConfig) *types.GeminiRequest {
+// AnthropicToGemini converts an Anthropic request to a GeminiRequest.
+func AnthropicToGemini(anthropicReq *types.MessageRequest, model config.ModelConfig) *types.GeminiRequest {
+	req := core.NormalizeRequest(anthropicReq)
 	geminiReq := &types.GeminiRequest{
 		GenerationConfig: &types.GeminiGenerationConfig{
 			MaxOutputTokens: req.MaxTokens,
@@ -277,116 +262,6 @@ func GeminiToNormalized(geminiResp *types.GeminiResponse, modelID string) *core.
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
-// normalizedToMessageRequest reconstructs an Anthropic MessageRequest from a
-// NormalizedRequest. This is used as input to the existing TransformRequest
-// pipeline.
-func normalizedToMessageRequest(req *core.NormalizedRequest) *types.MessageRequest {
-	anthropicReq := &types.MessageRequest{
-		Model:     req.Model,
-		MaxTokens: req.MaxTokens,
-	}
-
-	// Set system prompt.
-	if req.SystemPrompt != "" {
-		if b, err := json.Marshal(req.SystemPrompt); err == nil {
-			anthropicReq.System = json.RawMessage(b)
-		}
-	}
-
-	// Set stream.
-	if req.Stream {
-		t := true
-		anthropicReq.Stream = &t
-	}
-
-	// Set temperature.
-	if req.Temperature != nil {
-		anthropicReq.Temperature = req.Temperature
-	}
-
-	// Set thinking.
-	if req.ReasoningEffort != "" || req.ThinkingBudget > 0 {
-		tc := map[string]any{
-			"type":          req.ReasoningEffort,
-			"budget_tokens": req.ThinkingBudget,
-		}
-		if b, err := json.Marshal(tc); err == nil {
-			anthropicReq.Thinking = b
-		}
-	}
-
-	// Convert messages.
-	for _, nm := range req.Messages {
-		msg := types.Message{Role: nm.Role}
-
-		var blocks []types.ContentBlock
-		if nm.Content != "" {
-			blocks = append(blocks, types.ContentBlock{Type: "text", Text: nm.Content})
-		}
-		// Reconstruct image blocks from the normalized representation so the
-		// downstream transformer can decide whether to convert them to
-		// image_url (vision-capable model) or to a [Image] text placeholder.
-		for _, img := range nm.Images {
-			blocks = append(blocks, types.ContentBlock{
-				Type: "image",
-				Source: &types.ImageSource{
-					Type:      "base64",
-					MediaType: img.MediaType,
-					Data:      img.Data,
-				},
-			})
-		}
-		if nm.Thinking != "" {
-			blocks = append(blocks, types.ContentBlock{Type: "thinking", Thinking: nm.Thinking})
-		}
-		for _, tc := range nm.ToolCalls {
-			blocks = append(blocks, types.ContentBlock{
-				Type:  "tool_use",
-				ID:    tc.ID,
-				Name:  tc.Name,
-				Input: []byte(tc.Arguments),
-			})
-		}
-		if len(nm.ToolResults) > 0 {
-			for _, tr := range nm.ToolResults {
-				content, _ := json.Marshal(tr.Content)
-				blocks = append(blocks, types.ContentBlock{
-					Type:      "tool_result",
-					ToolUseID: tr.ToolCallID,
-					Content:   content,
-				})
-			}
-		} else if nm.ToolCallID != "" {
-			content, _ := json.Marshal(nm.Content)
-			blocks = append(blocks, types.ContentBlock{
-				Type:      "tool_result",
-				ToolUseID: nm.ToolCallID,
-				Content:   content,
-			})
-		}
-
-		if len(blocks) > 0 {
-			b, _ := json.Marshal(blocks)
-			msg.Content = b
-		} else {
-			msg.Content = json.RawMessage(`""`)
-		}
-
-		anthropicReq.Messages = append(anthropicReq.Messages, msg)
-	}
-
-	// Convert tools.
-	for _, nt := range req.Tools {
-		anthropicReq.Tools = append(anthropicReq.Tools, types.Tool{
-			Name:        nt.Name,
-			Description: nt.Description,
-			InputSchema: nt.InputSchema,
-		})
-	}
-
-	return anthropicReq
-}
-
 func rawJSONString(s string) json.RawMessage {
 	b, err := json.Marshal(s)
 	if err != nil {
@@ -395,17 +270,8 @@ func rawJSONString(s string) json.RawMessage {
 	return json.RawMessage(b)
 }
 
-// joinMessageText concatenates the content of all messages for use as a
-// fallback when the transform pipeline fails.
-func joinMessageText(messages []core.NormalizedMessage) string {
-	var text string
-	for _, m := range messages {
-		if m.Content != "" {
-			if text != "" {
-				text += "\n"
-			}
-			text += m.Role + ": " + m.Content
-		}
-	}
-	return text
+// AnthropicToChatCompletion converts an Anthropic request to the OpenAI Chat
+// Completions format used by most upstreams.
+func AnthropicToChatCompletion(req *types.MessageRequest, model config.ModelConfig) (*types.ChatCompletionRequest, error) {
+	return NewRequestTransformer().TransformRequest(req, model)
 }

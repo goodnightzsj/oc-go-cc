@@ -13,16 +13,14 @@ import (
 
 // AnalyticsHandler serves analytics endpoints for the dashboard.
 type AnalyticsHandler struct {
-	store   *storage.Analytics
-	latency *storage.Latency
+	store *storage.Analytics
 }
 
 // NewAnalyticsHandler creates a handler backed by the given database.
 // It internally creates an Analytics store and a Latency store.
 func NewAnalyticsHandler(db *storage.Database) *AnalyticsHandler {
 	return &AnalyticsHandler{
-		store:   storage.NewAnalytics(db),
-		latency: storage.NewLatency(db),
+		store: storage.NewAnalytics(db),
 	}
 }
 
@@ -77,46 +75,30 @@ func (h *AnalyticsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, rangeErr.Error(), http.StatusBadRequest)
 		return
 	}
-
-	var summary *storage.TokenSummary
-	var err error
-	if explicitRange {
-		summary, err = h.store.GetTokenSummaryBetween(from, to)
-	} else {
-		summary, err = h.store.GetTokenSummary(days)
-	}
+	window, err := h.window(days, from, to, explicitRange)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	var models []storage.ModelBreakdown
-	if explicitRange {
-		models, err = h.store.GetModelBreakdownBetween(from, to)
-	} else {
-		models, err = h.store.GetModelBreakdown(days)
-	}
+	summary, err := h.store.TokenSummary(window)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	var providers []storage.ProviderBreakdown
-	if explicitRange {
-		providers, err = h.store.GetProviderBreakdownBetween(from, to)
-	} else {
-		providers, err = h.store.GetProviderBreakdown(days)
-	}
+	models, err := h.store.ModelBreakdown(window)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	var scenarios []storage.ScenarioBreakdown
-	if explicitRange {
-		scenarios, err = h.store.GetScenarioBreakdownBetween(from, to)
-	} else {
-		scenarios, err = h.store.GetScenarioBreakdown(days)
+
+	providers, err := h.store.ProviderBreakdown(window)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
+	scenarios, err := h.store.ScenarioBreakdown(window)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -130,20 +112,20 @@ func (h *AnalyticsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Query().Get("compare") == "1" && !explicitRange {
 		now := time.Now()
-		lastMinute, err := h.store.GetTokenSummaryBetween(now.Add(-time.Minute), now.Add(time.Second))
+		lastMinute, err := h.summaryBetween(now.Add(-time.Minute), now.Add(time.Second))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		today, err := h.store.GetTokenSummaryBetween(todayStart, now.Add(time.Second))
+		today, err := h.summaryBetween(todayStart, now.Add(time.Second))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		// The storage baseline still governs this wide window, so retained means
 		// every trustworthy row rather than an arbitrary client-side date limit.
-		retained, err := h.store.GetTokenSummary(36500)
+		retained, err := h.store.TokenSummary(h.store.Window(36500))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -153,6 +135,25 @@ func (h *AnalyticsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		resp["retained"] = retained
 	}
 	h.writeJSON(w, resp)
+}
+
+// window resolves the request's analytics window once, so every panel in a
+// response aggregates over exactly the same range. Range values have already
+// been validated by analyticsRange; a leftover error here (a zero-valued but
+// parseable timestamp) keeps its original 500 status.
+func (h *AnalyticsHandler) window(days int, from, to time.Time, explicitRange bool) (storage.Window, error) {
+	if explicitRange {
+		return h.store.WindowBetween(from, to)
+	}
+	return h.store.Window(days), nil
+}
+
+func (h *AnalyticsHandler) summaryBetween(from, to time.Time) (*storage.TokenSummary, error) {
+	window, err := h.store.WindowBetween(from, to)
+	if err != nil {
+		return nil, err
+	}
+	return h.store.TokenSummary(window)
 }
 
 // TokenTrend returns daily token/request aggregates.
@@ -171,16 +172,12 @@ func (h *AnalyticsHandler) TokenTrend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "granularity must be day or hour", http.StatusBadRequest)
 		return
 	}
-	var trend []storage.DailyTokenPoint
-	var err error
-	if explicitRange {
-		trend, err = h.store.GetTokenTrendBetween(from, to, granularity)
-	} else if granularity == "hour" {
-		end := time.Now().Add(time.Second)
-		trend, err = h.store.GetTokenTrendBetween(end.AddDate(0, 0, -days), end, granularity)
-	} else {
-		trend, err = h.store.GetDailyTokenTrend(days)
+	window, err := h.window(days, from, to, explicitRange)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
+	trend, err := h.store.TokenTrend(window, granularity)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -189,20 +186,5 @@ func (h *AnalyticsHandler) TokenTrend(w http.ResponseWriter, r *http.Request) {
 		"days":        days,
 		"granularity": granularity,
 		"trend":       trend,
-	})
-}
-
-// LatencyStats returns latency stats per model.
-func (h *AnalyticsHandler) LatencyStats(w http.ResponseWriter, r *http.Request) {
-	days := h.getDays(r)
-	since := time.Now().AddDate(0, 0, -days)
-	stats, err := h.latency.GetStats(since)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	h.writeJSON(w, map[string]any{
-		"days":  days,
-		"stats": stats,
 	})
 }

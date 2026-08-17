@@ -90,9 +90,6 @@ func TestCaptureMethodsAsync(t *testing.T) {
 	responseData := []byte(`{"choices": [{"message": {"content": "hi"}}]}`)
 	logger.CaptureUpstreamResponse("req-123", "opencode-go", responseData)
 
-	// Test CaptureTransformed
-	logger.CaptureTransformed("req-123", "opencode-go", responseData)
-
 	// Give async operations time to complete
 	time.Sleep(100 * time.Millisecond)
 
@@ -175,7 +172,6 @@ func TestCaptureWithNilLogger(t *testing.T) {
 	logger.CaptureNormalized("req-123", "test-provider", []byte(`{"test": "data"}`))
 	logger.CaptureUpstreamRequest("req-123", "test-provider", []byte(`{"test": "data"}`))
 	logger.CaptureUpstreamResponse("req-123", "test-provider", []byte(`{"test": "data"}`))
-	logger.CaptureTransformed("req-123", "test-provider", []byte(`{"test": "data"}`))
 
 	// Close should not panic when logger is nil
 	err := logger.Close()

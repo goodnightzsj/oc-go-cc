@@ -888,6 +888,7 @@ func TestCostBasedRouting_SelectsCheapest(t *testing.T) {
 			"default": {Provider: "opencode-go", ModelID: "legacy-default"},
 			"complex": {Provider: "opencode-go", ModelID: "legacy-complex"},
 		},
+		CostRouting: &config.CostRoutingConfig{Scenarios: selectorTestScenarios()},
 	}
 	atomic := config.NewAtomicConfig(cfg, "/tmp/test-config.json")
 	router := NewModelRouterWithCatalog(atomic, catalogPath)
@@ -938,6 +939,11 @@ func TestCostBasedRouting_FallsBackWhenNoMatch(t *testing.T) {
 		Models: map[string]config.ModelConfig{
 			"background": {Provider: "opencode-go", ModelID: "legacy-background"},
 		},
+		// No catalog model can satisfy this floor, so the selector must find no
+		// candidate and routing must fall back to the legacy scenario model.
+		CostRouting: &config.CostRoutingConfig{Scenarios: map[string]config.CostScenario{
+			"background": {MinContextWindow: 99_000_000},
+		}},
 	}
 	atomic := config.NewAtomicConfig(cfg, "/tmp/test-config.json")
 	router := NewModelRouterWithCatalog(atomic, catalogPath)

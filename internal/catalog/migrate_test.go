@@ -2,8 +2,10 @@ package catalog
 
 import (
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -46,16 +48,16 @@ func TestMigrateFromJSON(t *testing.T) {
 	ctx := context.Background()
 
 	start := time.Now()
-	migrated, err := MigrateFromJSON(ctx, db, jsonPath)
+	providers, models, err := ImportFromJSON(ctx, db, jsonPath)
 	elapsed := time.Since(start)
 
-	t.Logf("MigrateFromJSON took: %v", elapsed)
+	t.Logf("ImportFromJSON took: %v", elapsed)
 
 	if err != nil {
-		t.Fatalf("MigrateFromJSON: %v", err)
+		t.Fatalf("ImportFromJSON: %v", err)
 	}
-	if !migrated {
-		t.Fatal("expected migrated=true, got false")
+	if providers == 0 || models == 0 {
+		t.Fatalf("expected a non-empty import, got %d providers and %d models", providers, models)
 	}
 
 	idx, err := LoadFromSQLite(ctx, db)
@@ -76,5 +78,57 @@ func TestMigrateFromJSON(t *testing.T) {
 	}
 	if persistedKey != nil {
 		t.Errorf("persisted catalog API key = %q, want NULL", *persistedKey)
+	}
+}
+
+// ImportFromJSON must refresh the SQLite catalog every time, not only on the
+// first run. It used to bail out once catalog_last_sync was set, so every
+// `routatic-proxy catalog sync` after the first downloaded a fresh catalog and
+// then left SQLite — the copy production routing reads — on the original
+// snapshot, while reporting success.
+func TestImportFromJSON_RefreshesAnExistingCatalog(t *testing.T) {
+	dir := t.TempDir()
+	db, err := storage.Open(storage.Config{DatabasePath: filepath.Join(dir, "catalog.db")})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	jsonPath := filepath.Join(dir, "catalog.json")
+	writeCatalog := func(provider, modelKey string) {
+		t.Helper()
+		body := `{"providers":{"` + provider + `":{"name":"` + provider + `"}},` +
+			`"models":{"` + provider + `/` + modelKey + `":{"id":"` + provider + `/` + modelKey +
+			`","name":"` + modelKey + `","limit":{"context":1000},"cost":{"input":1,"output":1}}}}`
+		if err := os.WriteFile(jsonPath, []byte(body), 0o644); err != nil {
+			t.Fatalf("write catalog: %v", err)
+		}
+	}
+
+	ctx := context.Background()
+
+	writeCatalog("opencode-go", "model-old")
+	if _, models, err := ImportFromJSON(ctx, db, jsonPath); err != nil || models != 1 {
+		t.Fatalf("first import: models=%d err=%v", models, err)
+	}
+
+	// A later `catalog sync` lands a different catalog on disk.
+	writeCatalog("opencode-zen", "model-new")
+	if _, models, err := ImportFromJSON(ctx, db, jsonPath); err != nil || models != 1 {
+		t.Fatalf("second import: models=%d err=%v", models, err)
+	}
+
+	idx, err := LoadFromSQLite(ctx, db)
+	if err != nil {
+		t.Fatalf("load from SQLite: %v", err)
+	}
+	if _, ok := idx.Models["opencode-zen/model-new"]; !ok {
+		t.Errorf("SQLite is stale: model-new missing after re-import, holds %v", slices.Sorted(maps.Keys(idx.Models)))
+	}
+	if _, ok := idx.Models["opencode-go/model-old"]; ok {
+		t.Errorf("stale model survived replacement: %v", slices.Sorted(maps.Keys(idx.Models)))
+	}
+	if _, ok := idx.Providers["opencode-go"]; ok {
+		t.Errorf("stale provider survived replacement: %v", slices.Sorted(maps.Keys(idx.Providers)))
 	}
 }

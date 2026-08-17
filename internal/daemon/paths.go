@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 )
@@ -71,25 +70,6 @@ func GetPID(pidPath string) (int, error) {
 }
 
 // WritePID is implemented per platform in pid_write_unix.go and pid_write_windows.go.
-
-// FindBinary returns the absolute path to the routatic-proxy binary.
-func FindBinary() (string, error) {
-	// First try to use the current executable
-	execPath, err := os.Executable()
-	if err == nil {
-		return resolveExecutablePath(execPath), nil
-	}
-
-	// Fallback: search PATH for routatic-proxy, then the legacy oc-go-cc alias.
-	execPath, err = exec.LookPath(AppName)
-	if err != nil {
-		execPath, err = exec.LookPath(LegacyAppName)
-		if err != nil {
-			return "", fmt.Errorf("cannot find %s binary: %w", AppName, err)
-		}
-	}
-	return resolveExecutablePath(execPath), nil
-}
 
 func resolveExecutablePath(execPath string) string {
 	// Scoop on Windows launches applications through shims. Resolving those paths

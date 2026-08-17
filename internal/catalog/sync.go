@@ -4,11 +4,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -76,9 +78,8 @@ func Sync(sourceURL, destDir string) (*Lock, error) {
 		return nil, fmt.Errorf("parse catalog contents: %w", err)
 	}
 
-	idx, err := BuildProviderIndex(catalog)
-	if err != nil {
-		return nil, fmt.Errorf("build provider index: %w", err)
+	if err := validateEnabledProviders(catalog); err != nil {
+		return nil, fmt.Errorf("validate catalog: %w", err)
 	}
 
 	sum := sha256.Sum256(body)
@@ -96,13 +97,6 @@ func Sync(sourceURL, destDir string) (*Lock, error) {
 		return nil, fmt.Errorf("rename catalog file: %w", err)
 	}
 
-	if err := idx.Write(destDir); err != nil {
-		_ = os.Remove(tmpPath)
-		_ = os.Remove(filepath.Join(destDir, indexTmpFileName))
-		_ = os.Remove(filepath.Join(destDir, indexFileName))
-		return nil, fmt.Errorf("write provider index: %w", err)
-	}
-
 	lock := &Lock{
 		SourceURL: sourceURL,
 		SyncedAt:  time.Now().UTC(),
@@ -116,4 +110,39 @@ func Sync(sourceURL, destDir string) (*Lock, error) {
 	}
 
 	return lock, nil
+}
+
+// validateEnabledProviders rejects a synced catalog that yields no usable
+// models: either no provider is enabled, or no model references an enabled
+// provider. validateCatalog covers the provider-prefix and non-empty checks
+// but is blind to the enabled flag.
+func validateEnabledProviders(catalog Catalog) error {
+	if len(catalog.Providers) == 0 {
+		return errors.New("catalog providers map is empty")
+	}
+	if len(catalog.Models) == 0 {
+		return errors.New("catalog models map is empty")
+	}
+
+	enabled, reachable := 0, 0
+	for name, provider := range catalog.Providers {
+		if provider.Enabled != nil && !*provider.Enabled {
+			continue
+		}
+		enabled++
+		prefix := name + "/"
+		for modelKey := range catalog.Models {
+			if strings.HasPrefix(modelKey, prefix) {
+				reachable++
+				break
+			}
+		}
+	}
+	if enabled == 0 {
+		return errors.New("no enabled providers in catalog")
+	}
+	if reachable == 0 {
+		return errors.New("no models reference enabled providers")
+	}
+	return nil
 }

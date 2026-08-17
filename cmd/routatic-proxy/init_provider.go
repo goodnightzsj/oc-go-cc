@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -58,7 +58,7 @@ func getProviderConfig(provider string) (string, error) {
 		for p := range providerPresets {
 			supported = append(supported, p)
 		}
-		sort.Strings(supported)
+		slices.Sort(supported)
 		return "", fmt.Errorf("unknown provider %q; supported: %s", provider, strings.Join(supported, ", "))
 	}
 	return preset.Generator(), nil

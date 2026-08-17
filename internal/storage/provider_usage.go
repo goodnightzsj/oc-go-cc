@@ -25,42 +25,8 @@ type ProviderUsageSummary struct {
 	Plan                string    `json:"plan,omitempty"`
 }
 
-type ProviderUsageBreakdown struct {
-	Name                string  `json:"name"`
-	Model               string  `json:"model,omitempty"`
-	Provider            string  `json:"provider,omitempty"`
-	Plan                string  `json:"plan,omitempty"`
-	Requests            int64   `json:"requests"`
-	InputTokens         int64   `json:"input_tokens"`
-	OutputTokens        int64   `json:"output_tokens"`
-	ReasoningTokens     int64   `json:"reasoning_tokens"`
-	CacheReadTokens     int64   `json:"cache_read_tokens"`
-	CacheCreationTokens int64   `json:"cache_creation_tokens"`
-	CostUSD             float64 `json:"cost_usd"`
-}
-
-func (b ProviderUsageBreakdown) TotalTokens() int64 {
-	return b.InputTokens + b.OutputTokens + b.CacheReadTokens + b.CacheCreationTokens
-}
-
-type ProviderUsageDailyPoint struct {
-	Date                string  `json:"date"`
-	Requests            int64   `json:"requests"`
-	InputTokens         int64   `json:"input_tokens"`
-	OutputTokens        int64   `json:"output_tokens"`
-	ReasoningTokens     int64   `json:"reasoning_tokens"`
-	CacheReadTokens     int64   `json:"cache_read_tokens"`
-	CacheCreationTokens int64   `json:"cache_creation_tokens"`
-	CostUSD             float64 `json:"cost_usd"`
-}
-
 type ProviderUsageAnalytics struct {
-	Summary   ProviderUsageSummary      `json:"summary"`
-	Models    []ProviderUsageBreakdown  `json:"models"`
-	Providers []ProviderUsageBreakdown  `json:"providers"`
-	Plans     []ProviderUsageBreakdown  `json:"plans"`
-	Trend     []ProviderUsageDailyPoint `json:"trend"`
-	Recent    []ProviderCostRecord      `json:"recent"`
+	Summary ProviderUsageSummary `json:"summary"`
 }
 
 // ReplaceProviderUsage atomically replaces the last sanitized account
@@ -149,99 +115,5 @@ func (d *Database) GetProviderUsageAnalytics(ctx context.Context, days int) (*Pr
 	if observedAt != "" {
 		out.Summary.ObservedAt, _ = time.Parse(time.RFC3339Nano, observedAt)
 	}
-	for _, spec := range []struct {
-		name  string
-		group string
-		into  *[]ProviderUsageBreakdown
-	}{
-		{"models", "model", &out.Models},
-		{"providers", "provider", &out.Providers},
-		{"plans", "plan", &out.Plans},
-	} {
-		rows, err := d.db.QueryContext(ctx, `
-			SELECT COALESCE(`+spec.group+`, 'unknown'),
-			       COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
-			       COALESCE(SUM(reasoning_tokens), 0), COALESCE(SUM(cache_read_tokens), 0),
-			       COALESCE(SUM(cache_write_5m_tokens + cache_write_1h_tokens), 0),
-			       COALESCE(SUM(cost_units), 0), COALESCE(MAX(model), ''),
-			       COALESCE(MAX(provider), ''), COALESCE(MAX(plan), '')
-			FROM provider_usage`+where+` GROUP BY `+spec.group+` ORDER BY COUNT(*) DESC, `+spec.group, args...)
-		if err != nil {
-			return nil, err
-		}
-		var list []ProviderUsageBreakdown
-		for rows.Next() {
-			var item ProviderUsageBreakdown
-			var units int64
-			if err := rows.Scan(&item.Name, &item.Requests, &item.InputTokens, &item.OutputTokens,
-				&item.ReasoningTokens, &item.CacheReadTokens, &item.CacheCreationTokens, &units,
-				&item.Model, &item.Provider, &item.Plan); err != nil {
-				_ = rows.Close()
-				return nil, err
-			}
-			item.CostUSD = float64(units) / 1e8
-			list = append(list, item)
-		}
-		if err := rows.Err(); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		if err := rows.Close(); err != nil {
-			return nil, err
-		}
-		*spec.into = list
-	}
-	trendRows, err := d.db.QueryContext(ctx, `
-		SELECT DATE(observed_at), COUNT(*), COALESCE(SUM(input_tokens), 0),
-		       COALESCE(SUM(output_tokens), 0), COALESCE(SUM(reasoning_tokens), 0),
-		       COALESCE(SUM(cache_read_tokens), 0),
-		       COALESCE(SUM(cache_write_5m_tokens + cache_write_1h_tokens), 0),
-		       COALESCE(SUM(cost_units), 0)
-		FROM provider_usage`+where+` GROUP BY DATE(observed_at) ORDER BY DATE(observed_at)`, args...)
-	if err != nil {
-		return nil, err
-	}
-	for trendRows.Next() {
-		var point ProviderUsageDailyPoint
-		var units int64
-		if err := trendRows.Scan(&point.Date, &point.Requests, &point.InputTokens, &point.OutputTokens,
-			&point.ReasoningTokens, &point.CacheReadTokens, &point.CacheCreationTokens, &units); err != nil {
-			_ = trendRows.Close()
-			return nil, err
-		}
-		point.CostUSD = float64(units) / 1e8
-		out.Trend = append(out.Trend, point)
-	}
-	if err := trendRows.Err(); err != nil {
-		_ = trendRows.Close()
-		return nil, err
-	}
-	if err := trendRows.Close(); err != nil {
-		return nil, err
-	}
-	recentRows, err := d.db.QueryContext(ctx, `
-		SELECT observed_at, model, provider, plan, input_tokens, output_tokens,
-		       reasoning_tokens, cache_read_tokens, cache_write_5m_tokens,
-		       cache_write_1h_tokens, cost_units
-		FROM provider_usage`+where+` ORDER BY observed_at DESC LIMIT 8`, args...)
-	if err != nil {
-		return nil, err
-	}
-	for recentRows.Next() {
-		var item ProviderCostRecord
-		var observed string
-		if err := recentRows.Scan(&observed, &item.Model, &item.Provider, &item.Plan,
-			&item.InputTokens, &item.OutputTokens, &item.ReasoningTokens, &item.CacheReadTokens,
-			&item.CacheWrite5mTokens, &item.CacheWrite1hTokens, &item.ProviderCostUnits); err != nil {
-			_ = recentRows.Close()
-			return nil, err
-		}
-		item.Time, _ = time.Parse(time.RFC3339Nano, observed)
-		out.Recent = append(out.Recent, item)
-	}
-	if err := recentRows.Err(); err != nil {
-		_ = recentRows.Close()
-		return nil, err
-	}
-	return out, recentRows.Close()
+	return out, nil
 }

@@ -3,7 +3,7 @@ package catalog
 import (
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -106,7 +106,7 @@ func (ic *IndexedCatalog) ResolveShort(short string) (ResolvedModel, error) {
 }
 
 func (ic *IndexedCatalog) resolveFromMatches(short string, matches []string) (ResolvedModel, error) {
-	sort.Strings(matches)
+	slices.Sort(matches)
 
 	var enabled []string
 	var missingProviders []string
@@ -146,7 +146,7 @@ func (ic *IndexedCatalog) resolveFromMatches(short string, matches []string) (Re
 	for _, key := range enabled {
 		providers = append(providers, ProviderFromModelKey(key))
 	}
-	sort.Strings(providers)
+	slices.Sort(providers)
 	return ResolvedModel{}, fmt.Errorf("ambiguous model %q: available on multiple providers [%s] - use provider/model-id format", short, strings.Join(providers, ", "))
 }
 
@@ -206,7 +206,7 @@ func (ic *IndexedCatalog) findModel(sel Selector) (Model, string) {
 	}
 	// Fall back to any provider. Use deterministic order.
 	if len(fallbackKeys) > 0 {
-		sort.Strings(fallbackKeys)
+		slices.Sort(fallbackKeys)
 		key := fallbackKeys[0]
 		return ic.Models[key], key
 	}

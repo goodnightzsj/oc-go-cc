@@ -1,10 +1,27 @@
 package gui
 
 import (
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
+
+// Without SQLite there is no queryable history: the handler must say so rather
+// than silently returning an empty page that looks like "no requests yet".
+func TestHandleHistoryWithoutStorageIsUnavailable(t *testing.T) {
+	s := &Server{}
+	rec := httptest.NewRecorder()
+	s.handleHistory(rec, httptest.NewRequest(http.MethodGet, "/api/history", nil))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+	if !strings.Contains(rec.Body.String(), "history storage is unavailable") {
+		t.Errorf("body = %q, want an explanation of why history is missing", rec.Body.String())
+	}
+}
 
 func TestHistoryRequestQueryParsesServerSideFilters(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/history?search=quota&model=m&provider=p&scenario=s&cost_source=provider&start=2026-08-01&end=2026-08-08&success=false&streaming=true&sort=duration_ms&order=asc", nil)

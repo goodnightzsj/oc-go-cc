@@ -28,18 +28,56 @@ type Config struct {
 	OpenRouter                     OpenRouterConfig         `json:"openrouter"`
 	AnthropicFirst                 AnthropicFirstConfig     `json:"anthropic_first"`
 	Logging                        LoggingConfig            `json:"logging"`
-	Debug                          DebugConfig              `json:"debug"`
 	Catalog                        CatalogConfig            `json:"catalog"`
 	Storage                        *StorageConfig           `json:"storage,omitempty"`
-	UpdateChannel                  string                   `json:"update_channel,omitempty"`
 }
 
 // CostRoutingConfig controls cost-aware model selection.
 type CostRoutingConfig struct {
-	Enabled            bool               `json:"enabled"`
-	PreferProviders    []string           `json:"prefer_providers,omitempty"`
-	MaxContextWindow   int64              `json:"max_context_window,omitempty"`
-	PenaltyPerProvider map[string]float64 `json:"penalty_per_provider,omitempty"`
+	Enabled            bool                    `json:"enabled"`
+	PreferProviders    []string                `json:"prefer_providers,omitempty"`
+	MaxContextWindow   int64                   `json:"max_context_window,omitempty"`
+	PenaltyPerProvider map[string]float64      `json:"penalty_per_provider,omitempty"`
+	Scenarios          map[string]CostScenario `json:"scenarios,omitempty"`
+}
+
+// CostScenarioNames are the routing scenario keys that cost_routing.scenarios
+// may define. It mirrors the Scenario constants in internal/router/scenarios.go;
+// TestCostScenarioNamesMatchRouterScenarios guards the two against drift.
+// "override" is absent on purpose: an explicitly requested model short-circuits
+// scenario routing before the cost selector is consulted.
+var CostScenarioNames = []string{
+	"default",
+	"background",
+	"think",
+	"complex",
+	"long_context",
+	"fast",
+	"vision",
+	"vision_complex",
+	"vision_long_context",
+}
+
+// CostScenario is the per-scenario policy applied on top of the requirements
+// already derived from the request itself (token count, tool use, vision,
+// reasoning). Every field is additive: a scenario left out of the config uses
+// the zero policy, which imposes no extra requirements and lets the cheapest
+// model that can serve the request win.
+type CostScenario struct {
+	// Description is documentation only; it does not affect selection.
+	Description string `json:"description,omitempty"`
+	// RequiresTools, RequiresVision and RequiresReasoning are hard floors. A
+	// nil pointer means "no opinion" — the request's own detected needs still
+	// apply.
+	RequiresTools     *bool `json:"requires_tools,omitempty"`
+	RequiresVision    *bool `json:"requires_vision,omitempty"`
+	RequiresReasoning *bool `json:"requires_reasoning,omitempty"`
+	// MinContextWindow is a floor in tokens. The effective floor is the larger
+	// of this and the request's own token count.
+	MinContextWindow int64 `json:"min_context_window,omitempty"`
+	// PreferredProviders restricts candidates to these providers. When
+	// cost_routing.prefer_providers is also set, the two are intersected.
+	PreferredProviders []string `json:"preferred_providers,omitempty"`
 }
 
 // CostBasedRoutingEnabled reports whether cost-aware routing should be active.
@@ -69,12 +107,6 @@ type CatalogConfig struct {
 	MaxAgeHours int    `json:"max_age_hours"`
 	SourceURL   string `json:"source_url"`
 	Enabled     *bool  `json:"enabled,omitempty"`
-}
-
-// DebugConfig holds debug-related configuration.
-type DebugConfig struct {
-	CaptureEnabled bool   `json:"capture_enabled"`
-	CaptureDir     string `json:"capture_dir"`
 }
 
 // ModelConfig defines routing rules for a specific model.
@@ -227,21 +259,11 @@ type StorageConfig struct {
 
 // DebugCapture controls request/response capture for debugging.
 type DebugCapture struct {
-	Enabled       bool     `json:"enabled"`
-	Directory     string   `json:"directory"`
-	MaxFiles      int      `json:"max_files"`
-	MaxFileSize   int64    `json:"max_file_size"`
-	CapturePhases []string `json:"capture_phases,omitempty"`
-	RedactAPIKeys bool     `json:"redact_api_keys"`
-}
-
-// EffectiveDebugCapture returns the debug capture configuration with defaults applied.
-// Returns zero value DebugCapture if nil.
-func (lc *LoggingConfig) EffectiveDebugCapture() DebugCapture {
-	if lc.DebugCapture == nil {
-		return DebugCapture{}
-	}
-	return *lc.DebugCapture
+	Enabled       bool   `json:"enabled"`
+	Directory     string `json:"directory"`
+	MaxFiles      int    `json:"max_files"`
+	MaxFileSize   int64  `json:"max_file_size"`
+	RedactAPIKeys bool   `json:"redact_api_keys"`
 }
 
 // EffectiveAPIKeys returns the global pool of API keys for rotation. The APIKeys

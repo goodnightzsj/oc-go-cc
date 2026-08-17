@@ -57,7 +57,7 @@ func TestSyncProviderUsageRequestsCorrectsHistoryAndIsIdempotent(t *testing.T) {
 	if dry.SnapshotRows != 2 || dry.MatchedDetails != 1 || dry.WouldRemove != 1 || dry.WouldInsert != 1 || dry.ProjectedRequests != 3 {
 		t.Fatalf("unexpected dry-run report: %+v", dry)
 	}
-	if count, _ := repo.Count(); count != 3 {
+	if _, count, _ := repo.Query(RequestQuery{}); count != 3 {
 		t.Fatalf("dry run changed request count to %d", count)
 	}
 
@@ -72,7 +72,7 @@ func TestSyncProviderUsageRequestsCorrectsHistoryAndIsIdempotent(t *testing.T) {
 		t.Fatalf("projected cost = %.8f", applied.ProjectedCostUSD)
 	}
 
-	records, err := repo.Last(10)
+	records, _, err := repo.Query(RequestQuery{PageSize: 10})
 	if err != nil {
 		t.Fatalf("read requests: %v", err)
 	}
@@ -98,9 +98,8 @@ func TestSyncProviderUsageRequestsCorrectsHistoryAndIsIdempotent(t *testing.T) {
 	if byID["exact-local"].Provider != "platform-a" {
 		t.Fatalf("exact request provider changed: %+v", byID["exact-local"])
 	}
-	analytics := NewAnalytics(db)
-	analytics.SetBaseline(observedAt.Add(30 * time.Minute))
-	summary, err := analytics.GetTokenSummary(30)
+	analytics := &Analytics{db: db, baseline: observedAt.Add(30 * time.Minute)}
+	summary, err := analytics.TokenSummary(analytics.Window(30))
 	if err != nil {
 		t.Fatalf("analytics after sync: %v", err)
 	}

@@ -4,20 +4,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"regexp"
 	"strings"
 
 	"github.com/routatic/proxy/internal/config"
 )
 
-var sensitiveFieldPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)api[_-]?key`),
-	regexp.MustCompile(`(?i)token`),
-	regexp.MustCompile(`(?i)secret`),
-	regexp.MustCompile(`(?i)password`),
-	regexp.MustCompile(`(?i)credential`),
+// sensitiveKeyFragments are matched case-insensitively as substrings of a JSON
+// field name. Anything that hits is masked before the config leaves the process,
+// on both the settings GET path and the config export download.
+var sensitiveKeyFragments = []string{
+	"apikey", "api_key", "api-key",
+	"token", "secret", "password", "credential",
 }
 
+// anonymizeConfig returns a copy of cfg with every secret-looking field replaced
+// by keyMask. It works on the marshalled form so any nested provider block is
+// covered without per-field code, and it never mutates cfg — the running proxy
+// keeps using the real keys to authenticate.
 func anonymizeConfig(cfg *config.Config) (*config.Config, error) {
 	data, err := json.Marshal(cfg)
 	if err != nil {
@@ -61,8 +64,8 @@ func anonymizeMap(m map[string]interface{}) {
 
 func shouldAnonymize(key string) bool {
 	lowerKey := strings.ToLower(key)
-	for _, pattern := range sensitiveFieldPatterns {
-		if pattern.MatchString(lowerKey) {
+	for _, fragment := range sensitiveKeyFragments {
+		if strings.Contains(lowerKey, fragment) {
 			return true
 		}
 	}

@@ -1,7 +1,6 @@
 package router
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/routatic/proxy/internal/config"
@@ -77,8 +76,8 @@ func TestDetectScenario_ComplexFromUser(t *testing.T) {
 		{Role: "user", Content: "Architect a new microservice for user authentication"},
 	}
 	result := DetectScenario(messages, 100, mockConfig())
-	if result.Scenario != ScenarioComplex {
-		t.Errorf("Expected ScenarioComplex, got %s", result.Scenario)
+	if result != ScenarioComplex {
+		t.Errorf("Expected ScenarioComplex, got %s", result)
 	}
 }
 
@@ -87,8 +86,8 @@ func TestDetectScenario_ThinkFromUser(t *testing.T) {
 		{Role: "user", Content: "Analyze the tradeoffs of this design"},
 	}
 	result := DetectScenario(messages, 100, mockConfig())
-	if result.Scenario != ScenarioThink {
-		t.Errorf("Expected ScenarioThink, got %s", result.Scenario)
+	if result != ScenarioThink {
+		t.Errorf("Expected ScenarioThink, got %s", result)
 	}
 }
 
@@ -97,8 +96,8 @@ func TestDetectScenario_DefaultFromSimpleUserMessage(t *testing.T) {
 		{Role: "user", Content: "Hello, how are you?"},
 	}
 	result := DetectScenario(messages, 100, mockConfig())
-	if result.Scenario != ScenarioDefault {
-		t.Errorf("Expected ScenarioDefault, got %s", result.Scenario)
+	if result != ScenarioDefault {
+		t.Errorf("Expected ScenarioDefault, got %s", result)
 	}
 }
 
@@ -108,8 +107,8 @@ func TestDetectScenario_LongContextTakesPriority(t *testing.T) {
 	}
 	// Token count > 60000 should trigger long_context regardless of content
 	result := DetectScenario(messages, 70000, mockConfig())
-	if result.Scenario != ScenarioLongContext {
-		t.Errorf("Expected ScenarioLongContext, got %s", result.Scenario)
+	if result != ScenarioLongContext {
+		t.Errorf("Expected ScenarioLongContext, got %s", result)
 	}
 }
 
@@ -118,8 +117,8 @@ func TestDetectScenario_VisionSimpleRequest(t *testing.T) {
 		{Role: "user", Content: "Describe this screen", HasImage: true},
 	}
 	result := DetectScenario(messages, 100, mockConfig())
-	if result.Scenario != ScenarioVision {
-		t.Errorf("Expected ScenarioVision, got %s", result.Scenario)
+	if result != ScenarioVision {
+		t.Errorf("Expected ScenarioVision, got %s", result)
 	}
 }
 
@@ -128,8 +127,8 @@ func TestDetectScenario_VisionComplexRequest(t *testing.T) {
 		{Role: "user", Content: "Analyze this screenshot and find the bug", HasImage: true},
 	}
 	result := DetectScenario(messages, 100, mockConfig())
-	if result.Scenario != ScenarioVisionComplex {
-		t.Errorf("Expected ScenarioVisionComplex, got %s", result.Scenario)
+	if result != ScenarioVisionComplex {
+		t.Errorf("Expected ScenarioVisionComplex, got %s", result)
 	}
 }
 
@@ -140,8 +139,8 @@ func TestDetectScenario_VisionUsesLatestImageRequestComplexity(t *testing.T) {
 		{Role: "user", Content: "Cosa vedi?", HasImage: true},
 	}
 	result := DetectScenario(messages, 100, mockConfig())
-	if result.Scenario != ScenarioVision {
-		t.Errorf("Expected ScenarioVision, got %s", result.Scenario)
+	if result != ScenarioVision {
+		t.Errorf("Expected ScenarioVision, got %s", result)
 	}
 }
 
@@ -152,8 +151,8 @@ func TestDetectScenario_ReturnsToTextRoutingAfterImageTurn(t *testing.T) {
 		{Role: "user", Content: "Refactor this code"},
 	}
 	result := DetectScenario(messages, 100, mockConfig())
-	if result.Scenario != ScenarioComplex {
-		t.Errorf("Expected ScenarioComplex, got %s", result.Scenario)
+	if result != ScenarioComplex {
+		t.Errorf("Expected ScenarioComplex, got %s", result)
 	}
 }
 
@@ -164,8 +163,8 @@ func TestDetectScenario_ReturnsToTextRoutingWhenLatestTurnHasHistoricalImageOnly
 		{Role: "user", Content: "ci sei?", HasImage: true, ImageHashes: []string{"img1"}},
 	}
 	result := DetectScenario(messages, 100, mockConfig())
-	if result.Scenario != ScenarioDefault {
-		t.Errorf("Expected ScenarioDefault, got %s", result.Scenario)
+	if result != ScenarioDefault {
+		t.Errorf("Expected ScenarioDefault, got %s", result)
 	}
 }
 
@@ -190,8 +189,8 @@ func TestDetectScenario_LatestTextVisualIntentWithoutNewImageStaysNonVision(t *t
 		{Role: "user", Content: "cosa vedi nello screenshot?", HasImage: false},
 	}
 	result := DetectScenario(messages, 100, mockConfig())
-	if result.Scenario == ScenarioVision {
-		t.Errorf("Expected non-vision scenario for text-only latest message, got %s", result.Scenario)
+	if result == ScenarioVision {
+		t.Errorf("Expected non-vision scenario for text-only latest message, got %s", result)
 	}
 }
 
@@ -204,8 +203,8 @@ func TestDetectScenario_DebugWithoutVisualIntentStaysTextDefault(t *testing.T) {
 		{Role: "user", Content: "debug questo codice", HasImage: false},
 	}
 	result := DetectScenario(messages, 100, mockConfig())
-	if result.Scenario != ScenarioDefault {
-		t.Errorf("Expected ScenarioDefault (debug is no longer a complex trigger), got %s", result.Scenario)
+	if result != ScenarioDefault {
+		t.Errorf("Expected ScenarioDefault (debug is no longer a complex trigger), got %s", result)
 	}
 }
 
@@ -216,8 +215,8 @@ func TestRouteForStreaming_ReturnsToFastAfterImageTurn(t *testing.T) {
 		{Role: "user", Content: "Hello"},
 	}
 	result := RouteForStreaming(messages, 100, mockConfig())
-	if result.Scenario != ScenarioFast {
-		t.Errorf("Expected ScenarioFast, got %s", result.Scenario)
+	if result != ScenarioFast {
+		t.Errorf("Expected ScenarioFast, got %s", result)
 	}
 }
 
@@ -226,8 +225,8 @@ func TestDetectScenario_VisionLongContextTakesPriorityOverVisionComplex(t *testi
 		{Role: "user", Content: "Analyze this screenshot and refactor the code", HasImage: true},
 	}
 	result := DetectScenario(messages, 70000, mockConfig())
-	if result.Scenario != ScenarioVisionLongContext {
-		t.Errorf("Expected ScenarioVisionLongContext, got %s", result.Scenario)
+	if result != ScenarioVisionLongContext {
+		t.Errorf("Expected ScenarioVisionLongContext, got %s", result)
 	}
 }
 
@@ -238,8 +237,8 @@ func TestRouteForStreaming_VisionComplexKeepsVisionComplexScenario(t *testing.T)
 		{Role: "user", Content: "Refactor the code shown in this screenshot", HasImage: true},
 	}
 	result := RouteForStreaming(messages, 100, mockConfig())
-	if result.Scenario != ScenarioVisionComplex {
-		t.Errorf("Expected ScenarioVisionComplex, got %s", result.Scenario)
+	if result != ScenarioVisionComplex {
+		t.Errorf("Expected ScenarioVisionComplex, got %s", result)
 	}
 }
 
@@ -258,17 +257,14 @@ func TestRouteForStreaming_RespectsConfiguredThreshold(t *testing.T) {
 
 	// Below threshold should NOT trigger long_context
 	result := RouteForStreaming(messages, 40955, cfg)
-	if result.Scenario == ScenarioLongContext {
-		t.Errorf("Expected NOT ScenarioLongContext for 40955 tokens with threshold 256000, got %s", result.Scenario)
+	if result == ScenarioLongContext {
+		t.Errorf("Expected NOT ScenarioLongContext for 40955 tokens with threshold 256000, got %s", result)
 	}
 
 	// Above threshold should trigger long_context
 	result = RouteForStreaming(messages, 300000, cfg)
-	if result.Scenario != ScenarioLongContext {
-		t.Errorf("Expected ScenarioLongContext for 300000 tokens with threshold 256000, got %s", result.Scenario)
-	}
-	if !strings.Contains(result.Reason, "deepseek-v4-flash") {
-		t.Errorf("Expected reason to mention configured model 'deepseek-v4-flash', got: %s", result.Reason)
+	if result != ScenarioLongContext {
+		t.Errorf("Expected ScenarioLongContext for 300000 tokens with threshold 256000, got %s", result)
 	}
 }
 
@@ -282,13 +278,13 @@ func TestRouteForStreaming_UsesDefaultThresholdWhenNotConfigured(t *testing.T) {
 
 	// Default threshold is 100000
 	result := RouteForStreaming(messages, 90000, cfg)
-	if result.Scenario == ScenarioLongContext {
-		t.Errorf("Expected NOT ScenarioLongContext for 90000 tokens with default threshold, got %s", result.Scenario)
+	if result == ScenarioLongContext {
+		t.Errorf("Expected NOT ScenarioLongContext for 90000 tokens with default threshold, got %s", result)
 	}
 
 	result = RouteForStreaming(messages, 110000, cfg)
-	if result.Scenario != ScenarioLongContext {
-		t.Errorf("Expected ScenarioLongContext for 110000 tokens with default threshold, got %s", result.Scenario)
+	if result != ScenarioLongContext {
+		t.Errorf("Expected ScenarioLongContext for 110000 tokens with default threshold, got %s", result)
 	}
 }
 
@@ -299,15 +295,12 @@ func TestRouteForStreaming_NilConfig(t *testing.T) {
 
 	// Default threshold is 100000; nil config should not panic
 	result := RouteForStreaming(messages, 90000, nil)
-	if result.Scenario == ScenarioLongContext {
-		t.Errorf("Expected NOT ScenarioLongContext for 90000 tokens with nil config, got %s", result.Scenario)
+	if result == ScenarioLongContext {
+		t.Errorf("Expected NOT ScenarioLongContext for 90000 tokens with nil config, got %s", result)
 	}
 
 	result = RouteForStreaming(messages, 110000, nil)
-	if result.Scenario != ScenarioLongContext {
-		t.Errorf("Expected ScenarioLongContext for 110000 tokens with nil config, got %s", result.Scenario)
-	}
-	if !strings.Contains(result.Reason, "long_context") {
-		t.Errorf("Expected reason to contain fallback model name 'long_context', got: %s", result.Reason)
+	if result != ScenarioLongContext {
+		t.Errorf("Expected ScenarioLongContext for 110000 tokens with nil config, got %s", result)
 	}
 }

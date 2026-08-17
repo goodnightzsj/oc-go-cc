@@ -124,7 +124,3 @@ func setIcon(running bool) {
 		systray.SetTitle("⏸")
 	}
 }
-
-func Quit() {
-	systray.Quit()
-}

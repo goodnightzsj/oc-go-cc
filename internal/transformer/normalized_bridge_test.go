@@ -5,70 +5,72 @@ import (
 	"testing"
 
 	"github.com/routatic/proxy/internal/config"
-	"github.com/routatic/proxy/internal/core"
+	"github.com/routatic/proxy/pkg/types"
 )
 
-func TestNormalizedToAnthropic_SystemPromptWithNewline(t *testing.T) {
-	req := &core.NormalizedRequest{
-		Model:        "minimax-m3",
-		SystemPrompt: "Line one\nLine two\nLine three",
-		MaxTokens:    100,
-		Messages: []core.NormalizedMessage{
-			{Role: "user", Content: "Hello"},
-		},
-	}
-
-	anthropicReq := NormalizedToAnthropic(req, config.ModelConfig{ModelID: "minimax-m3"})
-
-	// The bug: marshaling the request failed when the system prompt contained
-	// unescaped newlines because we built the RawMessage by wrapping the raw
-	// string in quotes instead of JSON-encoding it.
-	_, err := json.Marshal(anthropicReq)
-	if err != nil {
-		t.Fatalf("json.Marshal failed: %v", err)
-	}
-
-	if got := anthropicReq.SystemText(); got != req.SystemPrompt {
-		t.Fatalf("system text mismatch: got %q, want %q", got, req.SystemPrompt)
-	}
-}
-
-func TestNormalizedToAnthropic_MessageContentWithNewline(t *testing.T) {
-	req := &core.NormalizedRequest{
-		Model:     "minimax-m3",
+func TestAnthropicForModel_PreservesContentAndSetsStream(t *testing.T) {
+	streamIn := true
+	req := &types.MessageRequest{
+		Model:     "claude-opus-4-8",
+		System:    json.RawMessage(`"Line one\nLine two\nLine three"`),
 		MaxTokens: 100,
-		Messages: []core.NormalizedMessage{
-			{Role: "user", Content: "Hello\nWorld"},
+		Messages: []types.Message{
+			{Role: "user", Content: json.RawMessage(`"Hello\nWorld"`)},
 		},
+		Stream: &streamIn,
 	}
 
-	anthropicReq := NormalizedToAnthropic(req, config.ModelConfig{ModelID: "minimax-m3"})
+	// A non-streaming call must not forward stream:true, and the model ID must
+	// be rewritten to the routed model.
+	out := AnthropicForModel(req, config.ModelConfig{ModelID: "minimax-m3"}, false)
 
-	_, err := json.Marshal(anthropicReq)
-	if err != nil {
+	if _, err := json.Marshal(out); err != nil {
 		t.Fatalf("json.Marshal failed: %v", err)
 	}
-
-	blocks := anthropicReq.Messages[0].ContentBlocks()
+	if out.Model != "minimax-m3" {
+		t.Errorf("model = %q, want minimax-m3", out.Model)
+	}
+	if out.Stream != nil {
+		t.Errorf("stream = %v, want nil for a non-streaming call", *out.Stream)
+	}
+	if got := out.SystemText(); got != "Line one\nLine two\nLine three" {
+		t.Errorf("system text mismatch: got %q", got)
+	}
+	blocks := out.Messages[0].ContentBlocks()
 	if len(blocks) != 1 || blocks[0].Text != "Hello\nWorld" {
-		t.Fatalf("unexpected content blocks: %+v", blocks)
+		t.Errorf("unexpected content blocks: %+v", blocks)
+	}
+	// The caller's request must not be mutated.
+	if req.Model != "claude-opus-4-8" || req.Stream == nil {
+		t.Errorf("source request was mutated: model=%q stream=%v", req.Model, req.Stream)
 	}
 }
 
-func TestNormalizedToResponses_SystemPromptWithNewline(t *testing.T) {
-	req := &core.NormalizedRequest{
-		Model:        "gpt-5",
-		SystemPrompt: "Line one\nLine two",
-		MaxTokens:    100,
-		Messages: []core.NormalizedMessage{
-			{Role: "user", Content: "Hello\nWorld"},
+func TestAnthropicForModel_StreamingSetsStreamTrue(t *testing.T) {
+	req := &types.MessageRequest{Model: "claude-opus-4-8", MaxTokens: 100}
+
+	out := AnthropicForModel(req, config.ModelConfig{ModelID: "minimax-m3"}, true)
+
+	if out.Stream == nil || !*out.Stream {
+		t.Fatalf("stream = %v, want true", out.Stream)
+	}
+}
+
+func TestAnthropicToResponses_SystemPromptWithNewline(t *testing.T) {
+	req := &types.MessageRequest{
+		Model:     "gpt-5",
+		System:    json.RawMessage(`"Line one\nLine two"`),
+		MaxTokens: 100,
+		Messages: []types.Message{
+			{Role: "user", Content: json.RawMessage(`"Hello\nWorld"`)},
 		},
 	}
 
-	responsesReq := NormalizedToResponses(req, config.ModelConfig{ModelID: "gpt-5"})
+	responsesReq := AnthropicToResponses(req, config.ModelConfig{ModelID: "gpt-5"})
 
-	_, err := json.Marshal(responsesReq)
-	if err != nil {
+	// The original bug: content was built by wrapping the raw string in quotes
+	// instead of JSON-encoding it, so any newline produced invalid JSON.
+	if _, err := json.Marshal(responsesReq); err != nil {
 		t.Fatalf("json.Marshal failed: %v", err)
 	}
 
@@ -80,15 +82,15 @@ func TestNormalizedToResponses_SystemPromptWithNewline(t *testing.T) {
 	if err := json.Unmarshal(responsesReq.Input[0].Content, &systemPrompt); err != nil {
 		t.Fatalf("system prompt content was not valid JSON: %v", err)
 	}
-	if systemPrompt != req.SystemPrompt {
-		t.Fatalf("system prompt mismatch: got %q, want %q", systemPrompt, req.SystemPrompt)
+	if systemPrompt != "Line one\nLine two" {
+		t.Fatalf("system prompt mismatch: got %q", systemPrompt)
 	}
 
 	var messageContent string
 	if err := json.Unmarshal(responsesReq.Input[1].Content, &messageContent); err != nil {
 		t.Fatalf("message content was not valid JSON: %v", err)
 	}
-	if messageContent != req.Messages[0].Content {
-		t.Fatalf("message content mismatch: got %q, want %q", messageContent, req.Messages[0].Content)
+	if messageContent != "Hello\nWorld" {
+		t.Fatalf("message content mismatch: got %q", messageContent)
 	}
 }

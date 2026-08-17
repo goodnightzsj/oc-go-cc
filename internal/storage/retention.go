@@ -62,8 +62,6 @@ func (r *Retention) runOnce() {
 
 	stats := struct {
 		requestsDeleted int64
-		latencyDeleted  int64
-		logsDeleted     int64
 	}{}
 
 	if requests, err := r.db.DB().ExecContext(ctx, `DELETE FROM requests WHERE created_at < ?`, before.Format(time.RFC3339Nano)); err == nil {
@@ -72,33 +70,9 @@ func (r *Retention) runOnce() {
 		slog.Warn("retention cleanup failed", "table", "requests", "error", err)
 	}
 
-	if latency, err := r.db.DB().ExecContext(ctx, `DELETE FROM latency_samples WHERE recorded_at < ?`, before.Format(time.RFC3339Nano)); err == nil {
-		stats.latencyDeleted, _ = latency.RowsAffected()
-	} else {
-		slog.Warn("retention cleanup failed", "table", "latency_samples", "error", err)
-	}
-
-	if logs, err := r.db.DB().ExecContext(ctx, `DELETE FROM logs WHERE recorded_at < ?`, before.Format(time.RFC3339Nano)); err == nil {
-		stats.logsDeleted, _ = logs.RowsAffected()
-	} else {
-		slog.Warn("retention cleanup failed", "table", "logs", "error", err)
-	}
-
-	if stats.requestsDeleted > 0 || stats.latencyDeleted > 0 || stats.logsDeleted > 0 {
+	if stats.requestsDeleted > 0 {
 		slog.Debug("retention cleanup",
 			"requests_deleted", stats.requestsDeleted,
-			"latency_deleted", stats.latencyDeleted,
-			"logs_deleted", stats.logsDeleted,
 			"retention_days", r.days)
 	}
-}
-
-func (r *Retention) SetDays(days int) {
-	if days > 0 {
-		r.days = days
-	}
-}
-
-func (r *Retention) Days() int {
-	return r.days
 }

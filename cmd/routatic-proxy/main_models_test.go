@@ -73,8 +73,8 @@ func migrateTestCatalogToSQLite(t *testing.T, dir string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if _, err := catalog.MigrateFromJSON(ctx, db, jsonPath); err != nil {
-		t.Fatalf("migrate catalog: %v", err)
+	if _, _, err := catalog.ImportFromJSON(ctx, db, jsonPath); err != nil {
+		t.Fatalf("import catalog: %v", err)
 	}
 }
 

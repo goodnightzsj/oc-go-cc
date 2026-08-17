@@ -66,72 +66,6 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 	return err
 }
 
-const (
-	// defaultRequestLimit is the page size used when a caller passes n <= 0.
-	defaultRequestLimit = 1000
-	// maxRequestScan caps time-range scans. A far-past `since` would otherwise
-	// stream the whole table into memory.
-	maxRequestScan = 50000
-)
-
-// Last returns the most recent n request records ordered by start time.
-func (r *Requests) Last(n int) ([]history.RequestRecord, error) {
-	if n <= 0 {
-		n = defaultRequestLimit
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	rows, err := r.db.DB().QueryContext(ctx, `
-		SELECT id, model, provider, scenario, start_time, duration_ms,
-		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-		       cost_usd, cost_source, details_known, streaming, success, error_msg, attempt
-		FROM requests
-		ORDER BY start_time DESC
-		LIMIT ?
-	`, n)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	return scanRequests(rows)
-}
-
-// Since returns request records with start time after the given time, newest
-// first, capped at maxRequestScan rows so a wide range cannot exhaust memory.
-func (r *Requests) Since(since time.Time) ([]history.RequestRecord, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	rows, err := r.db.DB().QueryContext(ctx, `
-		SELECT id, model, provider, scenario, start_time, duration_ms,
-		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-		       cost_usd, cost_source, details_known, streaming, success, error_msg, attempt
-		FROM requests
-		WHERE start_time >= ?
-		ORDER BY start_time DESC
-		LIMIT ?
-	`, since.Format(time.RFC3339Nano), maxRequestScan)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	return scanRequests(rows)
-}
-
-// Count returns the total number of request records.
-func (r *Requests) Count() (int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	var count int64
-	err := r.db.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM requests`).Scan(&count)
-	return count, err
-}
-
 // RequestQuery describes a filtered, sorted history page. Empty fields keep
 // the existing all-records behavior.
 type RequestQuery struct {
@@ -257,12 +191,6 @@ func (r *Requests) Summary(q RequestQuery) (*RequestSummary, error) {
 		return nil, err
 	}
 	return out, rows.Close()
-}
-
-// Page returns records for a single history page (1-based page, pageSize per
-// page, newest first) plus the total number of records.
-func (r *Requests) Page(page, pageSize int) ([]history.RequestRecord, int64, error) {
-	return r.Query(RequestQuery{Page: page, PageSize: pageSize})
 }
 
 // Query returns one server-side filtered history page and the matching total.
@@ -433,33 +361,6 @@ func (r *Requests) Totals() (*Totals, error) {
 		t.ModelCounts[model] = n
 	}
 	return t, rows.Err()
-}
-
-// CountSince returns the number of request records with start time after the given time.
-func (r *Requests) CountSince(since time.Time) (int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	var count int64
-	err := r.db.DB().QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM requests WHERE start_time >= ?
-	`, since.Format(time.RFC3339Nano)).Scan(&count)
-	return count, err
-}
-
-// DeleteBefore removes request records older than the given time.
-func (r *Requests) DeleteBefore(before time.Time) (int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	result, err := r.db.DB().ExecContext(ctx, `
-		DELETE FROM requests WHERE created_at < ?
-	`, before.Format(time.RFC3339Nano))
-	if err != nil {
-		return 0, err
-	}
-
-	return result.RowsAffected()
 }
 
 func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {

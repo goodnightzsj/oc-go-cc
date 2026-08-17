@@ -421,15 +421,17 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 	var routerMessages []router.MessageContent
 	var tokenMessages []token.MessageContent
 	systemText := anthropicReq.SystemText()
+	needsTools := len(anthropicReq.Tools) > 0
 
 	for _, msg := range anthropicReq.Messages {
 		blocks := msg.ContentBlocks()
 		content := extractTextFromBlocks(blocks)
 		mc := router.MessageContent{
-			Role:        msg.Role,
-			Content:     content,
-			HasImage:    blocksHaveImage(blocks),
-			ImageHashes: imageHashesFromBlocks(blocks),
+			Role:          msg.Role,
+			Content:       content,
+			HasImage:      blocksHaveImage(blocks),
+			ToolsDeclared: needsTools,
+			ImageHashes:   imageHashesFromBlocks(blocks),
 		}
 		routerMessages = append(routerMessages, mc)
 		tokenMessages = append(tokenMessages, token.MessageContent{
@@ -443,7 +445,6 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 
 	// Route to appropriate model and build fallback chain.
 	facts := router.AnalyzeRequestFacts(routerMessages)
-	needsTools := len(anthropicReq.Tools) > 0
 	modelChain, routeResult, err := h.buildModelChain(anthropicReq.Model, routerMessages, tokenCount, isStreaming, anthropicReq.MaxTokens, facts.NeedsVision, needsTools)
 	if err != nil {
 		status := http.StatusInternalServerError

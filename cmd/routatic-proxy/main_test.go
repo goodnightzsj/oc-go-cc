@@ -1,8 +1,12 @@
 package main
 
 import (
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/routatic/proxy/internal/config"
@@ -49,5 +53,41 @@ func TestServeAliasResolvesToStartAndReportsCalledAs(t *testing.T) {
 	}
 	if calledAs != "serve" {
 		t.Fatalf("CalledAs()=%q, want %q (headless would not be forced)", calledAs, "serve")
+	}
+}
+
+func TestServeReturnsProxyListenError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	databasePath := filepath.Join(t.TempDir(), "data.db")
+	configJSON := fmt.Sprintf(`{
+		"api_key":"test-key",
+		"host":"127.0.0.1",
+		"port":%d,
+		"hot_reload":false,
+		"catalog":{"enabled":false},
+		"storage":{"database_path":%q,"retention_days":1}
+	}`, port, databasePath)
+	if err := os.WriteFile(configPath, []byte(configJSON), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ROUTATIC_PROXY_CONFIG", configPath)
+
+	root := &cobra.Command{Use: appName, SilenceErrors: true, SilenceUsage: true}
+	root.AddCommand(startCmd())
+	root.SetArgs([]string{"serve", "--port", strconv.Itoa(port)})
+	err = root.Execute()
+	if err == nil {
+		t.Fatal("serve returned nil while its listen port was occupied")
+	}
+	if !strings.Contains(err.Error(), "address already in use") {
+		t.Fatalf("serve error = %q, want listen failure", err)
 	}
 }

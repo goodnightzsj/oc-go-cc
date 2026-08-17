@@ -175,6 +175,9 @@ func hasToolUsage(messages []MessageContent) bool {
 		"tool", "function", "execute", "run command",
 	}
 	for _, msg := range messages {
+		if msg.ToolsDeclared {
+			return true
+		}
 		if msg.Role == "tool" || msg.Role == "function" {
 			return true
 		}

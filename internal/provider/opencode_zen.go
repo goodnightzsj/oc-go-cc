@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
-	"time"
 
 	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
@@ -33,39 +31,6 @@ func NewOpenCodeZenProvider(atomic *config.AtomicConfig) *OpenCodeZenProvider {
 // Name returns the provider identifier.
 func (p *OpenCodeZenProvider) Name() string { return "opencode-zen" }
 
-// Capabilities returns provider-level capabilities.
-func (p *OpenCodeZenProvider) Capabilities() core.ProviderCapabilities {
-	return core.ProviderCapabilities{
-		SupportsStreaming:  true,
-		SupportsTools:      true,
-		SupportsThinking:   true,
-		SupportsImageInput: true,
-		MaxContextLength:   200_000,
-		DefaultMaxTokens:   4096,
-	}
-}
-
-// ModelCapabilities returns per-model capabilities.
-func (p *OpenCodeZenProvider) ModelCapabilities(modelID string) (core.ProviderCapabilities, bool) {
-	caps := p.Capabilities()
-	switch {
-	case strings.HasPrefix(modelID, "claude-"):
-		caps.MaxContextLength = 200_000
-	case strings.HasPrefix(modelID, "gemini-"):
-		caps.MaxContextLength = 1_000_000
-	case strings.HasPrefix(modelID, "gpt-"):
-		caps.MaxContextLength = 128_000
-		caps.SupportsThinking = false
-	case strings.HasPrefix(modelID, "minimax-"):
-		caps.MaxContextLength = 1_000_000
-	case strings.HasPrefix(modelID, "deepseek-"):
-		caps.MaxContextLength = 1_000_000
-	case strings.HasPrefix(modelID, "qwen"):
-		caps.MaxContextLength = 1_000_000
-	}
-	return caps, true
-}
-
 // WireFormat returns the wire format for the given model on Zen.
 // This replaces the old client.ClassifyEndpoint function.
 func (p *OpenCodeZenProvider) WireFormat(modelID string) core.WireFormat {
@@ -81,27 +46,8 @@ func (p *OpenCodeZenProvider) WireFormat(modelID string) core.WireFormat {
 	}
 }
 
-// RoundTripName returns the model ID to use in the upstream request.
-func (p *OpenCodeZenProvider) RoundTripName(model config.ModelConfig) string {
-	return model.ModelID
-}
-
-// StreamIdleTimeout returns the maximum gap between bytes on an active stream.
-func (p *OpenCodeZenProvider) StreamIdleTimeout(model config.ModelConfig) time.Duration {
-	const fallback = 5 * time.Minute
-	cfg := p.atomic.Get()
-	ms := cfg.OpenCodeZen.StreamTimeoutMs
-	if ms <= 0 {
-		ms = cfg.OpenCodeZen.TimeoutMs
-	}
-	if ms <= 0 {
-		return fallback
-	}
-	return time.Duration(ms) * time.Millisecond
-}
-
 // Execute sends a non-streaming request and returns the response.
-func (p *OpenCodeZenProvider) Execute(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
+func (p *OpenCodeZenProvider) Execute(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	switch p.WireFormat(model.ModelID) {
 	case core.WireFormatAnthropic:
 		return p.executeAnthropic(ctx, req, model)
@@ -115,7 +61,7 @@ func (p *OpenCodeZenProvider) Execute(ctx context.Context, req *core.NormalizedR
 }
 
 // Stream sends a streaming request and returns an io.ReadCloser for SSE events.
-func (p *OpenCodeZenProvider) Stream(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (io.ReadCloser, error) {
+func (p *OpenCodeZenProvider) Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	switch p.WireFormat(model.ModelID) {
 	case core.WireFormatAnthropic:
 		return p.streamAnthropic(ctx, req, model)
@@ -130,16 +76,18 @@ func (p *OpenCodeZenProvider) Stream(ctx context.Context, req *core.NormalizedRe
 
 // ── OpenAI Chat Completions ────────────────────────────────────────────
 
-func (p *OpenCodeZenProvider) executeOpenAI(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
+func (p *OpenCodeZenProvider) executeOpenAI(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeZen.BaseURL
 	apiKey := p.nextAPIKey(cfg.EffectiveAPIKeys())
 
-	openaiReq := transformer.TransformRequestFromNormalized(req, model)
+	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
+	if err != nil {
+		return nil, fmt.Errorf("request transform failed: %w", err)
+	}
 	streamFalse := false
 	openaiReq.Stream = &streamFalse
 
-	start := time.Now()
 	resp, err := p.doRequest(ctx, endpoint, apiKey, openaiReq, false)
 	if err != nil {
 		return nil, err
@@ -164,18 +112,19 @@ func (p *OpenCodeZenProvider) executeOpenAI(ctx context.Context, req *core.Norma
 	}
 
 	return &core.ExecuteResult{
-		Body:    resultBody,
-		ModelID: model.ModelID,
-		Latency: time.Since(start),
+		Body: resultBody,
 	}, nil
 }
 
-func (p *OpenCodeZenProvider) streamOpenAI(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (io.ReadCloser, error) {
+func (p *OpenCodeZenProvider) streamOpenAI(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeZen.BaseURL
 	apiKey := p.nextAPIKey(cfg.EffectiveAPIKeys())
 
-	openaiReq := transformer.TransformRequestFromNormalized(req, model)
+	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
+	if err != nil {
+		return nil, fmt.Errorf("request transform failed: %w", err)
+	}
 	streamTrue := true
 	openaiReq.Stream = &streamTrue
 
@@ -189,12 +138,12 @@ func (p *OpenCodeZenProvider) streamOpenAI(ctx context.Context, req *core.Normal
 
 // ── Anthropic Messages ────────────────────────────────────────────────
 
-func (p *OpenCodeZenProvider) executeAnthropic(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
+func (p *OpenCodeZenProvider) executeAnthropic(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeZen.AnthropicBaseURL
 	apiKey := p.nextAPIKey(cfg.EffectiveAPIKeys())
 
-	anthropicReq := transformer.NormalizedToAnthropic(req, model)
+	anthropicReq := transformer.AnthropicForModel(req, model, false)
 	rawBody, err := json.Marshal(anthropicReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -208,7 +157,6 @@ func (p *OpenCodeZenProvider) executeAnthropic(ctx context.Context, req *core.No
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 	httpReq.Header.Set("x-api-key", apiKey)
 
-	start := time.Now()
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -225,19 +173,15 @@ func (p *OpenCodeZenProvider) executeAnthropic(ctx context.Context, req *core.No
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	return &core.ExecuteResult{
-		Body:    body,
-		ModelID: model.ModelID,
-		Latency: time.Since(start),
-	}, nil
+	return &core.ExecuteResult{Body: body}, nil
 }
 
-func (p *OpenCodeZenProvider) streamAnthropic(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (io.ReadCloser, error) {
+func (p *OpenCodeZenProvider) streamAnthropic(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeZen.AnthropicBaseURL
 	apiKey := p.nextAPIKey(cfg.EffectiveAPIKeys())
 
-	anthropicReq := transformer.NormalizedToAnthropic(req, model)
+	anthropicReq := transformer.AnthropicForModel(req, model, true)
 	rawBody, err := json.Marshal(anthropicReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -268,15 +212,14 @@ func (p *OpenCodeZenProvider) streamAnthropic(ctx context.Context, req *core.Nor
 
 // ── OpenAI Responses ──────────────────────────────────────────────────
 
-func (p *OpenCodeZenProvider) executeResponses(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
+func (p *OpenCodeZenProvider) executeResponses(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeZen.ResponsesBaseURL
 	apiKey := p.nextAPIKey(cfg.EffectiveAPIKeys())
 
-	responsesReq := transformer.NormalizedToResponses(req, model)
+	responsesReq := transformer.AnthropicToResponses(req, model)
 	responsesReq.Stream = false
 
-	start := time.Now()
 	resp, err := p.doJSONRequest(ctx, endpoint, apiKey, responsesReq)
 	if err != nil {
 		return nil, err
@@ -301,18 +244,16 @@ func (p *OpenCodeZenProvider) executeResponses(ctx context.Context, req *core.No
 	}
 
 	return &core.ExecuteResult{
-		Body:    resultBody,
-		ModelID: model.ModelID,
-		Latency: time.Since(start),
+		Body: resultBody,
 	}, nil
 }
 
-func (p *OpenCodeZenProvider) streamResponses(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (io.ReadCloser, error) {
+func (p *OpenCodeZenProvider) streamResponses(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeZen.ResponsesBaseURL
 	apiKey := p.nextAPIKey(cfg.EffectiveAPIKeys())
 
-	responsesReq := transformer.NormalizedToResponses(req, model)
+	responsesReq := transformer.AnthropicToResponses(req, model)
 	responsesReq.Stream = true
 
 	resp, err := p.doJSONRequest(ctx, endpoint, apiKey, responsesReq)
@@ -325,15 +266,14 @@ func (p *OpenCodeZenProvider) streamResponses(ctx context.Context, req *core.Nor
 
 // ── Gemini ────────────────────────────────────────────────────────────
 
-func (p *OpenCodeZenProvider) executeGemini(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
+func (p *OpenCodeZenProvider) executeGemini(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeZen.GeminiBaseURL + "/" + model.ModelID
 	apiKey := p.nextAPIKey(cfg.EffectiveAPIKeys())
 
-	geminiReq := transformer.NormalizedToGemini(req, model)
+	geminiReq := transformer.AnthropicToGemini(req, model)
 	geminiReq.Stream = false
 
-	start := time.Now()
 	resp, err := p.doJSONRequest(ctx, endpoint, apiKey, geminiReq)
 	if err != nil {
 		return nil, err
@@ -358,18 +298,16 @@ func (p *OpenCodeZenProvider) executeGemini(ctx context.Context, req *core.Norma
 	}
 
 	return &core.ExecuteResult{
-		Body:    resultBody,
-		ModelID: model.ModelID,
-		Latency: time.Since(start),
+		Body: resultBody,
 	}, nil
 }
 
-func (p *OpenCodeZenProvider) streamGemini(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (io.ReadCloser, error) {
+func (p *OpenCodeZenProvider) streamGemini(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeZen.GeminiBaseURL + "/" + model.ModelID
 	apiKey := p.nextAPIKey(cfg.EffectiveAPIKeys())
 
-	geminiReq := transformer.NormalizedToGemini(req, model)
+	geminiReq := transformer.AnthropicToGemini(req, model)
 	geminiReq.Stream = true
 
 	resp, err := p.doJSONRequest(ctx, endpoint, apiKey, geminiReq)

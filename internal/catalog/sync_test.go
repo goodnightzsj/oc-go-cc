@@ -76,17 +76,9 @@ func TestSync(t *testing.T) {
 				if string(data) != tc.body {
 					t.Fatalf("catalog content mismatch: got %q, want %q", string(data), tc.body)
 				}
-
-				indexPath := filepath.Join(destDir, indexFileName)
-				if _, err := os.Stat(indexPath); err != nil {
-					t.Fatalf("expected index file: %v", err)
-				}
 			} else {
 				if _, err := os.Stat(catalogPath); !os.IsNotExist(err) {
 					t.Fatalf("expected no catalog file, got %v", err)
-				}
-				if _, err := os.Stat(filepath.Join(destDir, indexFileName)); !os.IsNotExist(err) {
-					t.Fatalf("expected no index file, got %v", err)
 				}
 			}
 
@@ -139,7 +131,7 @@ func TestSyncOversized(t *testing.T) {
 		t.Fatalf("expected error for oversized response, got nil")
 	}
 
-	for _, name := range []string{catalogFileName, tmpFileName, lockFileName, indexFileName, indexTmpFileName} {
+	for _, name := range []string{catalogFileName, tmpFileName, lockFileName} {
 		path := filepath.Join(destDir, name)
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("expected no %s after oversized sync failure, got %v", name, err)

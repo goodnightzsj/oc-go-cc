@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
@@ -30,24 +29,6 @@ func NewAWSBedrockProvider(atomic *config.AtomicConfig) *AWSBedrockProvider {
 
 // Name returns the provider identifier.
 func (p *AWSBedrockProvider) Name() string { return "aws-bedrock" }
-
-// Capabilities returns provider-level capabilities.
-func (p *AWSBedrockProvider) Capabilities() core.ProviderCapabilities {
-	return core.ProviderCapabilities{
-		SupportsStreaming:  true,
-		SupportsTools:      true,
-		SupportsThinking:   true,
-		SupportsImageInput: true,
-		MaxContextLength:   200_000,
-		DefaultMaxTokens:   4096,
-	}
-}
-
-// ModelCapabilities returns per-model capabilities. Returns true for all models
-// since Bedrock hosts many different model families.
-func (p *AWSBedrockProvider) ModelCapabilities(modelID string) (core.ProviderCapabilities, bool) {
-	return p.Capabilities(), true
-}
 
 // WireFormat returns the wire format for Bedrock models.
 // Bedrock Mantle uses "provider.model-name" format — models prefixed with
@@ -71,26 +52,7 @@ func (p *AWSBedrockProvider) WireFormat(modelID string) core.WireFormat {
 	}
 }
 
-// RoundTripName returns the model ID to use in the upstream request.
-func (p *AWSBedrockProvider) RoundTripName(model config.ModelConfig) string {
-	return model.ModelID
-}
-
-// StreamIdleTimeout returns the maximum gap between bytes on an active stream.
-func (p *AWSBedrockProvider) StreamIdleTimeout(model config.ModelConfig) time.Duration {
-	const fallback = 5 * time.Minute
-	cfg := p.atomic.Get()
-	ms := cfg.AWSBedrock.StreamTimeoutMs
-	if ms <= 0 {
-		ms = cfg.AWSBedrock.TimeoutMs
-	}
-	if ms <= 0 {
-		return fallback
-	}
-	return time.Duration(ms) * time.Millisecond
-}
-
-func (p *AWSBedrockProvider) Execute(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
+func (p *AWSBedrockProvider) Execute(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	switch p.WireFormat(model.ModelID) {
 	case core.WireFormatAnthropic:
 		return p.executeAnthropic(ctx, req, model)
@@ -101,7 +63,7 @@ func (p *AWSBedrockProvider) Execute(ctx context.Context, req *core.NormalizedRe
 	}
 }
 
-func (p *AWSBedrockProvider) Stream(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (io.ReadCloser, error) {
+func (p *AWSBedrockProvider) Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	switch p.WireFormat(model.ModelID) {
 	case core.WireFormatAnthropic:
 		return p.streamAnthropic(ctx, req, model)
@@ -114,16 +76,18 @@ func (p *AWSBedrockProvider) Stream(ctx context.Context, req *core.NormalizedReq
 
 // ── OpenAI Chat Completions ────────────────────────────────────────────
 
-func (p *AWSBedrockProvider) executeOpenAI(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
+func (p *AWSBedrockProvider) executeOpenAI(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
 	endpoint := p.bedrockEndpoint(cfg, model.ModelID)
 	apiKey := p.bedrockAPIKey(cfg)
 
-	openaiReq := transformer.TransformRequestFromNormalized(req, model)
+	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
+	if err != nil {
+		return nil, fmt.Errorf("request transform failed: %w", err)
+	}
 	streamFalse := false
 	openaiReq.Stream = &streamFalse
 
-	start := time.Now()
 	resp, err := p.doBedrockRequest(ctx, endpoint, apiKey, cfg.AWSBedrock.ProjectID, openaiReq, false)
 	if err != nil {
 		return nil, err
@@ -148,18 +112,19 @@ func (p *AWSBedrockProvider) executeOpenAI(ctx context.Context, req *core.Normal
 	}
 
 	return &core.ExecuteResult{
-		Body:    resultBody,
-		ModelID: model.ModelID,
-		Latency: time.Since(start),
+		Body: resultBody,
 	}, nil
 }
 
-func (p *AWSBedrockProvider) streamOpenAI(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (io.ReadCloser, error) {
+func (p *AWSBedrockProvider) streamOpenAI(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
 	endpoint := p.bedrockEndpoint(cfg, model.ModelID)
 	apiKey := p.bedrockAPIKey(cfg)
 
-	openaiReq := transformer.TransformRequestFromNormalized(req, model)
+	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
+	if err != nil {
+		return nil, fmt.Errorf("request transform failed: %w", err)
+	}
 	streamTrue := true
 	openaiReq.Stream = &streamTrue
 
@@ -173,14 +138,13 @@ func (p *AWSBedrockProvider) streamOpenAI(ctx context.Context, req *core.Normali
 
 // ── OpenAI Responses API ──────────────────────────────────────────────
 
-func (p *AWSBedrockProvider) executeResponses(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
+func (p *AWSBedrockProvider) executeResponses(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
 	endpoint := p.responsesEndpoint(cfg)
 	apiKey := p.bedrockAPIKey(cfg)
 
 	responsesReq := p.buildResponsesRequest(req, model)
 
-	start := time.Now()
 	resp, err := p.doBedrockRequest(ctx, endpoint, apiKey, cfg.AWSBedrock.ProjectID, responsesReq, false)
 	if err != nil {
 		return nil, err
@@ -205,13 +169,11 @@ func (p *AWSBedrockProvider) executeResponses(ctx context.Context, req *core.Nor
 	}
 
 	return &core.ExecuteResult{
-		Body:    resultBody,
-		ModelID: model.ModelID,
-		Latency: time.Since(start),
+		Body: resultBody,
 	}, nil
 }
 
-func (p *AWSBedrockProvider) streamResponses(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (io.ReadCloser, error) {
+func (p *AWSBedrockProvider) streamResponses(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
 	endpoint := p.responsesEndpoint(cfg)
 	apiKey := p.bedrockAPIKey(cfg)
@@ -227,7 +189,11 @@ func (p *AWSBedrockProvider) streamResponses(ctx context.Context, req *core.Norm
 	return resp.Body, nil
 }
 
-func (p *AWSBedrockProvider) buildResponsesRequest(req *core.NormalizedRequest, model config.ModelConfig) *types.ResponsesRequest {
+func (p *AWSBedrockProvider) buildResponsesRequest(anthropicReq *types.MessageRequest, model config.ModelConfig) *types.ResponsesRequest {
+	// Normalize first: Anthropic content may be a string or a block array, and
+	// this endpoint expects each input's content as a plain JSON string.
+	req := core.NormalizeRequest(anthropicReq)
+
 	var inputs []types.ResponsesInput
 	for _, msg := range req.Messages {
 		contentBytes, _ := json.Marshal(msg.Content)
@@ -246,7 +212,7 @@ func (p *AWSBedrockProvider) buildResponsesRequest(req *core.NormalizedRequest, 
 
 // ── Anthropic Messages ────────────────────────────────────────────────
 
-func (p *AWSBedrockProvider) executeAnthropic(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
+func (p *AWSBedrockProvider) executeAnthropic(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.AWSBedrock.AnthropicBaseURL
 	if endpoint == "" {
@@ -254,7 +220,7 @@ func (p *AWSBedrockProvider) executeAnthropic(ctx context.Context, req *core.Nor
 	}
 	apiKey := p.bedrockAPIKey(cfg)
 
-	anthropicReq := transformer.NormalizedToAnthropic(req, model)
+	anthropicReq := transformer.AnthropicForModel(req, model, false)
 	rawBody, err := json.Marshal(anthropicReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal anthropic request: %w", err)
@@ -270,7 +236,6 @@ func (p *AWSBedrockProvider) executeAnthropic(ctx context.Context, req *core.Nor
 		httpReq.Header.Set("OpenAI-Project", cfg.AWSBedrock.ProjectID)
 	}
 
-	start := time.Now()
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -287,14 +252,10 @@ func (p *AWSBedrockProvider) executeAnthropic(ctx context.Context, req *core.Nor
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	return &core.ExecuteResult{
-		Body:    body,
-		ModelID: model.ModelID,
-		Latency: time.Since(start),
-	}, nil
+	return &core.ExecuteResult{Body: body}, nil
 }
 
-func (p *AWSBedrockProvider) streamAnthropic(ctx context.Context, req *core.NormalizedRequest, model config.ModelConfig) (io.ReadCloser, error) {
+func (p *AWSBedrockProvider) streamAnthropic(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.AWSBedrock.AnthropicBaseURL
 	if endpoint == "" {
@@ -302,7 +263,7 @@ func (p *AWSBedrockProvider) streamAnthropic(ctx context.Context, req *core.Norm
 	}
 	apiKey := p.bedrockAPIKey(cfg)
 
-	anthropicReq := transformer.NormalizedToAnthropic(req, model)
+	anthropicReq := transformer.AnthropicForModel(req, model, true)
 	rawBody, err := json.Marshal(anthropicReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal anthropic request: %w", err)

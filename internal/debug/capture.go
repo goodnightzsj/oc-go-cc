@@ -55,98 +55,41 @@ func (c *CaptureLogger) worker() {
 	}
 }
 
-// CaptureOriginal captures the original incoming request data.
-// This is called before any transformation occurs.
-// The capture is performed asynchronously via the background worker.
-func (c *CaptureLogger) CaptureOriginal(requestID string, data []byte) {
+// capture builds an entry for the given phase and hands it to the background
+// worker. All Capture* methods differ only by phase.
+func (c *CaptureLogger) capture(phase, requestID, provider string, data []byte) {
 	if c == nil || !c.enabled {
 		return
 	}
 
-	entry := CaptureEntry{
+	c.sendEntry(CaptureEntry{
 		Timestamp: time.Now(),
-		Phase:     PhaseOriginal,
+		Phase:     phase,
+		Provider:  provider,
 		RequestID: requestID,
 		Data:      redactIfNeeded(data, c.storage.config.RedactAPIKeys),
-	}
+	})
+}
 
-	c.sendEntry(entry)
+// CaptureOriginal captures the original incoming request, before any transform.
+func (c *CaptureLogger) CaptureOriginal(requestID string, data []byte) {
+	c.capture(PhaseOriginal, requestID, "", data)
 }
 
 // CaptureNormalized captures the request after normalization to the internal format.
-// The provider parameter indicates which provider this request is being routed to.
-// The capture is performed asynchronously via the background worker.
-func (c *CaptureLogger) CaptureNormalized(requestID string, provider string, data []byte) {
-	if c == nil || !c.enabled {
-		return
-	}
-
-	entry := CaptureEntry{
-		Timestamp: time.Now(),
-		Phase:     PhaseNormalized,
-		Provider:  provider,
-		RequestID: requestID,
-		Data:      redactIfNeeded(data, c.storage.config.RedactAPIKeys),
-	}
-
-	c.sendEntry(entry)
+func (c *CaptureLogger) CaptureNormalized(requestID, provider string, data []byte) {
+	c.capture(PhaseNormalized, requestID, provider, data)
 }
 
 // CaptureUpstreamRequest captures the request as sent to the upstream provider.
-// This is after all transformations have been applied.
-// The capture is performed asynchronously via the background worker.
-func (c *CaptureLogger) CaptureUpstreamRequest(requestID string, provider string, data []byte) {
-	if c == nil || !c.enabled {
-		return
-	}
-
-	entry := CaptureEntry{
-		Timestamp: time.Now(),
-		Phase:     PhaseUpstreamRequest,
-		Provider:  provider,
-		RequestID: requestID,
-		Data:      redactIfNeeded(data, c.storage.config.RedactAPIKeys),
-	}
-
-	c.sendEntry(entry)
+func (c *CaptureLogger) CaptureUpstreamRequest(requestID, provider string, data []byte) {
+	c.capture(PhaseUpstreamRequest, requestID, provider, data)
 }
 
-// CaptureUpstreamResponse captures the raw response from the upstream provider.
-// This is before any transformation back to the Anthropic format.
-// The capture is performed asynchronously via the background worker.
-func (c *CaptureLogger) CaptureUpstreamResponse(requestID string, provider string, data []byte) {
-	if c == nil || !c.enabled {
-		return
-	}
-
-	entry := CaptureEntry{
-		Timestamp: time.Now(),
-		Phase:     PhaseUpstreamResponse,
-		Provider:  provider,
-		RequestID: requestID,
-		Data:      redactIfNeeded(data, c.storage.config.RedactAPIKeys),
-	}
-
-	c.sendEntry(entry)
-}
-
-// CaptureTransformed captures the final response after transformation to Anthropic format.
-// This is the response that will be sent back to the client.
-// The capture is performed asynchronously via the background worker.
-func (c *CaptureLogger) CaptureTransformed(requestID string, provider string, data []byte) {
-	if c == nil || !c.enabled {
-		return
-	}
-
-	entry := CaptureEntry{
-		Timestamp: time.Now(),
-		Phase:     PhaseTransformed,
-		Provider:  provider,
-		RequestID: requestID,
-		Data:      redactIfNeeded(data, c.storage.config.RedactAPIKeys),
-	}
-
-	c.sendEntry(entry)
+// CaptureUpstreamResponse captures the raw upstream response, before transforming
+// it back to the Anthropic format.
+func (c *CaptureLogger) CaptureUpstreamResponse(requestID, provider string, data []byte) {
+	c.capture(PhaseUpstreamResponse, requestID, provider, data)
 }
 
 // sendEntry sends an entry to the background worker via the buffered channel.

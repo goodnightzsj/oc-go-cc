@@ -45,20 +45,8 @@ func (sp *StreamProxy) ProxyStream(
 	case core.WireFormatGemini:
 		return sp.handler.ProxyGeminiStream(w, body, modelID, clientCtx, idleTimeout, cancel)
 	default:
-		return sp.proxyOpenAIStream(w, body, modelID, clientCtx, idleTimeout, cancel)
+		return sp.handler.ProxyStream(w, body, modelID, clientCtx, idleTimeout, cancel)
 	}
-}
-
-// proxyOpenAIStream delegates to the transformer's ProxyStream.
-func (sp *StreamProxy) proxyOpenAIStream(
-	w http.ResponseWriter,
-	body io.ReadCloser,
-	modelID string,
-	clientCtx context.Context,
-	idleTimeout time.Duration,
-	cancel context.CancelFunc,
-) error {
-	return sp.handler.ProxyStream(w, body, modelID, clientCtx, idleTimeout, cancel)
 }
 
 // proxyAnthropicPassthroughStream forwards raw Anthropic SSE bytes directly to

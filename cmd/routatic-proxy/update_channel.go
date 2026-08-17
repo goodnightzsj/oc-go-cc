@@ -51,8 +51,3 @@ Examples:
 		return nil
 	},
 }
-
-// TODO: wire updateChannelCmd into rootCmd when root command registration is centralized.
-// func init() {
-// 	rootCmd.AddCommand(updateChannelCmd)
-// }

@@ -7,23 +7,12 @@ import (
 	"time"
 )
 
-// DebugCapture holds configuration for request/response capture.
-type DebugCapture struct {
-	Enabled       bool     `json:"enabled"`
-	Directory     string   `json:"directory"`
-	MaxFiles      int      `json:"max_files"`
-	MaxFileSize   int64    `json:"max_file_size"`
-	CapturePhases []string `json:"capture_phases"`
-	RedactAPIKeys bool     `json:"redact_api_keys"`
-}
-
 // Capture phase constants.
 const (
 	PhaseOriginal         = "original"
 	PhaseNormalized       = "normalized"
 	PhaseUpstreamRequest  = "upstream-request"
 	PhaseUpstreamResponse = "upstream-response"
-	PhaseTransformed      = "transformed"
 )
 
 // CaptureEntry represents a single captured request/response phase.
@@ -69,12 +58,11 @@ func redactObject(obj map[string]interface{}) {
 
 // redactArray recursively redacts sensitive keys in array elements.
 func redactArray(arr []interface{}) {
-	for i, value := range arr {
+	for _, value := range arr {
 		if nested, ok := value.(map[string]interface{}); ok {
 			redactObject(nested)
 		} else if arr2, ok := value.([]interface{}); ok {
 			redactArray(arr2)
 		}
-		arr[i] = value
 	}
 }

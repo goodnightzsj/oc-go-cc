@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -101,7 +101,7 @@ func (s *Storage) ensureDirectory() error {
 		s.config.Directory = "~/.config/routatic-proxy/debug"
 	}
 
-	dir := expandHome(s.config.Directory)
+	dir := config.ExpandHome(s.config.Directory)
 
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("creating debug directory %s: %w", dir, err)
@@ -129,7 +129,7 @@ func (s *Storage) rotateFile() error {
 
 	// Generate new filename
 	filename := s.generateFilename()
-	filepath := filepath.Join(expandHome(s.config.Directory), filename)
+	filepath := filepath.Join(config.ExpandHome(s.config.Directory), filename)
 
 	// Create new file
 	f, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -145,7 +145,7 @@ func (s *Storage) rotateFile() error {
 
 // deleteOldestFiles removes the oldest debug files to keep within MaxFiles limit.
 func (s *Storage) deleteOldestFiles() error {
-	dir := expandHome(s.config.Directory)
+	dir := config.ExpandHome(s.config.Directory)
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -174,8 +174,8 @@ func (s *Storage) deleteOldestFiles() error {
 	}
 
 	// Sort by modification time (oldest first)
-	sort.Slice(files, func(i, j int) bool {
-		return files[i].modTime.Before(files[j].modTime)
+	slices.SortFunc(files, func(a, b fileInfo) int {
+		return a.modTime.Compare(b.modTime)
 	})
 
 	// Delete oldest files to make room
@@ -209,7 +209,7 @@ func (s *Storage) generateFilename() string {
 
 // scanExistingFiles counts existing capture files to set initial fileCount.
 func (s *Storage) scanExistingFiles() error {
-	dir := expandHome(s.config.Directory)
+	dir := config.ExpandHome(s.config.Directory)
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -249,16 +249,4 @@ func (s *Storage) Close() error {
 	}
 
 	return nil
-}
-
-// expandHome replaces a leading ~ with the user's home directory.
-func expandHome(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return path
-		}
-		return filepath.Join(home, path[2:])
-	}
-	return path
 }

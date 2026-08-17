@@ -150,15 +150,3 @@ type ChatCompletionChunk struct {
 	Choices []Choice   `json:"choices"`
 	Usage   *UsageInfo `json:"usage,omitempty"`
 }
-
-// ErrorResponse represents an error response from the OpenAI API.
-type ErrorResponse struct {
-	Error ErrorDetails `json:"error"`
-}
-
-// ErrorDetails contains the details of an API error.
-type ErrorDetails struct {
-	Type    string `json:"type"`
-	Message string `json:"message"`
-	Code    string `json:"code,omitempty"`
-}

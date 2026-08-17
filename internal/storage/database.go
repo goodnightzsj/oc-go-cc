@@ -149,29 +149,10 @@ func Open(cfg Config) (*Database, error) {
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
 
-	// Lightweight migrations for new columns (safe on existing DBs)
-	if err := database.migrateAddAttemptColumn(ctx); err != nil {
-		// Non-fatal; log and continue so the proxy still works
-		slog.Warn("migration warning", "err", err)
-	}
-	if err := database.migrateAddCacheColumns(ctx); err != nil {
-		slog.Warn("migration warning", "err", err)
-	}
-	if err := database.migrateAddCostColumn(ctx); err != nil {
+	// Lightweight column migrations for databases created by older versions.
+	if err := database.migrateColumns(ctx); err != nil {
 		_ = database.Close()
-		return nil, fmt.Errorf("migrate request cost column: %w", err)
-	}
-	if err := database.migrateAddCostSourceColumn(ctx); err != nil {
-		_ = database.Close()
-		return nil, fmt.Errorf("migrate request cost source column: %w", err)
-	}
-	if err := database.migrateAddRequestDetailsKnownColumn(ctx); err != nil {
-		_ = database.Close()
-		return nil, fmt.Errorf("migrate request details marker: %w", err)
-	}
-	if err := database.migrateAddUsageTrustedColumn(ctx); err != nil {
-		_ = database.Close()
-		return nil, fmt.Errorf("migrate trusted usage marker: %w", err)
+		return nil, fmt.Errorf("migrate request columns: %w", err)
 	}
 	if err := database.clearCatalogAPIKeys(ctx); err != nil {
 		_ = database.Close()
@@ -270,27 +251,6 @@ func (d *Database) initSchema(ctx context.Context) error {
 	CREATE INDEX IF NOT EXISTS idx_provider_usage_observed_at ON provider_usage(observed_at);
 	CREATE INDEX IF NOT EXISTS idx_provider_usage_model ON provider_usage(model);
 
-	CREATE TABLE IF NOT EXISTS latency_samples (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		model TEXT NOT NULL,
-		latency_ms INTEGER NOT NULL,
-		recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_latency_model_time ON latency_samples(model, recorded_at);
-	CREATE INDEX IF NOT EXISTS idx_latency_recorded_at ON latency_samples(recorded_at);
-
-	CREATE TABLE IF NOT EXISTS logs (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		level TEXT NOT NULL,
-		message TEXT,
-		field TEXT,
-		value TEXT,
-		recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_logs_recorded_at ON logs(recorded_at);
-	CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level);
 
 	CREATE TABLE IF NOT EXISTS schema_info (
 		key TEXT PRIMARY KEY,
@@ -327,93 +287,38 @@ func (d *Database) initSchema(ctx context.Context) error {
 
 	CREATE INDEX IF NOT EXISTS idx_models_provider ON models(provider);
 	CREATE INDEX IF NOT EXISTS idx_models_name ON models(name);
-
-	CREATE TABLE IF NOT EXISTS scenarios (
-		key TEXT PRIMARY KEY,
-		name TEXT NOT NULL,
-		description TEXT,
-		requires_tools INTEGER,
-		requires_vision INTEGER,
-		requires_reasoning INTEGER,
-		min_context_window INTEGER,
-		preferred_providers TEXT,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_scenarios_name ON scenarios(name);
 	`
 
 	_, err := d.db.ExecContext(ctx, schema)
 	return err
 }
 
-// migrateAddAttemptColumn adds the 'attempt' column to the requests table if it does not exist.
-// This is used for fallback-rate analytics.
-func (d *Database) migrateAddAttemptColumn(ctx context.Context) error {
-	// Try to add the column. SQLite will error if it already exists.
-	_, err := d.db.ExecContext(ctx, `ALTER TABLE requests ADD COLUMN attempt INTEGER DEFAULT 1`)
-	if err != nil {
-		// Ignore "duplicate column" errors
-		if strings.Contains(err.Error(), "duplicate column") {
-			return nil
-		}
-		return err
-	}
-	return nil
-}
-
-// migrateAddCacheColumns adds the prompt-cache token columns to existing
-// requests tables created before they existed. Idempotent: ignores duplicate
-// column errors.
-func (d *Database) migrateAddCacheColumns(ctx context.Context) error {
+// migrateColumns adds every column that a database created by an older version
+// may be missing. Idempotent: SQLite reports "duplicate column name" when the
+// column is already there, and that is the only error tolerated — anything else
+// (locked, corrupt, missing table) aborts startup rather than leaving the schema
+// half-migrated.
+func (d *Database) migrateColumns(ctx context.Context) error {
 	for _, alter := range []string{
+		`ALTER TABLE requests ADD COLUMN attempt INTEGER DEFAULT 1`,
 		`ALTER TABLE requests ADD COLUMN cache_read_tokens INTEGER DEFAULT 0`,
 		`ALTER TABLE requests ADD COLUMN cache_creation_tokens INTEGER DEFAULT 0`,
+		`ALTER TABLE requests ADD COLUMN cost_usd REAL`,
+		`ALTER TABLE requests ADD COLUMN cost_source TEXT`,
+		`ALTER TABLE requests ADD COLUMN details_known INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE requests ADD COLUMN usage_trusted INTEGER NOT NULL DEFAULT 0`,
 	} {
-		_, err := d.db.ExecContext(ctx, alter)
-		if err != nil && !strings.Contains(err.Error(), "duplicate column") {
-			return err
+		if _, err := d.db.ExecContext(ctx, alter); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return fmt.Errorf("%s: %w", alter, err)
 		}
 	}
-	return nil
-}
-
-// migrateAddCostColumn adds the per-request cost column to existing databases.
-func (d *Database) migrateAddCostColumn(ctx context.Context) error {
-	_, err := d.db.ExecContext(ctx, `ALTER TABLE requests ADD COLUMN cost_usd REAL`)
-	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
-		return err
-	}
-	return nil
-}
-
-func (d *Database) migrateAddCostSourceColumn(ctx context.Context) error {
-	_, err := d.db.ExecContext(ctx, `ALTER TABLE requests ADD COLUMN cost_source TEXT`)
-	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
-		return err
-	}
-	_, err = d.db.ExecContext(ctx, `
+	// Rows priced before cost_source existed were all estimates.
+	_, err := d.db.ExecContext(ctx, `
 		UPDATE requests
 		SET cost_source = 'estimated'
 		WHERE cost_usd IS NOT NULL AND (cost_source IS NULL OR cost_source = '')
 	`)
 	return err
-}
-
-func (d *Database) migrateAddRequestDetailsKnownColumn(ctx context.Context) error {
-	_, err := d.db.ExecContext(ctx, `ALTER TABLE requests ADD COLUMN details_known INTEGER NOT NULL DEFAULT 1`)
-	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
-		return err
-	}
-	return nil
-}
-
-func (d *Database) migrateAddUsageTrustedColumn(ctx context.Context) error {
-	_, err := d.db.ExecContext(ctx, `ALTER TABLE requests ADD COLUMN usage_trusted INTEGER NOT NULL DEFAULT 0`)
-	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
-		return err
-	}
-	return nil
 }
 
 // clearCatalogAPIKeys removes credentials written by versions that treated the
@@ -541,17 +446,26 @@ type priceEntry struct {
 //go:embed seed_prices.json
 var defaultModelPrices []byte
 
+// seedPrices parses the embedded rules once. PriceForModel is called per model
+// per aggregation row, so re-unmarshalling on every call showed up as pure
+// overhead.
+var seedPrices = sync.OnceValues(func() ([]priceEntry, error) {
+	if len(defaultModelPrices) == 0 {
+		return nil, nil
+	}
+	var entries []priceEntry
+	err := json.Unmarshal(defaultModelPrices, &entries)
+	return entries, err
+})
+
 // PriceForModel returns the seeded per-1M-token prices (USD) for a model ID,
 // matching the longest seed rule whose Match substring occurs in the model ID.
 // This is independent of the catalog/models tables so cost figures are always
 // available even when a model is absent from the catalog sync. Returns ok=false
 // when no rule matches (or embedded data is unavailable).
 func PriceForModel(model string) (inputPerM, outputPerM, cacheReadPerM, cacheWritePerM float64, ok bool) {
-	if model == "" || len(defaultModelPrices) == 0 {
-		return 0, 0, 0, 0, false
-	}
-	var entries []priceEntry
-	if err := json.Unmarshal(defaultModelPrices, &entries); err != nil {
+	entries, err := seedPrices()
+	if model == "" || err != nil {
 		return 0, 0, 0, 0, false
 	}
 	bestLen := -1
@@ -583,12 +497,8 @@ func PriceForModel(model string) (inputPerM, outputPerM, cacheReadPerM, cacheWri
 // others. Free-tier variants are explicitly zeroed. Update seed_prices.json
 // to refresh values; the JSON is embedded at build time.
 func (d *Database) SeedDefaultModelPrices(ctx context.Context) error {
-	if len(defaultModelPrices) == 0 {
-		return nil
-	}
-
-	var entries []priceEntry
-	if err := json.Unmarshal(defaultModelPrices, &entries); err != nil {
+	entries, err := seedPrices()
+	if err != nil {
 		return fmt.Errorf("parse seed_prices.json: %w", err)
 	}
 

@@ -37,22 +37,3 @@ func (r *ProviderRegistry) Get(name string) (Provider, bool) {
 	p, ok := r.providers[name]
 	return p, ok
 }
-
-// MustGet retrieves a provider by name, panicking if missing.
-func (r *ProviderRegistry) MustGet(name string) Provider {
-	if p, ok := r.Get(name); ok {
-		return p
-	}
-	panic(fmt.Sprintf("provider %q not registered", name))
-}
-
-// List returns all registered provider names.
-func (r *ProviderRegistry) List() []string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	names := make([]string, 0, len(r.providers))
-	for n := range r.providers {
-		names = append(names, n)
-	}
-	return names
-}

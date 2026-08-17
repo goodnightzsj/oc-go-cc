@@ -42,65 +42,6 @@ func TestAWSBedrockProvider_WireFormat_Anthropic(t *testing.T) {
 	}
 }
 
-func TestAWSBedrockProvider_RoundTripName(t *testing.T) {
-	p := NewAWSBedrockProvider(nil)
-	model := config.ModelConfig{ModelID: "moonshotai.kimi-k2.5"}
-	if got := p.RoundTripName(model); got != "moonshotai.kimi-k2.5" {
-		t.Errorf("RoundTripName() = %q, want %q", got, "moonshotai.kimi-k2.5")
-	}
-}
-
-func TestAWSBedrockProvider_Capabilities(t *testing.T) {
-	p := NewAWSBedrockProvider(nil)
-	caps := p.Capabilities()
-	if !caps.SupportsStreaming {
-		t.Error("SupportsStreaming = false, want true")
-	}
-	if !caps.SupportsTools {
-		t.Error("SupportsTools = false, want true")
-	}
-	if !caps.SupportsImageInput {
-		t.Error("SupportsImageInput = false, want true")
-	}
-}
-
-func TestAWSBedrockProvider_ModelCapabilities(t *testing.T) {
-	p := NewAWSBedrockProvider(nil)
-	caps, ok := p.ModelCapabilities("any-model")
-	if !ok {
-		t.Error("ModelCapabilities() returned false, want true")
-	}
-	if !caps.SupportsStreaming {
-		t.Error("ModelCapabilities().SupportsStreaming = false, want true")
-	}
-}
-
-func TestAWSBedrockProvider_StreamIdleTimeout_Default(t *testing.T) {
-	cfg := &config.Config{}
-	atomic := config.NewAtomicConfig(cfg, "")
-	p := NewAWSBedrockProvider(atomic)
-	model := config.ModelConfig{}
-	got := p.StreamIdleTimeout(model)
-	if got != 5*60*1000*1000*1000 { // 5 minutes
-		t.Errorf("StreamIdleTimeout() = %v, want 5m", got)
-	}
-}
-
-func TestAWSBedrockProvider_StreamIdleTimeout_Configured(t *testing.T) {
-	cfg := &config.Config{
-		AWSBedrock: config.AWSBedrockConfig{
-			StreamTimeoutMs: 30000,
-		},
-	}
-	atomic := config.NewAtomicConfig(cfg, "")
-	p := NewAWSBedrockProvider(atomic)
-	model := config.ModelConfig{}
-	got := p.StreamIdleTimeout(model)
-	if got != 30*1000*1000*1000 { // 30 seconds
-		t.Errorf("StreamIdleTimeout() = %v, want 30s", got)
-	}
-}
-
 func TestAWSBedrockProvider_Execute(t *testing.T) {
 	// Mock upstream server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -150,9 +91,9 @@ func TestAWSBedrockProvider_Execute(t *testing.T) {
 	atomic := config.NewAtomicConfig(cfg, "")
 	p := NewAWSBedrockProvider(atomic)
 
-	req := &core.NormalizedRequest{
+	req := &types.MessageRequest{
 		Model:    "moonshotai.kimi-k2.5",
-		Messages: []core.NormalizedMessage{{Role: "user", Content: "Hi"}},
+		Messages: []types.Message{{Role: "user", Content: json.RawMessage(`"Hi"`)}},
 	}
 	model := config.ModelConfig{ModelID: "moonshotai.kimi-k2.5"}
 
@@ -162,9 +103,6 @@ func TestAWSBedrockProvider_Execute(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("Execute() returned nil result")
-	}
-	if result.ModelID != "moonshotai.kimi-k2.5" {
-		t.Errorf("ModelID = %q, want %q", result.ModelID, "moonshotai.kimi-k2.5")
 	}
 	if len(result.Body) == 0 {
 		t.Error("Body is empty")
@@ -199,10 +137,11 @@ func TestAWSBedrockProvider_Stream(t *testing.T) {
 	atomic := config.NewAtomicConfig(cfg, "")
 	p := NewAWSBedrockProvider(atomic)
 
-	req := &core.NormalizedRequest{
+	streamTrue := true
+	req := &types.MessageRequest{
 		Model:    "moonshotai.kimi-k2.5",
-		Messages: []core.NormalizedMessage{{Role: "user", Content: "Hi"}},
-		Stream:   true,
+		Messages: []types.Message{{Role: "user", Content: json.RawMessage(`"Hi"`)}},
+		Stream:   &streamTrue,
 	}
 	model := config.ModelConfig{ModelID: "moonshotai.kimi-k2.5"}
 
@@ -245,9 +184,9 @@ func TestAWSBedrockProvider_Execute_NoProjectID(t *testing.T) {
 	atomic := config.NewAtomicConfig(cfg, "")
 	p := NewAWSBedrockProvider(atomic)
 
-	req := &core.NormalizedRequest{
+	req := &types.MessageRequest{
 		Model:    "test-model",
-		Messages: []core.NormalizedMessage{{Role: "user", Content: "Hi"}},
+		Messages: []types.Message{{Role: "user", Content: json.RawMessage(`"Hi"`)}},
 	}
 	model := config.ModelConfig{ModelID: "test-model"}
 

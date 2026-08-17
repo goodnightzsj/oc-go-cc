@@ -216,8 +216,10 @@ The catalog is downloaded from `models.dev` and cached locally in `~/.config/rou
 | `modalities.output` | Output types: usually `["text"]` |
 | `reasoning` | Whether the model supports reasoning mode |
 
-To add a model to the cost-based routing catalog, submit a PR to the models.dev repository or run:
+To add a model to the cost-based routing catalog, submit a PR to the models.dev repository, then refresh your local copy:
 
 ```bash
-routatic-proxy catalog sync --force
+routatic-proxy catalog sync
 ```
+
+`catalog sync` always re-downloads and re-imports, so there is no force flag. It reports how many providers and models landed in SQLite, which is the copy the dashboard and cost-based routing read.

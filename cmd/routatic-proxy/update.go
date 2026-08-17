@@ -70,8 +70,3 @@ Examples:
 		return nil
 	},
 }
-
-// TODO: wire updateCmd into rootCmd when root command registration is centralized.
-// func init() {
-// 	rootCmd.AddCommand(updateCmd)
-// }

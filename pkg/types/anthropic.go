@@ -246,13 +246,6 @@ type Tool struct {
 	InputSchema json.RawMessage `json:"input_schema"`
 }
 
-// ToolResult represents the result of a tool execution.
-type ToolResult struct {
-	ToolUseID string `json:"tool_use_id"`
-	Content   string `json:"content"`
-	IsError   bool   `json:"is_error,omitempty"`
-}
-
 // MessageResponse represents a response from the Anthropic Messages API.
 type MessageResponse struct {
 	ID           string         `json:"id"`
@@ -271,13 +264,6 @@ type Usage struct {
 	OutputTokens             int `json:"output_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
-}
-
-// ContentBlockDelta represents a streaming delta for a content block.
-type ContentBlockDelta struct {
-	Type  string `json:"type"`
-	Index int    `json:"index"`
-	Delta Delta  `json:"delta"`
 }
 
 // Delta represents a partial update in a streaming response.

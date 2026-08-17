@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 )
 
 // WriteFile marshals a catalog to JSON and writes it atomically to path.
@@ -30,12 +29,4 @@ func WriteFile(path string, catalog *Catalog) error {
 	}
 
 	return nil
-}
-
-// WriteFileToDir writes the catalog to dir/catalog.json atomically.
-func WriteFileToDir(dir string, catalog *Catalog) error {
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("create directory: %w", err)
-	}
-	return WriteFile(filepath.Join(dir, catalogFileName), catalog)
 }

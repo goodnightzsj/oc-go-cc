@@ -2,10 +2,6 @@
 package middleware
 
 import (
-	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -13,70 +9,6 @@ import (
 	"sync"
 	"time"
 )
-
-// RequestDeduplicator prevents duplicate requests from flooding the upstream.
-// Uses a hash of the request body to detect duplicates within a time window.
-type RequestDeduplicator struct {
-	inFlight    sync.Map // request hash → context cancel func
-	dedupWindow time.Duration
-	logger      *slog.Logger
-}
-
-// NewRequestDeduplicator creates a new request deduplicator.
-func NewRequestDeduplicator(window time.Duration) *RequestDeduplicator {
-	if window == 0 {
-		window = 500 * time.Millisecond
-	}
-	return &RequestDeduplicator{
-		dedupWindow: window,
-		logger:      slog.Default(),
-	}
-}
-
-// hashRequest creates a hash from the request body for deduplication.
-func hashRequest(body json.RawMessage) string {
-	hash := sha256.Sum256(body)
-	return hex.EncodeToString(hash[:])
-}
-
-// TryAcquire attempts to acquire a deduplication slot for a request.
-// Returns a context to use for the request, and true if this is a new request.
-// If false, the returned context is already cancelled and the caller should wait.
-func (d *RequestDeduplicator) TryAcquire(body json.RawMessage) (context.Context, bool) {
-	hash := hashRequest(body)
-
-	// Check if request is already in flight
-	if _, exists := d.inFlight.Load(hash); exists {
-		d.logger.Debug("duplicate request detected, waiting", "hash", hash[:8])
-		return nil, false
-	}
-
-	// Create a cancellable context for this request
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// Store the cancel function
-	d.inFlight.Store(hash, cancel)
-
-	// Auto-release after window
-	go func() {
-		select {
-		case <-time.After(d.dedupWindow):
-			d.Release(body)
-		case <-ctx.Done():
-			// Context was cancelled, release immediately
-		}
-	}()
-
-	return ctx, true
-}
-
-// Release releases a deduplication slot.
-func (d *RequestDeduplicator) Release(body json.RawMessage) {
-	hash := hashRequest(body)
-	if cancel, exists := d.inFlight.LoadAndDelete(hash); exists {
-		cancel.(context.CancelFunc)()
-	}
-}
 
 // RateLimiter provides per-client IP rate limiting.
 type RateLimiter struct {
@@ -148,10 +80,8 @@ func GetClientIP(r *http.Request) string {
 	// X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
 	// We want the first (leftmost) IP which is the original client.
 	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-		if idx := strings.Index(forwarded, ","); idx != -1 {
-			return strings.TrimSpace(forwarded[:idx])
-		}
-		return strings.TrimSpace(forwarded)
+		first, _, _ := strings.Cut(forwarded, ",")
+		return strings.TrimSpace(first)
 	}
 	// Fall back to RemoteAddr
 	return r.RemoteAddr

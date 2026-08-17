@@ -11,7 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -49,7 +49,6 @@ Legacy ~/.config/oc-go-cc/config.json and OC_GO_CC_* environment variables are s
 	}
 
 	// Add subcommands.
-	rootCmd.AddCommand(serveCmd())
 	rootCmd.AddCommand(stopCmd())
 	rootCmd.AddCommand(statusCmd())
 	rootCmd.AddCommand(initCmd())
@@ -68,160 +67,6 @@ Legacy ~/.config/oc-go-cc/config.json and OC_GO_CC_* environment variables are s
 	}
 }
 
-// serveCmd returns the command to start the proxy server.
-func serveCmd() *cobra.Command {
-	var configPath string
-	var port int
-	var background bool
-	var daemonize bool // hidden internal flag
-
-	cmd := &cobra.Command{
-		Use:   "serve",
-		Short: "Start the proxy server",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Handle background mode: fork and exit parent
-			if background && !daemonize {
-				opts := daemon.BackgroundOpts{
-					ConfigPath: configPath,
-					Port:       port,
-				}
-				return daemon.ForkIntoBackground(opts)
-			}
-
-			// Override config path if provided.
-			if configPath != "" {
-				_ = os.Setenv("ROUTATIC_PROXY_CONFIG", configPath)
-			}
-
-			cfg, err := config.Load()
-			if err != nil {
-				return fmt.Errorf("failed to load config: %w", err)
-			}
-
-			if err := ensureCatalogSynced(cfg, configPath, time.Now().UTC()); err != nil {
-				return fmt.Errorf("failed to sync catalog: %w", err)
-			}
-
-			// Ensure SQLite database exists.
-			if err := ensureDatabase(); err != nil {
-				return fmt.Errorf("failed to initialize database: %w", err)
-			}
-
-			var captureLogger *debug.CaptureLogger
-			if cfg.Logging.DebugCapture != nil && cfg.Logging.DebugCapture.Enabled {
-				storage, err := debug.NewStorage(*cfg.Logging.DebugCapture)
-				if err != nil {
-					return fmt.Errorf("failed to create debug storage: %w", err)
-				}
-				captureLogger = debug.NewCaptureLogger(storage, true)
-				defer func() { _ = captureLogger.Close() }()
-			}
-
-			// Override port if provided via flag.
-			if port != 0 {
-				cfg.Port = port
-			}
-
-			pidPath := getPIDPath()
-
-			// Check if already running before writing this process' PID.
-			if !daemonize {
-				if pid, err := daemon.GetPID(pidPath); err == nil {
-					// Check if process is still running.
-					if daemon.IsProcessRunning(pid) {
-						return fmt.Errorf("server is already running (PID %d)", pid)
-					}
-					// Stale PID file, clean up.
-					_ = os.Remove(pidPath)
-				}
-			}
-
-			// Daemonize setup (child process after re-exec).
-			if daemonize {
-				paths, err := daemon.DefaultPaths()
-				if err != nil {
-					return err
-				}
-				if err := paths.EnsureConfigDir(); err != nil {
-					return err
-				}
-				if err := daemon.DaemonizeSetup(paths); err != nil {
-					return err
-				}
-			} else {
-				// Ensure config directory exists before writing PID file.
-				paths, err := daemon.DefaultPaths()
-				if err != nil {
-					return err
-				}
-				if err := paths.EnsureConfigDir(); err != nil {
-					return err
-				}
-				// Write PID file for foreground mode.
-				if err := daemon.WritePID(pidPath, os.Getpid()); err != nil {
-					return fmt.Errorf("failed to write PID file: %w", err)
-				}
-			}
-			defer func() { _ = os.Remove(pidPath) }()
-
-			// Create atomic config for hot reload support.
-			atomicCfg := config.NewAtomicConfig(cfg, config.ResolveConfigPath())
-
-			// Re-apply CLI port override on every reload so it persists.
-			if port != 0 {
-				atomicCfg.OnReload(func(newCfg *config.Config) {
-					newCfg.Port = port
-				})
-			}
-
-			// Create and start server.
-			srv, err := server.NewServer(atomicCfg, captureLogger)
-			if err != nil {
-				return fmt.Errorf("failed to create server: %w", err)
-			}
-
-			// Start config watcher for hot reload (only if enabled in config).
-			if cfg.HotReload {
-				watchCtx, watchCancel := context.WithCancel(context.Background())
-				defer watchCancel()
-				go func() {
-					if err := config.WatchConfig(watchCtx, atomicCfg); err != nil && err != context.Canceled {
-						slog.Error("config watcher failed", "error", err)
-					}
-				}()
-			}
-
-			fmt.Printf("Starting %s v%s\n", appName, version)
-			fmt.Printf("Listening on %s:%d\n", cfg.Host, cfg.Port)
-			if cfg.AnthropicFirst.Enabled {
-				fmt.Printf("Forwarding to Anthropic first: %s\n", cfg.AnthropicFirst.BaseURL)
-				fmt.Printf("OpenCode fallback: %s\n", cfg.OpenCodeGo.BaseURL)
-			} else {
-				fmt.Printf("Forwarding to: %s\n", cfg.OpenCodeGo.BaseURL)
-			}
-			fmt.Println()
-			fmt.Println("Configure Claude Code with:")
-			fmt.Printf("  export ANTHROPIC_BASE_URL=http://%s:%d\n", cfg.Host, cfg.Port)
-			if cfg.AnthropicFirst.Enabled {
-				fmt.Println("  unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY")
-			} else {
-				fmt.Println("  export ANTHROPIC_AUTH_TOKEN=unused")
-			}
-			fmt.Println()
-
-			return srv.Start()
-		},
-	}
-
-	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Path to config file")
-	cmd.Flags().IntVarP(&port, "port", "p", 0, "Override listen port")
-	cmd.Flags().BoolVarP(&background, "background", "b", false, "Run as background daemon")
-	cmd.Flags().BoolVar(&daemonize, "_daemonize", false, "Internal use only")
-	_ = cmd.Flags().MarkHidden("_daemonize")
-
-	return cmd
-}
-
 // startCmd returns the command to start both the proxy server and GUI dashboard.
 func startCmd() *cobra.Command {
 	var configPath string
@@ -231,23 +76,37 @@ func startCmd() *cobra.Command {
 	var daemonize bool // hidden internal flag
 
 	cmd := &cobra.Command{
-		Use:   "start",
-		Short: "Start the proxy server (with optional dashboard)",
+		Use:     "start",
+		Aliases: []string{"serve"},
+		Short:   "Start the proxy server (with optional dashboard)",
 		Long: `Start the proxy server and optionally the GUI dashboard.
 
 The proxy runs on the configured port (default 3456). Use --headless to
-skip the dashboard (equivalent to the legacy "serve" command). The dashboard
-is available at http://127.0.0.1:3445 when not headless. All usage data
-is persisted to SQLite.
+skip the dashboard. The dashboard is available at http://127.0.0.1:3445
+when not headless. All usage data is persisted to SQLite.
+
+Invoking this command as "serve" always implies --headless.
 
 Press Ctrl+C to stop the server.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Cobra aliases do not change flag defaults, so the legacy
+			// "serve" name forces headless mode explicitly.
+			if cmd.CalledAs() == "serve" {
+				headless = true
+			}
+
 			// Handle background mode: fork and exit parent
 			if background && !daemonize {
+				// The child is re-executed by name; "serve" is how --headless
+				// survives the fork (BackgroundOpts carries no headless flag).
+				childCmd := "start"
+				if headless {
+					childCmd = "serve"
+				}
 				opts := daemon.BackgroundOpts{
 					ConfigPath: configPath,
 					Port:       port,
-					Command:    "start",
+					Command:    childCmd,
 				}
 				return daemon.ForkIntoBackground(opts)
 			}
@@ -269,6 +128,17 @@ Press Ctrl+C to stop the server.`,
 			// Ensure SQLite database exists.
 			if err := ensureDatabase(); err != nil {
 				return fmt.Errorf("failed to initialize database: %w", err)
+			}
+
+			// Debug request/response capture, when enabled in config.
+			var captureLogger *debug.CaptureLogger
+			if cfg.Logging.DebugCapture != nil && cfg.Logging.DebugCapture.Enabled {
+				captureStore, err := debug.NewStorage(*cfg.Logging.DebugCapture)
+				if err != nil {
+					return fmt.Errorf("failed to create debug storage: %w", err)
+				}
+				captureLogger = debug.NewCaptureLogger(captureStore, true)
+				defer func() { _ = captureLogger.Close() }()
 			}
 
 			// Override port if provided via flag.
@@ -329,7 +199,7 @@ Press Ctrl+C to stop the server.`,
 			}
 
 			// Create and start proxy server.
-			srv, err := server.NewServer(atomicCfg, nil)
+			srv, err := server.NewServer(atomicCfg, captureLogger)
 			if err != nil {
 				return fmt.Errorf("failed to create server: %w", err)
 			}
@@ -363,6 +233,12 @@ Press Ctrl+C to stop the server.`,
 			// Print startup info.
 			fmt.Printf("Starting %s v%s\n", appName, version)
 			fmt.Printf("Proxy listening on %s:%d\n", cfg.Host, cfg.Port)
+			if cfg.AnthropicFirst.Enabled {
+				fmt.Printf("Forwarding to Anthropic first: %s\n", cfg.AnthropicFirst.BaseURL)
+				fmt.Printf("OpenCode fallback: %s\n", cfg.OpenCodeGo.BaseURL)
+			} else {
+				fmt.Printf("Forwarding to: %s\n", cfg.OpenCodeGo.BaseURL)
+			}
 			fmt.Println()
 			fmt.Println("Configure Claude Code with:")
 			fmt.Printf("  export ANTHROPIC_BASE_URL=http://%s:%d\n", cfg.Host, cfg.Port)
@@ -375,7 +251,6 @@ Press Ctrl+C to stop the server.`,
 			if !headless {
 				// Start GUI server on port 3445.
 				guiSrv = gui.New(gui.Options{
-					History:          srv.History,
 					Metrics:          srv.Metrics(),
 					AtomicConfig:     atomicCfg,
 					ProxyPort:        cfg.Port,
@@ -800,7 +675,7 @@ func runModelsList(cmd *cobra.Command, configPath, provider string) error {
 		for i, m := range models {
 			ids[i] = m.ModelID
 		}
-		sort.Strings(ids)
+		slices.Sort(ids)
 		for _, id := range ids {
 			lines = append(lines, fmt.Sprintf("%s/%s", p, id))
 		}
@@ -847,7 +722,7 @@ func catalogProviders(cat *catalog.IndexedCatalog) []string {
 			providers = append(providers, p)
 		}
 	}
-	sort.Strings(providers)
+	slices.Sort(providers)
 	return providers
 }
 

@@ -94,11 +94,11 @@ func TestModelBreakdownSumsToSummary(t *testing.T) {
 	})
 
 	a := NewAnalytics(db)
-	summary, err := a.GetTokenSummary(30)
+	summary, err := a.TokenSummary(a.Window(30))
 	if err != nil {
 		t.Fatalf("GetTokenSummary: %v", err)
 	}
-	breakdown, err := a.GetModelBreakdown(30)
+	breakdown, err := a.ModelBreakdown(a.Window(30))
 	if err != nil {
 		t.Fatalf("GetModelBreakdown: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestGetProviderBreakdown_CostIsRealAndMatchesModels(t *testing.T) {
 	})
 
 	a := NewAnalytics(db)
-	providers, err := a.GetProviderBreakdown(30)
+	providers, err := a.ProviderBreakdown(a.Window(30))
 	if err != nil {
 		t.Fatalf("GetProviderBreakdown: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestGetProviderBreakdown_CostIsRealAndMatchesModels(t *testing.T) {
 		byName[pb.Provider] = pb
 	}
 
-	models, err := a.GetModelBreakdown(30)
+	models, err := a.ModelBreakdown(a.Window(30))
 	if err != nil {
 		t.Fatalf("GetModelBreakdown: %v", err)
 	}

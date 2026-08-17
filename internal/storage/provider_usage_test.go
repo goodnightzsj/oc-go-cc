@@ -33,9 +33,6 @@ func TestProviderUsageSnapshotAnalyticsAndReplacement(t *testing.T) {
 	if math.Abs(got.Summary.CostUSD-0.42345678) > 1e-12 {
 		t.Fatalf("cost = %.8f, want 0.42345678", got.Summary.CostUSD)
 	}
-	if len(got.Models) != 2 || len(got.Providers) != 2 || len(got.Plans) != 2 || len(got.Recent) != 3 {
-		t.Fatalf("unexpected breakdown sizes: models=%d providers=%d plans=%d recent=%d", len(got.Models), len(got.Providers), len(got.Plans), len(got.Recent))
-	}
 	if got.Summary.ReasoningTokens != 1 {
 		t.Fatalf("reasoning tokens = %d, want 1", got.Summary.ReasoningTokens)
 	}

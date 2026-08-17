@@ -3,7 +3,7 @@ package metrics
 
 import (
 	"math"
-	"sort"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,7 +18,6 @@ type Metrics struct {
 	requestsFailed   atomic.Int64
 	upstreamCalls    atomic.Int64
 	rateLimited      atomic.Int64
-	deduplicated     atomic.Int64
 
 	// Latency tracking
 	mu                sync.RWMutex
@@ -93,11 +92,6 @@ func (m *Metrics) RecordRateLimited() {
 	m.rateLimited.Add(1)
 }
 
-// RecordDeduplicated records a deduplicated request.
-func (m *Metrics) RecordDeduplicated() {
-	m.deduplicated.Add(1)
-}
-
 func (m *Metrics) recordLatency(latency time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -167,7 +161,6 @@ func (m *Metrics) GetSnapshot() Snapshot {
 		RequestsFailed:   m.requestsFailed.Load(),
 		UpstreamCalls:    m.upstreamCalls.Load(),
 		RateLimited:      m.rateLimited.Load(),
-		Deduplicated:     m.deduplicated.Load(),
 		Latencies:        latencies,
 		ModelCounts:      modelCounts,
 		ModelSuccess:     modelSuccess,
@@ -183,7 +176,6 @@ type Snapshot struct {
 	RequestsFailed   int64
 	UpstreamCalls    int64
 	RateLimited      int64
-	Deduplicated     int64
 	Latencies        []time.Duration
 	ModelCounts      map[string]int64
 	ModelSuccess     map[string]int64 // Per-model success counts
@@ -222,9 +214,8 @@ func calculateModelStats(model string, samples []time.Duration) ModelLatencyStat
 		return ModelLatencyStats{Model: model}
 	}
 
-	sorted := make([]time.Duration, len(samples))
-	copy(sorted, samples)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	sorted := slices.Clone(samples)
+	slices.Sort(sorted)
 
 	var sum time.Duration
 	for _, d := range sorted {
@@ -234,27 +225,10 @@ func calculateModelStats(model string, samples []time.Duration) ModelLatencyStat
 	count := len(sorted)
 	avg := sum / time.Duration(count)
 
-	p50Idx := int(math.Ceil(float64(count)*0.50)) - 1
-	p90Idx := int(math.Ceil(float64(count)*0.90)) - 1
-	p99Idx := int(math.Ceil(float64(count)*0.99)) - 1
-	if p50Idx < 0 {
-		p50Idx = 0
+	pctIdx := func(fraction float64) int {
+		return min(max(int(math.Ceil(float64(count)*fraction))-1, 0), count-1)
 	}
-	if p90Idx < 0 {
-		p90Idx = 0
-	}
-	if p99Idx < 0 {
-		p99Idx = 0
-	}
-	if p50Idx >= count {
-		p50Idx = count - 1
-	}
-	if p90Idx >= count {
-		p90Idx = count - 1
-	}
-	if p99Idx >= count {
-		p99Idx = count - 1
-	}
+	p50Idx, p90Idx, p99Idx := pctIdx(0.50), pctIdx(0.90), pctIdx(0.99)
 
 	return ModelLatencyStats{
 		Model: model,

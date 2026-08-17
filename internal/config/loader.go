@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -97,19 +98,20 @@ func ResolveConfigPath() string {
 	if path := envValue("ROUTATIC_PROXY_CONFIG"); path != "" {
 		return path
 	}
-	path := expandHome(defaultConfigPath)
+	path := ExpandHome(defaultConfigPath)
 	if _, err := os.Stat(path); err == nil {
 		return path
 	}
-	legacyPath := expandHome(legacyConfigPath)
+	legacyPath := ExpandHome(legacyConfigPath)
 	if _, err := os.Stat(legacyPath); err == nil {
 		return legacyPath
 	}
 	return path
 }
 
-// expandHome replaces a leading ~ with the user's home directory.
-func expandHome(path string) string {
+// ExpandHome resolves a leading "~/" against the user's home directory. It
+// returns the path unchanged if the home directory cannot be determined.
+func ExpandHome(path string) string {
 	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -374,6 +376,26 @@ func validate(cfg *Config) error {
 		return err
 	}
 
+	if err := validateCostScenarios(cfg.CostRouting); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateCostScenarios rejects cost_routing.scenarios keys that are not real
+// routing scenarios. A typo would otherwise sit in the config doing nothing,
+// which is the failure mode this validation exists to prevent.
+func validateCostScenarios(cr *CostRoutingConfig) error {
+	if cr == nil {
+		return nil
+	}
+	for name := range cr.Scenarios {
+		if !slices.Contains(CostScenarioNames, name) {
+			return fmt.Errorf("cost_routing.scenarios has unknown scenario %q (valid: %s)",
+				name, strings.Join(CostScenarioNames, ", "))
+		}
+	}
 	return nil
 }
 

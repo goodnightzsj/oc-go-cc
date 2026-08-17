@@ -1,7 +1,6 @@
 package router
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/routatic/proxy/internal/config"
@@ -22,13 +21,6 @@ const (
 	ScenarioVisionComplex     Scenario = "vision_complex"
 	ScenarioVisionLongContext Scenario = "vision_long_context"
 )
-
-// ScenarioResult contains the detected scenario and token count.
-type ScenarioResult struct {
-	Scenario   Scenario
-	TokenCount int
-	Reason     string
-}
 
 // MessageContent represents a single message in a conversation.
 type MessageContent struct {
@@ -59,74 +51,41 @@ type RequestFacts struct {
 //  5. Default
 //
 // For streaming requests, consider using RouteForStreaming() to prefer faster models.
-func DetectScenario(messages []MessageContent, tokenCount int, cfg *config.Config) ScenarioResult {
+func DetectScenario(messages []MessageContent, tokenCount int, cfg *config.Config) Scenario {
 	facts := AnalyzeRequestFacts(messages)
 	// 1. Check for long context first (most important)
-	threshold := getLongContextThreshold(cfg)
-	if tokenCount > threshold {
+	if tokenCount > getLongContextThreshold(cfg) {
 		if facts.NeedsVision {
-			return ScenarioResult{
-				Scenario:   ScenarioVisionLongContext,
-				TokenCount: tokenCount,
-				Reason:     fmt.Sprintf("image request token count %d exceeds threshold %d", tokenCount, threshold),
-			}
+			return ScenarioVisionLongContext
 		}
-		return ScenarioResult{
-			Scenario:   ScenarioLongContext,
-			TokenCount: tokenCount,
-			Reason:     fmt.Sprintf("token count %d exceeds threshold %d (use MiniMax for 1M context)", tokenCount, threshold),
-		}
+		return ScenarioLongContext
 	}
 
 	if facts.NeedsVision {
 		if facts.LatestTextComplexIntent {
-			return ScenarioResult{
-				Scenario:   ScenarioVisionComplex,
-				TokenCount: tokenCount,
-				Reason:     "complex image request detected",
-			}
+			return ScenarioVisionComplex
 		}
-		return ScenarioResult{
-			Scenario:   ScenarioVision,
-			TokenCount: tokenCount,
-			Reason:     "simple image request detected",
-		}
+		return ScenarioVision
 	}
 
 	// 2. Check for complex tasks (architectural OR tool-related)
 	latestUser := latestUserMessages(messages)
 	if hasComplexPattern(latestUser) {
-		return ScenarioResult{
-			Scenario:   ScenarioComplex,
-			TokenCount: tokenCount,
-			Reason:     "complex or tool-based operation detected (use GLM-5.1)",
-		}
+		return ScenarioComplex
 	}
 
 	// 3. Check for thinking/reasoning patterns
 	if hasThinkingPattern(latestUser) {
-		return ScenarioResult{
-			Scenario:   ScenarioThink,
-			TokenCount: tokenCount,
-			Reason:     "thinking/reasoning pattern detected (use GLM-5)",
-		}
+		return ScenarioThink
 	}
 
 	// 4. Check for background task patterns (truly simple operations)
 	if hasBackgroundPattern(messages) {
-		return ScenarioResult{
-			Scenario:   ScenarioBackground,
-			TokenCount: tokenCount,
-			Reason:     "simple background task detected (use Qwen3.5 Plus)",
-		}
+		return ScenarioBackground
 	}
 
 	// 5. Default
-	return ScenarioResult{
-		Scenario:   ScenarioDefault,
-		TokenCount: tokenCount,
-		Reason:     "default scenario (use Kimi K2.6)",
-	}
+	return ScenarioDefault
 }
 
 // AnalyzeRequestFacts extracts routing-relevant facts from the message history.
@@ -301,63 +260,26 @@ func getLongContextThreshold(cfg *config.Config) int {
 // RouteForStreaming selects a model optimized for streaming latency.
 // For streaming, we prioritize fast TTFT (time-to-first-token) over capability.
 // This may return a less capable model but one that streams faster.
-func RouteForStreaming(messages []MessageContent, tokenCount int, cfg *config.Config) ScenarioResult {
+func RouteForStreaming(messages []MessageContent, tokenCount int, cfg *config.Config) Scenario {
 	facts := AnalyzeRequestFacts(messages)
 	// For streaming, use simpler models that have better TTFT
 	// Complex models (GLM, Kimi) are too slow for streaming with many tools
 
-	threshold := getLongContextThreshold(cfg)
-	if tokenCount > threshold {
+	if tokenCount > getLongContextThreshold(cfg) {
 		if facts.NeedsVision {
-			return ScenarioResult{
-				Scenario:   ScenarioVisionLongContext,
-				TokenCount: tokenCount,
-				Reason:     fmt.Sprintf("high token count image request (%d > %d)", tokenCount, threshold),
-			}
+			return ScenarioVisionLongContext
 		}
-		model := "long_context"
-		if cfg != nil {
-			if lc, ok := cfg.Models["long_context"]; ok && lc.ModelID != "" {
-				model = lc.ModelID
-			}
-		}
-		return ScenarioResult{
-			Scenario:   ScenarioLongContext,
-			TokenCount: tokenCount,
-			Reason:     fmt.Sprintf("high token count streaming (%d > %d) - use %s for acceptable TTFT", tokenCount, threshold, model),
-		}
+		return ScenarioLongContext
 	}
 
 	if facts.NeedsVision {
 		if facts.LatestTextComplexIntent {
-			return ScenarioResult{
-				Scenario:   ScenarioVisionComplex,
-				TokenCount: tokenCount,
-				Reason:     "complex image request detected",
-			}
+			return ScenarioVisionComplex
 		}
-		return ScenarioResult{
-			Scenario:   ScenarioVision,
-			TokenCount: tokenCount,
-			Reason:     "simple image request detected",
-		}
+		return ScenarioVision
 	}
 
-	latestUser := latestUserMessages(messages)
-	if hasComplexPattern(latestUser) || hasThinkingPattern(latestUser) {
-		// Complex request but streaming - downgrade to faster model
-		// GLM-5 and Kimi are too slow for streaming with complex prompts
-		return ScenarioResult{
-			Scenario:   ScenarioFast,
-			TokenCount: tokenCount,
-			Reason:     "complex request but streaming - use fast model (qwen3.6-plus) for better TTFT",
-		}
-	}
-
-	// Default to fast scenario for streaming
-	return ScenarioResult{
-		Scenario:   ScenarioFast,
-		TokenCount: tokenCount,
-		Reason:     "streaming request - use fast model (qwen3.6-plus)",
-	}
+	// Everything else streams on the fast scenario, complex prompts included:
+	// GLM-5 and Kimi are too slow for streaming.
+	return ScenarioFast
 }

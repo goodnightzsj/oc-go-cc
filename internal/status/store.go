@@ -1,6 +1,7 @@
 package status
 
 import (
+	"os"
 	"sync"
 	"time"
 
@@ -77,7 +78,7 @@ func (s *Store) Update(seq uint64, snap Snapshot) {
 	snap.Source = "proxy"
 	snap.Proxy = ProxySnapshot{
 		Version: buildinfo.Version,
-		PID:     buildinfo.PID(),
+		PID:     os.Getpid(),
 		Binary:  buildinfo.BinaryPath(),
 	}
 	s.snapshot = snap
@@ -102,7 +103,7 @@ func (s *Store) Snapshot() Snapshot {
 		snap.Stale = true
 		snap.Proxy = ProxySnapshot{
 			Version: buildinfo.Version,
-			PID:     buildinfo.PID(),
+			PID:     os.Getpid(),
 			Binary:  buildinfo.BinaryPath(),
 		}
 		return snap

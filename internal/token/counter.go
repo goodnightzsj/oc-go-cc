@@ -44,10 +44,10 @@ func NewCounter() (*Counter, error) {
 	return &Counter{tiktoken: enc}, nil
 }
 
-// CountTokens counts tokens in a string.
-func (c *Counter) CountTokens(text string) (int, error) {
-	tokens := c.tiktoken.Encode(text, nil, nil)
-	return len(tokens), nil
+// CountTokens counts tokens in a string. tiktoken.Encode cannot fail, so there
+// is no error to report.
+func (c *Counter) CountTokens(text string) int {
+	return len(c.tiktoken.Encode(text, nil, nil))
 }
 
 // MessageContent represents a single message in a conversation.
@@ -59,26 +59,17 @@ type MessageContent struct {
 
 // CountMessages counts tokens in a message array.
 // Estimates tokens for system prompt + messages with formatting overhead.
-func (c *Counter) CountMessages(system string, messages []MessageContent) (int, error) {
-	// Base tokens for message formatting
+func (c *Counter) CountMessages(system string, messages []MessageContent) int {
 	total := 3 // Start token
 
 	if system != "" {
-		sysTokens, err := c.CountTokens(system)
-		if err != nil {
-			return 0, err
-		}
-		total += sysTokens + 5 // System prompt overhead
+		total += c.CountTokens(system) + 5 // System prompt overhead
 	}
 
 	for _, msg := range messages {
-		msgTokens, err := c.CountTokens(msg.Content)
-		if err != nil {
-			return 0, err
-		}
-		total += msgTokens + 5 // Per-message overhead
+		total += c.CountTokens(msg.Content) + 5 // Per-message overhead
 		total += msg.ExtraTokens
 	}
 
-	return total, nil
+	return total
 }

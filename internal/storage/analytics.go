@@ -1,9 +1,10 @@
 package storage
 
 import (
+	"cmp"
 	"context"
 	"errors"
-	"sort"
+	"slices"
 	"time"
 )
 
@@ -27,56 +28,48 @@ func NewAnalytics(db *Database) *Analytics {
 	return &Analytics{db: db, baseline: db.AnalyticsBaseline()}
 }
 
-// SetBaseline makes every aggregate ignore requests recorded before t. Pass the
-// zero time to analyse the full history again.
-func (a *Analytics) SetBaseline(t time.Time) {
-	a.baseline = t
-}
-
-// Baseline reports the current cutoff; the zero time means no cutoff.
-func (a *Analytics) Baseline() time.Time {
-	return a.baseline
-}
-
-// windowStarts keeps the requested range while applying the trust baseline to
-// locally observed rows. Corrected rows have usage_trusted=1 and remain in
-// usage/cost analytics even when their timestamp predates it.
-func (a *Analytics) windowStarts(days int) (requested, trusted time.Time) {
-	requested = time.Now().AddDate(0, 0, -days)
-	trusted = requested
-	if !a.baseline.IsZero() && a.baseline.After(trusted) {
-		trusted = a.baseline
-	}
-	return requested, trusted
-}
-
-type analyticsWindow struct {
+// Window is a resolved analytics time range. Build one with Analytics.Window or
+// Analytics.WindowBetween and hand the same value to every aggregate, so one
+// dashboard request reports every panel over exactly the same range.
+//
+// requested is the range the caller asked for; trusted is that start pushed
+// forward to the trust baseline. Both travel together because rows corrected in
+// place carry usage_trusted=1 and stay in usage/cost analytics even when their
+// timestamp predates trusted.
+type Window struct {
 	requested time.Time
 	trusted   time.Time
 	end       time.Time
 }
 
-func (a *Analytics) windowForDays(days int) analyticsWindow {
+// Window returns the window covering the last N days. Non-positive days means 30.
+func (a *Analytics) Window(days int) Window {
 	if days <= 0 {
 		days = 30
 	}
-	requested, trusted := a.windowStarts(days)
+	now := time.Now()
 	// SQLite stores request timestamps at millisecond precision. Leave a small
 	// inclusive tolerance so a request inserted immediately before aggregation
 	// cannot round to the half-open window's upper boundary.
-	return analyticsWindow{requested: requested, trusted: trusted, end: time.Now().Add(time.Second)}
+	return a.window(now.AddDate(0, 0, -days), now.Add(time.Second))
 }
 
-func (a *Analytics) windowBetween(start, end time.Time) (analyticsWindow, error) {
+// WindowBetween returns the window for an explicit half-open range.
+func (a *Analytics) WindowBetween(start, end time.Time) (Window, error) {
 	if start.IsZero() || end.IsZero() || !start.Before(end) {
-		return analyticsWindow{}, errors.New("analytics start must be before end")
+		return Window{}, errors.New("analytics start must be before end")
 	}
-	requested := start
-	trusted := requested
+	return a.window(start, end), nil
+}
+
+// window applies the trust baseline to the requested start. The baseline only
+// ever narrows the window: a cutoff older than the request is ignored.
+func (a *Analytics) window(start, end time.Time) Window {
+	trusted := start
 	if !a.baseline.IsZero() && a.baseline.After(trusted) {
 		trusted = a.baseline
 	}
-	return analyticsWindow{requested: requested, trusted: trusted, end: end}, nil
+	return Window{requested: start, trusted: trusted, end: end}
 }
 
 // TokenSummary holds high-level token and request metrics for a time window.
@@ -94,23 +87,9 @@ type TokenSummary struct {
 	PeriodEnd           time.Time `json:"period_end"`
 }
 
-// GetTokenSummary returns aggregated token/request metrics for the last N days.
-func (a *Analytics) GetTokenSummary(days int) (*TokenSummary, error) {
-	return a.getTokenSummary(a.windowForDays(days))
-}
-
-// GetTokenSummaryBetween returns the same aggregate for an explicit half-open
-// time range. Corrected rows remain included through usage_trusted semantics.
-func (a *Analytics) GetTokenSummaryBetween(start, end time.Time) (*TokenSummary, error) {
-	window, err := a.windowBetween(start, end)
-	if err != nil {
-		return nil, err
-	}
-	return a.getTokenSummary(window)
-}
-
-func (a *Analytics) getTokenSummary(window analyticsWindow) (*TokenSummary, error) {
-
+// TokenSummary returns aggregated token/request metrics for a resolved window.
+// Corrected rows remain included through usage_trusted semantics.
+func (a *Analytics) TokenSummary(window Window) (*TokenSummary, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -158,7 +137,7 @@ func (a *Analytics) getTokenSummary(window analyticsWindow) (*TokenSummary, erro
 // modelCostSum sums estimated USD cost across requests using price rules from
 // seed_prices.json, keyed per model. Falls back to the models table for
 // input/output rates when a model has no seed rule.
-func (a *Analytics) modelCostSum(ctx context.Context, window analyticsWindow) (float64, error) {
+func (a *Analytics) modelCostSum(ctx context.Context, window Window) (float64, error) {
 	rows, err := a.db.DB().QueryContext(ctx, `
 		SELECT r.model,
 		       COUNT(*),
@@ -216,27 +195,8 @@ type ModelBreakdown struct {
 	EstCostUSD          float64 `json:"est_cost_usd"` // based on models.cost_* if available
 }
 
-// TotalTokens is the full input/output/cache volume for ring-chart weighting.
-func (mb ModelBreakdown) TotalTokens() int64 {
-	return mb.InputTokens + mb.OutputTokens + mb.CacheReadTokens + mb.CacheCreationTokens
-}
-
-// GetModelBreakdown returns usage stats per model for the last N days.
-func (a *Analytics) GetModelBreakdown(days int) ([]ModelBreakdown, error) {
-	return a.getModelBreakdown(a.windowForDays(days))
-}
-
-// GetModelBreakdownBetween returns model aggregates for an explicit range.
-func (a *Analytics) GetModelBreakdownBetween(start, end time.Time) ([]ModelBreakdown, error) {
-	window, err := a.windowBetween(start, end)
-	if err != nil {
-		return nil, err
-	}
-	return a.getModelBreakdown(window)
-}
-
-func (a *Analytics) getModelBreakdown(window analyticsWindow) ([]ModelBreakdown, error) {
-
+// ModelBreakdown returns usage stats per model for a resolved window.
+func (a *Analytics) ModelBreakdown(window Window) ([]ModelBreakdown, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -260,10 +220,12 @@ func (a *Analytics) getModelBreakdown(window analyticsWindow) ([]ModelBreakdown,
 			COALESCE(SUM(r.cost_usd), 0) AS stored_cost_usd
 		FROM requests r
 			LEFT JOIN (
-				SELECT model, AVG(latency_ms) AS avg_latency
-				FROM latency_samples
-				WHERE julianday(recorded_at) >= julianday(?)
-				  AND julianday(recorded_at) < julianday(?)
+				SELECT model, AVG(duration_ms) AS avg_latency
+				FROM requests
+				WHERE julianday(start_time) >= julianday(?)
+				  AND julianday(start_time) < julianday(?)
+				  AND duration_ms > 0
+				  AND details_known = 1
 				GROUP BY model
 			) l ON l.model = r.model
 		LEFT JOIN models m
@@ -373,21 +335,9 @@ type ScenarioBreakdown struct {
 	EstCostUSD          float64 `json:"est_cost_usd"`
 }
 
-// GetScenarioBreakdown returns local usage grouped by routing scenario.
-func (a *Analytics) GetScenarioBreakdown(days int) ([]ScenarioBreakdown, error) {
-	return a.getScenarioBreakdown(a.windowForDays(days))
-}
-
-// GetScenarioBreakdownBetween returns scenario aggregates for an explicit range.
-func (a *Analytics) GetScenarioBreakdownBetween(start, end time.Time) ([]ScenarioBreakdown, error) {
-	window, err := a.windowBetween(start, end)
-	if err != nil {
-		return nil, err
-	}
-	return a.getScenarioBreakdown(window)
-}
-
-func (a *Analytics) getScenarioBreakdown(window analyticsWindow) ([]ScenarioBreakdown, error) {
+// ScenarioBreakdown returns local usage grouped by routing scenario for a
+// resolved window.
+func (a *Analytics) ScenarioBreakdown(window Window) ([]ScenarioBreakdown, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	rows, err := a.db.DB().QueryContext(ctx, `
@@ -447,37 +397,15 @@ func (a *Analytics) getScenarioBreakdown(window analyticsWindow) ([]ScenarioBrea
 		}
 		result = append(result, agg.row)
 	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Requests != result[j].Requests {
-			return result[i].Requests > result[j].Requests
-		}
-		return result[i].Scenario < result[j].Scenario
+	slices.SortFunc(result, func(a, b ScenarioBreakdown) int {
+		return cmp.Or(cmp.Compare(b.Requests, a.Requests), cmp.Compare(a.Scenario, b.Scenario))
 	})
 	return result, nil
 }
 
-func (a *Analytics) GetProviderUsageAnalytics(days int) (*ProviderUsageAnalytics, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	return a.db.GetProviderUsageAnalytics(ctx, days)
-}
-
-// GetProviderBreakdown returns usage by provider (with fallback rate).
-func (a *Analytics) GetProviderBreakdown(days int) ([]ProviderBreakdown, error) {
-	return a.getProviderBreakdown(a.windowForDays(days))
-}
-
-// GetProviderBreakdownBetween returns platform aggregates for an explicit range.
-func (a *Analytics) GetProviderBreakdownBetween(start, end time.Time) ([]ProviderBreakdown, error) {
-	window, err := a.windowBetween(start, end)
-	if err != nil {
-		return nil, err
-	}
-	return a.getProviderBreakdown(window)
-}
-
-func (a *Analytics) getProviderBreakdown(window analyticsWindow) ([]ProviderBreakdown, error) {
-
+// ProviderBreakdown returns usage by provider (with fallback rate) for a
+// resolved window.
+func (a *Analytics) ProviderBreakdown(window Window) ([]ProviderBreakdown, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -560,11 +488,8 @@ func (a *Analytics) getProviderBreakdown(window analyticsWindow) ([]ProviderBrea
 		}
 		result = append(result, agg.pb)
 	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Requests != result[j].Requests {
-			return result[i].Requests > result[j].Requests
-		}
-		return result[i].Provider < result[j].Provider
+	slices.SortFunc(result, func(a, b ProviderBreakdown) int {
+		return cmp.Or(cmp.Compare(b.Requests, a.Requests), cmp.Compare(a.Provider, b.Provider))
 	})
 	return result, nil
 }
@@ -582,21 +507,8 @@ type DailyTokenPoint struct {
 	CostUSD             float64 `json:"cost_usd"`
 }
 
-// GetDailyTokenTrend returns daily token/request aggregates for the last N days.
-func (a *Analytics) GetDailyTokenTrend(days int) ([]DailyTokenPoint, error) {
-	return a.getTokenTrend(a.windowForDays(days), "day")
-}
-
-// GetTokenTrendBetween returns hourly or daily aggregates for an explicit range.
-func (a *Analytics) GetTokenTrendBetween(start, end time.Time, granularity string) ([]DailyTokenPoint, error) {
-	window, err := a.windowBetween(start, end)
-	if err != nil {
-		return nil, err
-	}
-	return a.getTokenTrend(window, granularity)
-}
-
-func (a *Analytics) getTokenTrend(window analyticsWindow, granularity string) ([]DailyTokenPoint, error) {
+// TokenTrend returns hourly or daily aggregates for a resolved window.
+func (a *Analytics) TokenTrend(window Window, granularity string) ([]DailyTokenPoint, error) {
 	bucket := "DATE(r.start_time)"
 	if granularity == "hour" {
 		bucket = "strftime('%Y-%m-%dT%H:00:00Z', r.start_time)"

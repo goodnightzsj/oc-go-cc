@@ -18,7 +18,6 @@ import (
 	"github.com/routatic/proxy/internal/debug"
 	"github.com/routatic/proxy/internal/gui"
 	"github.com/routatic/proxy/internal/handlers"
-	"github.com/routatic/proxy/internal/history"
 	"github.com/routatic/proxy/internal/metrics"
 	"github.com/routatic/proxy/internal/provider"
 	"github.com/routatic/proxy/internal/router"
@@ -35,7 +34,6 @@ type Server struct {
 	mu        sync.Mutex
 	logger    *slog.Logger
 	levelVar  *slog.LevelVar
-	History   *history.History // exported so the ui command can read it
 	metrics   *metrics.Metrics // stored for Metrics() getter
 	storage   *storage.Database
 	retention *storage.Retention
@@ -73,9 +71,6 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 
 	// Create status store for the statusline endpoint.
 	statusStore := status.NewStore(0)
-
-	// Create history ring buffer (1000 entries, in-memory).
-	hist := history.New(1000)
 
 	// Initialize SQLite storage first so catalog can use it.
 	var db *storage.Database
@@ -123,7 +118,6 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 		tokenCounter,
 		metrics,
 		captureLogger,
-		hist,
 		storageWriter,
 	)
 	healthHandler := handlers.NewHealthHandler(tokenCounter, fallbackHandler, metrics, statusStore)
@@ -144,7 +138,6 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 		analyticsHandler := gui.NewAnalyticsHandler(db)
 		mux.HandleFunc("/api/analytics/summary", analyticsHandler.Summary)
 		mux.HandleFunc("/api/analytics/tokens/trend", analyticsHandler.TokenTrend)
-		mux.HandleFunc("/api/analytics/latency", analyticsHandler.LatencyStats)
 	}
 
 	// Create HTTP server.
@@ -169,7 +162,6 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 		mux:       mux,
 		logger:    logger,
 		levelVar:  levelVar,
-		History:   hist,
 		metrics:   metrics,
 		storage:   db,
 		retention: retention,
@@ -267,24 +259,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		return srvToShutdown.Shutdown(ctx)
 	}
 	return nil
-}
-
-// WritePID writes the current PID to a file.
-func WritePID(path string) error {
-	pid := os.Getpid()
-	return os.WriteFile(path, []byte(fmt.Sprintf("%d", pid)), 0644)
-}
-
-// ReadPID reads the PID from a file.
-func ReadPID(path string) (int, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 0, err
-	}
-
-	var pid int
-	_, err = fmt.Sscanf(string(data), "%d", &pid)
-	return pid, err
 }
 
 // parseLogLevel converts a string log level to slog.Level.

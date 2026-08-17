@@ -99,9 +99,9 @@ func catalogSyncCmd() *cobra.Command {
 			cmd.Printf("  Bytes:  %d\n", lock.Bytes)
 			cmd.Printf("  TTL:    %d hours\n", lock.TTLHours)
 
-			// Migrate the downloaded JSON catalog to SQLite so that
-			// 'routatic-proxy models list' and other SQLite-backed commands
-			// can find it.
+			// Refresh the SQLite catalog from the JSON just downloaded. This is
+			// what 'routatic-proxy models list', the dashboard, and cost-based
+			// routing all read.
 			jsonPath := filepath.Join(catalogDir, "catalog.json")
 			db, err := storage.Open(storage.DefaultConfig)
 			if err != nil {
@@ -110,15 +110,15 @@ func catalogSyncCmd() *cobra.Command {
 			defer func() { _ = db.Close() }()
 
 			ctx := cmd.Context()
-			migrated, err := catalog.MigrateFromJSON(ctx, db, jsonPath)
+			providers, models, err := catalog.ImportFromJSON(ctx, db, jsonPath)
 			if err != nil {
-				return fmt.Errorf("migrate catalog to SQLite: %w", err)
+				return fmt.Errorf("import catalog into SQLite: %w", err)
 			}
 
-			if migrated {
-				cmd.Println("  Catalog migrated to SQLite database")
-			} else {
-				cmd.Println("  SQLite catalog already up to date")
+			cmd.Printf("  SQLite: %d providers, %d models imported\n", providers, models)
+
+			if syncedAt, err := storage.NewCatalogRepo(db).LastSync(ctx); err == nil && !syncedAt.IsZero() {
+				cmd.Printf("  Last refresh: %s\n", syncedAt.Format(time.RFC3339))
 			}
 
 			return nil

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -731,9 +732,9 @@ func TestExpandHome(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := expandHome(tt.input)
+		got := ExpandHome(tt.input)
 		if got != tt.want {
-			t.Errorf("expandHome(%q) = %q, want %q", tt.input, got, tt.want)
+			t.Errorf("ExpandHome(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
 }
@@ -1222,5 +1223,45 @@ func TestDefaults_StreamingTimeoutFallback(t *testing.T) {
 	}
 	if cfg.OpenCodeZen.StreamTimeoutMs != 700000 {
 		t.Errorf("OpenCodeZen.StreamTimeoutMs = %d, want 700000 (should fallback to StreamingTimeoutMs)", cfg.OpenCodeZen.StreamTimeoutMs)
+	}
+}
+
+func TestValidateCostScenarios_RejectsUnknownScenarioName(t *testing.T) {
+	cfg := &Config{
+		APIKey: "test",
+		CostRouting: &CostRoutingConfig{
+			Enabled: true,
+			// A typo here used to sit in the config doing nothing.
+			Scenarios: map[string]CostScenario{"long-context": {MinContextWindow: 200000}},
+		},
+	}
+
+	err := validate(cfg)
+	if err == nil {
+		t.Fatal("expected validation error for unknown scenario name, got nil")
+	}
+	if !strings.Contains(err.Error(), "long-context") {
+		t.Errorf("error should name the offending key, got: %v", err)
+	}
+}
+
+func TestValidateCostScenarios_AcceptsEveryCanonicalName(t *testing.T) {
+	scenarios := make(map[string]CostScenario, len(CostScenarioNames))
+	for _, name := range CostScenarioNames {
+		scenarios[name] = CostScenario{}
+	}
+	cfg := &Config{
+		APIKey:      "test",
+		CostRouting: &CostRoutingConfig{Enabled: true, Scenarios: scenarios},
+	}
+
+	if err := validate(cfg); err != nil {
+		t.Fatalf("all canonical scenario names should validate, got: %v", err)
+	}
+}
+
+func TestValidateCostScenarios_NoCostRoutingBlockIsFine(t *testing.T) {
+	if err := validate(&Config{APIKey: "test"}); err != nil {
+		t.Fatalf("config without cost_routing should validate, got: %v", err)
 	}
 }

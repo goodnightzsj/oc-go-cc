@@ -39,7 +39,6 @@ type NormalizedRequest struct {
 	Messages        []NormalizedMessage
 	MaxTokens       int
 	Temperature     *float64
-	TopP            *float64
 	Stream          bool
 	Tools           []NormalizedToolDef
 	ReasoningEffort string // "low", "medium", "high"

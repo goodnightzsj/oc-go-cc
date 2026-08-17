@@ -1787,36 +1787,6 @@ function bindPlotTooltip(root, tip, options) {
   });
 }
 
-// Percentiles cannot be averaged across models: a model with one request would
-// otherwise weigh as much as one with 100k. Weighting each model's p95 by its
-// request count is still an approximation (the true p95 needs the merged
-// distribution), so the worst single-model p95 is surfaced alongside it.
-function aggregateP95(stats) {
-  const rows = (stats || []).filter(st => st && (st.p95_ms || 0) > 0);
-  if (!rows.length) return '—';
-
-  let weighted = 0;
-  let totalCount = 0;
-  let worst = 0;
-  for (const st of rows) {
-    const count = Number(st.count) || 0;
-    const p95 = Number(st.p95_ms) || 0;
-    weighted += p95 * count;
-    totalCount += count;
-    if (p95 > worst) worst = p95;
-  }
-
-  // No usable counts (older rows) — fall back to the worst case rather than a
-  // misleading equal-weight mean.
-  if (totalCount <= 0) return Math.round(worst) + ' ms';
-
-  const val = Math.round(weighted / totalCount);
-  if (rows.length > 1 && worst > val) {
-    return val + ' ms · max ' + Math.round(worst) + ' ms';
-  }
-  return val + ' ms';
-}
-
 function escapeHtml(str) {
   if (!str && str !== 0) return '';
   return String(str).replace(/[&<>"']/g, function(c) {

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 )
@@ -128,7 +128,7 @@ func (d *Database) ReconcileProviderCosts(ctx context.Context, providerRows []Pr
 	for key := range providerByIdentity {
 		keys = append(keys, key)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 
 	var matches []providerCostMatch
 	for _, key := range keys {

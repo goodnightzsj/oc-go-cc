@@ -112,8 +112,8 @@ func (m Model) CostOutputPerM() float64 {
 	return 0
 }
 
-// UpsertBatch atomically inserts or replaces provider and model records in a single transaction.
-func (r *CatalogRepo) UpsertBatch(ctx context.Context, providers []ProviderRecord, models []ModelRecord) error {
+// ReplaceBatch atomically replaces the provider and model catalog.
+func (r *CatalogRepo) ReplaceBatch(ctx context.Context, providers []ProviderRecord, models []ModelRecord) error {
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return err
@@ -121,6 +121,13 @@ func (r *CatalogRepo) UpsertBatch(ctx context.Context, providers []ProviderRecor
 	defer func() { _ = tx.Rollback() }()
 
 	now := time.Now().UTC().Format(time.RFC3339)
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM models`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM providers`); err != nil {
+		return err
+	}
 
 	for _, p := range providers {
 		enabled := 1
@@ -148,7 +155,7 @@ func (r *CatalogRepo) UpsertBatch(ctx context.Context, providers []ProviderRecor
 
 	for _, m := range models {
 		provider := providerFromModelKey(m.ID)
-		modelName := modelNameFromKey(m.ID)
+		modelName := ModelNameFromKey(m.ID)
 
 		supportsTools := 1
 		if !m.ToolCall {
@@ -308,114 +315,6 @@ func (r *CatalogRepo) Load(ctx context.Context) (*IndexedCatalog, error) {
 	return idx, nil
 }
 
-// GetModel retrieves a single model by its ID. Returns nil, nil if not found.
-func (r *CatalogRepo) GetModel(ctx context.Context, id string) (*Model, error) {
-	var m Model
-	var displayName string
-	var contextWindow sql.NullInt64
-	var costInput, costOutput sql.NullFloat64
-	var supportsTools, supportsVision, supportsReasoning int
-
-	err := r.db.DB().QueryRowContext(ctx, `
-		SELECT id, name, context_window, cost_input_per_m, cost_output_per_m,
-		       supports_tools, supports_vision, supports_reasoning
-		FROM models
-		WHERE id = ?
-	`, id).Scan(&m.ID, &displayName, &contextWindow, &costInput, &costOutput,
-		&supportsTools, &supportsVision, &supportsReasoning)
-
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	m.Name = displayName
-	m.ToolCall = supportsTools == 1
-	m.Reasoning = supportsReasoning == 1
-	m.Vision = supportsVision == 1
-
-	if contextWindow.Valid {
-		m.Limit = &Limit{Context: contextWindow.Int64}
-	}
-	if costInput.Valid || costOutput.Valid {
-		m.Rates = &Rates{}
-		if costInput.Valid {
-			m.Rates.Input = costInput.Float64
-		}
-		if costOutput.Valid {
-			m.Rates.Output = costOutput.Float64
-		}
-	}
-
-	if m.Vision {
-		m.Modalities.Input = []string{"text", "image"}
-	} else {
-		m.Modalities.Input = []string{"text"}
-	}
-	m.Modalities.Output = []string{"text"}
-
-	return &m, nil
-}
-
-// ListModelsByProvider returns all models that belong to the given provider.
-func (r *CatalogRepo) ListModelsByProvider(ctx context.Context, provider string) ([]Model, error) {
-	rows, err := r.db.DB().QueryContext(ctx, `
-		SELECT id, name, context_window, cost_input_per_m, cost_output_per_m,
-		       supports_tools, supports_vision, supports_reasoning
-		FROM models
-		WHERE provider = ?
-	`, provider)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var result []Model
-	for rows.Next() {
-		var m Model
-		var displayName string
-		var contextWindow sql.NullInt64
-		var costInput, costOutput sql.NullFloat64
-		var supportsTools, supportsVision, supportsReasoning int
-
-		if err := rows.Scan(&m.ID, &displayName, &contextWindow, &costInput, &costOutput,
-			&supportsTools, &supportsVision, &supportsReasoning); err != nil {
-			return nil, err
-		}
-
-		m.Name = displayName
-		m.ToolCall = supportsTools == 1
-		m.Reasoning = supportsReasoning == 1
-		m.Vision = supportsVision == 1
-
-		if contextWindow.Valid {
-			m.Limit = &Limit{Context: contextWindow.Int64}
-		}
-		if costInput.Valid || costOutput.Valid {
-			m.Rates = &Rates{}
-			if costInput.Valid {
-				m.Rates.Input = costInput.Float64
-			}
-			if costOutput.Valid {
-				m.Rates.Output = costOutput.Float64
-			}
-		}
-
-		if m.Vision {
-			m.Modalities.Input = []string{"text", "image"}
-		} else {
-			m.Modalities.Input = []string{"text"}
-		}
-		m.Modalities.Output = []string{"text"}
-
-		result = append(result, m)
-	}
-
-	return result, rows.Err()
-}
-
 // LastSync returns the timestamp of the last catalog sync, or zero time if never synced.
 func (r *CatalogRepo) LastSync(ctx context.Context) (time.Time, error) {
 	var syncedAt sql.NullString
@@ -436,28 +335,12 @@ func (r *CatalogRepo) LastSync(ctx context.Context) (time.Time, error) {
 	return time.Parse(time.RFC3339, syncedAt.String)
 }
 
-// SetLastSync records the timestamp of a catalog sync.
-func (r *CatalogRepo) SetLastSync(ctx context.Context, t time.Time) error {
-	_, err := r.db.DB().ExecContext(ctx, `
-		INSERT OR REPLACE INTO schema_info (key, value) VALUES ('catalog_last_sync', ?)
-	`, t.Format(time.RFC3339))
-	return err
-}
-
 func providerFromModelKey(key string) string {
-	idx := strings.IndexByte(key, '/')
-	if idx < 0 {
+	provider, _, ok := strings.Cut(key, "/")
+	if !ok {
 		return ""
 	}
-	return key[:idx]
-}
-
-func modelNameFromKey(key string) string {
-	idx := strings.IndexByte(key, '/')
-	if idx < 0 {
-		return key
-	}
-	return key[idx+1:]
+	return provider
 }
 
 // ProviderModel is a flattened model entry used for display in provider listings.
@@ -470,11 +353,6 @@ type ProviderModel struct {
 	Context     int64
 	CostInput   float64
 	CostOutput  float64
-}
-
-// ModelsForProvider returns the models that support the named provider.
-func (ic *IndexedCatalog) ModelsForProvider(provider string) []Model {
-	return ic.ProviderModels[provider]
 }
 
 // ListProviderModels returns a flattened ProviderModel slice for the given provider.
@@ -505,9 +383,9 @@ func (ic *IndexedCatalog) ListProviderModels(provider string) []ProviderModel {
 
 // ModelNameFromKey extracts the model name portion from a model key of the form "provider/model-name".
 func ModelNameFromKey(key string) string {
-	idx := strings.IndexByte(key, '/')
-	if idx < 0 {
+	_, name, ok := strings.Cut(key, "/")
+	if !ok {
 		return key
 	}
-	return key[idx+1:]
+	return name
 }

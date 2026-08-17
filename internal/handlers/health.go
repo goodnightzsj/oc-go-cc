@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 
 	"github.com/routatic/proxy/internal/buildinfo"
 	"github.com/routatic/proxy/internal/metrics"
@@ -46,7 +47,7 @@ func (h *HealthHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 		"service":    "routatic-proxy",
 		"version":    buildinfo.Version,
 		"build_time": buildinfo.Date,
-		"pid":        buildinfo.PID(),
+		"pid":        os.Getpid(),
 		"binary":     buildinfo.BinaryPath(),
 		"metrics": map[string]interface{}{
 			"requests_received": snapshot.RequestsReceived,
@@ -55,7 +56,6 @@ func (h *HealthHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 			"requests_streamed": snapshot.RequestsStreamed,
 			"upstream_calls":    snapshot.UpstreamCalls,
 			"rate_limited":      snapshot.RateLimited,
-			"deduplicated":      snapshot.Deduplicated,
 			"p95_latency_ms":    snapshot.CalculateP95().Milliseconds(),
 			"p99_latency_ms":    snapshot.CalculateP99().Milliseconds(),
 		},
@@ -109,11 +109,7 @@ func (h *HealthHandler) HandleCountTokens(w http.ResponseWriter, r *http.Request
 		return
 	}
 	messages := tokenMessagesFromAnthropic(body.Messages)
-	count, err := h.tokenCounter.CountMessages(systemText, messages)
-	if err != nil {
-		http.Error(w, "failed to count tokens", http.StatusInternalServerError)
-		return
-	}
+	count := h.tokenCounter.CountMessages(systemText, messages)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

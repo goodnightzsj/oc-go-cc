@@ -1,9 +1,11 @@
 package router
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 
 	"github.com/routatic/proxy/internal/catalog"
 	"github.com/routatic/proxy/internal/config"
@@ -52,36 +54,42 @@ func NewSelector(cat *catalog.IndexedCatalog, cfg *config.Config) *Selector {
 // Candidates are sorted by total cost per million tokens ascending. Ties are
 // broken by larger context window, then by model ID.
 func (s *Selector) SelectCheapest(scenario string, constraints ScenarioConstraints) (catalog.ResolvedModel, error) {
-	scen, ok := s.catalog.Scenarios[scenario]
-	if !ok {
-		return catalog.ResolvedModel{}, fmt.Errorf("unknown scenario %q", scenario)
-	}
-
-	candidates := s.resolveCandidates(scen, constraints)
+	candidates := s.resolveCandidates(s.scenarioPolicy(scenario), constraints)
 	if len(candidates) == 0 {
 		return catalog.ResolvedModel{}, fmt.Errorf("%w: scenario %q", ErrNoCandidateModel, scenario)
 	}
 
-	sort.Slice(candidates, func(i, j int) bool {
-		a, b := candidates[i], candidates[j]
+	// Stable sort: ModelID can repeat across providers, so the comparator is not
+	// a total order and an unstable sort would shuffle equal candidates.
+	slices.SortStableFunc(candidates, func(a, b catalog.ResolvedModel) int {
 		costA := a.CostInputPerM + a.CostOutputPerM + s.effectivePenalty(a.Provider)
 		costB := b.CostInputPerM + b.CostOutputPerM + s.effectivePenalty(b.Provider)
-		if costA != costB {
-			return costA < costB
-		}
-		if a.ContextWindow != b.ContextWindow {
-			return a.ContextWindow > b.ContextWindow
-		}
-		return a.ModelID < b.ModelID
+		return cmp.Or(
+			cmp.Compare(costA, costB),
+			cmp.Compare(b.ContextWindow, a.ContextWindow),
+			cmp.Compare(a.ModelID, b.ModelID),
+		)
 	})
 
 	return candidates[0], nil
 }
 
+// scenarioPolicy returns the configured policy for a scenario. An unconfigured
+// scenario yields the zero policy, which imposes no requirements beyond those
+// the request itself carries. Returning a zero value rather than an error is
+// deliberate: cost routing is only consulted when it is explicitly enabled, and
+// a missing scenario entry must not silently disable it.
+func (s *Selector) scenarioPolicy(scenario string) config.CostScenario {
+	if s.cfg == nil || s.cfg.CostRouting == nil {
+		return config.CostScenario{}
+	}
+	return s.cfg.CostRouting.Scenarios[scenario]
+}
+
 // resolveCandidates enumerates all enabled provider/model pairs for a scenario
 // and returns the resolved models that match the scenario requirements and
 // constraints.
-func (s *Selector) resolveCandidates(scen catalog.Scenario, constraints ScenarioConstraints) []catalog.ResolvedModel {
+func (s *Selector) resolveCandidates(scen config.CostScenario, constraints ScenarioConstraints) []catalog.ResolvedModel {
 	providers := s.providerSet(scen)
 	minContext := max(scen.MinContextWindow, constraints.Context)
 
@@ -131,14 +139,10 @@ func (s *Selector) resolveCandidates(scen catalog.Scenario, constraints Scenario
 // enabled are returned; when the global cost_routing.prefer_providers is
 // non-empty it is intersected with the scenario's preferred providers (or used
 // alone when the scenario has none). Otherwise all enabled providers are returned.
-func (s *Selector) providerSet(scen catalog.Scenario) map[string]bool {
+func (s *Selector) providerSet(scen config.CostScenario) map[string]bool {
 	// Handle nil config by returning all enabled providers.
 	if s.cfg == nil {
-		set := make(map[string]bool, len(s.enabledProviders))
-		for p := range s.enabledProviders {
-			set[p] = true
-		}
-		return set
+		return maps.Clone(s.enabledProviders)
 	}
 
 	globalPref := s.globalPreferProviders()
@@ -146,11 +150,7 @@ func (s *Selector) providerSet(scen catalog.Scenario) map[string]bool {
 
 	// If neither global nor scenario has preferred providers, return all enabled.
 	if len(globalPref) == 0 && len(scenarioPref) == 0 {
-		set := make(map[string]bool, len(s.enabledProviders))
-		for p := range s.enabledProviders {
-			set[p] = true
-		}
-		return set
+		return maps.Clone(s.enabledProviders)
 	}
 
 	// Resolve which list to use. When both are set, intersect them.
@@ -159,17 +159,11 @@ func (s *Selector) providerSet(scen catalog.Scenario) map[string]bool {
 		if len(scenarioPref) == 0 {
 			candidates = globalPref
 		} else {
-			// Intersect global and scenario preferred providers.
-			globalSet := make(map[string]struct{}, len(globalPref))
-			for _, p := range globalPref {
-				globalSet[p] = struct{}{}
-			}
-			candidates = nil
-			for _, p := range scenarioPref {
-				if _, ok := globalSet[p]; ok {
-					candidates = append(candidates, p)
-				}
-			}
+			// Intersect global and scenario preferred providers. Clone first:
+			// scenarioPref aliases the catalog's slice, which must not be mutated.
+			candidates = slices.DeleteFunc(slices.Clone(scenarioPref), func(p string) bool {
+				return !slices.Contains(globalPref, p)
+			})
 		}
 	}
 
@@ -195,7 +189,7 @@ func modelSupportsProvider(modelKey string, provider string) bool {
 	return catalog.ProviderFromModelKey(modelKey) == provider
 }
 
-func modelMatches(model catalog.Model, scen catalog.Scenario, constraints ScenarioConstraints, minContext int64) bool {
+func modelMatches(model catalog.Model, scen config.CostScenario, constraints ScenarioConstraints, minContext int64) bool {
 	if model.ContextWindow() < minContext {
 		return false
 	}
@@ -237,12 +231,6 @@ func enabledProviders(cfg *config.Config) map[string]bool {
 		}
 	}
 	return enabled
-}
-
-// IsEnabledProvider reports whether the named provider is enabled in the
-// selector's runtime configuration.
-func (s *Selector) IsEnabledProvider(provider string) bool {
-	return s.enabledProviders[provider]
 }
 
 // effectivePenalty returns the additional per-provider cost penalty from the

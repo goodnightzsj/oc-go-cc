@@ -1,15 +1,17 @@
 package gui
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 
 	"github.com/routatic/proxy/internal/config"
 )
 
-// TestRedactConfigKeys_MasksEveryKeyField asserts no raw key survives the
-// GET path, and that non-secret fields are left untouched.
-func TestRedactConfigKeys_MasksEveryKeyField(t *testing.T) {
+// TestAnonymizeConfig_MasksEveryKeyField asserts no raw key survives the
+// settings GET path, and that non-secret fields are left untouched. This is the
+// single masker behind both /api/proxy/config and /api/config/export.
+func TestAnonymizeConfig_MasksEveryKeyField(t *testing.T) {
 	cfg := &config.Config{
 		APIKey:  "sk-global-real",
 		APIKeys: []string{"sk-a", "sk-b"},
@@ -22,7 +24,10 @@ func TestRedactConfigKeys_MasksEveryKeyField(t *testing.T) {
 	cfg.AWSBedrock.APIKey = "sk-bedrock-real"
 	cfg.OpenRouter.APIKey = "sk-router-real"
 
-	got := redactConfigKeys(cfg)
+	got, err := anonymizeConfig(cfg)
+	if err != nil {
+		t.Fatalf("anonymizeConfig: %v", err)
+	}
 
 	blob, err := json.Marshal(got)
 	if err != nil {
@@ -43,11 +48,11 @@ func TestRedactConfigKeys_MasksEveryKeyField(t *testing.T) {
 
 	// The original must not be mutated: the proxy keeps using it to auth.
 	if cfg.APIKey != "sk-global-real" || cfg.OpenCodeGo.APIKey != "sk-go-real" {
-		t.Errorf("redactConfigKeys mutated the source config: global=%q go=%q",
+		t.Errorf("anonymizeConfig mutated the source config: global=%q go=%q",
 			cfg.APIKey, cfg.OpenCodeGo.APIKey)
 	}
 	if len(cfg.APIKeys) != 2 || cfg.APIKeys[0] != "sk-a" {
-		t.Errorf("redactConfigKeys mutated the source APIKeys slice: %v", cfg.APIKeys)
+		t.Errorf("anonymizeConfig mutated the source APIKeys slice: %v", cfg.APIKeys)
 	}
 }
 
@@ -97,14 +102,5 @@ func TestStripMaskedKeys_DropsMaskedFields(t *testing.T) {
 }
 
 func bytesContains(b []byte, sub string) bool {
-	return len(sub) > 0 && len(b) >= len(sub) && indexOf(string(b), sub) >= 0
-}
-
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
+	return bytes.Contains(b, []byte(sub))
 }

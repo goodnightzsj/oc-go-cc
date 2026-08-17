@@ -17,10 +17,8 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,7 +44,6 @@ type Config struct {
 
 // Server is the embedded HTTP server that backs the webview UI.
 type Server struct {
-	hist              *history.History
 	met               *metrics.Metrics
 	atomicCfg         *config.AtomicConfig
 	cfg               Config
@@ -68,7 +65,6 @@ type Server struct {
 
 // Options configures the GUI server.
 type Options struct {
-	History          *history.History
 	Metrics          *metrics.Metrics
 	AtomicConfig     *config.AtomicConfig
 	ProxyPort        int
@@ -86,7 +82,6 @@ func New(opts Options) *Server {
 		opts.Logger = slog.Default()
 	}
 	s := &Server{
-		hist:             opts.History,
 		met:              opts.Metrics,
 		atomicCfg:        opts.AtomicConfig,
 		proxyPort:        opts.ProxyPort,
@@ -146,9 +141,9 @@ func (s *Server) getProxyPort() int {
 	return s.proxyPort
 }
 
-// Start starts the embedded HTTP server on port 3445 and returns
-// the URL that the webview should load. If another routatic-proxy instance
-// is using that port, it is killed before binding.
+// Start starts the embedded HTTP server on port 3445 (or the next free port in
+// the following ten) and returns the URL that the webview should load. A stale
+// instance already holding the port is left alone; this one simply moves up.
 func (s *Server) Start(ctx context.Context) (string, error) {
 	s.guiPort.Store(3445)
 	// Allow GUI port override via environment variable.
@@ -156,10 +151,6 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 		if p, err := strconv.Atoi(envPort); err == nil && p > 0 && p < 65536 {
 			s.guiPort.Store(int32(p))
 		}
-	}
-	// Ensure port is free, killing any existing routatic-proxy GUI.
-	if err := s.ensurePortAvailable(); err != nil {
-		return "", fmt.Errorf("gui port check: %w", err)
 	}
 
 	mux := http.NewServeMux()
@@ -197,14 +188,12 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 	mux.HandleFunc("/api/config/import", s.handleConfigImport)
 	mux.HandleFunc("/api/perf/models", s.handlePerformance)
 	mux.HandleFunc("/api/perf/aggregate", s.handlePerformanceAggregate)
-	mux.HandleFunc("/api/catalog/stats", s.handleCatalogStats)
 
 	// Analytics (only when SQLite storage is available)
 	if s.storage != nil {
 		ah := NewAnalyticsHandler(s.storage)
 		mux.HandleFunc("/api/analytics/summary", ah.Summary)
 		mux.HandleFunc("/api/analytics/tokens/trend", ah.TokenTrend)
-		mux.HandleFunc("/api/analytics/latency", ah.LatencyStats)
 	}
 
 	startPort := int(s.guiPort.Load())
@@ -217,7 +206,7 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 			break
 		}
 		if p == startPort {
-			fmt.Printf("Port %d in use by another app, trying port %d for GUI\n", p, p+1)
+			fmt.Printf("Port %d in use, trying port %d for GUI\n", p, p+1)
 		}
 	}
 	if ln == nil {
@@ -458,29 +447,20 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Prefer the persistent SQLite history (full dataset) with pagination;
-	// fall back to the in-memory ring buffer only when storage is unavailable.
-	if s.storage != nil {
-		repo := storage.NewRequests(s.storage)
-		records, total, err := repo.Query(query)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		writeJSON(w, map[string]any{
-			"items": toHistoryEntries(records),
-			"total": total,
-			"page":  page,
-			"size":  size,
-		})
+	// Prefer the persistent SQLite history (full dataset) with pagination. When
+	// storage is unavailable there is no queryable history to serve: the
+	// in-memory ring buffer is a live tail, not a filterable/paginated dataset,
+	// so say so instead of shipping a second, divergent query engine.
+	if s.storage == nil {
+		http.Error(w, "history storage is unavailable", http.StatusServiceUnavailable)
 		return
 	}
-
-	if s.hist == nil {
-		writeJSON(w, map[string]any{"items": []historyEntry{}, "total": 0, "page": page, "size": size})
+	repo := storage.NewRequests(s.storage)
+	records, total, err := repo.Query(query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	records, total := filterMemoryHistory(s.hist.Last(0), query)
 	writeJSON(w, map[string]any{
 		"items": toHistoryEntries(records),
 		"total": total,
@@ -575,103 +555,6 @@ func parseHistoryBool(value string) (*bool, error) {
 	return &parsed, nil
 }
 
-func filterMemoryHistory(records []history.RequestRecord, q storage.RequestQuery) ([]history.RequestRecord, int64) {
-	search := strings.ToLower(strings.TrimSpace(q.Search))
-	filtered := make([]history.RequestRecord, 0, len(records))
-	for _, rec := range records {
-		if search != "" && !strings.Contains(strings.ToLower(strings.Join([]string{
-			rec.ID, rec.Model, rec.Provider, rec.Scenario, rec.ErrorMsg,
-		}, "\n")), search) {
-			continue
-		}
-		if (q.Model != "" && rec.Model != q.Model) ||
-			(q.Provider != "" && rec.Provider != q.Provider) ||
-			(q.Scenario != "" && rec.Scenario != q.Scenario) ||
-			(q.CostSource != "" && rec.CostSource != q.CostSource) {
-			continue
-		}
-		if (q.Start != nil && rec.StartTime.Before(*q.Start)) ||
-			(q.End != nil && !rec.StartTime.Before(*q.End)) {
-			continue
-		}
-		if (q.Success != nil && rec.Success != *q.Success) ||
-			(q.Streaming != nil && rec.Streaming != *q.Streaming) {
-			continue
-		}
-		filtered = append(filtered, rec)
-	}
-
-	sort.SliceStable(filtered, func(i, j int) bool {
-		cmp := compareHistoryRecord(filtered[i], filtered[j], q.SortBy)
-		if cmp == 0 && q.SortBy != "start_time" {
-			return filtered[i].StartTime.After(filtered[j].StartTime)
-		}
-		if strings.EqualFold(q.SortOrder, "asc") {
-			return cmp < 0
-		}
-		return cmp > 0
-	})
-
-	total := int64(len(filtered))
-	start := (q.Page - 1) * q.PageSize
-	if start >= len(filtered) {
-		return []history.RequestRecord{}, total
-	}
-	end := min(start+q.PageSize, len(filtered))
-	return filtered[start:end], total
-}
-
-func compareHistoryRecord(a, b history.RequestRecord, field string) int {
-	switch field {
-	case "model":
-		return strings.Compare(strings.ToLower(a.Model), strings.ToLower(b.Model))
-	case "provider":
-		return strings.Compare(strings.ToLower(a.Provider), strings.ToLower(b.Provider))
-	case "scenario":
-		return strings.Compare(strings.ToLower(a.Scenario), strings.ToLower(b.Scenario))
-	case "prompt_tokens":
-		return a.DisplayInputTokens() - b.DisplayInputTokens()
-	case "output_tokens":
-		return a.OutputTokens - b.OutputTokens
-	case "cost_usd":
-		return floatCompare(a.CostUSD, b.CostUSD)
-	case "duration_ms":
-		return int(a.Duration.Milliseconds() - b.Duration.Milliseconds())
-	case "success":
-		return boolToCompare(a.Success, b.Success)
-	case "streaming":
-		return boolToCompare(a.Streaming, b.Streaming)
-	default:
-		if a.StartTime.Before(b.StartTime) {
-			return -1
-		}
-		if a.StartTime.After(b.StartTime) {
-			return 1
-		}
-		return 0
-	}
-}
-
-func floatCompare(a, b float64) int {
-	if a < b {
-		return -1
-	}
-	if a > b {
-		return 1
-	}
-	return 0
-}
-
-func boolToCompare(a, b bool) int {
-	if a == b {
-		return 0
-	}
-	if a {
-		return 1
-	}
-	return -1
-}
-
 // toHistoryEntries converts request records to the wire format.
 func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 	out := make([]historyEntry, len(records))
@@ -744,65 +627,12 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// redactConfigKeys returns a shallow clone of cfg with all API key fields
-// replaced by a fixed-width mask. The frontend settings form only needs to know
-// whether a key is set, not the key itself. Sending the actual keys to the
-// browser would leak them in the DevTools network tab and make them readable by
-// any script on the page. When the user saves without editing a masked field,
-// the frontend omits that field from the PATCH so the server never receives the
-// mask, leaving the real key on disk intact.
-func redactConfigKeys(cfg *config.Config) *config.Config {
-	out := *cfg // shallow copy
-
-	if out.APIKey != "" {
-		out.APIKey = keyMask
-	}
-	if len(out.APIKeys) > 0 {
-		out.APIKeys = make([]string, len(out.APIKeys))
-		for i := range out.APIKeys {
-			out.APIKeys[i] = keyMask
-		}
-	}
-	if out.OpenCodeGo.APIKey != "" {
-		out.OpenCodeGo.APIKey = keyMask
-	}
-	if len(out.OpenCodeGo.APIKeys) > 0 {
-		out.OpenCodeGo.APIKeys = make([]string, len(out.OpenCodeGo.APIKeys))
-		for i := range out.OpenCodeGo.APIKeys {
-			out.OpenCodeGo.APIKeys[i] = keyMask
-		}
-	}
-	if out.OpenCodeZen.APIKey != "" {
-		out.OpenCodeZen.APIKey = keyMask
-	}
-	if len(out.OpenCodeZen.APIKeys) > 0 {
-		out.OpenCodeZen.APIKeys = make([]string, len(out.OpenCodeZen.APIKeys))
-		for i := range out.OpenCodeZen.APIKeys {
-			out.OpenCodeZen.APIKeys[i] = keyMask
-		}
-	}
-	if out.AWSBedrock.APIKey != "" {
-		out.AWSBedrock.APIKey = keyMask
-	}
-	if len(out.AWSBedrock.APIKeys) > 0 {
-		out.AWSBedrock.APIKeys = make([]string, len(out.AWSBedrock.APIKeys))
-		for i := range out.AWSBedrock.APIKeys {
-			out.AWSBedrock.APIKeys[i] = keyMask
-		}
-	}
-	if out.OpenRouter.APIKey != "" {
-		out.OpenRouter.APIKey = keyMask
-	}
-	if len(out.OpenRouter.APIKeys) > 0 {
-		out.OpenRouter.APIKeys = make([]string, len(out.OpenRouter.APIKeys))
-		for i := range out.OpenRouter.APIKeys {
-			out.OpenRouter.APIKeys[i] = keyMask
-		}
-	}
-	return &out
-}
-
-// maskForKeys is the exact mask redactConfigKeys substitutes for real keys.
+// keyMask is the fixed-width placeholder substituted for every secret value
+// that leaves the process (settings GET and config export). The frontend only
+// needs to know whether a key is set, and sending the real key would leak it in
+// the DevTools network tab and to any script on the page. When the user saves
+// without editing a masked field, the frontend omits it from the PATCH, and
+// stripMaskedKeys drops it server-side if it comes back anyway.
 const keyMask = "••••••••••••••••"
 
 // stripMaskedKeys removes from a config PATCH any field whose value is still
@@ -904,7 +734,13 @@ func (s *Server) handleProxyConfig(w http.ResponseWriter, r *http.Request) {
 		// settings form only needs to know whether a key is set, so send a
 		// fixed-width mask instead. Saving an unchanged masked field is a no-op
 		// because the frontend only patches fields the user actually edited.
-		writeJSON(w, redactConfigKeys(s.atomicCfg.Get()))
+		redacted, err := anonymizeConfig(s.atomicCfg.Get())
+		if err != nil {
+			// Fail closed: an unredactable config is never sent unredacted.
+			http.Error(w, "failed to redact config", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, redacted)
 
 	case http.MethodPost:
 		// Decode only the fields the client sent (partial update).
@@ -1124,242 +960,9 @@ func (s *Server) handleCatalogSync(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleCatalogStats(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	if s.storage == nil {
-		writeJSON(w, map[string]any{
-			"available": false,
-			"error":     "storage not configured",
-		})
-		return
-	}
-
-	repo := storage.NewCatalogRepo(s.storage)
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-
-	idx, err := repo.Load(ctx)
-	if err != nil {
-		writeJSON(w, map[string]any{
-			"available": false,
-			"error":     err.Error(),
-		})
-		return
-	}
-
-	lastSync, _ := repo.LastSync(ctx)
-
-	providersByEnabled := make(map[string]int)
-	for _, p := range idx.Providers {
-		enabled := "disabled"
-		if p.Enabled != nil && *p.Enabled {
-			enabled = "enabled"
-		}
-		providersByEnabled[enabled]++
-	}
-
-	modelsByProvider := make(map[string]int)
-	for prov := range idx.Providers {
-		modelsByProvider[prov] = len(idx.ProviderModels[prov])
-	}
-
-	totalModels := len(idx.Models)
-	modelsWithTools := 0
-	modelsWithVision := 0
-	modelsWithReasoning := 0
-	for _, m := range idx.Models {
-		if m.ToolCall {
-			modelsWithTools++
-		}
-		if m.Vision {
-			modelsWithVision++
-		}
-		if m.Reasoning {
-			modelsWithReasoning++
-		}
-	}
-
-	resp := map[string]any{
-		"available":             true,
-		"last_sync":             lastSync,
-		"total_providers":       len(idx.Providers),
-		"providers_enabled":     providersByEnabled["enabled"],
-		"providers_disabled":    providersByEnabled["disabled"],
-		"total_models":          totalModels,
-		"models_with_tools":     modelsWithTools,
-		"models_with_vision":    modelsWithVision,
-		"models_with_reasoning": modelsWithReasoning,
-		"models_by_provider":    modelsByProvider,
-	}
-
-	writeJSON(w, resp)
-}
-
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
-}
-
-// ensurePortAvailable checks if an existing routatic-proxy GUI is running on
-// the configured port and kills it if found. It does not test-bind — the caller
-// handles binding and will retry with higher ports on failure.
-func (s *Server) ensurePortAvailable() error {
-	client := &http.Client{Timeout: 2 * time.Second}
-	startPort := int(s.guiPort.Load())
-
-	for p := startPort; p < startPort+10; p++ {
-		// Check if this port responds to the routatic-proxy metrics endpoint
-		resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/metrics", p))
-		if err != nil {
-			// No HTTP response → port is free or another app
-			continue
-		}
-
-		var m struct {
-			ProxyRunning bool `json:"proxy_running"`
-		}
-		decodeErr := json.NewDecoder(resp.Body).Decode(&m)
-		_ = resp.Body.Close()
-
-		if decodeErr == nil {
-			// Our GUI — kill the existing instance
-			s.logger.Info("killing existing routatic-proxy GUI on port", "port", p)
-			if err := s.killProcessOnPort(p); err != nil {
-				return fmt.Errorf("failed to kill existing instance: %w", err)
-			}
-			s.guiPort.Store(int32(p))
-			return nil
-		}
-
-		// Responded but not our metrics format → another app
-		if p == startPort {
-			fmt.Printf("Port %d in use by another app, trying port %d for GUI\n", p, p+1)
-		}
-	}
-
-	return nil
-}
-
-// killProcessOnPort terminates the process listening on the given port.
-// Platform-aware: uses lsof+ps on Unix, netstat+tasklist on Windows.
-func (s *Server) killProcessOnPort(port int) error {
-	pids, err := s.findPIDsOnPort(port)
-	if err != nil || len(pids) == 0 {
-		return nil
-	}
-
-	killed := false
-	for _, pid := range pids {
-		if !s.isRoutaticProxyProcess(pid) {
-			continue
-		}
-		s.logger.Info("terminating routatic-proxy process", "pid", pid)
-		if s.killProcess(pid) {
-			killed = true
-		}
-	}
-
-	if !killed {
-		return fmt.Errorf("no routatic-proxy process found on port %d", port)
-	}
-
-	// Wait for port to be released
-	for i := 0; i < 10; i++ {
-		conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-		if err != nil {
-			return nil
-		}
-		_ = conn.Close()
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	return fmt.Errorf("port %d not released after killing process", port)
-}
-
-// findPIDsOnPort returns PIDs listening on the given port.
-func (s *Server) findPIDsOnPort(port int) ([]int, error) {
-	switch runtime.GOOS {
-	case "windows":
-		cmd := exec.Command("cmd", "/c", fmt.Sprintf("netstat -ano | findstr /r /c:\":%d \"", port))
-		output, err := cmd.Output()
-		if err != nil {
-			return nil, err
-		}
-		var pids []int
-		for _, line := range strings.Split(string(output), "\n") {
-			fields := strings.Fields(line)
-			if len(fields) >= 5 {
-				if pid, err := strconv.Atoi(fields[len(fields)-1]); err == nil && pid > 0 {
-					pids = append(pids, pid)
-				}
-			}
-		}
-		return pids, nil
-	default:
-		cmd := exec.Command("lsof", "-t", "-i", fmt.Sprintf(":%d", port))
-		output, err := cmd.Output()
-		if err != nil {
-			return nil, err
-		}
-		var pids []int
-		for _, pidStr := range strings.Split(strings.TrimSpace(string(output)), "\n") {
-			if pidStr == "" {
-				continue
-			}
-			if pid, err := strconv.Atoi(pidStr); err == nil {
-				pids = append(pids, pid)
-			}
-		}
-		return pids, nil
-	}
-}
-
-// isRoutaticProxyProcess checks if the PID belongs to routatic-proxy.
-func (s *Server) isRoutaticProxyProcess(pid int) bool {
-	switch runtime.GOOS {
-	case "windows":
-		cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/FO", "CSV", "/NH")
-		output, err := cmd.Output()
-		if err != nil {
-			return false
-		}
-		return strings.Contains(string(output), "routatic-proxy")
-	case "linux":
-		cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
-		if err != nil {
-			return false
-		}
-		return strings.Contains(string(cmdline), "routatic-proxy")
-	default:
-		output, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
-		if err != nil {
-			return false
-		}
-		name := strings.TrimSpace(string(output))
-		return strings.Contains(name, "routatic-proxy")
-	}
-}
-
-// killProcess terminates a process by PID. Returns true if successful.
-func (s *Server) killProcess(pid int) bool {
-	switch runtime.GOOS {
-	case "windows":
-		cmd := exec.Command("taskkill", "/F", "/PID", strconv.Itoa(pid))
-		return cmd.Run() == nil
-	default:
-		p, err := os.FindProcess(pid)
-		if err != nil {
-			return false
-		}
-		_ = p.Signal(os.Interrupt)
-		time.Sleep(500 * time.Millisecond)
-		_ = p.Kill()
-		return true
-	}
 }
 
 // securityHeadersMiddleware adds security headers to all responses.

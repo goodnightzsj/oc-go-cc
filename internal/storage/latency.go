@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"math"
-	"sort"
+	"slices"
 	"time"
 )
 
@@ -16,19 +16,6 @@ type Latency struct {
 // NewLatency creates a new Latency repository backed by the given database.
 func NewLatency(db *Database) *Latency {
 	return &Latency{db: db}
-}
-
-// Insert records a latency sample for a model.
-func (l *Latency) Insert(model string, latency time.Duration) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	_, err := l.db.DB().ExecContext(ctx, `
-		INSERT INTO latency_samples (model, latency_ms, recorded_at)
-		VALUES (?, ?, ?)
-	`, model, latency.Milliseconds(), time.Now().Format(time.RFC3339Nano))
-
-	return err
 }
 
 // ModelLatencyStats holds latency percentiles and counts for a single model.
@@ -75,7 +62,7 @@ func (s ModelLatencyStats) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// maxSamplesPerModel bounds how many latency samples GetStats pulls per model.
+// maxSamplesPerModel bounds how many request rows GetStats pulls per model.
 // Percentiles over the most recent 20k samples are representative, and this
 // keeps a long-running proxy from loading millions of rows into memory.
 const maxSamplesPerModel = 20000
@@ -89,13 +76,19 @@ func (l *Latency) GetStats(since time.Time) ([]ModelLatencyStats, error) {
 	// own distribution, so a global LIMIT would let one chatty model starve the
 	// others. Keeping the most recent maxSamplesPerModel rows per model bounds
 	// memory while leaving each model's recent distribution intact.
+	// duration_ms on requests is the same measurement the dedicated
+	// latency_samples table used to duplicate. Synthetic rows imported by
+	// `costs sync-requests` carry duration_ms=0 and details_known=0, so they are
+	// excluded rather than being counted as instant responses.
 	query := `
-		SELECT model, latency_ms
+		SELECT model, duration_ms
 		FROM (
-			SELECT model, latency_ms,
-			       ROW_NUMBER() OVER (PARTITION BY model ORDER BY recorded_at DESC) AS rn
-			FROM latency_samples
-			WHERE recorded_at >= ?
+			SELECT model, duration_ms,
+			       ROW_NUMBER() OVER (PARTITION BY model ORDER BY start_time DESC) AS rn
+			FROM requests
+			WHERE start_time >= ?
+			  AND duration_ms > 0
+			  AND details_known = 1
 		)
 		WHERE rn <= ?
 		ORDER BY model
@@ -166,29 +159,13 @@ func (l *Latency) GetSuccessCounts(since time.Time) (map[string]int64, map[strin
 	return successCounts, failureCounts, rows.Err()
 }
 
-// DeleteBefore removes latency samples older than the given time.
-func (l *Latency) DeleteBefore(before time.Time) (int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	result, err := l.db.DB().ExecContext(ctx, `
-		DELETE FROM latency_samples WHERE recorded_at < ?
-	`, before.Format(time.RFC3339Nano))
-	if err != nil {
-		return 0, err
-	}
-
-	return result.RowsAffected()
-}
-
 func calculateStats(model string, samples []int64) ModelLatencyStats {
 	if len(samples) == 0 {
 		return ModelLatencyStats{Model: model}
 	}
 
-	sorted := make([]int64, len(samples))
-	copy(sorted, samples)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	sorted := slices.Clone(samples)
+	slices.Sort(sorted)
 
 	var sum int64
 	for _, ms := range sorted {
@@ -199,25 +176,12 @@ func calculateStats(model string, samples []int64) ModelLatencyStats {
 	avg := sum / int64(count)
 
 	pctIdx := func(fraction float64) int {
-		idx := int(math.Ceil(float64(count)*fraction)) - 1
-		if idx < 0 {
-			return 0
-		}
-		if idx >= count {
-			return count - 1
-		}
-		return idx
+		return min(max(int(math.Ceil(float64(count)*fraction))-1, 0), count-1)
 	}
 
 	// p50 keeps its original truncating form; the upper percentiles round up so
 	// a small sample set still reports its slow tail instead of the median.
-	p50Idx := int(float64(count)*0.50) - 1
-	if p50Idx < 0 {
-		p50Idx = 0
-	}
-	if p50Idx >= count {
-		p50Idx = count - 1
-	}
+	p50Idx := min(max(int(float64(count)*0.50)-1, 0), count-1)
 	p90Idx := pctIdx(0.90)
 	p95Idx := pctIdx(0.95)
 	p99Idx := pctIdx(0.99)

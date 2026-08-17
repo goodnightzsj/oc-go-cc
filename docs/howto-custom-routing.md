@@ -176,6 +176,50 @@ Limit cost-based selection to a subset of providers:
 
 When a scenario also has per-scenario `preferred_providers`, the two lists are intersected.
 
+### Set Per-Scenario Policy
+
+`cost_routing.scenarios` adds requirements on top of what each request already implies. The proxy derives tool use, vision, reasoning and token count from the request itself, so you only need an entry here when you want a floor stricter than the request:
+
+```json
+{
+  "cost_routing": {
+    "enabled": true,
+    "scenarios": {
+      "complex": {
+        "description": "Architecture work: never pick a model without tools",
+        "requires_tools": true
+      },
+      "think": {
+        "requires_reasoning": true
+      },
+      "long_context": {
+        "min_context_window": 200000
+      },
+      "background": {
+        "preferred_providers": ["opencode-go"]
+      }
+    }
+  }
+}
+```
+
+Valid keys are the routing scenarios: `default`, `background`, `think`, `complex`, `long_context`, `fast`, `vision`, `vision_complex`, `vision_long_context`. An unknown key is rejected when the config loads, so a typo cannot sit there silently doing nothing.
+
+Every field is optional:
+
+| Field | Effect |
+|-------|--------|
+| `requires_tools` | Skip models without tool support |
+| `requires_vision` | Skip models without image input |
+| `requires_reasoning` | Skip models without reasoning mode |
+| `min_context_window` | Context floor in tokens; the effective floor is the larger of this and the request's own token count |
+| `preferred_providers` | Restrict candidates to these providers, intersected with the global `prefer_providers` |
+| `description` | Documentation only; ignored by selection |
+
+Scenarios are a config concept, not catalog data. The models.dev catalog supplies only `providers` and `models`, so there is nothing to define in `catalog.json`.
+
+If a scenario's requirements match no model, the proxy logs `cost-based routing found no model, using scenario model` and falls back to the statically configured primary for that scenario. Watch for that line when a policy is stricter than your catalog can satisfy.
+
 ### Cap the Context Window
 
 Exclude models with context windows larger than a threshold:

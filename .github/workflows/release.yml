@@ -12,341 +12,21 @@ permissions:
   contents: write
 
 jobs:
-  # ── Stage 1: Test & Build Validation ──────────────────────────────
-  validate:
-    name: Test & Build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version: "1.25"
-
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Test
-        run: go test ./... -v -race
-
-      - name: Build (sanity check)
-        run: go build -o /dev/null ./cmd/routatic-proxy
-
-  # ── Stage 2: Build & Release (macOS runner for DMG support) ──────
-  release:
-    name: Build & Release
-    needs: validate
-    runs-on: macos-latest
-    outputs:
-      tag: ${{ steps.version.outputs.tag }}
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version: "1.25"
-          cache: true
-
-      - name: Check signing availability
-        id: signing
-        env:
-          USE_SIGNPATH: ${{ vars.USE_SIGNPATH }}
-        run: echo "enabled=$([ "$USE_SIGNPATH" = "true" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-
-      - name: Determine version
-        id: version
-        run: |
-          # Version comes from the workflow_dispatch input
-          TAG="${{ github.event.inputs.version }}"
-
-          # Validate version format (must start with 'v' followed by semver)
-          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-            echo "Error: Version must follow semantic versioning with 'v' prefix (e.g., v1.2.3)"
-            exit 1
-          fi
-
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-          echo "Releasing as $TAG"
-
-      - name: Generate Windows resource files
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          go install github.com/tc-hib/go-winres@v0.3.3
-
-          # Parse version components (e.g., "0.5.3" → "0.5.3.0")
-          MAJOR=$(echo "$VERSION" | cut -d. -f1)
-          MINOR=$(echo "$VERSION" | cut -d. -f2)
-          PATCH=$(echo "$VERSION" | cut -d. -f3)
-          FILE_VER="${MAJOR:-0}.${MINOR:-0}.${PATCH:-0}.0"
-
-          # Update version in winres.json
-          cd cmd/routatic-proxy
-          sed -i.bak "s/\"file_version\": \"0.0.0.0\"/\"file_version\": \"${FILE_VER}\"/" winres/winres.json
-          sed -i.bak "s/\"product_version\": \"0.0.0.0\"/\"product_version\": \"${FILE_VER}\"/" winres/winres.json
-          sed -i.bak "s/\"FileVersion\": \"0.0.0.0\"/\"FileVersion\": \"${VERSION}\"/" winres/winres.json
-          sed -i.bak "s/\"ProductVersion\": \"0.0.0.0\"/\"ProductVersion\": \"${VERSION}\"/" winres/winres.json
-          rm -f winres/winres.json.bak
-
-          # Generate .syso files for both Windows architectures
-          go-winres make --arch amd64 --out rsrc_windows_amd64.syso
-          go-winres make --arch arm64 --out rsrc_windows_arm64.syso
-          cd ../..
-
-      - name: Build cross-platform binaries
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          mkdir -p dist
-
-          LDFLAGS="-X main.version=${VERSION}"
-
-          # Define target platforms (bash 3 compatible — macOS default)
-          TARGETS="darwin-amd64:darwin/amd64 darwin-arm64:darwin/arm64 linux-amd64:linux/amd64 linux-arm64:linux/arm64 windows-amd64:windows/amd64 windows-arm64:windows/arm64"
-
-          for TARGET in $TARGETS; do
-            NAME="${TARGET%%:*}"
-            PAIR="${TARGET##*:}"
-            GOOS="${PAIR%/*}"
-            GOARCH="${PAIR#*/}"
-            EXT=""
-            [ "$GOOS" = "windows" ] && EXT=".exe"
-
-            echo "Building ${NAME}..."
-            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
-              go build -ldflags "$LDFLAGS -s -w" \
-                -o "dist/routatic-proxy_${NAME}${EXT}" \
-                ./cmd/routatic-proxy
-          done
-
-          echo ""
-          echo "Built binaries:"
-          ls -lh dist/
-
-      - name: Stage Windows binaries for signing
-        if: ${{ steps.signing.outputs.enabled == 'true' }}
-        run: |
-          mkdir -p signing
-          cp dist/routatic-proxy_windows-amd64.exe signing/
-          cp dist/routatic-proxy_windows-arm64.exe signing/
-
-      - name: Upload unsigned Windows binaries
-        id: upload-unsigned
-        if: ${{ steps.signing.outputs.enabled == 'true' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: windows-binaries-unsigned
-          path: signing/
-
-      - name: Sign Windows binaries (SignPath)
-        if: ${{ steps.signing.outputs.enabled == 'true' }}
-        uses: signpath/github-action-submit-signing-request@ced31329c0317e779dad2eec2a7c3bb46ea1343e # v1
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: '5c4d4e48-c428-4e10-ab07-8db7f46cbec9'
-          project-slug: 'routatic-proxy'
-          signing-policy-slug: 'release-signing'
-          artifact-configuration-slug: 'windows-exe'
-          github-artifact-id: '${{ steps.upload-unsigned.outputs.artifact-id }}'
-          wait-for-completion: true
-          output-artifact-directory: 'signed'
-          wait-for-completion-timeout-in-seconds: 300
-
-      - name: Replace with signed Windows binaries
-        if: ${{ steps.signing.outputs.enabled == 'true' }}
-        run: |
-          cp signed/routatic-proxy_windows-amd64.exe dist/routatic-proxy_windows-amd64.exe
-          cp signed/routatic-proxy_windows-arm64.exe dist/routatic-proxy_windows-arm64.exe
-          rm -rf signing signed
-
-      - name: Generate checksums
-        run: |
-          cd dist
-          sha256sum routatic-proxy_* > checksums.txt
-          cat checksums.txt
-
-      - name: Build CGO-enabled binary (for DMG)
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          CGO_ENABLED=1 go build -tags darwin -ldflags "-X main.version=${VERSION}" -o bin/routatic-proxy ./cmd/routatic-proxy
-
-      - name: Build macOS DMG
-        env:
-          VERSION: ${{ steps.version.outputs.tag }}
-        run: |
-          brew install create-dmg
-          make dmg VERSION=${{ env.VERSION }}
-
-      - name: Generate AI Changelog
-        id: changelog
-        env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          OPENROUTER_MODEL: ${{ secrets.OPENROUTER_MODEL }}
-          OPENROUTER_TEMPERATURE: ${{ secrets.OPENROUTER_TEMPERATURE }}
-          OPENROUTER_MAX_TOKENS: ${{ secrets.OPENROUTER_MAX_TOKENS }}
-        run: |
-          brew install jq
-
-          # Configuration with defaults
-          MODEL="${OPENROUTER_MODEL:-openai/gpt-4o-mini}"
-          TEMP="${OPENROUTER_TEMPERATURE:-0.3}"
-          TOKENS="${OPENROUTER_MAX_TOKENS:-2000}"
-
-          echo "Using OpenRouter model: $MODEL"
-
-          # Generate changelog from the last stable (non-beta) release.
-          # Exclude prerelease/beta tags and the tag being released so notes
-          # reflect the full diff since the previous production release.
-          CURRENT_TAG="${{ steps.version.outputs.tag }}"
-          PREVIOUS_TAG=$(git tag --list --sort=-version:refname \
-            | grep -vi 'beta' \
-            | grep -v "^${CURRENT_TAG}$" \
-            | head -n 1)
-
-          if [ -n "$PREVIOUS_TAG" ]; then
-            echo "Generating AI changelog from $PREVIOUS_TAG to ${{ steps.version.outputs.tag }}"
-
-            COMMITS=$(git log "${PREVIOUS_TAG}..HEAD" --pretty=format:"%H%n%s%n%b%n---COMMIT_SEP---")
-            FILE_CHANGES=$(git diff --stat "${PREVIOUS_TAG}..HEAD")
-
-            PROMPT="You are a technical writer generating release notes for a Go proxy server project (routatic-proxy).
-
-            Analyze the provided git commits and file changes, then generate a well-structured
-            changelog in Markdown format. Follow these guidelines:
-
-            1. Start with a brief summary paragraph (2-3 sentences) describing the overall theme of this release
-            2. Group changes into sections with these exact headers:
-               - **New Features** - New capabilities, enhancements, additions
-               - **Bug Fixes** - Fixes for reported or discovered issues
-               - **Improvements** - Performance, reliability, or code quality improvements
-               - **Documentation** - README, docs, comments, config updates
-               - **Chores** - Build, CI/CD, dependency updates, refactoring
-            3. Each bullet should be concise but descriptive (one line)
-            4. Mention breaking changes prominently with a warning emoji Breaking Changes section at the top
-            5. Use present tense, imperative mood (e.g., Add feature not Added feature)
-            6. Keep it technical but accessible - target audience is developers using this tool
-
-            Format output as clean Markdown without any preamble or explanation. Do not wrap the entire response in a code block."
-
-            USER_CONTENT="Git commits since ${PREVIOUS_TAG}:\n\n${COMMITS}\n\nFiles changed:\n\n${FILE_CHANGES}"
-
-            # Truncate if too long (~4 chars per token)
-            MAX_CHARS=12000
-            if [ "${#USER_CONTENT}" -gt "$MAX_CHARS" ]; then
-              USER_CONTENT="${USER_CONTENT:0:MAX_CHARS}\n\n[...truncated for length...]"
-            fi
-
-            RESPONSE=$(curl -s -L -X POST "https://openrouter.ai/api/v1/chat/completions" \
-              -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
-              -H "Content-Type: application/json" \
-              -d "$(jq -n \
-                --arg prompt "$PROMPT" \
-                --arg user "$USER_CONTENT" \
-                --arg model "$MODEL" \
-                --arg temp "$TEMP" \
-                --arg tokens "$TOKENS" \
-                '{
-                  model: $model,
-                  messages: [
-                    {role: "system", content: $prompt},
-                    {role: "user", content: $user}
-                  ],
-                  temperature: ($temp | tonumber),
-                  max_tokens: ($tokens | tonumber)
-                }' \
-              )" \
-            )
-
-            CHANGELOG=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty')
-
-            if [ -z "$CHANGELOG" ] || [ "$CHANGELOG" = "null" ]; then
-              echo "Warning: AI changelog generation failed, using commit list instead" >&2
-              echo "API response: $RESPONSE" >&2
-              CHANGELOG="## Commits\n\n$(git log "${PREVIOUS_TAG}..HEAD" --pretty=format:'- %s')"
-            fi
-          else
-            echo "No previous tag found, using commit list"
-            CHANGELOG="## Commits\n\n$(git log --pretty=format:'- %s' -20)"
-          fi
-
-          echo "$CHANGELOG" > changelog.md
-          cat changelog.md
-
-      # GITHUB_TOKEN works here — same repo
-      # Use gh release create for atomic asset upload (immutable release support)
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "${{ steps.version.outputs.tag }}" \
-            --title "Release ${{ steps.version.outputs.tag }}" \
-            --notes-file changelog.md \
-            dist/routatic-proxy_* \
-            dist/checksums.txt \
-            bin/RoutaticProxy.dmg
-
-  # ── Stage 3: Publish Docker Image ───────────────────────────────
-  docker:
-    name: Publish Docker Image
-    needs: release
+  pipeline:
+    name: Production
     permissions:
-      contents: read
+      contents: write
       packages: write
-    if: github.repository == 'routatic/proxy'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          fetch-depth: 0
-
-      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
-
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
-        id: meta
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=semver,pattern={{version}},value=${{ needs.release.outputs.tag }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.release.outputs.tag }}
-            type=semver,pattern={{major}},value=${{ needs.release.outputs.tag }}
-            type=raw,value=latest
-
-      - name: Strip v prefix from version
-        id: version
-        env:
-          TAG: ${{ needs.release.outputs.tag }}
-        run: echo "value=${TAG#v}" >> "$GITHUB_OUTPUT"
-
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: VERSION=${{ steps.version.outputs.value }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+    uses: ./.github/workflows/release-pipeline.yml
+    with:
+      channel: production
+      version: ${{ github.event.inputs.version }}
+    secrets: inherit
 
   # ── Stage 4: Update Homebrew Tap ─────────────────────────────────
   homebrew:
     name: Update Homebrew Tap
-    needs: release
+    needs: pipeline
     if: github.repository == 'routatic/proxy'
     runs-on: ubuntu-latest
     steps:
@@ -355,7 +35,7 @@ jobs:
       - name: Download release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.release.outputs.tag }}
+          TAG: ${{ needs.pipeline.outputs.tag }}
         run: |
           gh release download "$TAG" \
             --repo "${{ github.repository }}" \
@@ -380,8 +60,8 @@ jobs:
       - name: Update homebrew tap
         env:
           PAT: ${{ secrets.HOMEBREW_PAT }}
-          TAG: ${{ needs.release.outputs.tag }}
-          VERSION: ${{ needs.release.outputs.tag }}
+          TAG: ${{ needs.pipeline.outputs.tag }}
+          VERSION: ${{ needs.pipeline.outputs.tag }}
           DARWIN_ARM64: ${{ steps.checksums.outputs.darwin_arm64 }}
           DARWIN_AMD64: ${{ steps.checksums.outputs.darwin_amd64 }}
           LINUX_AMD64: ${{ steps.checksums.outputs.linux_amd64 }}
@@ -478,7 +158,7 @@ jobs:
   # ── Stage 5: Update Scoop Bucket ──────────────────────────────────
   scoop:
     name: Update Scoop Bucket
-    needs: release
+    needs: pipeline
     if: github.repository == 'routatic/proxy'
     runs-on: ubuntu-latest
     steps:
@@ -487,7 +167,7 @@ jobs:
       - name: Download release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.release.outputs.tag }}
+          TAG: ${{ needs.pipeline.outputs.tag }}
         run: |
           gh release download "$TAG" \
             --repo "${{ github.repository }}" \
@@ -508,8 +188,8 @@ jobs:
       - name: Update scoop bucket
         env:
           PAT: ${{ secrets.SCOOP_PAT }}
-          TAG: ${{ needs.release.outputs.tag }}
-          VERSION: ${{ needs.release.outputs.tag }}
+          TAG: ${{ needs.pipeline.outputs.tag }}
+          VERSION: ${{ needs.pipeline.outputs.tag }}
           WINDOWS_AMD64: ${{ steps.checksums.outputs.windows_amd64 }}
           WINDOWS_ARM64: ${{ steps.checksums.outputs.windows_arm64 }}
         run: |

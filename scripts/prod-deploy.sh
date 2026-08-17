@@ -75,6 +75,9 @@ echo "[prod] building ${BUILD_PATH}"
 		-o "${BUILD_PATH}" ./cmd/routatic-proxy
 )
 
+echo "[prod] syncing model catalog"
+"${BUILD_PATH}" catalog sync
+
 ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
 
 echo "[prod] restarting ${SERVICE_NAME}"

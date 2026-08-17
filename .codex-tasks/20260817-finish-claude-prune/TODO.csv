@@ -1,0 +1,6 @@
+id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,notes
+1,Fix atomic catalog replacement,DONE,"Second import removes stale providers and models","go test ./internal/catalog -run TestImportFromJSON_RefreshesAnExistingCatalog -count=1",2026-08-17 19:38:54 +0800,0,
+2,Run repository validation,DONE,"Build tests vet and formatting pass","go test ./... && go vet ./... && go build ./...",2026-08-17 19:39:52 +0800,0,
+3,Validate consolidated release workflows,DONE,"Available local workflow checks pass and hosted-only gap is recorded","workflow validator and YAML parse",2026-08-17 19:41:35 +0800,0,"Hosted release remains intentionally untriggered"
+4,Reorganize unpublished branch history,DONE,"Coherent buildable commits exist and backup preserves 3c10460","git log and per-commit validation",2026-08-17 19:44:59 +0800,0,
+5,Close task and verify branch state,DONE,"Task complete worktree clean main unchanged","git status --short --branch && git log --oneline main..HEAD",2026-08-17 19:46:27 +0800,0,

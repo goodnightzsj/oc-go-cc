@@ -100,6 +100,28 @@ func TestCostBasedRouting_SQLiteCatalogSelectsCheapest(t *testing.T) {
 	}
 }
 
+func TestCostBasedRouting_SQLiteCatalogHonorsDeclaredTools(t *testing.T) {
+	db := newCatalogDB(t)
+	cfg := &config.Config{
+		APIKey: "global-key",
+		Models: map[string]config.ModelConfig{
+			"default": {Provider: "opencode-go", ModelID: "legacy-default"},
+		},
+		CostRouting: &config.CostRoutingConfig{Enabled: true},
+	}
+	r := NewModelRouterWithDB(config.NewAtomicConfig(cfg, "/tmp/test-config.json"), db)
+
+	result, err := r.Route([]MessageContent{{
+		Role: "user", Content: "Hello", ToolsDeclared: true,
+	}}, 100, "")
+	if err != nil {
+		t.Fatalf("Route failed: %v", err)
+	}
+	if result.Primary.ModelID != "cheap-tools" {
+		t.Errorf("primary = %q, want the cheapest tools-capable model cheap-tools", result.Primary.ModelID)
+	}
+}
+
 // A scenario policy nothing can satisfy must fall back to the legacy model
 // rather than failing the request.
 func TestCostBasedRouting_SQLiteCatalogFallsBackWhenUnsatisfiable(t *testing.T) {

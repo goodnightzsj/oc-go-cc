@@ -24,10 +24,11 @@ const (
 
 // MessageContent represents a single message in a conversation.
 type MessageContent struct {
-	Role        string
-	Content     string
-	HasImage    bool
-	ImageHashes []string
+	Role          string
+	Content       string
+	HasImage      bool
+	ToolsDeclared bool
+	ImageHashes   []string
 }
 
 // RequestFacts summarizes relevant properties of the request for scenario

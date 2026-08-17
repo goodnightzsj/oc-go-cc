@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -222,12 +221,11 @@ Press Ctrl+C to stop the server.`,
 			var guiSrv *gui.Server
 			var guiDone <-chan struct{}
 
-			// Start proxy in background.
+			// Start proxy in background and preserve startup failures for the
+			// foreground command's exit status.
+			proxyErrCh := make(chan error, 1)
 			go func() {
-				if err := srv.Start(); err != nil && err != http.ErrServerClosed {
-					slog.Error("proxy server error", "error", err)
-					cancel()
-				}
+				proxyErrCh <- srv.Start()
 			}()
 
 			// Print startup info.
@@ -284,9 +282,16 @@ Press Ctrl+C to stop the server.`,
 			// Wait for signal or GUI window close.
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+			defer signal.Stop(sigCh)
+			var proxyErr error
 			select {
 			case <-sigCh:
 				fmt.Println("\nShutting down...")
+			case proxyErr = <-proxyErrCh:
+				if proxyErr != nil {
+					slog.Error("proxy server error", "error", proxyErr)
+				}
+				cancel()
 			case <-ctx.Done():
 			case <-guiDone:
 				fmt.Println("\nGUI window closed, shutting down...")
@@ -301,7 +306,7 @@ Press Ctrl+C to stop the server.`,
 				_ = guiSrv.Shutdown(shutdownCtx)
 			}
 
-			return nil
+			return proxyErr
 		},
 	}
 

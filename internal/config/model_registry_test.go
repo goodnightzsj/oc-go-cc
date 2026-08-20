@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -124,5 +125,15 @@ func TestResolveModelConfig(t *testing.T) {
 				t.Errorf("SupportsTools = %v, want %v", *got.SupportsTools, *tt.expected.SupportsTools)
 			}
 		})
+	}
+}
+
+// CanonicalModelID relies on every registry key being lowercase to make its
+// case-insensitive lookup unambiguous.
+func TestModelMetadataKeysAreLowercase(t *testing.T) {
+	for key := range modelMetadata {
+		if key != strings.ToLower(key) {
+			t.Errorf("modelMetadata key %q is not lowercase; CanonicalModelID assumes lowercase keys", key)
+		}
 	}
 }

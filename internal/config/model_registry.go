@@ -40,24 +40,18 @@ var modelMetadata = map[string]ModelMetadata{
 	"qwen3.5-plus":           {ContextWindow: 1000000, MaxOutputTokens: 8192, Vision: true, SupportsTools: true},
 }
 
-// CanonicalModelID returns the registered spelling for a known model ID.
-// Unknown and ambiguously cased custom IDs are preserved unchanged.
+// CanonicalModelID returns the registered spelling for a known model ID, so a
+// request that differs only in case still resolves. Every modelMetadata key is
+// lowercase (enforced by TestModelMetadataKeysAreLowercase), which makes the
+// case-insensitive match unambiguous. Unknown IDs are returned unchanged, so
+// custom model IDs keep their exact spelling.
 func CanonicalModelID(modelID string) string {
 	if _, ok := modelMetadata[modelID]; ok {
 		return modelID
 	}
-	match := ""
-	for known := range modelMetadata {
-		if !strings.EqualFold(known, modelID) {
-			continue
-		}
-		if match != "" {
-			return modelID
-		}
-		match = known
-	}
-	if match != "" {
-		return match
+	lowered := strings.ToLower(modelID)
+	if _, ok := modelMetadata[lowered]; ok {
+		return lowered
 	}
 	return modelID
 }

@@ -148,8 +148,10 @@ func TestProxyStream_ReasoningContentFastPath(t *testing.T) {
 	if got := events[3].Delta.Thinking; got != " step by step" {
 		t.Errorf("event[3].Delta.Thinking = %q, want %q", got, " step by step")
 	}
-	if got := events[1].ContentBlock.Signature; got != thinkingSignaturePlaceholder {
-		t.Errorf("event[1].ContentBlock.Signature = %q, want %q", got, thinkingSignaturePlaceholder)
+	// The start block opens unsigned; the signature arrives as signature_delta
+	// (event[4]) and accumulates onto the block.
+	if got := events[1].ContentBlock.Signature; got != "" {
+		t.Errorf("event[1].ContentBlock.Signature = %q, want empty", got)
 	}
 	if events[4].Type != "content_block_delta" || events[4].Delta == nil || events[4].Delta.Type != "signature_delta" {
 		t.Errorf("event[4] = %+v, want signature_delta", events[4])
@@ -1254,3 +1256,177 @@ func mustJSON(t *testing.T, v any) string {
 }
 
 func strPtr(s string) *string { return &s }
+
+// bodyThenErrReader yields body on the first Read, then fails with err. It
+// simulates an upstream that stalls or drops after delivering a complete
+// response (finish_reason already sent).
+type bodyThenErrReader struct {
+	body []byte
+	err  error
+	sent bool
+}
+
+func (r *bodyThenErrReader) Read(p []byte) (int, error) {
+	if !r.sent {
+		r.sent = true
+		return copy(p, r.body), nil
+	}
+	return 0, r.err
+}
+
+func (r *bodyThenErrReader) Close() error { return nil }
+
+func TestProxyStream_TerminalEventsSurviveUpstreamErrorAfterFinishReason(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "read error", err: io.ErrUnexpectedEOF},
+		{name: "idle cancel", err: context.Canceled},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := NewStreamHandler()
+			w := newMockResponseWriter()
+			body := "data: " + `{"choices":[{"delta":{"reasoning_content":"Thinking..."}}]}` + "\n\n" +
+				"data: " + `{"choices":[{"delta":{"content":"42"},"finish_reason":"stop"}]}` + "\n\n"
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			err := handler.ProxyStream(w, &bodyThenErrReader{body: []byte(body), err: tt.err}, "kimi-k2.6", ctx, 0, cancel)
+			if err != nil {
+				t.Fatalf("ProxyStream() error = %v, want nil (response already complete)", err)
+			}
+
+			events := parseSSEEvents(t, w.buf.String())
+			if len(events) < 2 {
+				t.Fatalf("expected terminal events, got %+v", events)
+			}
+			last := events[len(events)-1]
+			penultimate := events[len(events)-2]
+			if last.Type != "message_stop" {
+				t.Errorf("last event = %q, want message_stop", last.Type)
+			}
+			if penultimate.Type != "message_delta" {
+				t.Fatalf("penultimate event = %q, want message_delta", penultimate.Type)
+			}
+			if penultimate.Delta == nil || penultimate.Delta.StopReason != "end_turn" {
+				t.Errorf("message_delta.Delta = %+v, want stop_reason end_turn", penultimate.Delta)
+			}
+		})
+	}
+}
+
+func TestProxyStream_UpstreamErrorBeforeFinishReasonStillFails(t *testing.T) {
+	handler := NewStreamHandler()
+	w := newMockResponseWriter()
+	body := "data: " + `{"choices":[{"delta":{"content":"partial"}}]}` + "\n\n"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err := handler.ProxyStream(w, &bodyThenErrReader{body: []byte(body), err: io.ErrUnexpectedEOF}, "kimi-k2.6", ctx, 0, cancel)
+	if err == nil {
+		t.Fatal("ProxyStream() error = nil, want error so the handler can fall back")
+	}
+}
+
+func TestProxyStream_ThinkingBlockStartHasEmptySignature(t *testing.T) {
+	handler := NewStreamHandler()
+	w := newMockResponseWriter()
+	body := sseLines(
+		`{"choices":[{"delta":{"reasoning_content":"Thinking..."}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := handler.ProxyStream(w, body, "kimi-k2.6", ctx, 0, cancel); err != nil {
+		t.Fatalf("ProxyStream error: %v", err)
+	}
+
+	events := parseSSEEvents(t, w.buf.String())
+	if events[1].Type != "content_block_start" || events[1].ContentBlock == nil {
+		t.Fatalf("event[1] = %+v, want content_block_start", events[1])
+	}
+	// Signature deltas accumulate onto the start block, so the start block must
+	// not pre-seed the placeholder or the client sees it twice.
+	if got := events[1].ContentBlock.Signature; got != "" {
+		t.Errorf("content_block_start signature = %q, want empty", got)
+	}
+}
+
+func TestEmitMessageResponse_ThinkingSignatureOnlyInDelta(t *testing.T) {
+	handler := NewStreamHandler()
+	w := newMockResponseWriter()
+	resp := &types.MessageResponse{
+		ID:   "msg_1",
+		Type: "message",
+		Role: "assistant",
+		Content: []types.ContentBlock{
+			{Type: "thinking", Thinking: "hmm", Signature: "upstream-sig"},
+		},
+		Model: "kimi-k2.6",
+	}
+
+	if err := handler.EmitMessageResponse(w, resp); err != nil {
+		t.Fatalf("EmitMessageResponse error: %v", err)
+	}
+
+	events := parseSSEEvents(t, w.buf.String())
+	var start, sigDelta *types.MessageEvent
+	for i := range events {
+		switch {
+		case events[i].Type == "content_block_start":
+			start = &events[i]
+		case events[i].Type == "content_block_delta" && events[i].Delta != nil && events[i].Delta.Type == "signature_delta":
+			sigDelta = &events[i]
+		}
+	}
+	if start == nil || start.ContentBlock == nil {
+		t.Fatalf("no content_block_start in %+v", events)
+	}
+	if got := start.ContentBlock.Signature; got != "" {
+		t.Errorf("content_block_start signature = %q, want empty", got)
+	}
+	if sigDelta == nil {
+		t.Fatalf("no signature_delta in %+v", events)
+	}
+	if got := sigDelta.Delta.Signature; got != "upstream-sig" {
+		t.Errorf("signature_delta = %q, want the upstream signature", got)
+	}
+}
+
+func TestProxyStream_NoDuplicateToolStopsOnErrorAfterFinishReason(t *testing.T) {
+	handler := NewStreamHandler()
+	w := newMockResponseWriter()
+	body := "data: " + `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read","arguments":"{}"}}]}}]}` + "\n\n" +
+		"data: " + `{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}` + "\n\n"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := handler.ProxyStream(w, &bodyThenErrReader{body: []byte(body), err: io.ErrUnexpectedEOF}, "kimi-k2.6", ctx, 0, cancel); err != nil {
+		t.Fatalf("ProxyStream() error = %v, want nil", err)
+	}
+
+	events := parseSSEEvents(t, w.buf.String())
+	stops := 0
+	for _, ev := range events {
+		if ev.Type == "content_block_stop" {
+			stops++
+		}
+	}
+	if stops != 1 {
+		t.Errorf("content_block_stop count = %d, want 1: %+v", stops, events)
+	}
+	last := events[len(events)-1]
+	if last.Type != "message_stop" {
+		t.Errorf("last event = %q, want message_stop", last.Type)
+	}
+	if got := events[len(events)-2]; got.Type != "message_delta" || got.Delta == nil || got.Delta.StopReason != "tool_use" {
+		t.Errorf("penultimate event = %+v, want message_delta with stop_reason tool_use", got)
+	}
+}

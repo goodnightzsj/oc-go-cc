@@ -33,14 +33,40 @@ func extractRequestID(v interface{}) string {
 	}
 }
 
-// teeReadCloser wraps an io.ReadCloser with a TeeReader for capturing response data.
-type teeReadCloser struct {
+// captureReadCloser wraps an io.ReadCloser with a TeeReader so every byte read
+// (including streaming SSE) is also piped to the capture goroutine. Close closes
+// the pipe write end, which lets the goroutine finish; the previous teeReadCloser
+// never closed it, so CaptureUpstreamResponse never landed on disk and the
+// goroutine leaked for every captured request.
+type captureReadCloser struct {
 	io.ReadCloser
-	r io.Reader
+	r  io.Reader
+	pw *io.PipeWriter
 }
 
-func (t *teeReadCloser) Read(p []byte) (n int, err error) {
+func (t *captureReadCloser) Read(p []byte) (n int, err error) {
 	return t.r.Read(p)
+}
+
+func (t *captureReadCloser) Close() error {
+	err := t.ReadCloser.Close()
+	_ = t.pw.Close()
+	return err
+}
+
+// CaptureBody wraps body so that all bytes read from it are delivered (async)
+// to capture. Returns body unchanged when capture is nil.
+func CaptureBody(body io.ReadCloser, capture func(data []byte)) io.ReadCloser {
+	if capture == nil {
+		return body
+	}
+	pr, pw := io.Pipe()
+	tee := &captureReadCloser{ReadCloser: body, r: io.TeeReader(body, pw), pw: pw}
+	go func() {
+		data, _ := io.ReadAll(pr)
+		capture(data)
+	}()
+	return tee
 }
 
 // Provider constants identify the upstream API that handles a model's request.
@@ -388,15 +414,12 @@ func (c *OpenCodeClient) ChatCompletion(
 		return nil, &APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
 	}
 
-	// Capture upstream response by wrapping the body with a TeeReader
+	// Capture upstream response by wrapping the body. CaptureBody closes the
+	// pipe write end on Close so the async capture goroutine always finishes.
 	if c.captureLogger != nil {
-		pr, pw := io.Pipe()
-		resp.Body = &teeReadCloser{ReadCloser: resp.Body, r: io.TeeReader(resp.Body, pw)}
-		// Async copy to capture
-		go func() {
-			data, _ := io.ReadAll(pr)
+		resp.Body = CaptureBody(resp.Body, func(data []byte) {
 			c.captureLogger.CaptureUpstreamResponse(extractRequestID(ctx.Value("requestID")), Provider(modelConfig), data)
-		}()
+		})
 	}
 
 	return resp, nil

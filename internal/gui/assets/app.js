@@ -81,6 +81,7 @@ const TRANSLATIONS = {
     'history.perPage': 'Rows per page',
     'history.streaming': 'Streaming',
     'history.nonStreaming': 'Non-streaming',
+    'history.peakWindow': 'Billed at 2x (deepseek weekday peak UTC 01-04/06-10)',
     'filter.dateRange': 'Date range',
     'filter.today': 'Today',
     'filter.clear': 'Clear',
@@ -332,6 +333,7 @@ const TRANSLATIONS = {
     'history.perPage': '每页',
     'history.streaming': '流式',
     'history.nonStreaming': '非流式',
+    'history.peakWindow': '2 倍计费时段（deepseek 工作日高峰 UTC 01-04/06-10）',
     'filter.dateRange': '日期范围',
     'filter.today': '今天',
     'filter.clear': '清除',
@@ -1329,9 +1331,12 @@ function renderHistory() {
       : t('detail.unknown');
     const totalTokens = Number(h.input_tokens || 0) + Number(h.output_tokens || 0)
       + Number(h.cache_read_tokens || 0) + Number(h.cache_creation_tokens || 0);
+    const peakMark = Number(h.peak_multiplier || 1) > 1
+      ? ' <span class="badge badge-peak" title="' + t('history.peakWindow') + '">Peak ×' + Number(h.peak_multiplier) + '</span>'
+      : '';
     return `
     <tr data-id="${escapeHtml(rowId)}" tabindex="0" aria-haspopup="dialog" style="cursor: pointer;">
-      <td>${fmtTime(h.start_time)}</td>
+      <td>${fmtTime(h.start_time)}${peakMark}</td>
       <td><div class="history-status-stack">${detailsKnown ? `<span class="badge ${h.success ? 'badge-success' : 'badge-error'}">${h.success ? t('badge.success') : t('badge.fail')}</span>` : `<span class="badge badge-unknown">${t('detail.unknown')}</span>`}<small class="history-stream-state">${streamLabel}</small></div></td>
       <td><div class="history-model-cell"><strong>${escapeHtml(h.model) || '—'}</strong><small>${escapeHtml(h.provider) || '—'}</small></div></td>
       <td><span class="badge badge-scene">${escapeHtml(h.scenario) || '—'}</span></td>

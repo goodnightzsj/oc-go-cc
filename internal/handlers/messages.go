@@ -655,6 +655,7 @@ func (h *MessagesHandler) handleStreaming(
 				Streaming:           true,
 				Success:             true,
 				Attempt:             1, // streaming fallback attempts not yet tracked in record; treat as primary
+				PeakMultiplier:      history.PeakMultiplier(model.ModelID, streamStart),
 			}
 			if h.storage != nil {
 				if err := h.storage.InsertRequest(rec); err != nil {
@@ -930,6 +931,7 @@ func (h *MessagesHandler) handleNonStreaming(
 		Streaming:           false,
 		Success:             true,
 		Attempt:             result.Attempted,
+		PeakMultiplier:      history.PeakMultiplier(result.ModelID, startTime),
 	}
 	if h.storage != nil {
 		if err := h.storage.InsertRequest(rec); err != nil {

@@ -154,6 +154,7 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
 .badge-success { background: rgba(48,209,88,0.15); color: #30d158; }
 .badge-error { background: rgba(255,69,58,0.15); color: #ff453a; }
 .badge-unknown { background: rgba(154,163,173,.12); color: var(--ui-muted, #98989d); }
+.badge-peak { background:#b45309; color:#fff; }
 .badge-scene { background: #3a3a3c; color: #98989d; }
 
 /* ── Filter Select ────────────────────────────────────────── */

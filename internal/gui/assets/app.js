@@ -1305,6 +1305,23 @@ function renderHistoryPager() {
   if (next) next.disabled = historyPage >= max;
 }
 
+// Derive the deepseek peak multiplier from start_time + model, matching
+// history.PeakMultiplier (weekday UTC 01-04 / 06-10). Falls back to 1 when
+// the timestamp cannot be parsed or the model is not deepseek. Used in place
+// of the stored column so backfilled rows show the badge too; an explicit
+// stored multiplier > 1 (written by live inserts) wins over the re-derivation.
+function effectivePeakMultiplier(h) {
+  const stored = Number(h.peak_multiplier);
+  if (stored > 1) return stored;
+  if (!/deepseek/i.test(String(h.model || ''))) return 1;
+  const t = new Date(h.start_time);
+  if (isNaN(t.getTime())) return 1;
+  const day = t.getUTCDay();
+  if (day === 0 || day === 6) return 1;
+  const hour = t.getUTCHours();
+  return (hour >= 1 && hour < 4) || (hour >= 6 && hour < 10) ? 2 : 1;
+}
+
 function renderHistory() {
   const tbody = document.getElementById('history-tbody');
   document.getElementById('history-count').textContent =
@@ -1331,15 +1348,16 @@ function renderHistory() {
       : t('detail.unknown');
     const totalTokens = Number(h.input_tokens || 0) + Number(h.output_tokens || 0)
       + Number(h.cache_read_tokens || 0) + Number(h.cache_creation_tokens || 0);
-    const peakMark = Number(h.peak_multiplier || 1) > 1
-      ? ' <span class="badge badge-peak" title="' + t('history.peakWindow') + '">Peak ×' + Number(h.peak_multiplier) + '</span>'
+    const pm = effectivePeakMultiplier(h);
+    const peakMark = pm > 1
+      ? ' <span class="badge badge-peak" title="' + t('history.peakWindow') + '">Peak ×' + pm + '</span>'
       : '';
     return `
     <tr data-id="${escapeHtml(rowId)}" tabindex="0" aria-haspopup="dialog" style="cursor: pointer;">
       <td>${fmtTime(h.start_time)}${peakMark}</td>
-      <td><div class="history-status-stack">${detailsKnown ? `<span class="badge ${h.success ? 'badge-success' : 'badge-error'}">${h.success ? t('badge.success') : t('badge.fail')}</span>` : `<span class="badge badge-unknown">${t('detail.unknown')}</span>`}<small class="history-stream-state">${streamLabel}</small></div></td>
+      <td><div class="history-status-stack">${detailsKnown ? `<span class="badge ${h.success ? 'badge-success' : 'badge-error'}" title="${h.success ? t('badge.success') : t('badge.fail')}">${h.success ? t('badge.success') : t('badge.fail')}</span>` : `<span class="badge badge-unknown" title="${t('detail.unknown')}">${t('detail.unknown')}</span>`}<small class="history-stream-state">${streamLabel}</small></div></td>
       <td><div class="history-model-cell"><strong>${escapeHtml(h.model) || '—'}</strong><small>${escapeHtml(h.provider) || '—'}</small></div></td>
-      <td><span class="badge badge-scene">${escapeHtml(h.scenario) || '—'}</span></td>
+      <td><span class="badge badge-scene" title="${t('detail.scenario')}: ${escapeHtml(h.scenario) || '—'}">${escapeHtml(h.scenario) || '—'}</span></td>
       <td><button type="button" class="history-token-trigger" data-token-id="${escapeHtml(rowId)}" aria-label="${t('detail.title')}">${totalTokens.toLocaleString()}</button></td>
       <td>${cost}</td>
       <td>${detailsKnown ? fmtDuration(h.duration_ms) : '—'}</td>

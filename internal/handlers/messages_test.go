@@ -35,7 +35,7 @@ func newTestProviderRegistry(t *testing.T, atomicCfg *config.AtomicConfig) *core
 	t.Helper()
 	reg := core.NewProviderRegistry()
 	for _, p := range []core.Provider{
-		provider.NewOpenCodeGoProvider(atomicCfg),
+		provider.NewOpenCodeGoProvider(atomicCfg, nil),
 		provider.NewOpenCodeZenProvider(atomicCfg),
 		provider.NewAWSBedrockProvider(atomicCfg),
 	} {

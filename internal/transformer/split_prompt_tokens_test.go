@@ -33,6 +33,18 @@ func TestSplitPromptTokens(t *testing.T) {
 			usage:  types.UsageInfo{PromptTokens: 10000, PromptCacheHitTokens: 3000, PromptCacheMissTokens: 2000},
 			wantIn: 5000, wantRead: 3000, wantCreate: 2000,
 		},
+		{
+			// Real capture from OpenCode Go oa-compat gateway:
+			// usage: {"prompt_tokens":427549,"prompt_tokens_details":{"cached_tokens":426240}}
+			name:   "opencode oa-compat: cached_tokens in prompt_tokens_details",
+			usage:  types.UsageInfo{PromptTokens: 427549, PromptTokensDetails: &types.PromptTokensDetails{CachedTokens: 426240}},
+			wantIn: 1309, wantRead: 426240, wantCreate: 0,
+		},
+		{
+			name:   "cached_tokens with empty details object is treated as no cache",
+			usage:  types.UsageInfo{PromptTokens: 84, PromptTokensDetails: &types.PromptTokensDetails{}},
+			wantIn: 84, wantRead: 0, wantCreate: 0,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

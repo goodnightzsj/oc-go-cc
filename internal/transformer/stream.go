@@ -643,6 +643,13 @@ func usageInfoToAnthropic(usage *types.UsageInfo) *types.Usage {
 // input_tokens to zero on every cached turn and, when upstream omitted the cache
 // fields entirely, billed the whole prompt at the uncached rate.
 func splitPromptTokens(usage *types.UsageInfo) (input, cacheRead, cacheCreate int) {
+	// OpenAI-standard form (OpenCode Go oa-compat gateway): prompt_tokens is
+	// the full prompt, of which prompt_tokens_details.cached_tokens were read
+	// from cache. The rest is fresh input written to cache this turn.
+	if usage.PromptTokensDetails != nil && usage.PromptTokensDetails.CachedTokens > 0 {
+		cached := usage.PromptTokensDetails.CachedTokens
+		return nonNegative(usage.PromptTokens - cached), cached, 0
+	}
 	hit, miss := usage.PromptCacheHitTokens, usage.PromptCacheMissTokens
 	if hit == 0 && miss == 0 {
 		return usage.PromptTokens, 0, 0

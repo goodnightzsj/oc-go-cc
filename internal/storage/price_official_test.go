@@ -10,7 +10,7 @@ func TestPriceForModel_OfficialOpenCode(t *testing.T) {
 		model                          string
 		in, out, cacheRead, cacheWrite float64
 	}{
-		{"deepseek-v4-flash", 0.14, 0.28, 0.0028, 0},
+		{"deepseek-v4-flash", 0.22, 0.66, 0.007, 0},
 		{"deepseek-v4-pro", 0.435, 0.87, 0.003625, 0},
 		{"kimi-k3", 3.00, 15.00, 0.30, 0},
 		{"kimi-k2.7-code", 0.95, 4.00, 0.19, 0},

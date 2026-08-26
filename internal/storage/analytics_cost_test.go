@@ -51,7 +51,7 @@ func TestCostForTokens_CacheWriteRate(t *testing.T) {
 
 	// DeepSeek V4 Flash has no cache_write price, so creation bills at input.
 	got = costForTokens("deepseek-v4-flash", million, million, million, million, 0, 0)
-	want = 0.14 + 0.28 + 0.0028 + 0.14
+	want = 0.22 + 0.66 + 0.007 + 0.22
 	if math.Abs(got-want) > 1e-9 {
 		t.Errorf("deepseek-v4-flash cost = %v, want %v", got, want)
 	}

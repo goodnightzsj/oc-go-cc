@@ -44,3 +44,12 @@
 
 - cost = input×input价 + cache_creation×max(cache_write价, input价) + cache_read×cache_read价 + output×output价（`internal/storage/analytics.go` costForTokens）。
 - 平台 cacheWrite 字段恒为 null → cache creation 按 input 价计。
+
+## 历史数据回填（同日执行）
+
+远端 `requests` 表修复前行的数据已按"与 OpenCode 账单一致"回填：
+
+- **精确层**：7 行（重叠窗口）直接写平台账单值（含平台 cost，`cost_source='provider'`）；27 行（部署前最后 4.5 分钟）用 capture 原始 `cached_tokens` 拆分并重算（`estimated`）。
+- **估算层**：其余修复前行无原始缓存数据，按 capture 窗口命中率 99.64% 拆分 input/cache_read 并重算（`estimated`）——早期会话真实命中率更低（重叠窗口实测 80.2%），该层为近似值。
+- 回填前总成本 $18.00（全量×0.14）→ 回填后 $2.01（与按窗口比例推算的平台全天账单 $1.5-2 吻合）。
+- 验证关系：平台账单 input+cacheRead = 代理原始全量（重叠窗口 7/7 按此指纹配对成功）；DB 已备份 `data.db.backup-2608`。

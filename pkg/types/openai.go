@@ -133,12 +133,21 @@ type Choice struct {
 }
 
 // UsageInfo represents token usage information.
+// Cache split is reported in two incompatible styles by different upstreams:
+// DeepSeek-style prompt_cache_hit/miss_tokens, and OpenAI-standard
+// prompt_tokens_details.cached_tokens (used by OpenCode Go's oa-compat gateway).
 type UsageInfo struct {
-	PromptTokens          int `json:"prompt_tokens"`
-	CompletionTokens      int `json:"completion_tokens"`
-	TotalTokens           int `json:"total_tokens"`
-	PromptCacheHitTokens  int `json:"prompt_cache_hit_tokens,omitempty"`
-	PromptCacheMissTokens int `json:"prompt_cache_miss_tokens,omitempty"`
+	PromptTokens          int                  `json:"prompt_tokens"`
+	CompletionTokens      int                  `json:"completion_tokens"`
+	TotalTokens           int                  `json:"total_tokens"`
+	PromptTokensDetails   *PromptTokensDetails `json:"prompt_tokens_details,omitempty"`
+	PromptCacheHitTokens  int                  `json:"prompt_cache_hit_tokens,omitempty"`
+	PromptCacheMissTokens int                  `json:"prompt_cache_miss_tokens,omitempty"`
+}
+
+// PromptTokensDetails carries OpenAI-standard prompt token breakdown.
+type PromptTokensDetails struct {
+	CachedTokens int `json:"cached_tokens,omitempty"`
 }
 
 // ChatCompletionChunk represents a streaming chunk from the Chat Completions API.

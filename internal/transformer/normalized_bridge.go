@@ -169,10 +169,16 @@ func OpenAIResponseToNormalized(openaiResp *types.ChatCompletionResponse, modelI
 
 	// Map usage. UsageInfo is a value type; check if it was populated.
 	if openaiResp.Usage.PromptTokens > 0 || openaiResp.Usage.CompletionTokens > 0 {
+		// OpenAI-standard cached_tokens counts as cache read; DeepSeek-style
+		// hit/miss fields are read separately.
+		cacheRead := openaiResp.Usage.PromptCacheHitTokens
+		if openaiResp.Usage.PromptTokensDetails != nil {
+			cacheRead += openaiResp.Usage.PromptTokensDetails.CachedTokens
+		}
 		nr.Usage = core.NormalizedUsage{
 			InputTokens:         openaiResp.Usage.PromptTokens,
 			OutputTokens:        openaiResp.Usage.CompletionTokens,
-			CacheReadTokens:     openaiResp.Usage.PromptCacheHitTokens,
+			CacheReadTokens:     cacheRead,
 			CacheCreationTokens: openaiResp.Usage.PromptCacheMissTokens,
 		}
 	}

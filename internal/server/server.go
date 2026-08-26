@@ -65,7 +65,7 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 
 	// Register providers.
 	providerRegistry := core.NewProviderRegistry()
-	_ = providerRegistry.Register(provider.NewOpenCodeGoProvider(atomic))
+	_ = providerRegistry.Register(provider.NewOpenCodeGoProvider(atomic, captureLogger))
 	_ = providerRegistry.Register(provider.NewOpenCodeZenProvider(atomic))
 	_ = providerRegistry.Register(provider.NewAWSBedrockProvider(atomic))
 

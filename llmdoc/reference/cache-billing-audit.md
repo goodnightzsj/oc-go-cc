@@ -28,7 +28,7 @@
 | 侧 | 数据 | 窗口 | 说明 |
 |----|------|------|------|
 | OpenCode 账单 | usage 页 server-fn 数据 | 8-14、8-26 10:01:49 UTC 前 | `cost` 单位 = 1e-8 USD，即 `provider_usage.cost_units` |
-| 远端代理 | `requests` 表 | 今天 09:59:21 UTC 起 607 行 | input 存"全量"（修复前）/ "纯输入"（修复后），缓存分列 |
+| 远端代理 | `requests` 表 | 今天 09:59:21 UTC 起（回填/校验时 1147+ 行，持续增长） | input 存"全量"（修复前）/ "纯输入"（修复后），缓存单列；985 行 provider 级精确 |
 | CompactGate | `request_logs`（compactgate-logs.sqlite） | 7-10 起，deepseek 今天 637 条 | `cached_input_tokens` 与代理 `cache_read_tokens` 同源 |
 
 - 重叠锚点窗口（09:59:21–10:01:49 UTC）：OpenCode 账单 6 条 = $0.1496；代理估算 7 行 = $0.2624（虚高 1.75×，且全部来自缓存误计）。
@@ -45,14 +45,21 @@
 - cost = input×input价 + cache_creation×max(cache_write价, input价) + cache_read×cache_read价 + output×output价（`internal/storage/analytics.go` costForTokens）。
 - 平台 cacheWrite 字段恒为 null → cache creation 按 input 价计。
 
-## 历史数据回填（同日执行）
+## 历史数据回填（同日二次执行：逐帧回填）
 
-远端 `requests` 表修复前行的数据已按"与 OpenCode 账单一致"回填：
+第一轮回填用命中率估算；第二轮回填以 **OpenCode usage 页真实数据逐帧复原**（用户提供 server-fn 数据 648 条 usg 记录，含 `cacheReadTokens`/`cost`(units, 1e-8 USD)/`costMultiplier=2`/`timeCreated`/`provider`），并叠加 debug_capture 原始 usage：
 
-- **精确层**：7 行（重叠窗口）直接写平台账单值（含平台 cost，`cost_source='provider'`）；27 行（部署前最后 4.5 分钟）用 capture 原始 `cached_tokens` 拆分并重算（`estimated`）。
-- **估算层**：其余修复前行无原始缓存数据，按 capture 窗口命中率 99.64% 拆分 input/cache_read 并重算（`estimated`）——早期会话真实命中率更低（重叠窗口实测 80.2%），该层为近似值。
-- 回填前总成本 $18.00（全量×0.14）→ 回填后 **$2.27**（平台当天账单 $2.19，差 3.6%，为估算层命中率误差）。
-- 验证关系：平台账单 input+cacheRead = 代理原始全量（重叠窗口 7/7 按此指纹配对成功）；DB 已备份 `data.db.backup-2608`。
-- 明细：7 行（重叠窗口）用平台账单值（`cost_source='provider'`）；19:14-19:19 段因 capture 文件轮转删除、无法逐条恢复，按 0.99 命中率估算；其余按会话年龄曲线（80%→99%）估算；均标注 `estimated`。
-- CompactGate：修复后的行经代理响应天然一致（cached_input_tokens=15,590,912 与代理相等）；修复前行无关联键（请求侧 token 语义不同、output 为空、id 格式不同），无法可靠回填。
-- 教训：debug_capture 文件轮转（max_files 20 × 50MB）在流量峰值下几分钟即滚动，**回填/取证前应先拷贝 capture 目录**。
+- **平台精确层**：602 行（今天全量，含 09:59:57→11:24:25 与 12:50→13:02 UTC 段）按"时间 + output 相等"配对写入平台值（`cost_source='provider'`，`cost_usd=units/1e8`）；配对质量校验：总 token 误差 p99=0.0%、时间差中位数 5.4s。
+- **capture 精确层**：383 行（11:50→14:05 UTC 段）用 capture `prompt_tokens^-^cached_tokens` 拆分并按请求时间戳对齐（`input_tokens=pt-cr`，cost 按 seed 价公式）。
+- **剩余 estimated 179 行**（$0.58）：仅 11:10–11:15 部分与 **11:24:25→11:50:45 真缺口**——该窗口平台数据不存在（usage 页只返回最近 50 条，历史翻页未提供）且 capture 文件被轮换删除，无法精确；其余为新请求尾部（修复版本本已正确，仅标记）。
+- 结果：**provider 985 行 = $2.32，estimated 179 行 = $0.58，总 $2.90**（今天全天）；窗口对账（09:59:21→11:24:25 UTC）provider 部分与平台 units 差 **0.4%**。
+- **CompactGate**：`cached_input_tokens` 按时间轴对齐回填 1147 行（远端 start_time ↔ CompactGate time），与远端 `cache_read_tokens` 总量一致（≈258M，面板 263.7M 含最新请求）。
+- 方法要点：平台记录 `input+cacheRead` = 代理全量，output 相等；capture 用 `upstream-request` 行时间戳（比响应完成时间更贴 start_time）；site 数据经 Edge CDP（9210 端口失败后启用 `chrome://inspect/#remote-debugging` 得 9222 WebSocket 端点）从 usage 页直接抓取，无需登录态注入。
+- 教训：debug_capture 文件轮转（max_files 20 × 50MB）在流量峰值下几分钟即滚动，**回填/取证前应先拷贝 capture 目录**；usage 页服务端默认只渲染 50 条（早前窗口曾一次渲染 600 条——平台行为变化，翻页机制须用 CDP 实测）。
+## Peak 定价验证与徽章现算（2026-08-27 增补）
+
+- **平台峰值窗口实测边界**：逐条对比平台 `cost` 与 off-peak 公式（in×0.22 + cr×0.007 + out×0.66）——UTC 09:59:57 行 ×2.0，UTC 10:00:17 行 ×1.0。**窗口为 `[06:00, 10:00) UTC` 左闭右开**，与 `history.PeakMultiplier`（`internal/history/record.go:41`）和 `TestPeakMultiplier` 断言一致。
+- **`costMultiplier: 2` 是 lite 计划固定标记，与 Peak 无关**：平台记录 `enrichment: {"plan":"lite","costMultiplier":2}` 恒为 2（`/tmp/platform_keep.json` 全量验证），**不计入 `cost` 字段**；`cost` 本身已是 peak 后最终值，对账直接 `units/1e8` 即可。
+- **徽章前端现算**（commit `17f663f`）：`internal/gui/assets/app.js:1313` `effectivePeakMultiplier()` 按 `start_time + model` 前端判定 deepseek 工作日高峰，回填行不再依赖存储的 `peak_multiplier` 列（回填路径从不写该列，此前导致回填行集体丢徽章）。特效：存储值 >1 优先，避免平台记账时刻与 start_time 在边界（±秒级）判定分歧时徽章消失。
+- **遗留时区 bug 修复**：9 行回填插入行 `start_time` 原存 UTC `+00:00`（回填脚本未转时区），按日统计错位 8 小时；已转 `+08:00`（备份 `backup-20260827-tzfix.db`，远端 `~/.local/share/routatic-proxy/`）。
+- **2026-08-26/27 对账结论**：双方同时存在的行逐行成本差异为 0（1493+ 行精确到 1e-8）；8-26 远端 $4.9977 vs 平台 $4.9939（差 2 条平台未列出的记录 `$0.0015`），8-27 差异全为记账时差（平台 usage 页数据滞后约 5 分钟）。

@@ -11,6 +11,7 @@ import (
 	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/core"
+	"github.com/routatic/proxy/internal/debug"
 	"github.com/routatic/proxy/internal/models"
 	"github.com/routatic/proxy/internal/transformer"
 	"github.com/routatic/proxy/pkg/types"
@@ -19,11 +20,12 @@ import (
 // OpenCodeGoProvider implements core.Provider for the OpenCode Go backend.
 type OpenCodeGoProvider struct {
 	baseProvider
+	capture *debug.CaptureLogger // request/response debug capture; nil when disabled
 }
 
 // NewOpenCodeGoProvider creates a new OpenCodeGoProvider.
-func NewOpenCodeGoProvider(atomic *config.AtomicConfig) *OpenCodeGoProvider {
-	return &OpenCodeGoProvider{baseProvider: newBaseProvider(atomic)}
+func NewOpenCodeGoProvider(atomic *config.AtomicConfig, capture *debug.CaptureLogger) *OpenCodeGoProvider {
+	return &OpenCodeGoProvider{baseProvider: newBaseProvider(atomic), capture: capture}
 }
 
 // Name returns the provider identifier.
@@ -111,11 +113,23 @@ func (p *OpenCodeGoProvider) streamOpenAI(ctx context.Context, req *types.Messag
 	streamTrue := true
 	openaiReq.Stream = &streamTrue
 
+	if p.capture != nil {
+		raw, err := json.Marshal(openaiReq)
+		if err == nil {
+			p.capture.CaptureUpstreamRequest(rid(ctx), p.Name(), raw)
+		}
+	}
+
 	resp, err := p.doRequest(ctx, endpoint, apiKey, openaiReq, true)
 	if err != nil {
 		return nil, err
 	}
 
+	if p.capture != nil {
+		return client.CaptureBody(resp.Body, func(data []byte) {
+			p.capture.CaptureUpstreamResponse(rid(ctx), p.Name(), data)
+		}), nil
+	}
 	return resp.Body, nil
 }
 
@@ -179,6 +193,10 @@ func (p *OpenCodeGoProvider) streamAnthropic(ctx context.Context, req *types.Mes
 	httpReq.Header.Set("x-api-key", apiKey)
 	httpReq.Header.Set("Accept", "text/event-stream")
 
+	if p.capture != nil {
+		p.capture.CaptureUpstreamRequest(rid(ctx), p.Name(), rawBody)
+	}
+
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -190,10 +208,26 @@ func (p *OpenCodeGoProvider) streamAnthropic(ctx context.Context, req *types.Mes
 		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
 	}
 
+	if p.capture != nil {
+		return client.CaptureBody(resp.Body, func(data []byte) {
+			p.capture.CaptureUpstreamResponse(rid(ctx), p.Name(), data)
+		}), nil
+	}
 	return resp.Body, nil
 }
 
 // ── HTTP helpers ──────────────────────────────────────────────────────
+
+// rid extracts the request ID from the handler context for capture correlation.
+func rid(ctx context.Context) string {
+	switch v := ctx.Value("requestID").(type) {
+	case string:
+		return v
+	case []byte:
+		return string(v)
+	}
+	return ""
+}
 
 func (p *OpenCodeGoProvider) doRequest(ctx context.Context, endpoint, apiKey string, req any, stream bool) (*http.Response, error) {
 	body, err := json.Marshal(req)

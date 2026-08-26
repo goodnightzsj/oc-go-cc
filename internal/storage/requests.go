@@ -42,8 +42,9 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 		INSERT OR REPLACE INTO requests (
 			id, model, provider, scenario, start_time, duration_ms,
 			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-			cost_usd, cost_source, details_known, usage_trusted, streaming, success, error_msg, attempt
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?)
+			cost_usd, cost_source, details_known, usage_trusted, streaming, success, error_msg, attempt,
+			peak_multiplier
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?)
 	`,
 		rec.ID,
 		rec.Model,
@@ -61,6 +62,7 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 		boolToInt(rec.Success),
 		rec.ErrorMsg,
 		attempt,
+		peakMultiplierForRecord(rec),
 	)
 
 	return err
@@ -226,7 +228,8 @@ func (r *Requests) Query(q RequestQuery) ([]history.RequestRecord, int64, error)
 	rows, err := r.db.DB().QueryContext(ctx, `
 		SELECT id, model, provider, scenario, start_time, duration_ms,
 		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-		       cost_usd, cost_source, details_known, streaming, success, error_msg, attempt
+		       cost_usd, cost_source, details_known, streaming, success, error_msg, attempt,
+		       peak_multiplier
 		FROM requests`+where+`
 		ORDER BY `+orderBy+`
 		LIMIT ? OFFSET ?
@@ -374,6 +377,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		var costUSD sql.NullFloat64
 		var costSource sql.NullString
 		var errorMsg sql.NullString
+		var peakMul float64
 		err := rows.Scan(
 			&rec.ID,
 			&rec.Model,
@@ -392,10 +396,12 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 			&success,
 			&errorMsg,
 			&attempt,
+			&peakMul,
 		)
 		if err != nil {
 			return nil, err
 		}
+		rec.PeakMultiplier = peakMul
 		if attempt.Valid {
 			rec.Attempt = int(attempt.Int64)
 		} else {
@@ -443,13 +449,18 @@ func (r *Requests) costForRecord(ctx context.Context, rec history.RequestRecord)
 	if err != nil && err != sql.ErrNoRows {
 		return 0, "", err
 	}
-	return costForTokens(rec.Model,
+	reqTime := rec.StartTime
+	if reqTime.IsZero() {
+		reqTime = time.Now()
+	}
+	return costForTokensAt(rec.Model,
 		int64(rec.InputTokens),
 		int64(rec.OutputTokens),
 		int64(rec.CacheReadTokens),
 		int64(rec.CacheCreationTokens),
 		modelsInputPerM,
-		modelsOutputPerM), CostSourceEstimated, nil
+		modelsOutputPerM,
+		reqTime), CostSourceEstimated, nil
 }
 
 func boolToInt(b bool) int {
@@ -457,4 +468,16 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// peakMultiplierForRecord returns the billing multiplier to persist for a
+// record: the caller-set value when present, else computed from start time.
+func peakMultiplierForRecord(rec history.RequestRecord) float64 {
+	if rec.PeakMultiplier > 0 {
+		return rec.PeakMultiplier
+	}
+	if rec.StartTime.IsZero() {
+		return 1
+	}
+	return history.PeakMultiplier(rec.Model, rec.StartTime)
 }

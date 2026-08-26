@@ -307,6 +307,7 @@ func (d *Database) migrateColumns(ctx context.Context) error {
 		`ALTER TABLE requests ADD COLUMN cost_source TEXT`,
 		`ALTER TABLE requests ADD COLUMN details_known INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE requests ADD COLUMN usage_trusted INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE requests ADD COLUMN peak_multiplier REAL NOT NULL DEFAULT 1`,
 	} {
 		if _, err := d.db.ExecContext(ctx, alter); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return fmt.Errorf("%s: %w", alter, err)
@@ -342,7 +343,8 @@ func (d *Database) BackfillRequestCosts(ctx context.Context) (int64, error) {
 		       COALESCE(r.cache_read_tokens, 0),
 		       COALESCE(r.cache_creation_tokens, 0),
 		       COALESCE(m.cost_input_per_m, 0),
-		       COALESCE(m.cost_output_per_m, 0)
+		       COALESCE(m.cost_output_per_m, 0),
+		       r.start_time
 		FROM requests r
 		LEFT JOIN models m ON m.id = r.model
 		WHERE r.cost_usd IS NULL
@@ -356,11 +358,12 @@ func (d *Database) BackfillRequestCosts(ctx context.Context) (int64, error) {
 		model                                   string
 		input, output, cacheRead, cacheCreation int64
 		modelsInputPerM, modelsOutputPerM       float64
+		startTime                               string
 	}
 	var pending []requestCostRow
 	for rows.Next() {
 		var row requestCostRow
-		if err := rows.Scan(&row.id, &row.model, &row.input, &row.output, &row.cacheRead, &row.cacheCreation, &row.modelsInputPerM, &row.modelsOutputPerM); err != nil {
+		if err := rows.Scan(&row.id, &row.model, &row.input, &row.output, &row.cacheRead, &row.cacheCreation, &row.modelsInputPerM, &row.modelsOutputPerM, &row.startTime); err != nil {
 			_ = rows.Close()
 			return 0, err
 		}
@@ -386,7 +389,7 @@ func (d *Database) BackfillRequestCosts(ctx context.Context) (int64, error) {
 
 	var updated int64
 	for _, row := range pending {
-		cost := costForTokens(row.model, row.input, row.output, row.cacheRead, row.cacheCreation, row.modelsInputPerM, row.modelsOutputPerM)
+		cost := costForTokensAt(row.model, row.input, row.output, row.cacheRead, row.cacheCreation, row.modelsInputPerM, row.modelsOutputPerM, parseRequestTime(row.startTime))
 		res, err := stmt.ExecContext(ctx, cost, CostSourceEstimated, row.id)
 		if err != nil {
 			_ = tx.Rollback()

@@ -63,3 +63,11 @@
 - **徽章前端现算**（commit `17f663f`）：`internal/gui/assets/app.js:1313` `effectivePeakMultiplier()` 按 `start_time + model` 前端判定 deepseek 工作日高峰，回填行不再依赖存储的 `peak_multiplier` 列（回填路径从不写该列，此前导致回填行集体丢徽章）。特效：存储值 >1 优先，避免平台记账时刻与 start_time 在边界（±秒级）判定分歧时徽章消失。
 - **遗留时区 bug 修复**：9 行回填插入行 `start_time` 原存 UTC `+00:00`（回填脚本未转时区），按日统计错位 8 小时；已转 `+08:00`（备份 `backup-20260827-tzfix.db`，远端 `~/.local/share/routatic-proxy/`）。
 - **2026-08-26/27 对账结论**：双方同时存在的行逐行成本差异为 0（1493+ 行精确到 1e-8）；8-26 远端 $4.9977 vs 平台 $4.9939（差 2 条平台未列出的记录 `$0.0015`），8-27 差异全为记账时差（平台 usage 页数据滞后约 5 分钟）。
+
+## 重复计费溯源与对账去重（2026-08-27 增补二）
+
+- **现象**：8-26 远端 $4.9977 vs 平台 $4.9939，差 $0.0038；8-27 差 $0.0022（记账时差）。
+- **根因**：远端 3 条"重复行"——同一逻辑请求被 Claude Code 客户端超时重发（间隔 2–25 秒、`input+cache` 总和/output/cost 逐项相同、id 连号），代理将两次 HTTP 各记一行，平台合并为一次计费。`recordStreamSuccess`（`internal/handlers/messages.go:656`）每个 HTTP 请求只插入一行，插入逻辑本身不产生重复。
+- **决策：代理插入层不做启发式去重**（token+时间窗判定有误删合法并发请求的风险）；正确姿势是**以平台为权威的对账去重**：逐行匹配（model+in+cr+out 全等或宽松 time+out+cost），平台有而远端多余的行直接 DELETE，总量对齐到 0.0001 USD。
+- **8-27 覆盖回填**：57 行 matched 覆盖为平台精确值（`cost_source='provider'`），1 条 00:43:47 的在途请求保持 `estimated`（平台记账延迟 2–4 分钟，次日对账自然收敛）。
+- **备份**：`backup-20260827-dedup.db`（删重）、`backup-20260827-backfill827.db`（回填）。

@@ -16,12 +16,15 @@ const (
 )
 
 // CaptureEntry represents a single captured request/response phase.
+// Data is a string because upstream SSE streams are not a single JSON document
+// and cannot be embedded as json.RawMessage (its MarshalJSON validates and
+// rejects multi-document payloads).
 type CaptureEntry struct {
-	Timestamp time.Time       `json:"timestamp"`
-	Phase     string          `json:"phase"`
-	Provider  string          `json:"provider"`
-	RequestID string          `json:"request_id"`
-	Data      json.RawMessage `json:"data"`
+	Timestamp time.Time `json:"timestamp"`
+	Phase     string    `json:"phase"`
+	Provider  string    `json:"provider"`
+	RequestID string    `json:"request_id"`
+	Data      string    `json:"data"`
 }
 
 // RedactSensitive redacts sensitive fields (api_key, api-key, authorization) from JSON data.

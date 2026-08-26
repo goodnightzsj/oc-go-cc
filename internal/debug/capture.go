@@ -2,7 +2,6 @@
 package debug
 
 import (
-	"encoding/json"
 	"log/slog"
 	"sync"
 	"time"
@@ -108,15 +107,12 @@ func (c *CaptureLogger) sendEntry(entry CaptureEntry) {
 }
 
 // redactIfNeeded applies RedactSensitive to data if redaction is enabled.
-// Returns the original data as json.RawMessage if redaction is disabled.
-// Returns the redacted data as json.RawMessage if redaction is enabled.
-func redactIfNeeded(data []byte, redactEnabled bool) json.RawMessage {
+func redactIfNeeded(data []byte, redactEnabled bool) string {
 	if !redactEnabled {
-		return json.RawMessage(data)
+		return string(data)
 	}
 
-	redacted := RedactSensitive(data)
-	return json.RawMessage(redacted)
+	return string(RedactSensitive(data))
 }
 
 // Close shuts down the capture logger.

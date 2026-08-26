@@ -71,3 +71,9 @@
 - **决策：代理插入层不做启发式去重**（token+时间窗判定有误删合法并发请求的风险）；正确姿势是**以平台为权威的对账去重**：逐行匹配（model+in+cr+out 全等或宽松 time+out+cost），平台有而远端多余的行直接 DELETE，总量对齐到 0.0001 USD。
 - **8-27 覆盖回填**：57 行 matched 覆盖为平台精确值（`cost_source='provider'`），1 条 00:43:47 的在途请求保持 `estimated`（平台记账延迟 2–4 分钟，次日对账自然收敛）。
 - **备份**：`backup-20260827-dedup.db`（删重）、`backup-20260827-backfill827.db`（回填）。
+
+## CompactGate 溯源与方案取舍（2026-08-27 增补三）
+
+- **CompactGate 侧无重发特征**：8-26 18:04+08 窗口内 out=560/214 各只有一条记录，全部 `success`、`client_disconnect_phase=none`、`upstream_status=200`；CG request_id（UUID）与 rproxy req-* 不同，**转发时未透传 X-Request-ID**。可知 Claude 客户端只发出一次请求且未断连；重复发生在 **CG→rproxy 网关转发层**（18:03:06 有 CG 记录 502 "socket hang up"，链路偶发断连触发网关层自动重试），rproxy 对同一逻辑请求（平台只计一次）记录两条。
+- **插入层自动去重被否决**：60s 窗口 + (model, scenario, output, input+cr 总和) 指纹会误伤合法请求——`TestProviderCostReconciliationClassifiesWithoutGuessing` 中 1.2s 间隔的同指纹独立请求被吞（真实并行/快速连续请求同样可能）。**协议层无任何可读"重发特征"**（不透传 ID、无 retry header），因此"读特征再忽略"与"插入层剔除"均不可行。
+- **最终决策：以平台为权威的对账去重**——平台按逻辑请求计费一次，远端多余记录由对账流程逐行匹配后删除（criteria：model+in+cr+out 全等，或宽松 time±120s+out+cost）。已在 8-26 执行 3 条（$0.0038）并验证远端 $4.9939 = 平台 $4.9939。

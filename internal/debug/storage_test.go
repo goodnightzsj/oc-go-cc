@@ -54,7 +54,7 @@ func TestWriteEntryCreatesFile(t *testing.T) {
 		Timestamp: time.Now().UTC(),
 		Provider:  "test-provider",
 		Phase:     "request",
-		Data:      json.RawMessage(`{"test": "data"}`),
+		Data:      string(`{"test": "data"}`),
 	}
 
 	if err := s.WriteEntry(entry); err != nil {
@@ -112,7 +112,7 @@ func TestFileRotation(t *testing.T) {
 			Timestamp: time.Now().UTC(),
 			Provider:  "test-provider",
 			Phase:     "request",
-			Data:      json.RawMessage(`{"large": "data content here"}`),
+			Data:      string(`{"large": "data content here"}`),
 		}
 		if err := s.WriteEntry(entry); err != nil {
 			t.Fatalf("WriteEntry() error = %v", err)
@@ -153,7 +153,7 @@ func TestMaxFilesDeletion(t *testing.T) {
 			Timestamp: time.Now().UTC(),
 			Provider:  "test-provider",
 			Phase:     "request",
-			Data:      json.RawMessage(`{"test": "data"}`),
+			Data:      string(`{"test": "data"}`),
 		}
 		if err := s.WriteEntry(entry); err != nil {
 			t.Fatalf("WriteEntry() error = %v", err)
@@ -167,7 +167,7 @@ func TestMaxFilesDeletion(t *testing.T) {
 		Timestamp: time.Now().UTC(),
 		Provider:  "test-provider",
 		Phase:     "request",
-		Data:      json.RawMessage(`{"trigger": "rotation"}`),
+		Data:      string(`{"trigger": "rotation"}`),
 	}
 	if err := s.WriteEntry(entry); err != nil {
 		t.Fatalf("WriteEntry() error = %v", err)
@@ -202,7 +202,7 @@ func TestJSONLFormat(t *testing.T) {
 		Timestamp: time.Now().UTC(),
 		Provider:  "test-provider",
 		Phase:     "response",
-		Data:      json.RawMessage(`{"key": "value", "number": 42}`),
+		Data:      string(`{"key": "value", "number": 42}`),
 	}
 
 	if err := s.WriteEntry(entry); err != nil {

@@ -421,6 +421,7 @@ type historyEntry struct {
 	CacheCreationTokens int      `json:"cache_creation_tokens"`
 	CostUSD             *float64 `json:"cost_usd"`
 	CostSource          string   `json:"cost_source,omitempty"`
+	PeakMultiplier      float64  `json:"peak_multiplier"`
 	DetailsKnown        bool     `json:"details_known"`
 	Streaming           bool     `json:"streaming"`
 	Attempt             int      `json:"attempt"`
@@ -580,6 +581,7 @@ func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 			Attempt:             rec.Attempt,
 			Success:             rec.Success,
 			ErrorMsg:            rec.ErrorMsg,
+			PeakMultiplier:      rec.PeakMultiplier,
 		}
 		if rec.CostKnown || rec.CostUSD != 0 {
 			entry.CostUSD = &rec.CostUSD

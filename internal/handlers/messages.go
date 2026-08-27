@@ -144,6 +144,18 @@ func (w *responseWriter) extractUsageFromSSE(b []byte) {
 	}
 }
 
+// SetPartialUsage records usage surfaced by the transformer from a
+// mid-stream OpenAI chunk (every chunk carries cumulative usage, so the last
+// value seen before an upstream failure is the exact count the platform
+// bills for a partially produced stream). Called from the transform
+// goroutine, the same one that calls extractUsageFromSSE via Write.
+func (w *responseWriter) SetPartialUsage(in, out, cacheRead, cacheCreate int) {
+	w.usage.inputTokens = in
+	w.usage.outputTokens = out
+	w.usage.cacheReadInputTokens = cacheRead
+	w.usage.cacheCreationInputTokens = cacheCreate
+}
+
 func (w *responseWriter) detectContentInSSE(b []byte) {
 	data := string(b)
 	if strings.Contains(data, `"content_block_start"`) ||
@@ -664,6 +676,44 @@ func (h *MessagesHandler) handleStreaming(
 			}
 		}
 
+		// recordStreamFailure persists an interrupted stream that produced
+		// usage. The platform bills partially produced streams by the tokens
+		// actually consumed, so a failure after SSE payload started leaves a
+		// permanent one-sided gap unless the proxy records it too. Streams
+		// that died before any chunk carried usage are not billed by the
+		// platform either, so they are not recorded.
+		recordStreamFailure := func(model config.ModelConfig, err error, action string) {
+			cancelAttempt()
+			if rw.usage.inputTokens == 0 && rw.usage.outputTokens == 0 &&
+				rw.usage.cacheReadInputTokens == 0 && rw.usage.cacheCreationInputTokens == 0 {
+				h.logger.Warn(action+" streaming failed, no usage reported", "model", model.ModelID, "error", err)
+				return
+			}
+			h.metrics.RecordFailureForModel(model.ModelID)
+			if h.storage == nil {
+				return
+			}
+			rec := history.RequestRecord{
+				ID:                  requestID,
+				Model:               model.ModelID,
+				Provider:            model.Provider,
+				Scenario:            string(scenario),
+				StartTime:           streamStart,
+				Duration:            time.Since(streamStart),
+				InputTokens:         rw.usage.inputTokens,
+				OutputTokens:        rw.usage.outputTokens,
+				CacheReadTokens:     rw.usage.cacheReadInputTokens,
+				CacheCreationTokens: rw.usage.cacheCreationInputTokens,
+				Streaming:           true,
+				Success:             false,
+				Attempt:             1,
+				PeakMultiplier:      history.PeakMultiplier(model.ModelID, streamStart),
+			}
+			if err := h.storage.InsertRequest(rec); err != nil {
+				h.logger.Warn("failed to insert failed request into storage", "error", err)
+			}
+		}
+
 		// handleStreamError checks the error from a streaming attempt and
 		// decides whether to retry the next model or abort. It returns true
 		// if the caller should continue (fallback to next model), or false
@@ -679,7 +729,7 @@ func (h *MessagesHandler) handleStreaming(
 					"model", model.ModelID, "idle_timeout", idleTimeout)
 				if rw.ssePayloadWritten {
 					h.sendStreamError(rw, "stream idle after SSE payload started")
-					h.metrics.RecordFailureForModel(model.ModelID)
+					recordStreamFailure(model, err, action)
 					return false // abort
 				}
 				return true // continue to next model
@@ -689,7 +739,7 @@ func (h *MessagesHandler) handleStreaming(
 					"model", model.ModelID)
 				if rw.ssePayloadWritten {
 					h.sendStreamError(rw, "empty stream after SSE payload started")
-					h.metrics.RecordFailureForModel(model.ModelID)
+					recordStreamFailure(model, err, action)
 					return false // abort
 				}
 				return true // continue to next model
@@ -697,7 +747,7 @@ func (h *MessagesHandler) handleStreaming(
 			h.logger.Warn(action+" streaming failed", "model", model.ModelID, "error", err)
 			if rw.ssePayloadWritten {
 				h.sendStreamError(rw, "all upstream models failed after SSE payload started")
-				h.metrics.RecordFailureForModel(model.ModelID)
+				recordStreamFailure(model, err, action)
 				return false // abort — cannot fallback after SSE payload started
 			}
 			return true // continue to next model

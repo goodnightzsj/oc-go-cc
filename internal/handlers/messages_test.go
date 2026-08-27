@@ -19,6 +19,8 @@ import (
 	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/internal/metrics"
 	"github.com/routatic/proxy/internal/provider"
+	"github.com/routatic/proxy/internal/storage"
+	"path/filepath"
 	"github.com/routatic/proxy/internal/router"
 	"github.com/routatic/proxy/internal/token"
 	"github.com/routatic/proxy/internal/transformer"
@@ -1725,5 +1727,116 @@ func TestHandleStreaming_AnthropicRaw_NoKeepaliveInjection(t *testing.T) {
 
 	if strings.Contains(body, ":keepalive") {
 		t.Errorf("keepalive comment leaked into Anthropic raw stream output (concurrent write bug):\n%s", body)
+	}
+}
+
+func TestHandleStreaming_FailedStreamWithUsage_RecordsFailure(t *testing.T) {
+	// Upstream sends OpenAI chunks that each carry cumulative usage, then cuts
+	// the connection mid-stream (panic(http.ErrAbortHandler) resets it). The
+	// platform bills partially produced streams by the tokens actually
+	// consumed, so the proxy must persist a failure row with the last usage
+	// seen — otherwise the bill has no matching remote row.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		chunks := []string{
+			`{"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hello"}}],"usage":{"prompt_tokens":518407,"completion_tokens":5,"total_tokens":518412,"prompt_tokens_details":{"cached_tokens":516608}}}`,
+			`{"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":" world"}}],"usage":{"prompt_tokens":518407,"completion_tokens":12,"total_tokens":518419,"prompt_tokens_details":{"cached_tokens":516608}}}`,
+		}
+		for _, c := range chunks {
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", c)
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+		panic(http.ErrAbortHandler)
+	}))
+	defer upstream.Close()
+
+	handler := newStreamingTestHandler(t, upstream.URL)
+	db, err := storage.Open(storage.Config{
+		DatabasePath: filepath.Join(t.TempDir(), "failed.db"),
+		WALEnabled:   false,
+	})
+	if err != nil {
+		t.Fatalf("open storage: %v", err)
+	}
+	defer db.Close()
+	handler.storage = NewStorageAdapter(db)
+
+	stream := true
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	rec := httptest.NewRecorder()
+	handler.handleStreaming(
+		rec,
+		req,
+		&types.MessageRequest{Stream: &stream},
+		[]config.ModelConfig{{Provider: "opencode-go", ModelID: "deepseek-v4-flash"}},
+		nil,
+		router.ScenarioDefault,
+		"",
+	)
+
+	rows, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("query requests: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("stored rows = %d, want 1 failure row", total)
+	}
+	rec2 := rows[0]
+	if rec2.Success {
+		t.Fatalf("stored row marked success, want failure")
+	}
+	// Usage comes from the last chunk seen before the cut: prompt 518407 with
+	// 516608 cached → input 1799, cache_read 516608, completion 12.
+	if rec2.InputTokens != 1799 || rec2.CacheReadTokens != 516608 || rec2.OutputTokens != 12 {
+		t.Fatalf("recorded usage in=%d cr=%d out=%d, want 1799/516608/12",
+			rec2.InputTokens, rec2.CacheReadTokens, rec2.OutputTokens)
+	}
+	if !rec2.CostKnown || rec2.CostSource != storage.CostSourceEstimated {
+		t.Fatalf("failure row cost_source = %q known=%v, want estimated", rec2.CostSource, rec2.CostKnown)
+	}
+}
+
+func TestHandleStreaming_FailedBeforeUsage_DoesNotRecord(t *testing.T) {
+	// Connection dies before any chunk (and thus any usage) — the platform
+	// bills nothing for it, so the proxy must not create a matching row.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		panic(http.ErrAbortHandler)
+	}))
+	defer upstream.Close()
+
+	handler := newStreamingTestHandler(t, upstream.URL)
+	db, err := storage.Open(storage.Config{
+		DatabasePath: filepath.Join(t.TempDir(), "failed.db"),
+		WALEnabled:   false,
+	})
+	if err != nil {
+		t.Fatalf("open storage: %v", err)
+	}
+	defer db.Close()
+	handler.storage = NewStorageAdapter(db)
+
+	stream := true
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	rec := httptest.NewRecorder()
+	handler.handleStreaming(
+		rec,
+		req,
+		&types.MessageRequest{Stream: &stream},
+		[]config.ModelConfig{{Provider: "opencode-go", ModelID: "deepseek-v4-flash"}},
+		nil,
+		router.ScenarioDefault,
+		"",
+	)
+	_, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("query requests: %v", err)
+	}
+	if total != 0 {
+		t.Fatalf("stored rows = %d, want 0 (no usage → platform bills nothing)", total)
 	}
 }

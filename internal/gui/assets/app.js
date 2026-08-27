@@ -670,6 +670,17 @@ window.CustomSelect = {
   open(state, focusLast = false) {
     this.closeAll(state);
     state.list.hidden = false;
+    // Panels near the viewport bottom (e.g. the history pager) would overflow
+    // below the fold; flip them above the trigger when there is room.
+    const trigger = state.button.getBoundingClientRect();
+    const panelH = state.list.getBoundingClientRect().height;
+    if (trigger.bottom + panelH + 5 > window.innerHeight && trigger.top - panelH - 5 > 0) {
+      state.list.style.top = 'auto';
+      state.list.style.bottom = 'calc(100% + 5px)';
+    } else {
+      state.list.style.top = 'calc(100% + 5px)';
+      state.list.style.bottom = 'auto';
+    }
     state.wrapper.classList.add('open');
     state.button.setAttribute('aria-expanded', 'true');
     const options = [...state.list.querySelectorAll(':scope > button:not(:disabled)')];

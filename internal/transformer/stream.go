@@ -392,6 +392,16 @@ func (h *StreamHandler) processSSELine(
 	*decodeErrors = 0
 	if chunk.Usage != nil {
 		*terminalUsage = chunk.Usage
+		// Every OpenAI chunk carries cumulative usage; the last one seen
+		// before an upstream failure is the exact count the platform bills
+		// for a partially produced stream, so surface it on the writer even
+		// when the stream never completes.
+		if uw, ok := w.(interface {
+			SetPartialUsage(in, out, cacheRead, cacheCreate int)
+		}); ok {
+			in, cacheRead, cacheCreate := splitPromptTokens(chunk.Usage)
+			uw.SetPartialUsage(in, chunk.Usage.CompletionTokens, cacheRead, cacheCreate)
+		}
 	}
 
 	if len(chunk.Choices) == 0 {

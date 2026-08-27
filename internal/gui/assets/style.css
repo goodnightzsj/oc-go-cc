@@ -525,8 +525,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: none;
   color: var(--ui-muted);
   font-size: 11px;
 }
-.history-page-size { display: inline-flex; align-items: center; gap: 5px; color: var(--ui-muted); font-size: 10px; white-space: nowrap; }
-.history-page-size .filter-select { min-width: 62px; }
+.history-pager-nav { display: inline-flex; align-items: center; gap: 12px; white-space: nowrap; color: var(--ui-muted); font-size: 11px; }
+.history-pager-nav .btn-small { min-width: 64px; }
+.history-page-size { display: inline-flex; align-items: center; gap: 6px; color: var(--ui-muted); font-size: 11px; white-space: nowrap; }
+.history-page-size .filter-select { min-width: 64px; height: 30px; }
 .cost-value { display: inline-flex; align-items: center; gap: 6px; }
 .cost-source-dot {
   width: 7px;

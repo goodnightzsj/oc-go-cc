@@ -78,19 +78,23 @@ func TestCostForTokens_ModelsTableFallback(t *testing.T) {
 func TestModelBreakdownSumsToSummary(t *testing.T) {
 	db := newCostTestDB(t)
 
+	// Fixed off-peak start times: costForRecord prices at time.Now() when the
+	// record has no StartTime, and deepseek rows double in the weekly peak
+	// window — a clock-dependent test would fail depending on when it runs.
+	offPeak := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC) // Wednesday 12:00Z, deepseek ×1
 	insertCostRecord(t, db, history.RequestRecord{
 		ID: "r1", Model: "deepseek-v4-flash", Provider: "opencode-go",
 		InputTokens: 4_000, CacheReadTokens: 96_000, OutputTokens: 2_000,
-		Streaming: true, Success: true,
+		Streaming: true, Success: true, StartTime: offPeak,
 	})
 	insertCostRecord(t, db, history.RequestRecord{
 		ID: "r2", Model: "qwen3.7-plus", Provider: "opencode-go",
 		InputTokens: 10_000, CacheReadTokens: 50_000, CacheCreationTokens: 20_000,
-		OutputTokens: 5_000, Success: true,
+		OutputTokens: 5_000, Success: true, StartTime: offPeak,
 	})
 	insertCostRecord(t, db, history.RequestRecord{
 		ID: "r3", Model: "deepseek-v4-flash", Provider: "opencode-go",
-		InputTokens: 1_000, OutputTokens: 500, Success: false,
+		InputTokens: 1_000, OutputTokens: 500, Success: false, StartTime: offPeak,
 	})
 
 	a := NewAnalytics(db)

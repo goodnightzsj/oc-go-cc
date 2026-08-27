@@ -714,9 +714,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: none;
   border-radius: 6px;
   background: #181b1f;
   box-shadow: 0 12px 28px rgba(0, 0, 0, .42);
+  white-space: normal; /* options must stack vertically */
 }
 .theme-select-list[hidden] { display: none; }
 .theme-select-option {
+  display: block; /* buttons default to inline-block, which lays options out horizontally */
   width: 100%;
   min-height: 32px;
   padding: 6px 8px;

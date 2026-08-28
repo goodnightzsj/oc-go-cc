@@ -75,11 +75,15 @@ func TestParseRequestTime(t *testing.T) {
 	if peak != 2*base {
 		t.Fatalf("peak cost %v, want 2×base %v", peak, 2*base)
 	}
-	// input served from cache bills at the cache rate: platform billed a
-	// 516638-in/516608-cr/399-out request as (516638-516608)*0.22 + 516608*0.007
-	// + 399*0.66, doubled in the 07:00Z peak window -> 777239 units (1e-8 USD).
+	// Platform never deducts cache from input: `in` is the cache-miss part
+	// already, billed at the full input rate; the hit part bills at the cache
+	// rate on top. Verified 2026-08-28 against the platform invoice for a
+	// miss>hit request (18355-in/18176-cr/231-out == 0.00863558 doubled):
+	// 516638*0.22 + 516608*0.007 + 399*0.66, doubled in the 07:00Z peak
+	// window -> 23507991 units (1e-8 USD). The old formula subtracted the
+	// cache-read prefix and under-priced every miss>hit row.
 	cacheOverlap := costForTokensAt("deepseek-v4-flash", 516638, 399, 516608, 0, 0.22, 0.66, peakT)
-	if got := int64(math.Round(cacheOverlap * 1e8)); got != 777239 {
-		t.Fatalf("cache-overlap cost %v units, want platform 777239", got)
+	if got := int64(math.Round(cacheOverlap * 1e8)); got != 23507991 {
+		t.Fatalf("cache-overlap cost %v units, want platform 23507991", got)
 	}
 }

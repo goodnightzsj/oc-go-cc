@@ -26,3 +26,4 @@ node_modules/
 
 # Generated Windows resource files (built by go-winres in CI)
 *.syso
+__pycache__/

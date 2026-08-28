@@ -300,13 +300,10 @@ func costForTokens(model string, in, out, cacheRead, cacheCreate int64, modelsIn
 	// OpenCode semantics: cache CREATION (first-time prompt write) bills at the
 	// cache_write price when the model publishes one, otherwise at the input
 	// price; cache READ bills at the cheap cache_read price.
-	// Input tokens that were served from cache (input count includes the
-	// cache-read prefix, i.e. in > cacheRead) bill at the cache rate, not the
-	// input rate; only the non-cached remainder is priced as input. When input
-	// and cache are disjoint (in <= cacheRead) both bill as reported.
-	if in > cacheRead {
-		in -= cacheRead
-	}
+	// `in` is the cache-miss part already (splitPromptTokens strips the cached
+	// prefix before storage), so no deduction applies. Verified against the
+	// platform invoice: bill = miss*input + hit*cache_read + out*output,
+	// never miss-cacheRead (that under-prices rows where miss > hit).
 	cacheWriteRate := ipm
 	if cwpm > 0 {
 		cacheWriteRate = cwpm

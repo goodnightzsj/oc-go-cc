@@ -45,6 +45,16 @@ func TestSplitPromptTokens(t *testing.T) {
 			usage:  types.UsageInfo{PromptTokens: 84, PromptTokensDetails: &types.PromptTokensDetails{}},
 			wantIn: 84, wantRead: 0, wantCreate: 0,
 		},
+		{
+			// Real capture (2026-09-02): oa-compat non-streaming response
+			// reports prompt_cache_miss_tokens as the FULL prompt (261241),
+			// not cache-stripped, beside the hit count (261120); the fresh
+			// input is prompt - hit = 121. Billing the miss verbatim would
+			// price the cached prefix twice.
+			name:   "opencode oa-compat non-streaming: miss is un-stripped full prompt",
+			usage:  types.UsageInfo{PromptTokens: 261241, PromptCacheHitTokens: 261120, PromptCacheMissTokens: 261241},
+			wantIn: 121, wantRead: 261120, wantCreate: 0,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

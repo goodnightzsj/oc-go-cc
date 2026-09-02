@@ -665,7 +665,15 @@ func splitPromptTokens(usage *types.UsageInfo) (input, cacheRead, cacheCreate in
 		return usage.PromptTokens, 0, 0
 	}
 	// Partitioned form (DeepSeek): hit + miss accounts for the whole prompt.
+	// An oa-compat NON-streaming response is an exception: its miss is the
+	// FULL prompt (cache not stripped — observed 2026-09-02: prompt=261241,
+	// hit=261120, miss=261241), which also satisfies hit+miss >= prompt and
+	// would otherwise price the hit part twice (as fresh input and as cache
+	// read). Detect it by miss covering the whole prompt.
 	if hit+miss >= usage.PromptTokens {
+		if miss >= usage.PromptTokens {
+			return nonNegative(usage.PromptTokens - hit), hit, 0
+		}
 		return miss, hit, 0
 	}
 	// Additive form: cache counts sit outside prompt_tokens.

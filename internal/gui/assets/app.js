@@ -1097,14 +1097,14 @@ function renderOverviewUsage(data, trend, latency) {
   set('m-tokens', fmtTok(total));
   set('m-cache-hit', prompt > 0 ? `${(cacheRead / prompt * 100).toFixed(1)}%` : '—');
   set('m-total-note', today.total_requests != null
-    ? `${currentLang === 'zh' ? '今日' : 'Today'} ${fmt(Number(today.total_requests || 0))} · ${currentLang === 'zh' ? '保留' : 'Retained'} ${fmt(Number(retained.total_requests || 0))}`
+    ? `${currentLang === 'zh' ? '今日' : 'Today'} ${fmt(Number(today.total_requests || 0))} · ${currentLang === 'zh' ? '累计' : 'All-time'} ${fmt(Number(retained.total_requests || 0))}`
     : `${overviewDays} ${currentLang === 'zh' ? '天' : 'days'}`);
   set('m-tokens-note', today.input_tokens != null
-    ? `${currentLang === 'zh' ? '今日' : 'Today'} ${compactTotal(totalUsageTokens(today))} · ${currentLang === 'zh' ? '保留' : 'Retained'} ${compactTotal(totalUsageTokens(retained))}`
+    ? `${currentLang === 'zh' ? '今日' : 'Today'} ${compactTotal(totalUsageTokens(today))} · ${currentLang === 'zh' ? '累计' : 'All-time'} ${compactTotal(totalUsageTokens(retained))}`
     : `${fmtTok(input)} ${currentLang === 'zh' ? '输入' : 'input'} · ${fmtTok(output)} ${currentLang === 'zh' ? '输出' : 'output'}`);
   set('m-cache-hit-note', `${fmtTok(cacheRead)} ${currentLang === 'zh' ? '读取' : 'read'}`);
   set('m-cost-note', today.est_cost_usd != null
-    ? `${currentLang === 'zh' ? '今日' : 'Today'} ${fmtCost(today.est_cost_usd)} · ${currentLang === 'zh' ? '保留' : 'Retained'} ${fmtCost(retained.est_cost_usd)}`
+    ? `${currentLang === 'zh' ? '今日' : 'Today'} ${fmtCost(today.est_cost_usd)} · ${currentLang === 'zh' ? '累计' : 'All-time'} ${fmtCost(retained.est_cost_usd)}`
     : t('analytics.currencyUSD'));
   set('m-throughput', `${Number(lastMinute.total_requests || 0).toLocaleString()} RPM`);
   set('m-throughput-note', `${fmtTok(totalUsageTokens(lastMinute))} TPM`);

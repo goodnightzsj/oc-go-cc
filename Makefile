@@ -9,11 +9,13 @@ CMD = ./cmd/routatic-proxy
 
 # ── Development ────────────────────────────────────────────────────
 
-build: build-css
+build:
+	@$(MAKE) build-css || echo "[WARN] CSS build failed, using existing style.css"
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
 	@ln -sf $(BINARY) bin/$(LEGACY_BINARY)
 
-build-ui: build-css
+build-ui:
+	@$(MAKE) build-css || echo "[WARN] CSS build failed, using existing style.css"
 	CGO_ENABLED=1 go build -tags darwin -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
 	@ln -sf $(BINARY) bin/$(LEGACY_BINARY)
 

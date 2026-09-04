@@ -55,6 +55,7 @@ const TRANSLATIONS = {
     'quota.percent': '%',
     'quota.total': 'Total',
     'quota.poolShare': 'Pool-equivalent (× 60/allowance), reconciles with the official monthly percent',
+    'quota.indexLagNotice': 'Official usage index refreshes ~8h behind. Current display: index-closed records + proxy real-time traffic.',
     'cmd.gotoQuota': 'Go to Quota',
     'overview.title': 'Dashboard',
     'analytics.title': 'Usage Analytics',
@@ -343,6 +344,7 @@ const TRANSLATIONS = {
     'quota.percent': '%',
     'quota.total': '总计',
     'quota.poolShare': '池等效合计（×60/额度），与官方月度占比一致',
+    'quota.indexLagNotice': '官方用量索引约 8 小时刷新，当前显示：索引已闭合记录 + 代理实时流量。',
     'cmd.gotoQuota': '前往套餐额度',
     'overview.title': '仪表盘',
     'analytics.title': '用量分析',
@@ -3560,7 +3562,11 @@ const QuotaModule = {
       this.renderModelLimits(view);
       return;
     }
-    root.innerHTML = accounts.map(account => this.renderAccount(account)).join('');
+    root.innerHTML = accounts.map(account => this.renderAccount(account)).join('') +
+      `<div class="quota-index-lag-notice">
+        <svg width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 3a1 1 0 011 1v3.586l1.707 1.707a1 1 0 01-1.414 1.414l-2-2A1 1 0 017 9V5a1 1 0 011-1z"/></svg>
+        <span>${t('quota.indexLagNotice')}</span>
+      </div>`;
     this.renderSummary(accounts);
     this.tickCountdowns();
     this.renderModelLimits(view);

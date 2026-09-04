@@ -65,7 +65,9 @@ This repository provides a cross-platform GUI for `routatic-proxy`:
 - **Linux** — Browser-based GUI via `xdg-open` (default, no CGO required). For system tray: build with `CGO_ENABLED=1` and install `libappindicator-gtk3-devel` (Fedora) or `libayatana-appindicator3-dev` (Ubuntu/Debian).
 - **Windows** — GUI not supported (CLI only).
 
-**Dashboard tabs:** Overview, History, Performance, Fallback, Usage Analytics, and Settings.
+**Dashboard tabs:** Overview, History, Performance, Fallback, Usage Analytics, Quota, and Settings.
+
+The **Quota** tab reads the OpenCode Go plan windows (5-hour rolling, weekly, monthly) live with your configured OpenCode Go key(s) and shows the remaining budget, spend, and reset countdown per window. Keys never reach the browser — the dashboard only receives a masked hint such as `••••a1b2`. The upstream usage endpoint is undocumented, so the response shape may change; responses are cached for 30 seconds.
 
 ```bash
 routatic-proxy ui
@@ -180,6 +182,10 @@ This project uses a dual release channel system. See [RELEASE_PROCESS.md](RELEAS
 ## Contributing
 
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, architecture overview, and how to submit pull requests.
+
+## Acknowledgements
+
+- The Quota tab's plan-window parsing is ported from [ocusage](https://github.com/muzimu217/ocusage) (MIT), which documented the undocumented OpenCode Go usage endpoint and the response shapes it returns in the wild.
 
 ## License
 

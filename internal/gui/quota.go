@@ -263,6 +263,22 @@ func (s *Server) monthlyModelUsage(accounts []quotaAccount, limits *quota.ModelL
 	for _, b := range breakdown {
 		raw[normalizeModelName(b.Model)] += b.EstCostUSD
 	}
+	// Scale raw ledger spend so the sum of the rows matches the official
+	// monthly total (the pool tracks pricing-internal multipliers that
+	// 60/allowance only approximates; calibrating against the authoritative
+	// window keeps the per-model rows and the total reconciling with the
+	// official remaining percent). Without an official total we fall back to
+	// the allowance-derived multiplier.
+	var rawSum float64
+	for _, v := range raw {
+		rawSum += v
+	}
+	scale := 0.0
+	if len(accounts) > 0 && accounts[0].Report != nil && accounts[0].Report.Monthly != nil && accounts[0].Report.Monthly.UsedDollars != nil {
+		if official := *accounts[0].Report.Monthly.UsedDollars; official > 0 && rawSum > 0 {
+			scale = official / rawSum
+		}
+	}
 	rows := make([]quotaModelUsage, 0, len(limits.Models))
 	for _, m := range limits.Models {
 		spent, used := raw[normalizeModelName(m.Model)]
@@ -271,9 +287,14 @@ func (s *Server) monthlyModelUsage(accounts []quotaAccount, limits *quota.ModelL
 			// of the plan table stays out of the way.
 			continue
 		}
-		weight, percent := 1.0, 0.0
-		if m.AllowanceUSD > 0 {
+		weight := 1.0
+		if scale > 0 {
+			weight = scale
+		} else if m.AllowanceUSD > 0 {
 			weight = 60 / m.AllowanceUSD
+		}
+		percent := 0.0
+		if m.AllowanceUSD > 0 && weight > 0 {
 			percent = spent * weight / 60 * 100
 		}
 		rows = append(rows, quotaModelUsage{Model: m.Model, UsedUSD: spent * weight, AllowanceUSD: m.AllowanceUSD, Percent: percent})

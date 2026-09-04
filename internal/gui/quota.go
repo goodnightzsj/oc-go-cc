@@ -48,12 +48,12 @@ type quotaResponse struct {
 }
 
 // quotaModelUsage is one row of the console-style monthly usage table: what
-// this instance spent on the model in the current plan month, converted to
-// shared-$60-pool equivalents (raw cost × 60/allowance — the same per-model
-// multiplier the OpenCode ledger applies, e.g. DeepSeek V4 Flash ×2), the
-// allowance from the docs, and the pool-equivalent share it represents.
-// Pool equivalents sum up across models and are comparable to the official
-// window totals.
+// this instance spent on the model in the current plan month, priced in the
+// same currency as the docs allowance (the official Go price, not pool
+// equivalents), so used_usd is directly comparable to allowance_usd. The
+// shared-$60-pool conversion (× 60/allowance — the per-model multiplier the
+// OpenCode ledger applies, e.g. DeepSeek V4 Flash ×2) is applied only to the
+// table's total row, which reconciles with the official monthly percent.
 type quotaModelUsage struct {
 	Model        string  `json:"model"`
 	UsedUSD      float64 `json:"used_usd"`
@@ -236,7 +236,7 @@ func (s *Server) limitsLoop(ctx context.Context) {
 // current plan month. The upstream usage endpoint only reports window
 // percents, never per-model numbers, so spend comes from this instance's own
 // SQLite ledger: each model's stored cost within [monthly resets_at − 31d,
-// resets_at), converted to shared-pool equivalents (× 60/allowance).
+// resets_at), priced in the official Go price currency.
 //
 // The monthly window is a 31-day subscription cycle, not a calendar month:
 // the OpenCode ledger's first usage record (2026-08-06T06:56Z) lands minutes
@@ -287,17 +287,25 @@ func (s *Server) monthlyModelUsage(accounts []quotaAccount, limits *quota.ModelL
 			// of the plan table stays out of the way.
 			continue
 		}
-		weight := 1.0
-		if scale > 0 {
-			weight = scale
-		} else if m.AllowanceUSD > 0 {
-			weight = 60 / m.AllowanceUSD
+		// Row spend is priced in the official Go price currency: the ledger
+		// holds official prices, and the calibration can only move the cost
+		// toward the official total, so dividing the calibrated pool-equivalent
+		// spend back by the pool multiplier (× 60/allowance) keeps the row
+		// comparable to the docs allowance. A DeepSeek row can therefore never
+		// read "$46 used of $30" through double scaling — it shows ~$23 vs $30.
+		poolWeight := 1.0
+		if m.AllowanceUSD > 0 {
+			poolWeight = 60 / m.AllowanceUSD
+		}
+		rowUsed := spent
+		if scale > 0 && poolWeight > 0 {
+			rowUsed = spent * scale / poolWeight
 		}
 		percent := 0.0
-		if m.AllowanceUSD > 0 && weight > 0 {
-			percent = spent * weight / 60 * 100
+		if m.AllowanceUSD > 0 && rowUsed > 0 {
+			percent = rowUsed / m.AllowanceUSD * 100
 		}
-		rows = append(rows, quotaModelUsage{Model: m.Model, UsedUSD: spent * weight, AllowanceUSD: m.AllowanceUSD, Percent: percent})
+		rows = append(rows, quotaModelUsage{Model: m.Model, UsedUSD: rowUsed, AllowanceUSD: m.AllowanceUSD, Percent: percent})
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].UsedUSD != rows[j].UsedUSD {

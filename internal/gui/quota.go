@@ -48,9 +48,18 @@ type quotaResponse struct {
 }
 
 // quotaModelUsage is one row of the console-style monthly usage table: what
-// this instance actually spent on the model in the current plan month (raw
-// cost from the ledger, same figures the OpenCode console shows), the
-// allowance from the docs, and the share it represents.
+// this instance spent on the model in the current plan month, converted to
+// shared-$60-pool equivalents (raw cost × 60/allowance — the same per-model
+// multiplier the OpenCode ledger applies, e.g. DeepSeek V4 Flash ×2), the
+// allowance from the docs, and the pool-equivalent share it represents.
+// Pool equivalents sum up across models and are comparable to the official
+// window totals.
+type quotaModelUsage struct {
+	Model        string  `json:"model"`
+	UsedUSD      float64 `json:"used_usd"`
+	AllowanceUSD float64 `json:"allowance_usd"`
+	Percent      float64 `json:"percent"`
+}
 type quotaModelUsage struct {
 	Model        string  `json:"model"`
 	UsedUSD      float64 `json:"used_usd"`
@@ -233,7 +242,7 @@ func (s *Server) limitsLoop(ctx context.Context) {
 // current plan month. The upstream usage endpoint only reports window
 // percents, never per-model numbers, so spend comes from this instance's own
 // SQLite ledger: each model's stored cost within [monthly resets_at − 30d,
-// resets_at), matching the raw cost figures the OpenCode console reports.
+// resets_at), converted to shared-pool equivalents (× 60/allowance).
 func (s *Server) monthlyModelUsage(accounts []quotaAccount, limits *quota.ModelLimits) []quotaModelUsage {
 	if limits == nil || s.storage == nil {
 		return nil
@@ -262,11 +271,12 @@ func (s *Server) monthlyModelUsage(accounts []quotaAccount, limits *quota.ModelL
 			// of the plan table stays out of the way.
 			continue
 		}
-		percent := 0.0
+		weight, percent := 1.0, 0.0
 		if m.AllowanceUSD > 0 {
-			percent = spent / m.AllowanceUSD * 100
+			weight = 60 / m.AllowanceUSD
+			percent = spent * weight / 60 * 100
 		}
-		rows = append(rows, quotaModelUsage{Model: m.Model, UsedUSD: spent, AllowanceUSD: m.AllowanceUSD, Percent: percent})
+		rows = append(rows, quotaModelUsage{Model: m.Model, UsedUSD: spent * weight, AllowanceUSD: m.AllowanceUSD, Percent: percent})
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].UsedUSD != rows[j].UsedUSD {

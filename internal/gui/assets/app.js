@@ -48,7 +48,7 @@ const TRANSLATIONS = {
     'quota.endpoint': 'Endpoint {url}',
     'quota.unofficial': 'Undocumented upstream endpoint; the response shape may change.',
     'quota.modelLimits': 'Model usage this month',
-    'quota.modelLimitsNote': 'Allowances from Go docs · updated {time}',
+    'quota.modelLimitsNote': 'Usage × 60/allowance ($60-pool equivalents) · allowances from Go docs · updated {time}',
     'quota.model': 'Model',
     'quota.modelUsed': 'Usage this month',
     'quota.modelAllowance': 'Monthly quota',
@@ -335,7 +335,7 @@ const TRANSLATIONS = {
     'quota.endpoint': '数据源 {url}',
     'quota.unofficial': '上游端点未公开，响应结构可能变化。',
     'quota.modelLimits': '本月各模型用量',
-    'quota.modelLimitsNote': '额度来自 Go 文档 · 更新于 {time}',
+    'quota.modelLimitsNote': '用量按 ×60/额度折算为 $60 池等效 · 额度来自 Go 文档 · 更新于 {time}',
     'quota.model': '模型',
     'quota.modelUsed': '本月用量',
     'quota.modelAllowance': '每月配额',
@@ -3705,8 +3705,10 @@ const QuotaModule = {
         <td class="quota-model-number">${(m.percent || 0).toFixed(m.percent >= 10 ? 0 : 1)}%</td>
       </tr>`).join('');
     const totalUsed = rows.reduce((sum, m) => sum + (Number(m.used_usd) || 0), 0);
-    const monthly = view.accounts?.[0]?.report?.monthly;
-    const totalPercent = monthly?.used_percent != null ? Number(monthly.used_percent) : null;
+    // The total row must be the sum of the per-model rows (pool-equivalent
+    // spend × 60/allowance), so the two always reconcile. The official window
+    // percent stays on the account cards above.
+    const totalPercent = totalUsed > 0 ? totalUsed / 60 * 100 : null;
     root.innerHTML = `<div class="quota-model-head">
         <span class="quota-model-title">${t('quota.modelLimits')}</span>
         <span class="quota-model-meta">${t('quota.modelLimitsNote').replace('{time}', ml?.fetched_at ? fmtTime(ml.fetched_at) : '—')}</span>

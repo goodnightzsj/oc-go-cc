@@ -18,7 +18,36 @@ const TRANSLATIONS = {
     'tab.performance': 'Performance',
     'tab.fallback': 'Fallback',
     'tab.analytics': 'Analytics',
+    'tab.quota': 'Quota',
     'tab.settings': 'Settings',
+    'quota.title': 'Plan Quota',
+    'quota.refresh': 'Refresh',
+    'quota.bottleneck': 'Tightest window',
+    'quota.remaining': 'Remaining',
+    'quota.nextReset': 'Next reset',
+    'quota.plan': 'Plan',
+    'quota.rolling5h': '5-hour rolling',
+    'quota.weekly': 'Weekly',
+    'quota.monthly': 'Monthly',
+    'quota.used': 'Used',
+    'quota.limit': 'Limit',
+    'quota.left': 'Left',
+    'quota.leftShort': 'left',
+    'quota.resetsIn': 'Resets in {d}',
+    'quota.resetsAtTime': 'at {time}',
+    'quota.resetUnknown': 'Reset time unknown',
+    'quota.derived': 'Dollars derived from plan limits',
+    'quota.exhausted': 'Exhausted',
+    'quota.keyLabel': 'Key',
+    'quota.keyCount': '{n} keys',
+    'quota.noKey': 'No OpenCode Go API key configured',
+    'quota.noKeyHint': 'Add a key under Settings → OpenCode Go to see the plan quota here.',
+    'quota.loadFail': 'Could not load quota',
+    'quota.updated': 'Updated {time}',
+    'quota.cached': 'cached',
+    'quota.endpoint': 'Endpoint {url}',
+    'quota.unofficial': 'Undocumented upstream endpoint; the response shape may change.',
+    'cmd.gotoQuota': 'Go to Quota',
     'overview.title': 'Dashboard',
     'analytics.title': 'Usage Analytics',
     'analytics.refresh': 'Refresh',
@@ -270,6 +299,35 @@ const TRANSLATIONS = {
     'tab.fallback': '降级策略',
     'tab.settings': '设置',
     'tab.analytics': '用量分析',
+    'tab.quota': '套餐额度',
+    'quota.title': '套餐额度',
+    'quota.refresh': '刷新',
+    'quota.bottleneck': '最紧窗口',
+    'quota.remaining': '剩余额度',
+    'quota.nextReset': '下次重置',
+    'quota.plan': '套餐',
+    'quota.rolling5h': '5 小时滚动',
+    'quota.weekly': '本周',
+    'quota.monthly': '本月',
+    'quota.used': '已用',
+    'quota.limit': '限额',
+    'quota.left': '剩余',
+    'quota.leftShort': '剩余',
+    'quota.resetsIn': '{d} 后重置',
+    'quota.resetsAtTime': '{time}',
+    'quota.resetUnknown': '重置时间未知',
+    'quota.derived': '美元数按套餐限额推算',
+    'quota.exhausted': '已用满',
+    'quota.keyLabel': '密钥',
+    'quota.keyCount': '{n} 个密钥',
+    'quota.noKey': '未配置 OpenCode Go 密钥',
+    'quota.noKeyHint': '在「设置 → OpenCode Go」填入密钥后，即可在此查看套餐额度。',
+    'quota.loadFail': '额度加载失败',
+    'quota.updated': '更新于 {time}',
+    'quota.cached': '缓存',
+    'quota.endpoint': '数据源 {url}',
+    'quota.unofficial': '上游端点未公开，响应结构可能变化。',
+    'cmd.gotoQuota': '前往套餐额度',
     'overview.title': '仪表盘',
     'analytics.title': '用量分析',
     'analytics.refresh': '刷新',
@@ -555,6 +613,7 @@ function toggleLanguage() {
   // Analytics charts and distributions carry inline strings; reload them
   // so they pick up the new language instead of keeping stale ones.
   if (activeTab === 'analytics') AnalyticsModule.load(true);
+  if (QuotaModule.view) QuotaModule.render();
   if (lastOverviewView) renderOverviewUsage(lastOverviewView.data, lastOverviewView.trend, lastOverviewView.latency);
 }
 
@@ -939,6 +998,7 @@ function activateTab(name) {
   if (name === 'analytics' && AnalyticsModule && AnalyticsModule.load) {
     AnalyticsModule.load(true);
   }
+  if (name === 'quota') QuotaModule.load(true);
   refreshCurrentTab();
 }
 
@@ -1002,6 +1062,9 @@ async function refreshCurrentTab() {
   switch (activeTab) {
     case 'history':
       await refreshHistory();
+      break;
+    case 'quota':
+      await QuotaModule.load();
       break;
     case 'settings':
       await refreshConfig();
@@ -2243,6 +2306,9 @@ function executeCommand(action) {
     case 'goto-analytics':
       document.querySelector('[data-tab="analytics"]').click();
       break;
+    case 'goto-quota':
+      document.querySelector('[data-tab="quota"]').click();
+      break;
     case 'goto-settings':
       document.querySelector('[data-tab="settings"]').click();
       break;
@@ -2276,10 +2342,10 @@ document.addEventListener('keydown', function(e) {
       document.getElementById('history-search')?.focus();
     }
   }
-  // Tab shortcuts: Cmd/Ctrl + 1/2/3/4/5/6
-  if ((e.metaKey || e.ctrlKey) && ['1', '2', '3', '4', '5', '6'].includes(e.key)) {
+  // Tab shortcuts: Cmd/Ctrl + 1..7
+  if ((e.metaKey || e.ctrlKey) && ['1', '2', '3', '4', '5', '6', '7'].includes(e.key)) {
     e.preventDefault();
-    const tabs = ['overview', 'history', 'performance', 'fallback', 'analytics', 'settings'];
+    const tabs = ['overview', 'history', 'performance', 'fallback', 'analytics', 'quota', 'settings'];
     document.querySelector(`[data-tab="${tabs[parseInt(e.key) - 1]}"]`)?.click();
   }
   // Escape to close modals (use if-else to ensure only one action)
@@ -3405,3 +3471,279 @@ const AnalyticsModule = {
 
 // Initialize dates and listeners before the queued hash activation runs.
 AnalyticsModule.init();
+
+/* ── Plan quota (OpenCode Go 5h / weekly / monthly) ────────────── */
+// Fed by /api/quota, which reads the upstream usage endpoint with the
+// configured OpenCode Go key(s) and caches the answer for 30s. Gauges show the
+// REMAINING share of each window, which is the number that decides whether the
+// next request goes through.
+const QUOTA_WINDOWS = [
+  { key: 'rolling_5h', label: 'quota.rolling5h' },
+  { key: 'weekly', label: 'quota.weekly' },
+  { key: 'monthly', label: 'quota.monthly' },
+];
+// The dashboard polls every 3s; quota only moves as fast as real spend, so
+// unforced reloads are throttled well below the server-side cache TTL.
+const QUOTA_MIN_RELOAD_MS = 20000;
+const QUOTA_RING_RADIUS = 54;
+const QUOTA_RING_LENGTH = 2 * Math.PI * QUOTA_RING_RADIUS;
+
+const QuotaModule = {
+  view: null,
+  loading: false,
+  lastLoadedAt: 0,
+
+  init() {
+    document.getElementById('btn-refresh-quota')?.addEventListener('click', () => this.load(true));
+    // A single ticker drives every countdown on the page and idles while the
+    // Quota tab is hidden.
+    setInterval(() => { if (activeTab === 'quota') this.tickCountdowns(); }, 1000);
+  },
+
+  async load(force) {
+    if (this.loading) return;
+    if (!force && Date.now() - this.lastLoadedAt < QUOTA_MIN_RELOAD_MS) return;
+    this.loading = true;
+    const btn = document.getElementById('btn-refresh-quota');
+    if (btn && force) btn.disabled = true;
+    try {
+      const r = await fetch('/api/quota' + (force ? '?refresh=1' : ''));
+      if (!r.ok) throw new Error((await r.text()).trim() || ('HTTP ' + r.status));
+      this.view = await r.json();
+      this.lastLoadedAt = Date.now();
+      this.render();
+    } catch (e) {
+      this.renderError(e.message || String(e));
+    } finally {
+      this.loading = false;
+      if (btn) btn.disabled = false;
+    }
+  },
+
+  render() {
+    const view = this.view;
+    const root = document.getElementById('quota-accounts');
+    if (!view || !root) return;
+
+    const meta = [];
+    if (view.fetched_at) meta.push(t('quota.updated').replace('{time}', fmtTime(view.fetched_at)));
+    if (view.cached) meta.push(t('quota.cached'));
+    this.setText('quota-meta', meta.join(' · '));
+    this.setText('quota-endpoint', view.endpoint ? t('quota.endpoint').replace('{url}', view.endpoint) : '');
+
+    if (view.error) {
+      root.innerHTML = `<div class="quota-notice is-error"><strong>${t('quota.loadFail')}</strong><span>${escapeHtml(view.error)}</span></div>`;
+      this.clearSummary();
+      return;
+    }
+    const accounts = view.accounts || [];
+    if (!accounts.length) {
+      root.innerHTML = `<div class="quota-notice"><strong>${t('quota.noKey')}</strong><span>${t('quota.noKeyHint')}</span></div>`;
+      this.clearSummary();
+      return;
+    }
+    root.innerHTML = accounts.map(account => this.renderAccount(account, accounts.length > 1)).join('');
+    this.renderSummary(accounts);
+    this.tickCountdowns();
+  },
+
+  renderError(message) {
+    const root = document.getElementById('quota-accounts');
+    if (root) {
+      root.innerHTML = `<div class="quota-notice is-error"><strong>${t('quota.loadFail')}</strong><span>${escapeHtml(message)}</span></div>`;
+    }
+    this.clearSummary();
+  },
+
+  renderAccount(account, showKey) {
+    const head = showKey
+      ? `<div class="quota-account-head"><span class="quota-key">${t('quota.keyLabel')} <code>${escapeHtml(account.key_hint || '')}</code></span></div>`
+      : '';
+    if (account.error) {
+      return `<section class="quota-account">${head}
+        <div class="quota-notice is-error"><strong>${t('quota.loadFail')}</strong><span>${escapeHtml(account.error)}</span></div>
+      </section>`;
+    }
+    const windows = this.windowsOf(account);
+    if (!windows.length) {
+      return `<section class="quota-account">${head}
+        <div class="quota-notice is-error"><strong>${t('quota.loadFail')}</strong><span>${escapeHtml(t('quota.resetUnknown'))}</span></div>
+      </section>`;
+    }
+    return `<section class="quota-account">${head}
+      <div class="quota-window-grid">${windows.map(item => this.renderWindow(item)).join('')}</div>
+    </section>`;
+  },
+
+  renderWindow(item) {
+    const w = item.window;
+    const used = Math.min(100, Math.max(0, Number(w.used_percent || 0)));
+    const left = 100 - used;
+    const level = this.levelOf(used);
+    const offset = QUOTA_RING_LENGTH * (1 - left / 100);
+    const deadline = this.deadlineOf(w, item.fetchedAt);
+    const limit = w.limit_dollars != null ? Number(w.limit_dollars) : null;
+    const usedDollars = w.used_dollars != null ? Number(w.used_dollars) : null;
+    const leftDollars = limit != null && usedDollars != null ? Math.max(0, limit - usedDollars) : null;
+    const badge = used >= 100
+      ? `<span class="quota-badge is-crit">${t('quota.exhausted')}</span>`
+      : (w.status && w.status !== 'ok' ? `<span class="quota-badge is-warn">${escapeHtml(w.status)}</span>` : '');
+
+    return `<article class="quota-card level-${level}">
+      <header class="quota-card-head">
+        <span class="quota-card-label">${t(item.label)}</span>
+        ${badge}
+      </header>
+      <div class="quota-gauge">
+        <svg viewBox="0 0 128 128" aria-hidden="true">
+          <circle class="quota-gauge-track" cx="64" cy="64" r="${QUOTA_RING_RADIUS}"></circle>
+          <circle class="quota-gauge-fill" cx="64" cy="64" r="${QUOTA_RING_RADIUS}"
+                  stroke-dasharray="${QUOTA_RING_LENGTH.toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}"></circle>
+        </svg>
+        <div class="quota-gauge-center">
+          <strong>${left.toFixed(left >= 10 ? 0 : 1)}<span class="quota-unit">%</span></strong>
+          <span>${t('quota.leftShort')}</span>
+        </div>
+      </div>
+      <dl class="quota-figures">
+        <div><dt>${t('quota.used')}</dt><dd>${usedDollars != null ? fmtCost(usedDollars) : '—'}</dd></div>
+        <div><dt>${t('quota.limit')}</dt><dd>${limit != null ? fmtCost(limit) : '—'}</dd></div>
+        <div><dt>${t('quota.left')}</dt><dd class="quota-figure-strong">${leftDollars != null ? fmtCost(leftDollars) : '—'}</dd></div>
+      </dl>
+      <footer class="quota-card-foot">
+        <span class="quota-reset"${deadline != null ? ` data-deadline="${deadline}"` : ''}>${deadline != null ? '' : t('quota.resetUnknown')}</span>
+        ${w.percent_derived ? `<span class="quota-derived" title="${t('quota.derived')}">${t('quota.derived')}</span>` : ''}
+      </footer>
+    </article>`;
+  },
+
+  renderSummary(accounts) {
+    let tightest = null;
+    let nextReset = null;
+    let plan = '';
+    accounts.forEach(account => {
+      if (account.report?.plan) plan = account.report.plan;
+      this.windowsOf(account).forEach(item => {
+        const used = Number(item.window.used_percent || 0);
+        if (!tightest || used > Number(tightest.window.used_percent || 0)) tightest = item;
+        const deadline = this.deadlineOf(item.window, item.fetchedAt);
+        if (deadline != null && (nextReset == null || deadline < nextReset.deadline)) {
+          nextReset = { deadline, label: item.label };
+        }
+      });
+    });
+
+    const bottleneck = document.getElementById('quota-bottleneck');
+    if (tightest) {
+      const used = Math.min(100, Math.max(0, Number(tightest.window.used_percent || 0)));
+      const limit = tightest.window.limit_dollars != null ? Number(tightest.window.limit_dollars) : null;
+      const usedDollars = tightest.window.used_dollars != null ? Number(tightest.window.used_dollars) : null;
+      const leftDollars = limit != null && usedDollars != null ? Math.max(0, limit - usedDollars) : null;
+      if (bottleneck) bottleneck.className = 'metric-value quota-level-' + this.levelOf(used);
+      this.setText('quota-bottleneck', t(tightest.label));
+      this.setText('quota-bottleneck-note', `${used.toFixed(1)}% ${t('quota.used').toLowerCase()}`);
+      this.setText('quota-remaining', leftDollars != null ? fmtCost(leftDollars) : `${(100 - used).toFixed(1)}%`);
+      this.setText('quota-remaining-note', limit != null ? `${t('quota.limit')} ${fmtCost(limit)}` : '');
+    } else {
+      this.clearSummary();
+    }
+
+    const resetEl = document.getElementById('quota-next-reset');
+    if (resetEl) {
+      if (nextReset) {
+        resetEl.dataset.deadline = String(nextReset.deadline);
+        this.setText('quota-next-reset-note', `${t(nextReset.label)} · ${t('quota.resetsAtTime').replace('{time}', new Date(nextReset.deadline).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }))}`);
+      } else {
+        delete resetEl.dataset.deadline;
+        resetEl.textContent = '--';
+        this.setText('quota-next-reset-note', t('quota.resetUnknown'));
+      }
+    }
+    this.setText('quota-plan', plan || 'OpenCode Go');
+    // With a single key its hint is more useful than the count.
+    this.setText('quota-plan-note', accounts.length > 1
+      ? t('quota.keyCount').replace('{n}', accounts.length)
+      : (accounts[0]?.key_hint ? `${t('quota.keyLabel')} ${accounts[0].key_hint}` : ''));
+  },
+
+  clearSummary() {
+    ['quota-bottleneck', 'quota-remaining', 'quota-next-reset', 'quota-plan'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.textContent = '--';
+        delete el.dataset.deadline;
+      }
+    });
+    ['quota-bottleneck-note', 'quota-remaining-note', 'quota-next-reset-note', 'quota-plan-note'].forEach(id => this.setText(id, ''));
+    const bottleneck = document.getElementById('quota-bottleneck');
+    if (bottleneck) bottleneck.className = 'metric-value';
+  },
+
+  // tickCountdowns re-renders only the countdown text, so the gauges are not
+  // rebuilt every second.
+  tickCountdowns() {
+    const now = Date.now();
+    document.querySelectorAll('#tab-quota [data-deadline]').forEach(el => {
+      const remaining = Number(el.dataset.deadline) - now;
+      const text = fmtCountdown(remaining);
+      el.textContent = el.classList.contains('metric-value') ? text : t('quota.resetsIn').replace('{d}', text);
+    });
+  },
+
+  windowsOf(account) {
+    const report = account.report;
+    if (!report) return [];
+    return QUOTA_WINDOWS
+      .filter(spec => report[spec.key])
+      .map(spec => ({ label: spec.label, window: report[spec.key], fetchedAt: report.fetched_at }));
+  },
+
+  // Thresholds mirror ocusage's alert levels: red once a window is nearly gone,
+  // amber while it is going fast.
+  levelOf(usedPercent) {
+    if (usedPercent >= 90) return 'crit';
+    if (usedPercent >= 75) return 'warn';
+    return 'ok';
+  },
+
+  // deadlineOf prefers the absolute reset timestamp; a relative countdown is
+  // anchored to when the report was fetched, not to now, so a cached response
+  // does not restart the clock.
+  deadlineOf(w, fetchedAt) {
+    if (w.resets_at) {
+      const parsed = Date.parse(w.resets_at);
+      if (!Number.isNaN(parsed)) return parsed;
+    }
+    if (w.resets_in_sec != null) {
+      const base = fetchedAt ? Date.parse(fetchedAt) : NaN;
+      return (Number.isNaN(base) ? Date.now() : base) + Number(w.resets_in_sec) * 1000;
+    }
+    return null;
+  },
+
+  setText(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  },
+};
+
+// fmtCountdown renders a live countdown the way "2d 9h" / "3h 20m" / "12m 04s"
+// reads naturally, and stays at zero instead of going negative.
+function fmtCountdown(ms) {
+  const total = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const mins = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  const pad = n => String(n).padStart(2, '0');
+  if (currentLang === 'zh') {
+    if (days > 0) return `${days} 天 ${hours} 小时`;
+    if (hours > 0) return `${hours} 小时 ${pad(mins)} 分`;
+    return `${mins} 分 ${pad(secs)} 秒`;
+  }
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${pad(mins)}m`;
+  return `${mins}m ${pad(secs)}s`;
+}
+
+QuotaModule.init();

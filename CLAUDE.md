@@ -121,10 +121,15 @@ Precedence: `*_API_KEYS` → `*_API_KEY` → global `API_KEYS` → global `API_K
 - `internal/handlers/models.go` — `GET /v1/models` (OpenAI-style listing). Used by provider-switching tools like CC-Switch's "Fetch Models" button; sources IDs from `ModelRouter.ListModels` (config aliases + `model_overrides` keys + catalog canonical names).
 - `configs/config.example.json` — Reference config with all options documented.
 - `internal/gui/` — Embedded HTTP server for the dashboard (serves static assets + API endpoints).
-- `internal/gui/assets/` — HTML/CSS/JS for the dashboard (Overview, History, Analytics, Settings tabs).
+- `internal/gui/assets/` — HTML/CSS/JS for the dashboard (Overview, History, Analytics, Quota, Settings tabs).
+- `internal/quota/` — OpenCode Go plan quota reader (5-hour rolling / weekly / monthly windows). Parsing rules ported from [ocusage](https://github.com/muzimu217/ocusage) (MIT).
 - `internal/history/` — In-memory ring buffer (1000 entries, O(1) insert, thread-safe).
 - `internal/metrics/` — In-process request counters (received, streamed, success, failed, model distribution).
 - `internal/storage/` — SQLite persistence layer for request history, latency samples, and analytics.
+
+### Plan Quota (Quota tab)
+
+`GET /api/quota` reports the OpenCode Go plan windows for every configured Go key. The usage endpoint is derived from `opencode_go.base_url` by swapping the API suffix for `/usage`; a base URL that does not look like an OpenCode API endpoint is rejected instead of falling back to `opencode.ai`, so a key meant for a private mirror is never sent to the public host. Keys are fetched in parallel and each one's result (or error) is reported separately; the response carries only a masked key hint, never the key. Answers are cached for 30 seconds because the endpoint is undocumented and rate-limited — the dashboard's own poll never reaches upstream more often than that.
 
 ### GUI Config Editing
 

@@ -69,7 +69,7 @@ This repository provides a cross-platform GUI for `routatic-proxy`:
 
 The **Quota** tab reads the OpenCode Go plan windows (5-hour rolling, weekly, monthly) live with your configured OpenCode Go key(s) and shows the remaining budget, spend, and reset countdown per window. Keys never reach the browser — the dashboard only receives a masked hint such as `••••a1b2`. The upstream usage endpoint is undocumented, so the response shape may change; responses are cached for 30 seconds.
 
-Per-model monthly allowances are synced daily from the [Go docs](https://opencode.ai/docs/go) (zh page first, en fallback; pricing variants like Peak/Off-Peak merge into one row). The usage table lists only the models this instance has actually served, with their weighted spend this month (from the proxy's own ledger: raw cost × 60/allowance — a $15-allowance model counts 4× toward the shared $60 pool, $30 counts 2×, $60 counts 1×), quota, share, and the window total.
+Per-model monthly allowances are synced daily from the [Go docs](https://opencode.ai/docs/go) (zh page first, en fallback; pricing variants like Peak/Off-Peak merge into one row). The usage table lists only the models this instance has actually served, with their raw spend this month (from the proxy's own ledger — the same cost figures the OpenCode console shows), quota, share, and the window total.
 
 ```bash
 routatic-proxy ui

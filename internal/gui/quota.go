@@ -235,8 +235,14 @@ func (s *Server) limitsLoop(ctx context.Context) {
 // monthlyModelUsage builds the console-style per-model usage rows for the
 // current plan month. The upstream usage endpoint only reports window
 // percents, never per-model numbers, so spend comes from this instance's own
-// SQLite ledger: each model's stored cost within [monthly resets_at − 30d,
+// SQLite ledger: each model's stored cost within [monthly resets_at − 31d,
 // resets_at), converted to shared-pool equivalents (× 60/allowance).
+//
+// The monthly window is a 31-day subscription cycle, not a calendar month:
+// the OpenCode ledger's first usage record (2026-08-06T06:56Z) lands minutes
+// after the subscription start implied by resets_at (2026-09-06T06:44Z minus
+// 31 days = 2026-08-06T06:44Z). Sizing it as 30 days would drop 8/6 from the
+// window and undercount every opening day of the cycle.
 func (s *Server) monthlyModelUsage(accounts []quotaAccount, limits *quota.ModelLimits) []quotaModelUsage {
 	if limits == nil || s.storage == nil {
 		return nil
@@ -245,7 +251,7 @@ func (s *Server) monthlyModelUsage(accounts []quotaAccount, limits *quota.ModelL
 	if reset.IsZero() {
 		return nil
 	}
-	win, err := storage.NewAnalytics(s.storage).WindowBetween(reset.Add(-30*24*time.Hour), reset)
+	win, err := storage.NewAnalytics(s.storage).WindowBetween(reset.Add(-31*24*time.Hour), reset)
 	if err != nil {
 		return nil
 	}

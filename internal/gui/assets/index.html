@@ -40,6 +40,7 @@
     <button class="tab px-4 py-1.5 border-none bg-transparent text-[#98989d] hover:text-[#f5f5f7] hover:bg-[#3a3a3c] cursor-pointer text-[13px] rounded-t transition-colors" data-tab="performance" data-i18n="tab.performance">Performance</button>
     <button class="tab px-4 py-1.5 border-none bg-transparent text-[#98989d] hover:text-[#f5f5f7] hover:bg-[#3a3a3c] cursor-pointer text-[13px] rounded-t transition-colors" data-tab="fallback" data-i18n="tab.fallback">Fallback</button>
     <button class="tab px-4 py-1.5 border-none bg-transparent text-[#98989d] hover:text-[#f5f5f7] hover:bg-[#3a3a3c] cursor-pointer text-[13px] rounded-t transition-colors" data-tab="analytics" data-i18n="tab.analytics">Analytics</button>
+    <button class="tab px-4 py-1.5 border-none bg-transparent text-[#98989d] hover:text-[#f5f5f7] hover:bg-[#3a3a3c] cursor-pointer text-[13px] rounded-t transition-colors" data-tab="quota" data-i18n="tab.quota">Quota</button>
     <button class="tab px-4 py-1.5 border-none bg-transparent text-[#98989d] hover:text-[#f5f5f7] hover:bg-[#3a3a3c] cursor-pointer text-[13px] rounded-t transition-colors" data-tab="settings" data-i18n="tab.settings">Settings</button>
   </nav>
 
@@ -304,9 +305,13 @@
           <span class="command-item-label" data-i18n="cmd.gotoAnalytics">Go to Analytics</span>
           <span class="command-item-shortcut"><kbd aria-keyshortcuts="Meta+5">⌘5</kbd></span>
         </div>
+        <div class="command-item" data-action="goto-quota" role="option" id="cmd-goto-quota">
+          <span class="command-item-label" data-i18n="cmd.gotoQuota">Go to Quota</span>
+          <span class="command-item-shortcut"><kbd aria-keyshortcuts="Meta+6">⌘6</kbd></span>
+        </div>
         <div class="command-item" data-action="goto-settings" role="option" id="cmd-goto-settings">
           <span class="command-item-label" data-i18n="cmd.gotoSettings">Go to Settings</span>
-          <span class="command-item-shortcut"><kbd aria-keyshortcuts="Meta+6">⌘6</kbd></span>
+          <span class="command-item-shortcut"><kbd aria-keyshortcuts="Meta+7">⌘7</kbd></span>
         </div>
         <div class="command-item" data-action="refresh" role="option" id="cmd-refresh">
           <span class="command-item-label" data-i18n="cmd.refreshData">Refresh Data</span>
@@ -469,6 +474,48 @@
         </section>
       </div>
       <span class="analytics-retained-range" id="analytics-retained-range"></span>
+    </div>
+  </div>
+
+  <!-- Quota Tab -->
+  <div class="tab-content flex-1 overflow-y-auto" id="tab-quota">
+    <div class="page-shell quota-page">
+      <div class="page-heading">
+        <div>
+          <h1 data-i18n="quota.title">Plan Quota</h1>
+          <span class="page-meta" id="quota-meta"></span>
+          <span class="page-meta quota-endpoint" id="quota-endpoint"></span>
+        </div>
+        <div class="analytics-controls">
+          <button class="btn btn-small" id="btn-refresh-quota" data-i18n="quota.refresh">Refresh</button>
+        </div>
+      </div>
+
+      <div class="metric-band metric-grid usage-metrics quota-metrics" aria-label="Quota summary">
+        <div class="metric-cell">
+          <div class="metric-label" data-i18n="quota.bottleneck">Tightest window</div>
+          <div class="metric-value" id="quota-bottleneck">--</div>
+          <div class="metric-note" id="quota-bottleneck-note"></div>
+        </div>
+        <div class="metric-cell">
+          <div class="metric-label" data-i18n="quota.remaining">Remaining</div>
+          <div class="metric-value" id="quota-remaining">--</div>
+          <div class="metric-note" id="quota-remaining-note"></div>
+        </div>
+        <div class="metric-cell">
+          <div class="metric-label" data-i18n="quota.nextReset">Next reset</div>
+          <div class="metric-value" id="quota-next-reset">--</div>
+          <div class="metric-note" id="quota-next-reset-note"></div>
+        </div>
+        <div class="metric-cell">
+          <div class="metric-label" data-i18n="quota.plan">Plan</div>
+          <div class="metric-value" id="quota-plan">--</div>
+          <div class="metric-note" id="quota-plan-note"></div>
+        </div>
+      </div>
+
+      <div id="quota-accounts" class="quota-accounts" aria-live="polite"></div>
+      <p class="quota-disclaimer" data-i18n="quota.unofficial">Undocumented upstream endpoint; the response shape may change.</p>
     </div>
   </div>
 

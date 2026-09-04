@@ -60,6 +60,11 @@ type Server struct {
 	logger            *slog.Logger
 	catalogMu         sync.Mutex
 
+	// Cached plan-quota response; see quotaCacheTTL.
+	quotaMu       sync.Mutex
+	quotaCache    *quotaResponse
+	quotaCacheFor string
+
 	storage *storage.Database
 }
 
@@ -180,6 +185,7 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 	mux.HandleFunc("/api/proxy/stop", s.handleProxyStop)
 	mux.HandleFunc("/api/catalog/lock", s.handleCatalogLock)
 	mux.HandleFunc("/api/catalog/sync", s.handleCatalogSync)
+	mux.HandleFunc("/api/quota", s.handleQuota)
 	mux.HandleFunc("/api/test/send", s.handleTestSend)
 
 	// New endpoints for advanced GUI features

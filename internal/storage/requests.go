@@ -371,7 +371,9 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 	for rows.Next() {
 		var rec history.RequestRecord
 		var startTimeStr string
-		var detailsKnown, streaming, success int
+		// Imported official rows carry NULL streaming/success/details_known;
+		// scan them as nullable booleans instead of failing on NULL.
+		var detailsKnown, streaming, success sql.NullInt64
 
 		var attempt sql.NullInt64
 		var costUSD sql.NullFloat64
@@ -424,9 +426,9 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		}
 
 		rec.StartTime, _ = time.Parse(time.RFC3339Nano, startTimeStr)
-		rec.Streaming = streaming == 1
-		rec.Success = success == 1
-		rec.DetailsKnown = detailsKnown == 1
+		rec.Streaming = streaming.Valid && streaming.Int64 == 1
+		rec.Success = success.Valid && success.Int64 == 1
+		rec.DetailsKnown = detailsKnown.Valid && detailsKnown.Int64 == 1
 		rec.Duration = time.Duration(rec.Duration) * time.Millisecond
 
 		records = append(records, rec)

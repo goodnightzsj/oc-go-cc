@@ -3702,7 +3702,7 @@ const QuotaModule = {
         <td>${escapeHtml(m.model)}</td>
         <td class="quota-model-number">${m.used_usd != null ? fmtCost(m.used_usd) : '—'}</td>
         <td class="quota-model-number">${m.allowance_usd != null ? fmtCost(m.allowance_usd) : '—'}</td>
-        <td class="quota-model-number">${(m.percent || 0).toFixed(m.percent >= 10 ? 0 : 1)}%</td>
+        <td class="quota-model-number">${(m.percent || 0).toFixed(1)}%</td>
       </tr>`).join('');
     const totalUsed = rows.reduce((sum, m) => sum + (Number(m.used_usd) || 0), 0);
     // The total row must be the sum of the per-model rows (pool-equivalent

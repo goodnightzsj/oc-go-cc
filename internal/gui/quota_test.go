@@ -231,7 +231,8 @@ func TestHandleQuotaMonthlyModelUsage(t *testing.T) {
 
 	// DeepSeek V4 Flash: $11.45 of raw spend → ×2 toward the $60 pool
 	// ($30 allowance). GLM-5.2: $2.00 → ×1. Both fall inside the current plan
-	// month window [reset-30d, reset); an older record must not count.
+	// month window [reset-31d, reset) (31-day subscription cycle); an older
+	// record must not count.
 	for _, rec := range []history.RequestRecord{
 		{ID: "quota-dsf-1", Model: "deepseek-v4-flash", StartTime: reset.Add(-5 * 24 * time.Hour), CostUSD: 10.0, CostKnown: true, CostSource: "estimated"},
 		{ID: "quota-dsf-2", Model: "deepseek-v4-flash", StartTime: reset.Add(-2 * 24 * time.Hour), CostUSD: 1.45, CostKnown: true, CostSource: "estimated"},

@@ -266,10 +266,13 @@ func providerRequestCandidatesForSync(ctx context.Context, tx *sql.Tx, minTime, 
 		var startTime string
 		var durationMS int64
 		var detailsKnown, usageTrusted int
-		if err := rows.Scan(&row.id, &startTime, &durationMS, &row.model, &row.provider, &row.scenario, &row.input, &row.output,
+		var provider, scenario sql.NullString
+		if err := rows.Scan(&row.id, &startTime, &durationMS, &row.model, &provider, &scenario, &row.input, &row.output,
 			&row.cacheRead, &row.cacheNew, &row.cost, &row.costSource, &detailsKnown, &usageTrusted); err != nil {
 			return nil, err
 		}
+		row.provider = provider.String
+		row.scenario = scenario.String
 		startedAt, err := time.Parse(time.RFC3339Nano, startTime)
 		if err != nil {
 			return nil, fmt.Errorf("parse request %q start time: %w", row.id, err)

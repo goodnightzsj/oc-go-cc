@@ -377,12 +377,13 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		var costUSD sql.NullFloat64
 		var costSource sql.NullString
 		var errorMsg sql.NullString
+		var provider, scenario sql.NullString
 		var peakMul float64
 		err := rows.Scan(
 			&rec.ID,
 			&rec.Model,
-			&rec.Provider,
-			&rec.Scenario,
+			&provider,
+			&scenario,
 			&startTimeStr,
 			&rec.Duration,
 			&rec.InputTokens,
@@ -401,6 +402,8 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		if err != nil {
 			return nil, err
 		}
+		rec.Provider = provider.String
+		rec.Scenario = scenario.String
 		rec.PeakMultiplier = peakMul
 		if attempt.Valid {
 			rec.Attempt = int(attempt.Int64)

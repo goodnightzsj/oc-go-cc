@@ -17,6 +17,15 @@ import (
 // every open tab would hammer opencode.ai and earn a 429.
 const quotaCacheTTL = 30 * time.Second
 
+// limitsRefreshTTL bounds how often the per-model allowance table is pulled
+// from the Go docs page. The table changes rarely (new models, adjusted
+// allowances) and is refreshed once a day by limitsLoop; a failed refresh
+// keeps the previous snapshot.
+const limitsRefreshTTL = 24 * time.Hour
+
+// limitsFetchTimeout is the per-attempt bound for pulling the docs page.
+const limitsFetchTimeout = 20 * time.Second
+
 // quotaAccount is the quota picture for one configured API key. Report and Error
 // are mutually exclusive.
 type quotaAccount struct {
@@ -26,12 +35,13 @@ type quotaAccount struct {
 }
 
 type quotaResponse struct {
-	Endpoint   string         `json:"endpoint"`
-	Accounts   []quotaAccount `json:"accounts"`
-	FetchedAt  time.Time      `json:"fetched_at"`
-	TTLSeconds int            `json:"ttl_seconds"`
-	Cached     bool           `json:"cached"`
-	Error      string         `json:"error,omitempty"`
+	Endpoint    string             `json:"endpoint"`
+	Accounts    []quotaAccount     `json:"accounts"`
+	ModelLimits *quota.ModelLimits `json:"model_limits,omitempty"`
+	FetchedAt   time.Time          `json:"fetched_at"`
+	TTLSeconds  int                `json:"ttl_seconds"`
+	Cached      bool               `json:"cached"`
+	Error       string             `json:"error,omitempty"`
 }
 
 // maskKeyHint renders a key as a stable, non-reversible label. Only the last
@@ -96,10 +106,14 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := quotaResponse{
-		Endpoint:   endpoint,
-		Accounts:   fetchQuotaAccounts(r.Context(), endpoint, keys),
-		FetchedAt:  time.Now().UTC(),
-		TTLSeconds: int(quotaCacheTTL.Seconds()),
+		Endpoint:    endpoint,
+		Accounts:    fetchQuotaAccounts(r.Context(), endpoint, keys),
+		ModelLimits: s.ensureModelLimits(r.Context()),
+		FetchedAt:   time.Now().UTC(),
+		TTLSeconds:  int(quotaCacheTTL.Seconds()),
+	}
+	if s.met != nil {
+		annotateUsedModels(resp.ModelLimits, s.met.GetSnapshot().ModelCounts)
 	}
 	s.storeQuota(endpoint, keys, resp)
 	writeJSON(w, resp)
@@ -167,4 +181,74 @@ func (s *Server) storeQuota(endpoint string, keys []string, resp quotaResponse) 
 func quotaCacheKey(endpoint string, keys []string) string {
 	sum := sha256.Sum256([]byte(endpoint + "\x00" + strings.Join(keys, "\x00")))
 	return hex.EncodeToString(sum[:])
+}
+
+// ensureModelLimits returns the cached per-model allowance snapshot, fetching
+// it when missing or older than limitsRefreshTTL. A failed refresh keeps the
+// previous snapshot (possibly nil, which just omits the section).
+func (s *Server) ensureModelLimits(ctx context.Context) *quota.ModelLimits {
+	s.limitsMu.Lock()
+	defer s.limitsMu.Unlock()
+	if s.modelLimits != nil && time.Since(s.modelLimits.FetchedAt) < limitsRefreshTTL {
+		return s.modelLimits
+	}
+	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limitsFetchTimeout)
+	defer cancel()
+	lim, err := quota.FetchModelLimits(fetchCtx, &http.Client{Timeout: limitsFetchTimeout}, s.modelLimitsURL...)
+	if err != nil {
+		return s.modelLimits
+	}
+	s.modelLimits = lim
+	return lim
+}
+
+// limitsLoop refreshes the per-model allowance table once a day; it is
+// otherwise identical to the handler-side refresh.
+func (s *Server) limitsLoop(ctx context.Context) {
+	ticker := time.NewTicker(limitsRefreshTTL)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.ensureModelLimits(context.Background())
+		}
+	}
+}
+
+// annotateUsedModels flags the docs-table entries that match models the proxy
+// has served requests for since startup, so the UI can lead with the models
+// this instance actually routes to. Names are normalized to lowercase
+// alphanumerics with variant suffixes stripped, so the proxy's
+// "deepseek-v4-flash" matches the docs' "DeepSeek V4 Flash (Off-Peak)".
+func annotateUsedModels(limits *quota.ModelLimits, counts map[string]int64) {
+	if limits == nil || len(counts) == 0 {
+		return
+	}
+	used := make(map[string]bool, len(counts))
+	for name, n := range counts {
+		if n > 0 {
+			used[normalizeModelName(name)] = true
+		}
+	}
+	for i := range limits.Models {
+		if used[normalizeModelName(limits.Models[i].Model)] {
+			limits.Models[i].Used = true
+		}
+	}
+}
+
+func normalizeModelName(name string) string {
+	name = strings.ToLower(name)
+	if i := strings.IndexByte(name, '('); i >= 0 {
+		name = name[:i]
+	}
+	var b strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }

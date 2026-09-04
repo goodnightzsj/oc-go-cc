@@ -30,6 +30,7 @@ import (
 	"github.com/routatic/proxy/internal/daemon"
 	"github.com/routatic/proxy/internal/history"
 	"github.com/routatic/proxy/internal/metrics"
+	"github.com/routatic/proxy/internal/quota"
 	"github.com/routatic/proxy/internal/storage"
 )
 
@@ -64,6 +65,12 @@ type Server struct {
 	quotaMu       sync.Mutex
 	quotaCache    *quotaResponse
 	quotaCacheFor string
+
+	// Per-model allowance table synced daily from the Go docs; see
+	// limitsRefreshTTL. modelLimitsURL overrides the docs URLs (tests).
+	limitsMu       sync.Mutex
+	modelLimits    *quota.ModelLimits
+	modelLimitsURL []string
 
 	storage *storage.Database
 }
@@ -157,6 +164,11 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 			s.guiPort.Store(int32(p))
 		}
 	}
+
+	// Refresh the per-model allowance table from the Go docs daily so the
+	// quota page stays current even when nobody opens it; the handler's
+	// ensureModelLimits covers the first request after startup.
+	go s.limitsLoop(ctx)
 
 	mux := http.NewServeMux()
 

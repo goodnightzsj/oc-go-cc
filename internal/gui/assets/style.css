@@ -1210,6 +1210,18 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .quota-notice.is-error strong { color: var(--ui-red); }
 .quota-disclaimer { margin: 16px 0 0; color: var(--ui-muted); font-size: 10px; }
 
+/* Per-model allowance table — reuses the analytics table tokens so the quota
+   page stays on the dashboard palette. */
+.quota-model-limits { margin-top: 20px; }
+.quota-model-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.quota-model-title { color: var(--ui-text); font-size: 12px; font-weight: 600; }
+.quota-model-meta { color: var(--ui-muted); font-size: 10px; }
+.quota-model-scroll { max-height: 300px; overflow-y: auto; }
+.quota-model-table { min-width: 460px; }
+.quota-model-allowance, .quota-model-weight { text-align: right; font-variant-numeric: tabular-nums; }
+.quota-model-weight { color: var(--ui-muted); }
+.quota-mix-note { margin: 8px 0 0; color: var(--ui-muted); font-size: 10px; line-height: 1.5; }
+
 @media (max-width: 900px) {
   .quota-window-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

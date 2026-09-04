@@ -47,6 +47,13 @@ const TRANSLATIONS = {
     'quota.cached': 'cached',
     'quota.endpoint': 'Endpoint {url}',
     'quota.unofficial': 'Undocumented upstream endpoint; the response shape may change.',
+    'quota.modelLimits': 'Model monthly allowances',
+    'quota.modelLimitsNote': 'Go docs · updated {time}',
+    'quota.modelLimitsUsed': 'Used models · Go docs · updated {time}',
+    'quota.model': 'Model',
+    'quota.modelAllowance': 'Monthly allowance',
+    'quota.weight': 'Weight',
+    'quota.mixNote': 'Mixed usage: spend accrues into one shared pool weighted by allowance — $15 models count 4×, $30 count 2×, $60 count 1× (monthly pool $60).',
     'cmd.gotoQuota': 'Go to Quota',
     'overview.title': 'Dashboard',
     'analytics.title': 'Usage Analytics',
@@ -327,6 +334,13 @@ const TRANSLATIONS = {
     'quota.cached': '缓存',
     'quota.endpoint': '数据源 {url}',
     'quota.unofficial': '上游端点未公开，响应结构可能变化。',
+    'quota.modelLimits': '各模型每月使用额度',
+    'quota.modelLimitsNote': '来自 Go 文档 · 更新于 {time}',
+    'quota.modelLimitsUsed': '常用模型 · 来自 Go 文档 · 更新于 {time}',
+    'quota.model': '模型',
+    'quota.modelAllowance': '每月使用额度',
+    'quota.weight': '权重',
+    'quota.mixNote': '混用计费：各模型消费按额度折算成权重累计进同一额度池——$15 模型按 4×、$30 按 2×、$60 按 1× 计入（月池上限 $60）。',
     'cmd.gotoQuota': '前往套餐额度',
     'overview.title': '仪表盘',
     'analytics.title': '用量分析',
@@ -3534,17 +3548,20 @@ const QuotaModule = {
     if (view.error) {
       root.innerHTML = `<div class="quota-notice is-error"><strong>${t('quota.loadFail')}</strong><span>${escapeHtml(view.error)}</span></div>`;
       this.clearSummary();
+      this.renderModelLimits(view);
       return;
     }
     const accounts = view.accounts || [];
     if (!accounts.length) {
       root.innerHTML = `<div class="quota-notice"><strong>${t('quota.noKey')}</strong><span>${t('quota.noKeyHint')}</span></div>`;
       this.clearSummary();
+      this.renderModelLimits(view);
       return;
     }
-    root.innerHTML = accounts.map(account => this.renderAccount(account, accounts.length > 1)).join('');
+    root.innerHTML = accounts.map(account => this.renderAccount(account)).join('');
     this.renderSummary(accounts);
     this.tickCountdowns();
+    this.renderModelLimits(view);
   },
 
   renderError(message) {
@@ -3555,9 +3572,9 @@ const QuotaModule = {
     this.clearSummary();
   },
 
-  renderAccount(account, showKey) {
-    const head = showKey
-      ? `<div class="quota-account-head"><span class="quota-key">${t('quota.keyLabel')} <code>${escapeHtml(account.key_hint || '')}</code></span></div>`
+  renderAccount(account) {
+    const head = account.key_hint
+      ? `<div class="quota-account-head"><span class="quota-key">${t('quota.keyLabel')} <code>${escapeHtml(account.key_hint)}</code></span></div>`
       : '';
     if (account.error) {
       return `<section class="quota-account">${head}
@@ -3660,10 +3677,45 @@ const QuotaModule = {
       }
     }
     this.setText('quota-plan', plan || 'OpenCode Go');
-    // With a single key its hint is more useful than the count.
-    this.setText('quota-plan-note', accounts.length > 1
-      ? t('quota.keyCount').replace('{n}', accounts.length)
-      : (accounts[0]?.key_hint ? `${t('quota.keyLabel')} ${accounts[0].key_hint}` : ''));
+    this.setText('quota-plan-note', t('quota.keyCount').replace('{n}', accounts.length));
+  },
+
+  // renderModelLimits renders the per-model allowance table synced from the
+  // Go docs (daily). It is key-independent, so it appears once per page. When
+  // the proxy has served some of the listed models this session, only those
+  // ("common models") are shown.
+  renderModelLimits(view) {
+    const root = document.getElementById('quota-model-limits');
+    if (!root) return;
+    const ml = view.model_limits;
+    const models = ml?.models || [];
+    const used = models.filter(m => m.used);
+    const shown = used.length ? used : models;
+    if (!shown.length) {
+      root.innerHTML = '';
+      return;
+    }
+    const rows = shown.map(m => `<tr><td>${escapeHtml(m.model)}</td><td class="quota-model-allowance">${fmtCost(m.allowance_usd)}</td><td class="quota-model-weight">${this.fmtWeight(m.allowance_usd)}</td></tr>`).join('');
+    const noteKey = used.length ? 'quota.modelLimitsUsed' : 'quota.modelLimitsNote';
+    root.innerHTML = `<div class="quota-model-head">
+        <span class="quota-model-title">${t('quota.modelLimits')}</span>
+        <span class="quota-model-meta">${t(noteKey).replace('{time}', ml.fetched_at ? fmtTime(ml.fetched_at) : '—')}</span>
+      </div>
+      <div class="analytics-table-scroll quota-model-scroll">
+        <table class="analytics-table quota-model-table">
+          <thead><tr><th>${t('quota.model')}</th><th>${t('quota.modelAllowance')}</th><th>${t('quota.weight')}</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="quota-mix-note">${t('quota.mixNote')}</p>`;
+  },
+
+  // fmtWeight renders the monthly-pool multiplier (60 / allowance): $15 → 4×,
+  // $30 → 2×, $60 → 1×, $100 → 0.6×.
+  fmtWeight(allowanceUSD) {
+    const w = 60 / Number(allowanceUSD);
+    if (Math.abs(w - Math.round(w)) < 0.01) return Math.round(w) + '×';
+    return w.toFixed(1) + '×';
   },
 
   clearSummary() {

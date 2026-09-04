@@ -7,8 +7,10 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/metrics"
 )
 
 func quotaTestServer(t *testing.T, upstream string, keys ...string) *Server {
@@ -16,8 +18,18 @@ func quotaTestServer(t *testing.T, upstream string, keys ...string) *Server {
 	cfg := &config.Config{Host: "127.0.0.1", Port: 3456}
 	cfg.OpenCodeGo.BaseURL = upstream + "/chat/completions"
 	cfg.OpenCodeGo.APIKeys = keys
-	return &Server{atomicCfg: config.NewAtomicConfig(cfg, "")}
+	// The allowance-table fetch must never leave the test process; point it at
+	// a dead local port so ensureModelLimits fails fast and stays empty.
+	return &Server{atomicCfg: config.NewAtomicConfig(cfg, ""), modelLimitsURL: []string{"http://127.0.0.1:1/no"}}
 }
+
+// docsFixture is a minimal Go docs allowance table in the zh layout.
+const docsFixture = `<html><body><table><tr><th>模型</th><th>输入</th><th>使用额度</th></tr>
+<tr><td>GLM-5.2</td><td>$1.40</td><td>$60</td></tr>
+<tr><td>Grok 4.6 (≤ 200K tokens)</td><td>$2.00</td><td>$15</td></tr>
+<tr><td>DeepSeek V4 Flash (Off-Peak)</td><td>$0.22</td><td>$30</td></tr>
+<tr><td>Omen &amp; Alpha</td><td>$0.20</td><td>$100</td></tr>
+<tr><td>No Allowance</td><td>$1.00</td><td>-</td></tr></table></body></html>`
 
 func getQuota(t *testing.T, srv *Server, query string) quotaResponse {
 	t.Helper()
@@ -135,6 +147,71 @@ func TestHandleQuotaWithoutKeysOrDerivableEndpoint(t *testing.T) {
 	// than send the key to the public host.
 	if resp := getQuota(t, bad, ""); resp.Error == "" || len(resp.Accounts) != 0 {
 		t.Errorf("expected a fail-closed error, got %+v", resp)
+	}
+}
+
+func TestHandleQuotaAttachesModelLimits(t *testing.T) {
+	var docsHits, usageHits atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/docs" {
+			docsHits.Add(1)
+			_, _ = w.Write([]byte(docsFixture))
+			return
+		}
+		usageHits.Add(1)
+		_, _ = w.Write([]byte(`{"rolling5h":{"usagePercent":1}}`))
+	}))
+	defer upstream.Close()
+
+	srv := quotaTestServer(t, upstream.URL, "sk-key")
+	srv.modelLimitsURL = []string{upstream.URL + "/docs"}
+	srv.met = metrics.New()
+	srv.met.RecordSuccess("glm-5.2", time.Millisecond)
+	srv.met.RecordSuccess("deepseek-v4-flash", time.Millisecond)
+
+	resp := getQuota(t, srv, "")
+	if resp.ModelLimits == nil || len(resp.ModelLimits.Models) != 4 {
+		t.Fatalf("model_limits = %+v, want 4 models", resp.ModelLimits)
+	}
+	first := resp.ModelLimits.Models[0]
+	if first.Model != "GLM-5.2" || first.AllowanceUSD != 60 {
+		t.Errorf("first model = %+v, want GLM-5.2 $60", first)
+	}
+	if resp.ModelLimits.Models[3].Model != "Omen & Alpha" {
+		t.Errorf("HTML entities must be unescaped, got %q", resp.ModelLimits.Models[3].Model)
+	}
+	if resp.ModelLimits.URL != upstream.URL+"/docs" {
+		t.Errorf("limits url = %q", resp.ModelLimits.URL)
+	}
+	// The two recorded models must be flagged used, including the variant
+	// match ("deepseek-v4-flash" ↔ "DeepSeek V4 Flash (Off-Peak)").
+	if !resp.ModelLimits.Models[0].Used || !resp.ModelLimits.Models[2].Used {
+		t.Errorf("used flags = %+v, want GLM-5.2 and DeepSeek flagged", []bool{resp.ModelLimits.Models[0].Used, resp.ModelLimits.Models[2].Used})
+	}
+	if resp.ModelLimits.Models[1].Used || resp.ModelLimits.Models[3].Used {
+		t.Error("unrecorded models must not be flagged used")
+	}
+	if docsHits.Load() != 1 {
+		t.Errorf("docs hits = %d, want 1", docsHits.Load())
+	}
+
+	// A cached quota response carries the same snapshot; the docs page is not
+	// re-fetched inside the TTL.
+	_ = getQuota(t, srv, "")
+	if docsHits.Load() != 1 {
+		t.Errorf("docs hits after cached response = %d, want 1", docsHits.Load())
+	}
+
+	// Stale (>24h) limits refresh on the next uncached request.
+	srv.limitsMu.Lock()
+	srv.modelLimits.FetchedAt = time.Now().Add(-25 * time.Hour)
+	srv.limitsMu.Unlock()
+	_ = getQuota(t, srv, "?refresh=1")
+	if docsHits.Load() != 2 {
+		t.Errorf("docs hits after stale refresh = %d, want 2", docsHits.Load())
+	}
+	if usageHits.Load() != 2 {
+		t.Errorf("usage hits = %d, want 2 (cached + forced)", usageHits.Load())
 	}
 }
 

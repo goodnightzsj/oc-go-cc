@@ -131,6 +131,8 @@ Precedence: `*_API_KEYS` → `*_API_KEY` → global `API_KEYS` → global `API_K
 
 `GET /api/quota` reports the OpenCode Go plan windows for every configured Go key. The usage endpoint is derived from `opencode_go.base_url` by swapping the API suffix for `/usage`; a base URL that does not look like an OpenCode API endpoint is rejected instead of falling back to `opencode.ai`, so a key meant for a private mirror is never sent to the public host. Keys are fetched in parallel and each one's result (or error) is reported separately; the response carries only a masked key hint, never the key. Answers are cached for 30 seconds because the endpoint is undocumented and rate-limited — the dashboard's own poll never reaches upstream more often than that.
 
+The response also carries `model_limits`: the per-model monthly allowance table parsed from the Go docs pages (`internal/quota/limits.go`, `ParseModelLimits`), refreshed daily by `limitsLoop` (24h TTL, lazy first fetch via `ensureModelLimits`, zh page with en fallback). Models the running proxy has actually served are flagged `used` (`annotateUsedModels`, name-normalized so `deepseek-v4-flash` matches the docs' `DeepSeek V4 Flash (Off-Peak)`), and the UI leads with those. Spend weights (60/allowance: $15 → 4×, $30 → 2×, $60 → 1× toward the shared monthly pool) reflect the mixing semantics the community has verified against the console.
+
 ### GUI Config Editing
 
 The Settings tab exposes all config fields as editable form inputs. On save, only changed fields are sent to the backend as a JSON patch. The backend reads the current config from disk, merges the patch, writes back, and reloads atomically — the running proxy picks up changes immediately without restart.

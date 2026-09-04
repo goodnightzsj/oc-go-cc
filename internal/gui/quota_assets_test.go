@@ -25,6 +25,7 @@ func TestQuotaAssetsExposePlanWindows(t *testing.T) {
 		`data-tab="quota"`, `id="tab-quota"`, `id="quota-accounts"`, `id="quota-endpoint"`,
 		`id="quota-bottleneck"`, `id="quota-remaining"`, `id="quota-next-reset"`, `id="quota-plan"`,
 		`id="quota-model-limits"`, `id="btn-refresh-quota"`, `data-i18n="quota.unofficial"`, `id="cmd-goto-quota"`,
+		`id="icon-refresh"`, `class="btn btn-small btn-icon"`,
 	} {
 		if !strings.Contains(string(page), marker) {
 			t.Errorf("index.html missing quota marker %q", marker)
@@ -33,7 +34,8 @@ func TestQuotaAssetsExposePlanWindows(t *testing.T) {
 	for _, marker := range []string{
 		"QuotaModule", "'/api/quota'", "refresh=1", "QUOTA_RING_LENGTH", "fmtCountdown",
 		"tickCountdowns", "data-deadline", "rolling_5h", "percent_derived", "key_hint",
-		"case 'quota':", "levelOf(", "deadlineOf(", "renderModelLimits", "model_limits", "fmtWeight",
+		"case 'quota':", "levelOf(", "deadlineOf(", "renderModelLimits", "model_limits", "model_usage",
+		"used_usd",
 	} {
 		if !strings.Contains(string(app), marker) {
 			t.Errorf("app.js missing quota marker %q", marker)
@@ -43,13 +45,13 @@ func TestQuotaAssetsExposePlanWindows(t *testing.T) {
 	// raw key in the UI.
 	for _, key := range []string{"'tab.quota'", "'quota.title'", "'quota.rolling5h'", "'quota.noKeyHint'", "'quota.resetsIn'",
 		"'quota.modelLimits'", "'quota.modelAllowance'", "'quota.modelLimitsNote'", "'quota.model'",
-		"'quota.mixNote'", "'quota.weight'", "'quota.modelLimitsUsed'"} {
+		"'quota.modelUsed'", "'quota.percent'", "'quota.total'"} {
 		if strings.Count(string(app), key+":") < 2 {
 			t.Errorf("translation key %s must exist in both en and zh", key)
 		}
 	}
 	for _, marker := range []string{".quota-card", ".quota-gauge-fill", ".quota-figures", "level-crit",
-		".quota-model-limits", ".quota-model-scroll", ".quota-model-allowance", ".quota-mix-note"} {
+		".quota-model-limits", ".quota-model-scroll", ".quota-model-number", ".btn-icon", ".sr-only"} {
 		if !strings.Contains(string(style), marker) {
 			t.Errorf("style.css missing quota rule %q", marker)
 		}

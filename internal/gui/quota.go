@@ -60,12 +60,6 @@ type quotaModelUsage struct {
 	AllowanceUSD float64 `json:"allowance_usd"`
 	Percent      float64 `json:"percent"`
 }
-type quotaModelUsage struct {
-	Model        string  `json:"model"`
-	UsedUSD      float64 `json:"used_usd"`
-	AllowanceUSD float64 `json:"allowance_usd"`
-	Percent      float64 `json:"percent"`
-}
 
 // maskKeyHint renders a key as a stable, non-reversible label. Only the last
 // four characters leave the process — enough to tell two configured keys apart,

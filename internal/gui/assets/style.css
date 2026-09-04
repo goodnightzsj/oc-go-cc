@@ -1226,6 +1226,24 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .quota-model-number { text-align: right; font-variant-numeric: tabular-nums; }
 .quota-model-table tfoot td { border-top: 1px solid var(--ui-line); font-weight: 600; }
 
+.quota-index-lag-notice {
+  margin: 1.5rem 0 1rem;
+  padding: 0.75rem 1rem;
+  background: rgba(251, 191, 36, 0.1);
+  border-left: 3px solid #fbbf24;
+  border-radius: 4px;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: #fbbf24;
+}
+.quota-index-lag-notice svg {
+  flex-shrink: 0;
+  margin-top: 0.125rem;
+}
+
 @media (max-width: 900px) {
   .quota-window-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

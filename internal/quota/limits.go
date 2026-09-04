@@ -23,12 +23,10 @@ const (
 )
 
 // ModelLimit is the monthly usage allowance a Go plan key may spend on one
-// model, straight from the docs table. Used is set by the GUI layer for
-// models the running proxy has actually served.
+// model, straight from the docs table.
 type ModelLimit struct {
 	Model        string  `json:"model"`
 	AllowanceUSD float64 `json:"allowance_usd"`
-	Used         bool    `json:"used,omitempty"`
 }
 
 // ModelLimits is one snapshot of the per-model allowance table.
@@ -124,10 +122,40 @@ func ParseModelLimits(body []byte) ([]ModelLimit, error) {
 			models = append(models, ModelLimit{Model: cells[0], AllowanceUSD: allow})
 		}
 		if len(models) > 0 {
-			return models, nil
+			return mergeVariants(models), nil
 		}
 	}
 	return nil, fmt.Errorf("no usage-allowance table found")
+}
+
+// mergeVariants collapses pricing variants of one model ("DeepSeek V4 Flash
+// (Peak)" / "(Off-Peak)", "Grok 4.6 (≤ 200K tokens)" / "(> 200K tokens)")
+// into a single row under the base name, keeping the largest allowance — the
+// console lists one row per model, and a variant never lowers the plan.
+func mergeVariants(models []ModelLimit) []ModelLimit {
+	merged := make([]ModelLimit, 0, len(models))
+	idx := make(map[string]int, len(models))
+	for _, m := range models {
+		base := baseModelName(m.Model)
+		if i, ok := idx[base]; ok {
+			if m.AllowanceUSD > merged[i].AllowanceUSD {
+				merged[i].AllowanceUSD = m.AllowanceUSD
+			}
+			continue
+		}
+		idx[base] = len(merged)
+		merged = append(merged, ModelLimit{Model: base, AllowanceUSD: m.AllowanceUSD})
+	}
+	return merged
+}
+
+// baseModelName strips the parenthetical pricing-variant suffix, e.g.
+// "DeepSeek V4 Flash (Off-Peak)" → "DeepSeek V4 Flash".
+func baseModelName(name string) string {
+	if i := strings.IndexByte(name, '('); i >= 0 {
+		name = name[:i]
+	}
+	return strings.TrimSpace(name)
 }
 
 func cellTexts(row string) []string {

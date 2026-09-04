@@ -24,11 +24,35 @@ func TestParseModelLimits(t *testing.T) {
 	if m := models[0]; m.Model != "GLM-5.2" || m.AllowanceUSD != 60 {
 		t.Errorf("models[0] = %+v, want GLM-5.2 $60", m)
 	}
-	if m := models[1]; m.Model != "Grok 4.6 (≤ 200K tokens)" || m.AllowanceUSD != 15 {
-		t.Errorf("models[1] = %+v, want Grok 4.6 $15", m)
+	if m := models[1]; m.Model != "Grok 4.6" || m.AllowanceUSD != 15 {
+		t.Errorf("models[1] = %+v, want variant suffix stripped, $15", m)
 	}
 	if m := models[2]; m.Model != "Kimi & K2" || m.AllowanceUSD != 0.5 {
 		t.Errorf("models[2] = %+v, want unescaped name + $0.50", m)
+	}
+}
+
+// TestParseModelLimitsMergesVariants covers pricing variants of one model
+// collapsing into a single row under the base name (console lists one row per
+// model), keeping the largest allowance.
+func TestParseModelLimitsMergesVariants(t *testing.T) {
+	body := []byte(`<table><tr><th>Model</th><th>Input</th><th>Usage</th></tr>
+<tr><td>DeepSeek V4 Flash (Off-Peak)</td><td>$0.22</td><td>$30</td></tr>
+<tr><td>DeepSeek V4 Flash (Peak)</td><td>$0.44</td><td>$30</td></tr>
+<tr><td>Grok 4.6 (≤ 200K tokens)</td><td>$2.00</td><td>$15</td></tr>
+<tr><td>Omen Alpha</td><td>$0.20</td><td>$100</td></tr></table>`)
+	models, err := ParseModelLimits(body)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(models) != 3 {
+		t.Fatalf("models = %d, want 3 after merging DeepSeek variants", len(models))
+	}
+	if m := models[0]; m.Model != "DeepSeek V4 Flash" || m.AllowanceUSD != 30 {
+		t.Errorf("merged row = %+v, want DeepSeek V4 Flash $30", m)
+	}
+	if m := models[2]; m.Model != "Omen Alpha" || m.AllowanceUSD != 100 {
+		t.Errorf("models[2] = %+v, want Omen Alpha $100", m)
 	}
 }
 

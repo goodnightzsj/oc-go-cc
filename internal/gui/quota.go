@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/routatic/proxy/internal/quota"
+	"github.com/routatic/proxy/internal/storage"
 )
 
 // quotaCacheTTL bounds how often the undocumented upstream usage endpoint is
@@ -38,10 +40,22 @@ type quotaResponse struct {
 	Endpoint    string             `json:"endpoint"`
 	Accounts    []quotaAccount     `json:"accounts"`
 	ModelLimits *quota.ModelLimits `json:"model_limits,omitempty"`
+	ModelUsage  []quotaModelUsage  `json:"model_usage,omitempty"`
 	FetchedAt   time.Time          `json:"fetched_at"`
 	TTLSeconds  int                `json:"ttl_seconds"`
 	Cached      bool               `json:"cached"`
 	Error       string             `json:"error,omitempty"`
+}
+
+// quotaModelUsage is one row of the console-style monthly usage table: what
+// this instance spent on the model in the current plan month, weighted toward
+// the shared $60 pool by the model's allowance (a $30-allowance model counts
+// 2×), the allowance from the docs, and the weighted share it represents.
+type quotaModelUsage struct {
+	Model        string  `json:"model"`
+	UsedUSD      float64 `json:"used_usd"`
+	AllowanceUSD float64 `json:"allowance_usd"`
+	Percent      float64 `json:"percent"`
 }
 
 // maskKeyHint renders a key as a stable, non-reversible label. Only the last
@@ -112,9 +126,7 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 		FetchedAt:   time.Now().UTC(),
 		TTLSeconds:  int(quotaCacheTTL.Seconds()),
 	}
-	if s.met != nil {
-		annotateUsedModels(resp.ModelLimits, s.met.GetSnapshot().ModelCounts)
-	}
+	resp.ModelUsage = s.monthlyModelUsage(resp.Accounts, resp.ModelLimits)
 	s.storeQuota(endpoint, keys, resp)
 	writeJSON(w, resp)
 }
@@ -217,35 +229,82 @@ func (s *Server) limitsLoop(ctx context.Context) {
 	}
 }
 
-// annotateUsedModels flags the docs-table entries that match models the proxy
-// has served requests for since startup, so the UI can lead with the models
-// this instance actually routes to. Names are normalized to lowercase
-// alphanumerics with variant suffixes stripped, so the proxy's
-// "deepseek-v4-flash" matches the docs' "DeepSeek V4 Flash (Off-Peak)".
-func annotateUsedModels(limits *quota.ModelLimits, counts map[string]int64) {
-	if limits == nil || len(counts) == 0 {
-		return
+// monthlyModelUsage builds the console-style per-model usage rows for the
+// current plan month. The upstream usage endpoint only reports window
+// percents, never per-model numbers, so spend comes from this instance's own
+// SQLite ledger: each model's stored cost within [monthly resets_at − 30d,
+// resets_at), weighted by 60/allowance toward the shared pool.
+func (s *Server) monthlyModelUsage(accounts []quotaAccount, limits *quota.ModelLimits) []quotaModelUsage {
+	if limits == nil || s.storage == nil {
+		return nil
 	}
-	used := make(map[string]bool, len(counts))
-	for name, n := range counts {
-		if n > 0 {
-			used[normalizeModelName(name)] = true
+	reset := findMonthlyReset(accounts)
+	if reset.IsZero() {
+		return nil
+	}
+	win, err := storage.NewAnalytics(s.storage).WindowBetween(reset.Add(-30*24*time.Hour), reset)
+	if err != nil {
+		return nil
+	}
+	breakdown, err := storage.NewAnalytics(s.storage).ModelBreakdown(win)
+	if err != nil {
+		return nil
+	}
+	raw := make(map[string]float64, len(breakdown))
+	for _, b := range breakdown {
+		raw[normalizeModelName(b.Model)] += b.EstCostUSD
+	}
+	rows := make([]quotaModelUsage, 0, len(limits.Models))
+	for _, m := range limits.Models {
+		spent, used := raw[normalizeModelName(m.Model)]
+		if !used {
+			// Only models this instance has actually served show up; the rest
+			// of the plan table stays out of the way.
+			continue
 		}
-	}
-	for i := range limits.Models {
-		if used[normalizeModelName(limits.Models[i].Model)] {
-			limits.Models[i].Used = true
+		weight := 1.0
+		if m.AllowanceUSD > 0 {
+			weight = 60 / m.AllowanceUSD
 		}
+		weighted := spent * weight
+		percent := 0.0
+		if m.AllowanceUSD > 0 {
+			percent = weighted / m.AllowanceUSD * 100
+		}
+		rows = append(rows, quotaModelUsage{Model: m.Model, UsedUSD: weighted, AllowanceUSD: m.AllowanceUSD, Percent: percent})
 	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].UsedUSD != rows[j].UsedUSD {
+			return rows[i].UsedUSD > rows[j].UsedUSD
+		}
+		return rows[i].Model < rows[j].Model
+	})
+	return rows
 }
 
+// findMonthlyReset returns the monthly window's next reset from the first
+// account that reports one.
+func findMonthlyReset(accounts []quotaAccount) time.Time {
+	for i := range accounts {
+		if accounts[i].Report != nil && accounts[i].Report.Monthly != nil && accounts[i].Report.Monthly.ResetsAt != "" {
+			if t, err := time.Parse(time.RFC3339, accounts[i].Report.Monthly.ResetsAt); err == nil {
+				return t
+			}
+		}
+	}
+	return time.Time{}
+}
+
+// normalizeModelName maps a storage model id onto a docs base name so usage
+// can be attributed: "deepseek-v4-flash" ↔ "DeepSeek V4 Flash (Off-Peak)" →
+// "DeepSeek V4 Flash" (lowercase alphanumerics with variant suffixes
+// stripped).
 func normalizeModelName(name string) string {
-	name = strings.ToLower(name)
 	if i := strings.IndexByte(name, '('); i >= 0 {
 		name = name[:i]
 	}
 	var b strings.Builder
-	for _, r := range name {
+	for _, r := range strings.ToLower(name) {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
 			b.WriteRune(r)
 		}

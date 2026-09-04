@@ -2,15 +2,18 @@ package gui
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/routatic/proxy/internal/config"
-	"github.com/routatic/proxy/internal/metrics"
+	"github.com/routatic/proxy/internal/history"
+	"github.com/routatic/proxy/internal/storage"
 )
 
 func quotaTestServer(t *testing.T, upstream string, keys ...string) *Server {
@@ -165,9 +168,6 @@ func TestHandleQuotaAttachesModelLimits(t *testing.T) {
 
 	srv := quotaTestServer(t, upstream.URL, "sk-key")
 	srv.modelLimitsURL = []string{upstream.URL + "/docs"}
-	srv.met = metrics.New()
-	srv.met.RecordSuccess("glm-5.2", time.Millisecond)
-	srv.met.RecordSuccess("deepseek-v4-flash", time.Millisecond)
 
 	resp := getQuota(t, srv, "")
 	if resp.ModelLimits == nil || len(resp.ModelLimits.Models) != 4 {
@@ -177,19 +177,15 @@ func TestHandleQuotaAttachesModelLimits(t *testing.T) {
 	if first.Model != "GLM-5.2" || first.AllowanceUSD != 60 {
 		t.Errorf("first model = %+v, want GLM-5.2 $60", first)
 	}
+	// Variant rows collapse onto the base name.
+	if resp.ModelLimits.Models[1].Model != "Grok 4.6" || resp.ModelLimits.Models[2].Model != "DeepSeek V4 Flash" {
+		t.Errorf("variant rows not merged: %+v", resp.ModelLimits.Models[1:3])
+	}
 	if resp.ModelLimits.Models[3].Model != "Omen & Alpha" {
 		t.Errorf("HTML entities must be unescaped, got %q", resp.ModelLimits.Models[3].Model)
 	}
 	if resp.ModelLimits.URL != upstream.URL+"/docs" {
 		t.Errorf("limits url = %q", resp.ModelLimits.URL)
-	}
-	// The two recorded models must be flagged used, including the variant
-	// match ("deepseek-v4-flash" ↔ "DeepSeek V4 Flash (Off-Peak)").
-	if !resp.ModelLimits.Models[0].Used || !resp.ModelLimits.Models[2].Used {
-		t.Errorf("used flags = %+v, want GLM-5.2 and DeepSeek flagged", []bool{resp.ModelLimits.Models[0].Used, resp.ModelLimits.Models[2].Used})
-	}
-	if resp.ModelLimits.Models[1].Used || resp.ModelLimits.Models[3].Used {
-		t.Error("unrecorded models must not be flagged used")
 	}
 	if docsHits.Load() != 1 {
 		t.Errorf("docs hits = %d, want 1", docsHits.Load())
@@ -212,6 +208,65 @@ func TestHandleQuotaAttachesModelLimits(t *testing.T) {
 	}
 	if usageHits.Load() != 2 {
 		t.Errorf("usage hits = %d, want 2 (cached + forced)", usageHits.Load())
+	}
+}
+
+func TestHandleQuotaMonthlyModelUsage(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/docs" {
+			_, _ = w.Write([]byte(docsFixture))
+			return
+		}
+		_, _ = w.Write([]byte(`{"monthly":{"usedPercent":0,"resetsAt":"2026-09-06T06:44:54.961Z"}}`))
+	}))
+	defer upstream.Close()
+
+	reset := time.Date(2026, 9, 6, 6, 44, 54, 0, time.UTC)
+	db, err := storage.Open(storage.Config{DatabasePath: filepath.Join(t.TempDir(), "quota.db"), WALEnabled: false})
+	if err != nil {
+		t.Fatalf("open storage: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	requests := storage.NewRequests(db)
+
+	// DeepSeek V4 Flash: $11.45 of raw spend → ×2 weight toward the $60 pool.
+	// GLM-5.2: $2.00 → weight 1. Both fall inside the current plan month
+	// window [reset-30d, reset); an older record must not count.
+	for _, rec := range []history.RequestRecord{
+		{ID: "quota-dsf-1", Model: "deepseek-v4-flash", StartTime: reset.Add(-5 * 24 * time.Hour), CostUSD: 10.0, CostKnown: true, CostSource: "estimated"},
+		{ID: "quota-dsf-2", Model: "deepseek-v4-flash", StartTime: reset.Add(-2 * 24 * time.Hour), CostUSD: 1.45, CostKnown: true, CostSource: "estimated"},
+		{ID: "quota-glm-1", Model: "glm-5.2", StartTime: reset.Add(-3 * 24 * time.Hour), CostUSD: 2.0, CostKnown: true, CostSource: "estimated"},
+		{ID: "quota-old-1", Model: "deepseek-v4-flash", StartTime: reset.Add(-45 * 24 * time.Hour), CostUSD: 99.0, CostKnown: true, CostSource: "estimated"},
+	} {
+		if err := requests.Insert(rec); err != nil {
+			t.Fatalf("insert %s: %v", rec.ID, err)
+		}
+	}
+
+	srv := quotaTestServer(t, upstream.URL, "sk-key")
+	srv.modelLimitsURL = []string{upstream.URL + "/docs"}
+	srv.storage = db
+
+	resp := getQuota(t, srv, "")
+	// Only models with ledger entries appear; the other plan models stay out.
+	if len(resp.ModelUsage) != 2 {
+		t.Fatalf("model_usage rows = %d, want 2 (only used models)", len(resp.ModelUsage))
+	}
+	byModel := map[string]quotaModelUsage{}
+	for _, row := range resp.ModelUsage {
+		byModel[row.Model] = row
+	}
+	dsf := byModel["DeepSeek V4 Flash"]
+	if math.Abs(dsf.UsedUSD-22.9) > 1e-6 || dsf.AllowanceUSD != 30 {
+		t.Errorf("DeepSeek used = %v (want 11.45 raw × 2 = 22.9), allowance = %v", dsf.UsedUSD, dsf.AllowanceUSD)
+	}
+	glm := byModel["GLM-5.2"]
+	if math.Abs(glm.UsedUSD-2.0) > 1e-6 || math.Abs(glm.Percent-2.0/60*100) > 1e-6 {
+		t.Errorf("GLM row = %+v, want $2.00, %.2f%%", glm, 2.0/60*100)
+	}
+	// Most-spent first.
+	if resp.ModelUsage[0].Model != "DeepSeek V4 Flash" {
+		t.Errorf("rows not sorted by usage desc: %+v", resp.ModelUsage[0])
 	}
 }
 

@@ -218,8 +218,10 @@ func TestHandleQuotaMonthlyModelUsage(t *testing.T) {
 			return
 		}
 		// usedDollars = 26.9 while raw ledger spend is 13.45 (11.45 + 2.00):
-		// the official total calibrates the scale to exactly ×2, so rows and
-		// total reconcile with the official window percent.
+		// the official total calibrates the scale to exactly ×2. Rows keep the
+		// price currency (×2 calibration ÷ pool weight) so they stay comparable
+		// to the docs allowance; the pool-equivalent total (26.9) reconciles
+		// with the official window percent.
 		_, _ = w.Write([]byte(`{"monthly":{"usedPercent":44.8,"usedDollars":26.9,"resetsAt":"2026-09-06T06:44:54.961Z"}}`))
 	}))
 	defer upstream.Close()
@@ -235,8 +237,7 @@ func TestHandleQuotaMonthlyModelUsage(t *testing.T) {
 	// DeepSeek V4 Flash: $11.45 of raw spend; GLM-5.2: $2.00. Both fall inside
 	// the current plan month window [reset-31d, reset) (31-day subscription
 	// cycle); an older record must not count. The official monthly total
-	// (usedDollars 26.9) calibrates the scale to ×2, so rows reconcile with
-	// the official window percent.
+	// (usedDollars 26.9) calibrates the scale to ×2.
 	for _, rec := range []history.RequestRecord{
 		{ID: "quota-dsf-1", Model: "deepseek-v4-flash", StartTime: reset.Add(-5 * 24 * time.Hour), CostUSD: 10.0, CostKnown: true, CostSource: "estimated"},
 		{ID: "quota-dsf-2", Model: "deepseek-v4-flash", StartTime: reset.Add(-2 * 24 * time.Hour), CostUSD: 1.45, CostKnown: true, CostSource: "estimated"},
@@ -262,12 +263,15 @@ func TestHandleQuotaMonthlyModelUsage(t *testing.T) {
 		byModel[row.Model] = row
 	}
 	dsf := byModel["DeepSeek V4 Flash"]
-	if math.Abs(dsf.UsedUSD-22.9) > 1e-6 || dsf.AllowanceUSD != 30 || math.Abs(dsf.Percent-22.9/60*100) > 1e-6 {
-		t.Errorf("DeepSeek used = %v (want 11.45 raw × 2 = 22.9, %.2f%%), allowance = %v", dsf.UsedUSD, 22.9/60*100, dsf.AllowanceUSD)
+	// Row spend is priced in the official price currency (×2 pool-equivalent
+	// calibration divided back out), so it stays comparable to the $30 docs
+	// allowance: 11.45 raw × 2 scale ÷ 2 pool weight = 11.45.
+	if math.Abs(dsf.UsedUSD-11.45) > 1e-6 || dsf.AllowanceUSD != 30 || math.Abs(dsf.Percent-11.45/30*100) > 1e-6 {
+		t.Errorf("DeepSeek used = %v (want 11.45 raw, %.2f%%), allowance = %v", dsf.UsedUSD, 11.45/30*100, dsf.AllowanceUSD)
 	}
 	glm := byModel["GLM-5.2"]
 	if math.Abs(glm.UsedUSD-4.0) > 1e-6 || math.Abs(glm.Percent-4.0/60*100) > 1e-6 {
-		t.Errorf("GLM row = %+v, want $4.00 (×2 scale), %.2f%%", glm, 4.0/60*100)
+		t.Errorf("GLM row = %+v, want $4.00 (×2 scale ÷ 1 pool weight), %.2f%%", glm, 4.0/60*100)
 	}
 	// Most-spent first.
 	if resp.ModelUsage[0].Model != "DeepSeek V4 Flash" {

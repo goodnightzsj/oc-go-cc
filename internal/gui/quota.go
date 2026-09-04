@@ -48,9 +48,9 @@ type quotaResponse struct {
 }
 
 // quotaModelUsage is one row of the console-style monthly usage table: what
-// this instance spent on the model in the current plan month, weighted toward
-// the shared $60 pool by the model's allowance (a $30-allowance model counts
-// 2×), the allowance from the docs, and the weighted share it represents.
+// this instance actually spent on the model in the current plan month (raw
+// cost from the ledger, same figures the OpenCode console shows), the
+// allowance from the docs, and the share it represents.
 type quotaModelUsage struct {
 	Model        string  `json:"model"`
 	UsedUSD      float64 `json:"used_usd"`
@@ -233,7 +233,7 @@ func (s *Server) limitsLoop(ctx context.Context) {
 // current plan month. The upstream usage endpoint only reports window
 // percents, never per-model numbers, so spend comes from this instance's own
 // SQLite ledger: each model's stored cost within [monthly resets_at − 30d,
-// resets_at), weighted by 60/allowance toward the shared pool.
+// resets_at), matching the raw cost figures the OpenCode console reports.
 func (s *Server) monthlyModelUsage(accounts []quotaAccount, limits *quota.ModelLimits) []quotaModelUsage {
 	if limits == nil || s.storage == nil {
 		return nil
@@ -262,16 +262,11 @@ func (s *Server) monthlyModelUsage(accounts []quotaAccount, limits *quota.ModelL
 			// of the plan table stays out of the way.
 			continue
 		}
-		weight := 1.0
-		if m.AllowanceUSD > 0 {
-			weight = 60 / m.AllowanceUSD
-		}
-		weighted := spent * weight
 		percent := 0.0
 		if m.AllowanceUSD > 0 {
-			percent = weighted / m.AllowanceUSD * 100
+			percent = spent / m.AllowanceUSD * 100
 		}
-		rows = append(rows, quotaModelUsage{Model: m.Model, UsedUSD: weighted, AllowanceUSD: m.AllowanceUSD, Percent: percent})
+		rows = append(rows, quotaModelUsage{Model: m.Model, UsedUSD: spent, AllowanceUSD: m.AllowanceUSD, Percent: percent})
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].UsedUSD != rows[j].UsedUSD {

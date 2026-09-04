@@ -229,9 +229,10 @@ func TestHandleQuotaMonthlyModelUsage(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	requests := storage.NewRequests(db)
 
-	// DeepSeek V4 Flash: $11.45 of raw spend → ×2 weight toward the $60 pool.
-	// GLM-5.2: $2.00 → weight 1. Both fall inside the current plan month
-	// window [reset-30d, reset); an older record must not count.
+	// DeepSeek V4 Flash: $11.45 of raw spend; GLM-5.2: $2.00. Both fall inside
+	// the current plan month window [reset-30d, reset); an older record must
+	// not count. Usage is reported raw (same figures the OpenCode console
+	// shows), not weighted toward the pool.
 	for _, rec := range []history.RequestRecord{
 		{ID: "quota-dsf-1", Model: "deepseek-v4-flash", StartTime: reset.Add(-5 * 24 * time.Hour), CostUSD: 10.0, CostKnown: true, CostSource: "estimated"},
 		{ID: "quota-dsf-2", Model: "deepseek-v4-flash", StartTime: reset.Add(-2 * 24 * time.Hour), CostUSD: 1.45, CostKnown: true, CostSource: "estimated"},
@@ -257,8 +258,8 @@ func TestHandleQuotaMonthlyModelUsage(t *testing.T) {
 		byModel[row.Model] = row
 	}
 	dsf := byModel["DeepSeek V4 Flash"]
-	if math.Abs(dsf.UsedUSD-22.9) > 1e-6 || dsf.AllowanceUSD != 30 {
-		t.Errorf("DeepSeek used = %v (want 11.45 raw × 2 = 22.9), allowance = %v", dsf.UsedUSD, dsf.AllowanceUSD)
+	if math.Abs(dsf.UsedUSD-11.45) > 1e-6 || dsf.AllowanceUSD != 30 {
+		t.Errorf("DeepSeek used = %v (want raw 11.45), allowance = %v", dsf.UsedUSD, dsf.AllowanceUSD)
 	}
 	glm := byModel["GLM-5.2"]
 	if math.Abs(glm.UsedUSD-2.0) > 1e-6 || math.Abs(glm.Percent-2.0/60*100) > 1e-6 {

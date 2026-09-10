@@ -175,21 +175,29 @@ Empty analytics collections (`models`, `providers`, `scenarios`, and `trend`) an
 
 ### `GET /api/quota`
 
-Here `provider` selects one of the same five providers; omission retains the legacy **OpenCode Go** default. `refresh=1` bypasses the 30-second per-provider cache. Responses carry `provider`, `status`, `source`, `reason` when applicable, `fetched_at`, `ttl_seconds`, `cached`, official `links`, and separate account results. They are sent with `Cache-Control: no-store`.
+Here `provider` selects one of the same five providers; omission retains the legacy **OpenCode Go** default. `refresh=1` bypasses the 30-second Go/OpenRouter cache. AWS GET requests only read the cached billing snapshot, even with `refresh=1`; they never initiate paid queries. Responses carry `provider`, `status`, `source`, `reason` when applicable, `fetched_at`, `ttl_seconds`, `cached`, official `links`, and separate account results. They are sent with `Cache-Control: no-store`.
 
 | Status | Meaning |
 | --- | --- |
 | `available` | The configured upstream account query succeeded |
 | `partial` | Some account/key queries succeeded and others failed |
-| `not_configured` | Required credentials are missing |
-| `unavailable` | This provider's account capability is not integrated; inspect `reason` |
+| `not_configured` | Required credentials are missing or AWS billing is disabled |
+| `unavailable` | No public account API, no matching billing data, or an explicit AWS query is required; inspect `reason` |
 | `error` | The configured query failed; error details are preserved without credentials |
 
 Go `accounts[].report` contains the existing quota windows. OpenRouter `accounts[].openrouter` contains the individual inference key's cap, remaining cap, UTC usage, and BYOK usage; absent optional values remain `null`. Key caps are **not** an account balance, and multiple keys are not summed. `credits`, `credits_status`, and `credits_error` are separate, using only `openrouter.management_api_key` (or `ROUTATIC_PROXY_OPENROUTER_MANAGEMENT_API_KEY`). A negative `total_credits - total_usage` balance is retained.
 
 OpenRouter quota queries require explicit `openrouter.api_key` / `api_keys` (or their provider-specific environment overrides). Merely viewing this platform never probes its endpoint with the legacy global key pool. Go quota retains its legacy global-key compatibility; inference routing's existing key precedence is unchanged.
 
-Zen and CommandCode return `reason=no_public_account_api`. Bedrock returns `reason=aws_billing_auth_required`; no Cost Explorer integration or credential fallback is implied. All five providers' local usage remains independently available through the analytics endpoint. See the [capability matrix](platform-integration-review.md#五平台页面与账户能力).
+Zen and CommandCode return `reason=no_public_account_api`. Bedrock returns `aws_billing_disabled` until explicitly enabled, `aws_billing_refresh_required` without a current snapshot, or `aws_billing_no_data` when AWS returns no matching costs. All five providers' local usage remains independently available through the analytics endpoint. See the [capability matrix](platform-integration-review.md#五平台页面与账户能力).
+
+### `POST /api/quota?provider=aws-bedrock&billing_refresh=1`
+
+Explicitly queries the official Cost Explorer API. This action may incur AWS API charges; it requires `aws_bedrock.billing.enabled=true`, a validated 12-digit `linked_account_id`, and the service's standard AWS SDK credentials or named `profile`. Inference keys are never used. Cross-origin browser POSTs are rejected with HTTP 403; the paid query via GET, POST without the action flag, or POST for another provider returns HTTP 405.
+
+`bedrock_billing` contains `linked_account_id`, `start_date`, exclusive `end_date`, `metric=UnblendedCost`, exact included `services`, reported `currency`, nullable `total_cost`, `estimated`, and `daily` rows (`date`, `cost`, `estimated`). The query covers 30 complete UTC days and services whose AWS billing names contain Bedrock. This is not account credit, an invoice, or the local proxy ledger; see [service coverage and setup](aws-bedrock-billing.md). Negative and zero costs are preserved; missing data stays unknown. Any failed page or invalid amount/currency discards the partial report and returns an explicit error state.
+
+The snapshot has `ttl_seconds=86400`, is invalidated by billing profile/account changes or the UTC date changing, and is kept only in memory. Ordinary reads never refresh it upstream. Another explicit POST requests a new bill; overlapping POSTs reuse a completed in-flight result when they share the same scope.
 
 ### Configuration writes
 

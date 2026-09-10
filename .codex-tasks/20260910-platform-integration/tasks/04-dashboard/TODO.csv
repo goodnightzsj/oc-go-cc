@@ -8,3 +8,7 @@ id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,n
 7,补齐五平台页面交互与套餐本地数据,DONE,全部平台可独立查看本地数据与官方能力;旧请求不能覆盖新选择,go test -race -p 2 ./internal/config ./internal/gui ./internal/quota -count=1,2026-09-11,1,主线程最新config/gui/quota定向race全通过;CSV两页scope回归先失败后固定初始查询;未知零值及切换竞态回归通过
 8,验收五平台七页面与范围隔离,DONE,真实浏览器调用合成后端覆盖筛选与套餐失败路径;记录尚无真实账户验收,go test -race -p 2 ./... -count=1,2026-09-11,2,最新全量race通过;Chrome447断言31布局通过;修复390px套餐标题溢出并增补320px五平台;详见raw/multi-platform-browser-result.md;账户缺口仍明确保留
 9,修复部署发现的空集合与未配置额度凭证边界,DONE,五平台空模型趋势为数组;OpenRouter套餐不使用全局Key;显式管理Key独立可用,go test -race ./internal/gui ./internal/storage ./internal/quota -count=1,2026-09-11,1,两项新增测试先失败后通过;最新全量641顶层1039含子测试通过;Chrome447断言31布局重新通过;只改新额度查询不改推理兼容
+10,补齐AWS账单独立配置与校验,DONE,默认关闭;显式账户范围和独立SDK身份;配置加载保存及环境覆盖有回归,go test -race ./internal/config ./internal/gui -run BedrockBilling -count=1,2026-09-11,0,独立配置和局部保存定向race通过;无效账户不写盘;不复用任何推理Key
+11,实现AWS官方CostExplorer只读账单查询,DONE,SDK签名;范围分页币种未知错误有回归;不把账单当余额,go test -race ./internal/quota -run BedrockBilling -count=1,2026-09-11,0,主线程最新quota全包race通过1.319s;真实SDK环境和profile优先级及固定官方端点由合成HTTP验证;未查询真实账户
+12,贯通AWS套餐页面和配置表单,DONE,只有手动账单刷新触发收费接口;五平台切换不串数;双语呈现来源时间币种,go test -race ./internal/gui -run BedrockBilling -count=1,2026-09-11,0,主线程最新config/gui全包race通过2.740s和2.673s;覆盖POST跨站拒绝币种负值未知及局部保存;复用既有样式
+13,复验AWS增量后的五平台矩阵,DONE,合成AWS账户通过且其它四平台回归;浏览器有数据与空数据均通过,go test -race -p 2 ./... -count=1,2026-09-11,1,全量650顶层1073含子测试通过;Chrome有数据459检查31布局空账本210检查21布局通过;首轮fixture延后清理超时后运行器修正且再验收正常退出;#8账户未完成

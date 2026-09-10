@@ -62,9 +62,13 @@ type Server struct {
 	logger            *slog.Logger
 	catalogMu         sync.Mutex
 
-	// One cached quota response per platform; see quotaCacheTTL.
+	// One cached quota response per platform; each response carries its TTL.
 	quotaMu    sync.Mutex
 	quotaCache map[string]quotaCacheEntry
+	// Coalesce concurrent explicit, billable AWS lookups; the fetch override is
+	// used by isolated HTTP/browser tests, never by runtime configuration.
+	bedrockBillingMu    sync.Mutex
+	fetchBedrockBilling func(context.Context, config.AWSBillingConfig) (*quota.BedrockBilling, error)
 
 	// Per-model allowance table synced daily from the Go docs; see
 	// limitsRefreshTTL. modelLimitsURL overrides the docs URLs (tests).

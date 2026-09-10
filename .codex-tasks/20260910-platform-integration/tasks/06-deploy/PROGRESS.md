@@ -2,10 +2,10 @@
 
 ## Context Recovery Block
 
-- 当前：1/3；`f135930` 已推送部署并通过健康/数据校验，但生产页面空账本验收失败；已回退旧 release，待 #4/#5 边界修复验收后重新部署。
+- 当前：4/6；AWS增量已完成本地验证及生产预检/私有备份，准备提交推送与发布；真实账户状态/权限另保留 #8 未完成。
 - 真源：TODO.csv。
 - 来源：本项目 Claude 2026-09-04 session、llmdoc/startup.md 与 scripts/prod-deploy.sh。
-- 下一步：完成边界修复的最新验证，提交推送并重新部署；原备份保留，生产浏览器继续只读验收。
+- 下一步：AWS增量私有备份 → 提交推送与部署 → 生产只读复验 → #7UI/UX分析；#8需要用户补足账户权限/配置或明确未公开接口的验收边界。
 
 ## 只读远端基线（2026-09-11）
 
@@ -36,3 +36,18 @@
 - 第二轮生产浏览器通过所有 Overview/History 平台切换，到第75项发现 `/api/perf/models` 空结果仍为null。证据 `/tmp/oc-go-cc-deploy-fix-verify.I3hRE1/production-smoke/result.json`；无脚本异常/写请求，尚未进入套餐。当前版本已包含凭证隔离修复，因此保留运行而非退回缺少该修复的版本。
 - 扩展原空账本回归覆盖性能端点，六种平台范围均先失败；在唯一HTTP输出处将空slice初始化为空数组，文档同步。修后最新全量641顶层/1039含子测试race、vet、六目标CGO=0构建通过；GUI全包race在测试fixture扩展后另行通过。
 - 新增仅测试用的 `ROUTATIC_BROWSER_EMPTY=1`，生产只读脚本对完整空账本再验收204项、29平台/页面组合、21布局通过，0脚本错误/0写请求；原含数据447矩阵证据仍保留。最终自动证据 `/tmp/oc-go-cc-release-final.AVax0F/`。fixture已关闭。
+
+## 最终部署验收
+
+- 运行提交 `7c2d07c435ad6d13fbba1bbc95f1fc3cd84933ef`；release `/root/oc-go-cc/.tmp/prod/releases/20260911055621-3fad77f342fc`；版本 `v0.1.4-beta.53-48-g7c2d07c`，PID8365、active/running、NRestarts=0、health=ok。
+- 最后备份 `/root/oc-go-cc/.tmp/predeploy-20260911-final-QPrGa2Mw` 保留，配置散列一致；SQLite quick_check=ok，原 requests/provider_usage 主键无丢失，provider_usage 1390条。无关 .ace-tool 未改动。
+- 真实远端GUI经SSH隧道完成204检查、29平台/页面组合、21布局，196个只读请求，无脚本错误或被拦写请求；证据 `/tmp/oc-go-cc-release-final.AVax0F/production-smoke/result.json` 和同目录1440/390截图。
+- 5个 analytics/performance/quota 非法 provider 请求都返回400。模型列表200、Responses GET405验证沿用同代码的上一部署轮；未发真实推理/扣费请求。
+- 账户实态：Go上游返回403（界面明确显示订阅/Key权限提示）；OpenRouter not_configured、Credits not_configured；CommandCode not_configured；Zen和Bedrock能力unavailable。这里证明错误/未配置呈现正常，不等于账户余额可用。#8保留待办，不缩小验收口径。
+
+## AWS增量部署前预检
+
+- 原生SSH主机信任检查通过，/root/oc-go-cc main7c2d07c；仅无关.ace-tool未跟踪，保持不变。
+- 当前release20260911055621-3fad77f342fc、PID8365、active/running、NRestarts0、health=ok。sqlite3存在，既有配置和SQLite路径存在，未读取凭证或私有记录。
+- 本地AWS增量最新全量650/1073、六目标、Codex及有数据/空数据浏览器通过；下一步创建私有备份，不改变账户配置或开启收费查询。
+- 已完成服务端私有备份 `/root/oc-go-cc/.tmp/predeploy-20260911-aws-SV1xWrJc`，目录0700，保留配置、两个存在的catalog、原提交/release及SQLite一致性快照。quick_check=ok；requests=0，provider_usage=1390，原服务仍active。

@@ -3,13 +3,13 @@
 ## Context Recovery Block
 
 - 任务：修复全部已报告问题，独立接入 CommandCode，融合有价值的上游更新，分析 Codex/Claude Code 对接。
-- 形态：epic；5/7 子任务完成。
-- 当前：生产边界修复后全量641顶层/1039含子测试race、vet、六目标构建、Codex双轮与Chrome447断言/31布局通过，#6准备修复提交再部署；旧健康release仍运行，首次失败证据与备份保留。
-- 真源：SUBTASKS.csv；当前 tasks/06-deploy/TODO.csv，完成后才进入#7。
+- 形态：epic；5/8 子任务完成；AWS新增软件缺口已实现并验证，旧验收证据全部保留。
+- 当前：AWS增量全量/六目标/Codex与五平台浏览器通过；7c2d07c既有生产健康，开始备份和重新部署，再完成UIUX报告。
+- 真源：SUBTASKS.csv；当前 tasks/06-deploy/TODO.csv 第4项；#8只保留真实账户权限/未公开合同阻塞。
 - 起点：main，HEAD 684235d，初始工作区干净。origin=goodnightzsj/oc-go-cc；upstream=samueltuyizere/oc-go-cc（GitHub）。
 - 已知：上轮 /tmp/oc-go-cc-review.WPJFmt/ 与 /tmp/oc-go-cc-routing-review.yHSDWm/ 有合成复现；本轮不依赖缓存成功。全量基线有 tokenizer 外网 EOF、日期过期测试失败；init 测试未隔离 HOME。
 - 不读取或输出真实凭证，不读取本地真实 DB；部署已获授权但须在实现与验证完成后进行，部署前读 SSH 运行手册。
-- 下一步：修复后全量/浏览器验收 → 提交推送并重新部署 → 只读生产冒烟 → UI/UX分析。既有llmdoc同步须由用户决定。
+- 下一步：AWS增量五平台浏览器验收 → 全量回归/六目标构建 → 提交推送和部署 → UI/UX分析。真实账户凭证/授权不由代理擅自提供或修改；既有llmdoc同步须由用户决定。
 - 最新要求已落实：先核实 CommandCode 官网；Claude 模型走原生 Messages，Codex 公开合同缺口使用本项目 Responses 适配，并参考 MAXeaglet 的公开协议行为。日志、套餐入口、统计与独立配置保留并通过验收。
 
 ## 2026-09-10 启动

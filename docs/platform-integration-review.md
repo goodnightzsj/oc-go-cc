@@ -18,6 +18,7 @@
 | P2 | 概览、性能、分析只有平台分组，没有独立查询；旧异步响应可能覆盖新平台 | 平台范围贯通汇总、比较、趋势和性能；切换立即清除旧值，失败不显示为零。[platform_scope_test.go](../internal/gui/platform_scope_test.go)、[platform_filter_behavior_test.go](../internal/gui/platform_filter_behavior_test.go) |
 | P2 | CSV 每页重新读取筛选，中途切换平台会混合数据 | 一次导出固定完整查询；501 条两页异步回归验证平台、日期、搜索与排序均保持初始范围。[platform_filter_behavior_test.go](../internal/gui/platform_filter_behavior_test.go) |
 | P1 | 额度请求跟随重定向，错误响应体可能回显 Key | 拒绝重定向及含凭证/查询参数的额度地址；只返回脱敏错误。OpenRouter 管理 Key 与推理池隔离，逐 Key 保留失败。[openrouter_test.go](../internal/quota/openrouter_test.go)、[platform_quota_test.go](../internal/gui/platform_quota_test.go) |
+| P1 | AWS 账单缺少可执行接入；收费查询若用 GET 会被预取或跨站触发 | 独立 IAM 配置和账户过滤，复用官方 SDK 签名/分页；手动 POST 与来源检查，自动刷新不查 AWS，缺币种或分页失败不展示部分合计。[bedrock_billing_test.go](../internal/gui/bedrock_billing_test.go)、[bedrock_test.go](../internal/quota/bedrock_test.go) |
 
 普通日志不等于原始流量捕获：`debug_capture` 含完整对话内容，仍只应显式用于调试。CommandCode 套餐未获取时显示明确的未知状态与官方 Usage/Billing/API Keys 入口，不抓取私有账单，也不借用 Go 额度。
 
@@ -27,7 +28,7 @@
 | --- | --- | --- | --- |
 | OpenCode Go | 平台筛选及同名模型隔离 | 本实例请求、Token、已知费用与缺价数 | 保留现有 usage 窗口；端点未公开稳定合同，分模型费用不是官方账户账单 |
 | OpenCode Zen | 同上 | 同上 | 未找到公开账户查询合同；仍未接入余额，保留官方控制台入口 |
-| AWS Bedrock | 同上 | 同上 | Cost Explorer 需要独立 IAM 账单权限；当前未接入，推理 Bearer Key 不能替代账单授权 |
+| AWS Bedrock | 同上 | 同上 | 已实现 Cost Explorer 官方服务费用；独立 IAM 身份、显式账户、默认关闭、手动收费查询。保留币种/日期/Estimated，不冒充余额；真实 IAM 授权待验收。[配置与范围](aws-bedrock-billing.md) |
 | OpenRouter | 同上 | 同上 | 已实现 `/key` 每 Key 限额/UTC 用量与独立 Management Key `/credits`；BYOK、Key 限额和账户余额分开，不合计多 Key |
 | CommandCode | 同上 | 同上 | 未找到公开账户余额 REST 合同；仍未接入余额，保留 Usage/Billing/Keys 入口 |
 
@@ -53,7 +54,7 @@
 | `0b723b2` | 审阅 thinking 流结束与模型标识增量，保留 fork 已有等效修复，不重复覆盖 |
 | `b64f155` | 仅采纳 P95/P99 正确性修复，不引入可能丢失账目的异步队列和未测性能重构 |
 
-未采纳 `56d1f43` 的 RPM/流水线/多模块迁移、5 项 Go 依赖升级和 10 项 CI 依赖升级；它们不是当前缺陷的必要修复，需要各自验证，不能覆盖 fork 的发布流程。原有依赖版本未升级，`github.com/google/uuid` 仅从间接依赖改为直接依赖。
+未采纳 `56d1f43` 的 RPM/流水线/多模块迁移、5 项 Go 依赖升级和 10 项 CI 依赖升级；它们不是当前缺陷的必要修复，需要各自验证，不能覆盖 fork 的发布流程。原有依赖版本未升级，`github.com/google/uuid` 仅从间接依赖改为直接依赖；AWS 账单增量新增官方 Go SDK config/costexplorer 及其依赖，不自行实现凭证链或 SigV4。
 
 用户指定的 [MAXeaglet/commandcode-proxy](https://github.com/MAXeaglet/commandcode-proxy/tree/487f219f9586b2a4ba7f7435eed7ee19dabc53ec)（MIT，固定 `487f219`）作为协议行为审阅参考；未复制源码或 CLI 设备指纹/生命周期调用。它没有 Responses 入口，本项目复用 Go 转换器实现必要的 Codex 适配。
 

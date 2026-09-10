@@ -7,11 +7,11 @@
 - Support CLI: Claude 的本项目历史 session 仅作为部署流程证据。
 
 ## Status
-- Current phase: Epic 5/7；生产边界修复和重新全量验证已完成，详细状态以 CSV 为准。
-- Current step: 06-deploy 1/3，准备提交已验证边界修复并重新部署；旧健康release仍运行。
-- Done: 上游语义融合、路由/记账修复、CommandCode 双客户端、五平台独立查询与 OpenRouter 官方额度接口。
-- Next: 新修复全量/浏览器验证 → 提交推送 → SSH重新部署测试 → UI/UX只读分析。f135930已发布但已回退旧健康release；备份见06-deploy/PROGRESS.md。
-- Blockers: Zen/CommandCode 无公开账户查询合同；Bedrock 账单需要独立 IAM 权限；真实新平台账户未验证，不冒充已接入账户余额。
+- Current phase: Epic 5/8；AWS增量实现及全量验证完成，旧版本验证证据保留，详细状态以CSV为准。
+- Current step: 06-deploy 4/6；远端7c2d07c健康，私有备份predeploy-20260911-aws-SV1xWrJc完成，准备提交推送部署。
+- Done: 上游语义融合、路由/记账修复、CommandCode双客户端、五平台独立查询、OpenRouter额度接口；7c2d07c已部署并有生产只读验收。
+- Next: 提交推送和SSH部署 → 生产五平台只读冒烟 → UI/UX只读分析。650/1073 race、vet、六目标、Codex双轮、有数据459与空账本210检查通过；证据 /tmp/oc-go-cc-multiplatform-final.FHESMh/。
+- Blockers: #8仍未完成：Go账户403；Zen/CommandCode缺公开账户合同；Bedrock需独立IAM授权；OpenRouter/CommandCode真实账户未配置。软件和合成测试不能替代真实账户验收。
 
 ## Sources of Truth
 - llmdoc: `llmdoc/startup.md`、`llmdoc/must/accounting-baseline.md`；此次扩展的llmdoc同步待用户确认。

@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/quota"
 	"github.com/routatic/proxy/internal/storage"
 )
 
@@ -86,6 +88,20 @@ func TestMultiPlatformBrowserServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv, _ := configTestServer(t, string(raw))
+	// The browser exercises opt-in and POST through the real GUI handler; this
+	// synthetic collaborator prevents an AWS identity lookup or billable request.
+	srv.fetchBedrockBilling = func(_ context.Context, billing config.AWSBillingConfig) (*quota.BedrockBilling, error) {
+		if !billing.Enabled || billing.Profile != "browser-synthetic" || billing.LinkedAccountID != "123456789012" {
+			return nil, fmt.Errorf("synthetic billing fixture requires its explicit identity and account")
+		}
+		end := time.Now().UTC().Truncate(24 * time.Hour)
+		total := -1.25
+		return &quota.BedrockBilling{
+			LinkedAccountID: billing.LinkedAccountID, StartDate: end.AddDate(0, 0, -30).Format(time.DateOnly), EndDate: end.Format(time.DateOnly),
+			Metric: "UnblendedCost", Services: []string{"Amazon Bedrock", "Amazon Bedrock Mantle"}, Currency: "EUR", TotalCost: &total, Estimated: true,
+			Daily: []quota.BedrockDailyCost{{Date: end.AddDate(0, 0, -2).Format(time.DateOnly), Cost: -2.5}, {Date: end.AddDate(0, 0, -1).Format(time.DateOnly), Cost: 1.25, Estimated: true}},
+		}, nil
+	}
 	db, err := storage.Open(storage.Config{DatabasePath: filepath.Join(t.TempDir(), "browser.db")})
 	if err != nil {
 		t.Fatal(err)

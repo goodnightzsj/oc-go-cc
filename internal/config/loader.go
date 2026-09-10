@@ -96,7 +96,9 @@ func LoadJSON(data []byte) (*Config, error) {
 		return nil, fmt.Errorf("parsing JSON: %w", err)
 	}
 
-	applyEnvOverrides(&cfg)
+	if err := applyEnvOverrides(&cfg); err != nil {
+		return nil, err
+	}
 	applyDefaults(&cfg)
 
 	if err := validate(&cfg); err != nil {
@@ -149,7 +151,7 @@ func interpolateEnvVars(s string) string {
 }
 
 // applyEnvOverrides applies environment variable overrides to the config.
-func applyEnvOverrides(cfg *Config) {
+func applyEnvOverrides(cfg *Config) error {
 	// Global API keys (backward compatibility)
 	if v := envValue("ROUTATIC_PROXY_API_KEY"); v != "" {
 		cfg.APIKey = v
@@ -189,6 +191,19 @@ func applyEnvOverrides(cfg *Config) {
 	if v := envValue("ROUTATIC_PROXY_AWS_BEDROCK_API_KEYS"); v != "" {
 		cfg.AWSBedrock.APIKeys = parseCommaSeparatedKeys(v)
 		cfg.AWSBedrock.APIKey = ""
+	}
+	if v := envValue("ROUTATIC_PROXY_AWS_BILLING_ENABLED"); v != "" {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("ROUTATIC_PROXY_AWS_BILLING_ENABLED must be a boolean")
+		}
+		cfg.AWSBedrock.Billing.Enabled = enabled
+	}
+	if v := envValue("ROUTATIC_PROXY_AWS_BILLING_PROFILE"); v != "" {
+		cfg.AWSBedrock.Billing.Profile = v
+	}
+	if v := envValue("ROUTATIC_PROXY_AWS_BILLING_LINKED_ACCOUNT_ID"); v != "" {
+		cfg.AWSBedrock.Billing.LinkedAccountID = v
 	}
 
 	if v := envValue("ROUTATIC_PROXY_OPENROUTER_API_KEY"); v != "" {
@@ -234,6 +249,7 @@ func applyEnvOverrides(cfg *Config) {
 	if v := envValue("ROUTATIC_PROXY_LOG_LEVEL"); v != "" {
 		cfg.Logging.Level = v
 	}
+	return nil
 }
 
 func envValue(name string) string {
@@ -386,6 +402,9 @@ func validate(cfg *Config) error {
 	}
 	if err := validateAPIKeys(cfg.AWSBedrock.APIKeys); err != nil {
 		return fmt.Errorf("aws_bedrock.api_keys: %w", err)
+	}
+	if err := cfg.AWSBedrock.Billing.Validate(); err != nil {
+		return err
 	}
 
 	if err := validateSingleAPIKey(cfg.OpenRouter.APIKey); err != nil {

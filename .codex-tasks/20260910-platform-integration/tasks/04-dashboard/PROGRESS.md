@@ -2,9 +2,9 @@
 
 ## Context Recovery Block
 
-- 当前：9/9；部署边界修复完成，最新全量641顶层/1039含子测试race与Chrome447断言/31布局重新通过；等待重新部署验收。
-- 真源：TODO.csv；主线程负责后端/config/整合，platform_ui 限定写入页面和对应行为测试。
-- 下一步：父任务 #5 完成文档/构建/部署门槛；真实账户权限或未公开API不能被合成验证替代。
+- 当前：13/13；AWS独立配置、SDK账单、页面和五平台有数据/空数据矩阵通过；真实账户条件仍保留在#8。
+- 真源：TODO.csv；主线程负责后端、页面、验证和整合，所有旧代理写入权限失效。
+- 下一步：#6重新部署并验收；真实账户权限或未公开API不能被合成验证替代。
 - 约束：无真实凭证读取；入口与未知状态不能作为真实套餐接入完成。未提供的能力须明确证据和剩余限制。
 
 ## 验收证据
@@ -49,3 +49,20 @@
 - 新增五平台及 All 空集合回归、未配置/仅管理 Key 两种合成回归，均先失败。改动仅在共享查询结果初始化为空数组、OpenRouter 额度只取显式平台 Key；原有推理 Key 优先级及 Go 额度的全局 Key 兼容保持不变。
 - API 与 OpenRouter 使用文档同步上述行为边界；既有 llmdoc 大范围架构同步仍待用户确认。
 - 修复后 gui/storage/quota 全包 race 通过；完整 641 顶层/1039 含子测试通过。原 447 项浏览器矩阵在新源码上重跑成功，31 项布局、249 请求、无脚本错误/越界请求；证据 `/tmp/oc-go-cc-deploy-fix-verify.I3hRE1/browser-result.json`。
+
+## AWS 增量恢复核验
+
+- 新增未提交AWS代码保留；隔离HOME定向 `go test -race -p 2 ./internal/config ./internal/gui ./internal/quota -run BedrockBilling -count=1` 通过。配置默认关闭、独立账户scope与部分更新均验证。
+- 全包初轮保留两项失败：原平台能力和DOM测试仍断言AWS只有占位；下一步按新增官方账单合同扩展，不删除跨平台隔离断言。
+- 新 `TestBedrockBillingPaidQueryUsesPost` 先失败：GET查询参数可以产生收费请求，POST不支持。修复收费动作为显式POST并使用Go标准库CrossOriginProtection，普通GET/refresh不触发收费查询。
+- 当前工具子代理发生环境解码错误，无有效独立结论，不计审查通过；主线程继续合同核验和验收。上游HEAD复查仍为b214eeb，无新增提交。
+
+## 本次恢复与发布前复核
+
+- 保留全部未提交 AWS 改动，从活动 CSV 第11项继续；完整复核账单查询、配置、页面和测试链路，没有重复实现已完成的其他平台功能。
+- 最新隔离 HOME 定向全包 `go test -race -p 2 ./internal/config ./internal/gui ./internal/quota -count=1` 退出0：2.740s / 2.673s / 1.319s。SDK 环境/profile优先级、SigV4、固定端点、单账户过滤、分页失败、币种、负/零/未知值、POST与跨站拒绝、局部配置保存和过期响应隔离均通过。
+- `node --check internal/gui/assets/app.js`、`git diff --check` 通过；CommandCode/Zen/AWS官网再核对一致，Codex手册确认当前，upstream HEAD仍为b214eeb。
+- page_gate发生工具解码错误；旧backend_audit恢复消息未回传后停止。两者均不计为独立审查通过；主线程承担审查与验收。后续证据目录 `/tmp/oc-go-cc-multiplatform-final.FHESMh/`。
+- 最新Chrome152有数据矩阵459检查、31布局、261请求、6次独立保存、1次合成AWS手动POST全部通过；普通刷新/平台切换没有产生额外收费动作。空账本210检查、29平台/页面组合、21布局通过；两轮均无脚本错误或意外请求。结果为上述目录的browser-result.json与empty-browser/result.json。
+- 首轮有数据浏览器矩阵已通过，但主线程延后关闭fixture导致Go测试宿主10分钟超时；随后stop请求连接拒绝。空账本fixture明确POST停止并正常PASS（550.33s）。这是验证清理遗漏，保留失败、不归因产品错误；运行器改为成功确认十条合成记录后立即停止fixture，重跑验证生命周期。
+- 修正运行器后矩阵再次459检查/31布局通过，1次合成AWS手动POST，259请求；fixture53.23s自动退出PASS（包54.668s），没有增加超时或改产品代码。原失败和两份browser结果均保留，最新为browser-cleanup-result.json。

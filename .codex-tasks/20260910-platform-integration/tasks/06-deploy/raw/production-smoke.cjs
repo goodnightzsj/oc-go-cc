@@ -36,7 +36,7 @@ function check(value, message) {
   await context.route('**/*', async route => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.origin !== origin || !['GET', 'HEAD'].includes(request.method()) ||
+    if (url.origin !== origin || !['GET', 'HEAD'].includes(request.method()) || url.searchParams.has('billing_refresh') ||
         (url.pathname.startsWith('/api/') && !readPaths.has(url.pathname))) {
       result.blocked.push({phase, method: request.method(), path: url.pathname});
       return route.abort('blockedbyclient');
@@ -102,6 +102,11 @@ function check(value, message) {
           result.accountStates.push({provider, status: account.status, source: account.source, reason: account.reason, creditsStatus: account.credits_status});
           await page.waitForFunction(() => !document.getElementById('btn-refresh-quota').disabled);
           if (provider !== 'opencode-go') check(await page.locator('#quota-go').isHidden(), 'non-Go platform displayed Go windows');
+          if (provider === 'aws-bedrock') {
+            check(await page.locator('#quota-bedrock').isVisible(), 'independent AWS billing view missing');
+            if (account.reason === 'aws_billing_disabled') check(await page.locator('#btn-fetch-bedrock-billing').isDisabled(), 'disabled AWS billing offers a paid action');
+            check((await page.locator('#quota-bedrock').innerText()).includes('Not an account balance'), 'AWS bill described as a balance');
+          }
           check((await page.locator('#quota-local-note').innerText()).includes('not an account bill or balance'), 'local data provenance');
         }
       }
@@ -110,6 +115,9 @@ function check(value, message) {
     await openTab('settings');
     for (const name of ['go', 'zen', 'bedrock', 'openrouter', 'commandcode']) {
       check(await page.locator('#cfg-' + name + '-timeout').count() === 1, name + ' independent settings');
+    }
+    for (const name of ['enabled', 'profile', 'account']) {
+      check(await page.locator('#cfg-bedrock-billing-' + name).count() === 1, 'AWS independent billing configuration: ' + name);
     }
     for (const width of [1440, 768, 390]) {
       await page.setViewportSize({width, height: width === 768 ? 1024 : 900});

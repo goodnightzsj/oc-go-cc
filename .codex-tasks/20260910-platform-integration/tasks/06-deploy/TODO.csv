@@ -1,4 +1,7 @@
 id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,notes
 1,核对远端状态与部署回滚路径,DONE,SSH手册已读且目标仓库服务明确并保护现有数据,ssh root@23.80.89.173 systemctl is-active oc-go-cc.service,2026-09-11,0,原生SSH可信主机校验通过;main b555f5e;服务active且health200;既有release可回滚;仅.ace-tool未跟踪保留
-2,提交推送并部署目标版本,IN_PROGRESS,远端HEAD与本次提交一致且健康通过,bash scripts/prod-deploy.sh,,1,边界修复及最新全量浏览器通过;准备新提交再部署;原备份和首次失败证据保留
-3,执行远端页面与接口验收,FAILED,实际服务行为与新多平台功能一致且没有明显回归,node raw/production-smoke.cjs,,2,首轮空models已修复;第二轮到75项发现空perf列表为null;扩展同一空账本回归并修复;新版凭证隔离已在线;首次及第二次失败证据保留
+2,提交推送并部署目标版本,DONE,远端HEAD与本次提交一致且健康通过,bash scripts/prod-deploy.sh,2026-09-11,2,最终7c2d07c已推送并运行release20260911055621-3fad77f342fc;服务健康配置不变;三份备份及旧release保留
+3,执行远端页面与接口验收,DONE,实际服务行为与新多平台功能一致且没有明显回归,node raw/production-smoke.cjs,2026-09-11,2,最终生产204检查29平台页面组合21布局通过;非法provider五接口400;Go403及未配置账户状态如实显示并保留到#8
+4,AWS增量发布前保护远端状态,DONE,预检目标无冲突且配置账本及catalog有私有备份,ssh root@23.80.89.173 systemctl is-active oc-go-cc.service,2026-09-11,0,main7c2d07c健康NRestarts0;仅.ace-tool未跟踪;私有备份predeploy-20260911-aws-SV1xWrJc;SQLite quick_check=ok及1390条平台记录
+5,提交推送并重新部署AWS增量,IN_PROGRESS,运行目标提交且不改变配置及原账本;保留回滚release,bash scripts/prod-deploy.sh,,0,只发布已验证的软件功能;不启用收费查询或修改账户权限
+6,生产五平台页面及接口复验,TODO,实际部署页面通过且AWS独立配置显示默认关闭;无写入或扣费测试,node raw/production-smoke.cjs,,0,真实账户权限状态仍保留#8;验证后才能进行UIUX分析

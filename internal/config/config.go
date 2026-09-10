@@ -3,6 +3,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -134,15 +135,36 @@ type ModelConfig struct {
 
 // AWSBedrockConfig holds the upstream AWS Bedrock Mantle API settings.
 type AWSBedrockConfig struct {
-	BaseURL            string   `json:"base_url"`
-	AnthropicBaseURL   string   `json:"anthropic_base_url,omitempty"`
-	APIKey             string   `json:"api_key,omitempty"`
-	APIKeys            []string `json:"api_keys,omitempty"`
-	ProjectID          string   `json:"project_id,omitempty"`
-	WireFormat         string   `json:"wire_format,omitempty"` // "openai" (default), "anthropic"
-	TimeoutMs          int      `json:"timeout_ms"`
-	StreamTimeoutMs    int      `json:"stream_timeout_ms"`
-	StreamingTimeoutMs int      `json:"streaming_timeout_ms,omitempty"`
+	BaseURL            string           `json:"base_url"`
+	AnthropicBaseURL   string           `json:"anthropic_base_url,omitempty"`
+	APIKey             string           `json:"api_key,omitempty"`
+	APIKeys            []string         `json:"api_keys,omitempty"`
+	ProjectID          string           `json:"project_id,omitempty"`
+	WireFormat         string           `json:"wire_format,omitempty"` // "openai" (default), "anthropic"
+	TimeoutMs          int              `json:"timeout_ms"`
+	StreamTimeoutMs    int              `json:"stream_timeout_ms"`
+	StreamingTimeoutMs int              `json:"streaming_timeout_ms,omitempty"`
+	Billing            AWSBillingConfig `json:"billing"`
+}
+
+// AWSBillingConfig is independent of Bedrock inference keys. The SDK resolves
+// its own IAM identity only after an explicitly requested billing query.
+type AWSBillingConfig struct {
+	Enabled         bool   `json:"enabled"`
+	Profile         string `json:"profile,omitempty"`
+	LinkedAccountID string `json:"linked_account_id,omitempty"`
+}
+
+func (c AWSBillingConfig) Validate() error {
+	if c.Enabled || c.LinkedAccountID != "" {
+		if len(c.LinkedAccountID) != 12 || strings.IndexFunc(c.LinkedAccountID, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+			return fmt.Errorf("aws_bedrock.billing.linked_account_id must be a 12-digit account ID; billing queries must have an explicit account scope")
+		}
+	}
+	if envVarPattern.MatchString(c.Profile) {
+		return fmt.Errorf("aws_bedrock.billing.profile contains an unresolved environment variable")
+	}
+	return nil
 }
 
 // EffectiveAPIKeys returns the pool of API keys for AWS Bedrock. The APIKeys

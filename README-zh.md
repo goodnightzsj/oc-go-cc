@@ -40,9 +40,11 @@ routatic-proxy start -b
 
 概览、历史、性能和用量分析均可独立筛选五个平台；趋势、模型明细、汇总和比较使用相同平台范围。历史 CSV 导出固定开始时的筛选条件，不受分页期间切换平台影响。
 
-**套餐额度** 为五个平台分别展示本实例的请求、Token、费用已知小计和缺价记录。账户数据另行查询：OpenCode Go 保留三个限额窗口（5 小时滚动 / 本周 / 本月）；OpenRouter 查询每个推理 Key 的额度与 UTC 用量，并使用独立的 `openrouter.management_api_key` 查询账户 Credits，BYOK 用量单独显示。密钥仅以掩码展示；账户结果按平台缓存 30 秒。
+**套餐额度** 为五个平台分别展示本实例的请求、Token、费用已知小计和缺价记录。账户数据另行查询：OpenCode Go 保留三个限额窗口（5 小时滚动 / 本周 / 本月）；OpenRouter 查询每个推理 Key 的额度与 UTC 用量，并使用独立的 `openrouter.management_api_key` 查询账户 Credits，BYOK 用量单独显示。密钥仅以掩码展示；Go/OpenRouter 账户结果按平台缓存 30 秒。
 
-Go 模型额度来自 [Go 文档](https://opencode.ai/docs/zh-cn/go)，分模型用量是本实例估算，不是官方账户账单；仅在配置单个 Go 密钥且月度窗口已知时展示，多密钥无法从本地记录可靠归属到账户。Go 用量端点未公开，可能变化；Zen／CommandCode 暂无已核实的公开账户查询合同，AWS 账单需要独立 IAM 权限且尚未接入。这些平台仍有独立本地用量与官方入口，但不会套用 Go 配额，也不把“未获取”显示成零余额。详情见[五平台能力矩阵](docs/platform-integration-review.md#五平台页面与账户能力)。
+AWS Bedrock 已接入 [Cost Explorer 独立账单查询](docs/aws-bedrock-billing.md)：默认关闭，需显式账户 ID 和服务进程的独立 AWS SDK 身份；仅手动按钮发起收费查询，普通刷新只读取同账户、同 UTC 日的缓存。展示最近 30 个完整 UTC 日内已列明服务的费用、币种与预估标记，不当作剩余额度。
+
+Go 模型额度来自 [Go 文档](https://opencode.ai/docs/zh-cn/go)，分模型用量是本实例估算，不是官方账户账单；仅在配置单个 Go 密钥且月度窗口已知时展示，多密钥无法从本地记录可靠归属到账户。Go 用量端点未公开，可能变化；Zen／CommandCode 暂无已核实的公开账户查询合同。这些平台仍有独立本地用量与官方入口，但不会套用 Go 配额，也不把“未获取”显示成零余额。详情见[五平台能力矩阵](docs/platform-integration-review.md#五平台页面与账户能力)。
 
 未知价格显示 `—`，部分已知费用显示小计加 `+ ?`，不当作免费。用量分析的日期/时间桶和概览“今日”边界使用 UTC；历史日期筛选和单条时间使用浏览器本地时区。
 

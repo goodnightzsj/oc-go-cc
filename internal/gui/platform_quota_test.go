@@ -27,7 +27,7 @@ func TestQuotaPlatformCapabilitiesDoNotSendGoKeys(t *testing.T) {
 	srv.atomicCfg.ApplyLoaded(&cfg)
 	for provider, reason := range map[string]string{
 		"opencode-zen": "no_public_account_api", "commandcode": "no_public_account_api",
-		"aws-bedrock": "aws_billing_auth_required",
+		"aws-bedrock": "aws_billing_disabled",
 	} {
 		t.Run(provider, func(t *testing.T) {
 			rec := httptest.NewRecorder()
@@ -40,7 +40,11 @@ func TestQuotaPlatformCapabilitiesDoNotSendGoKeys(t *testing.T) {
 			if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &body) != nil {
 				t.Fatalf("capability response = %d: %s", rec.Code, rec.Body.String())
 			}
-			if body.Provider != provider || body.Status != "unavailable" || body.Source != "none" || body.Reason != reason || len(body.Accounts) != 0 || len(body.Links) == 0 {
+			status, source := "unavailable", "none"
+			if provider == "aws-bedrock" {
+				status, source = "not_configured", "official_api"
+			}
+			if body.Provider != provider || body.Status != status || body.Source != source || body.Reason != reason || len(body.Accounts) != 0 || len(body.Links) == 0 {
 				t.Fatalf("platform capability misrepresented: %+v", body)
 			}
 			if strings.Contains(rec.Body.String(), "synthetic-") {

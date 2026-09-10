@@ -15,7 +15,7 @@ async function checks() {
   const go = {provider:'opencode-go',status:'available',source:'upstream_api',currency:'USD',accounts:[{key_hint:'masked-GO01',report:{plan:'go',weekly:{has_percent:true,used_percent:25,used_dollars:7.5,limit_dollars:30,resets_at:'2030-01-01T00:00:00Z'},fetched_at:'2026-09-10T00:00:00Z'}}],model_limits:{models:[{model:'shared',allowance_usd:60}]},model_usage:[{model:'shared',used_usd:0.25,allowance_usd:60,percent:0.25/60*100,requests:3,unknown_cost_requests:0}],links:[{kind:'docs',url:'https://synthetic.invalid/go/docs'}],fetched_at:'2026-09-10T00:00:00Z'};
   const key = {limit:null,limit_remaining:null,limit_reset:null,usage:12,usage_daily:0,usage_weekly:null,usage_monthly:10,byok_usage:3,byok_usage_daily:1,byok_usage_weekly:null,byok_usage_monthly:2,include_byok_in_limit:false,is_free_tier:false,expires_at:null};
   let openrouter = {provider:'openrouter',status:'partial',source:'official_api',currency:'USD',credits_status:'not_configured',accounts:[{key_hint:'masked-OR01',openrouter:key},{key_hint:'masked-OR02',openrouter:{...key,limit:0,limit_remaining:0,limit_reset:'daily',usage:0,byok_usage:0,include_byok_in_limit:null}},{key_hint:'masked-BAD1',error:'synthetic HTTP 401 <denied>'}],links:[{kind:'billing',url:'https://synthetic.invalid/openrouter/credits'}]};
-  const unavailable = provider => ({provider,status:'unavailable',source:'none',accounts:[],reason:provider === 'aws-bedrock' ? 'aws_billing_auth_required' : 'no_public_account_api',links:[{kind:'billing',url:'https://synthetic.invalid/' + provider + '/billing'}]});
+  const unavailable = provider => ({provider,status:provider === 'aws-bedrock' ? 'not_configured' : 'unavailable',source:provider === 'aws-bedrock' ? 'official_api' : 'none',accounts:[],reason:provider === 'aws-bedrock' ? 'aws_billing_disabled' : 'no_public_account_api',links:[{kind:'billing',url:'https://synthetic.invalid/' + provider + '/billing'}]});
   let calls = [];
   const response = raw => {
     const url = new URL(raw,'http://synthetic.invalid');
@@ -42,7 +42,9 @@ async function checks() {
     assert.equal(calls.find(url=>url.pathname === '/api/analytics/summary').searchParams.get('days'),'30');
     assert.equal(get('quota-go').hidden,provider !== 'opencode-go');
     assert.equal(get('quota-openrouter').hidden,provider !== 'openrouter');
-    assert.equal(get('quota-unavailable').hidden,['opencode-go','openrouter'].includes(provider));
+    assert.equal(get('quota-bedrock').hidden,provider !== 'aws-bedrock');
+    assert.equal(get('quota-unavailable').hidden,['opencode-go','openrouter','aws-bedrock'].includes(provider));
+    assert.equal(calls.find(url=>url.pathname === '/api/quota').searchParams.has('billing_refresh'),false,'changing provider never initiates a paid query');
     assert.equal(get('quota-local-requests').textContent,'3');
     assert.equal(get('quota-local-tokens').textContent,'17');
     assert.equal(get('quota-local-cost').textContent,'$0.250 + ?');
@@ -56,8 +58,12 @@ async function checks() {
       assert.equal(get('quota-remaining').textContent,'$22.50','Go window gauges are preserved');
       assert.ok(get('quota-accounts').innerHTML.includes('quota-unit'));
       assert.ok(get('quota-model-limits').innerHTML.includes('shared'));
+    } else if (provider === 'aws-bedrock') {
+      assert.ok(get('quota-bedrock-body').innerHTML.includes(t('quota.reason.aws_billing_disabled')));
+      assert.equal(get('btn-fetch-bedrock-billing').disabled,true);
+      assert.equal(get('quota-source').textContent,t('quota.source.official_api'));
     } else if (provider !== 'openrouter') {
-      assert.ok(get('quota-unavailable-note').textContent.includes(provider === 'aws-bedrock' ? 'separate AWS billing authorization' : 'No public account quota API'));
+      assert.ok(get('quota-unavailable-note').textContent.includes('No public account quota API'));
       assert.equal(get('quota-source').textContent,t('quota.source.none'));
       assert.ok(get('quota-links').innerHTML.includes('/' + provider + '/billing'));
     }
@@ -186,7 +192,7 @@ async function checks() {
   assert.ok(get('quota-links').innerHTML.includes('https://synthetic.invalid/usage'));
   for (const lang of ['en','zh']) {
     currentLang = lang;
-    for (const key of ['quota.localTitle','quota.localNote','quota.reason.no_public_account_api','quota.reason.aws_billing_auth_required','openrouter.noLimit','openrouter.managementHint','openrouter.creditsFail']) assert.notEqual(t(key),key,'missing translation: ' + key);
+    for (const key of ['quota.localTitle','quota.localNote','quota.reason.no_public_account_api','quota.reason.aws_billing_disabled','openrouter.noLimit','openrouter.managementHint','openrouter.creditsFail']) assert.notEqual(t(key),key,'missing translation: ' + key);
   }
   currentLang = 'en';
   const mask = '••••••••••••••••';

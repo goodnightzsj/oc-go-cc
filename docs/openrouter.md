@@ -156,7 +156,7 @@ The model above is an example, not a claim of current account access. Replace `m
 
 Select **OpenRouter** in the Quota tab. Local usage includes only requests that pass through this instance; it is fetched separately from upstream account data.
 
-- `GET /api/v1/key` uses each configured inference key and returns that key's cap and UTC daily/weekly/monthly usage. BYOK usage is shown separately. A `null` cap means no per-key cap, not an unlimited account balance; missing optional usage values remain unknown.
+- `GET /api/v1/key` uses only explicitly configured OpenRouter inference keys (`openrouter.api_key` / `api_keys` or their provider-specific environment overrides) and returns that key's cap and UTC daily/weekly/monthly usage. Unlike legacy inference routing, browsing quota never falls back to global keys. BYOK usage is shown separately. A `null` cap means no per-key cap, not an unlimited account balance; missing optional usage values remain unknown.
 - `GET /api/v1/credits` requires a separate **Management Key**. Set `openrouter.management_api_key` in Settings, or `ROUTATIC_PROXY_OPENROUTER_MANAGEMENT_API_KEY` in the service environment. It is never put in the inference pool and never falls back to the inference key. Account balance is `total_credits - total_usage`, including negative balances.
 - Multiple keys are not summed or assumed to belong to one account. Errors are shown per key; one failed key does not hide another key's data. The response is cached per platform for 30 seconds and invalidated by endpoint/key changes.
 - Custom gateways must implement these endpoints at their own configured origin. The proxy never sends a private gateway key to the public OpenRouter host as a quota fallback.

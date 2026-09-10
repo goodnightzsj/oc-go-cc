@@ -171,6 +171,8 @@ Explicit analytics ranges are `[from, to)` and limited to 92 days. The configure
 
 Unknown cost is not free usage: `unknown_cost_requests` accompanies the known monetary subtotal. Requests without known outcome details do not contribute to a success-rate denominator. Identical model IDs on different providers remain separate rows.
 
+Empty analytics collections (`models`, `providers`, `scenarios`, and `trend`) are JSON arrays (`[]`), not `null`, including newly configured platforms with no local requests.
+
 ### `GET /api/quota`
 
 Here `provider` selects one of the same five providers; omission retains the legacy **OpenCode Go** default. `refresh=1` bypasses the 30-second per-provider cache. Responses carry `provider`, `status`, `source`, `reason` when applicable, `fetched_at`, `ttl_seconds`, `cached`, official `links`, and separate account results. They are sent with `Cache-Control: no-store`.
@@ -184,6 +186,8 @@ Here `provider` selects one of the same five providers; omission retains the leg
 | `error` | The configured query failed; error details are preserved without credentials |
 
 Go `accounts[].report` contains the existing quota windows. OpenRouter `accounts[].openrouter` contains the individual inference key's cap, remaining cap, UTC usage, and BYOK usage; absent optional values remain `null`. Key caps are **not** an account balance, and multiple keys are not summed. `credits`, `credits_status`, and `credits_error` are separate, using only `openrouter.management_api_key` (or `ROUTATIC_PROXY_OPENROUTER_MANAGEMENT_API_KEY`). A negative `total_credits - total_usage` balance is retained.
+
+OpenRouter quota queries require explicit `openrouter.api_key` / `api_keys` (or their provider-specific environment overrides). Merely viewing this platform never probes its endpoint with the legacy global key pool. Go quota retains its legacy global-key compatibility; inference routing's existing key precedence is unchanged.
 
 Zen and CommandCode return `reason=no_public_account_api`. Bedrock returns `reason=aws_billing_auth_required`; no Cost Explorer integration or credential fallback is implied. All five providers' local usage remains independently available through the analytics endpoint. See the [capability matrix](platform-integration-review.md#五平台页面与账户能力).
 

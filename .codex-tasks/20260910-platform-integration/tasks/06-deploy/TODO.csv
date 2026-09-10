@@ -1,4 +1,4 @@
 id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,notes
 1,核对远端状态与部署回滚路径,DONE,SSH手册已读且目标仓库服务明确并保护现有数据,ssh root@23.80.89.173 systemctl is-active oc-go-cc.service,2026-09-11,0,原生SSH可信主机校验通过;main b555f5e;服务active且health200;既有release可回滚;仅.ace-tool未跟踪保留
-2,提交推送并部署目标版本,IN_PROGRESS,远端HEAD与本次提交一致且健康通过,bash scripts/prod-deploy.sh,,0,部署前先本机磁盘备份配置与SQLite;仅在远端已确认工作目录执行
-3,执行远端页面与接口验收,TODO,实际服务行为与新多平台功能一致且没有明显回归,echo SKIP,,0,结合SSH和浏览器交互记录实际验证
+2,提交推送并部署目标版本,IN_PROGRESS,远端HEAD与本次提交一致且健康通过,bash scripts/prod-deploy.sh,,1,边界修复及最新全量浏览器通过;准备新提交再部署;原备份和首次失败证据保留
+3,执行远端页面与接口验收,FAILED,实际服务行为与新多平台功能一致且没有明显回归,node raw/production-smoke.cjs,,1,首次生产冒烟第8项在空models断言失败;证据/tmp/oc-go-cc-deploy-verify.eRBwTX/production-smoke;未到套餐页或发出写请求

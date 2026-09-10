@@ -134,3 +134,38 @@ func TestPlatformPerformanceWithoutStorageIsExplicit(t *testing.T) {
 		}
 	}
 }
+
+func TestEmptyPlatformDashboardCollections(t *testing.T) {
+	db, err := storage.Open(storage.Config{DatabasePath: filepath.Join(t.TempDir(), "empty.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	h := NewAnalyticsHandler(db)
+	for _, provider := range []string{"", "opencode-go", "opencode-zen", "aws-bedrock", "openrouter", "commandcode"} {
+		t.Run("provider="+provider, func(t *testing.T) {
+			for _, endpoint := range []struct {
+				handler http.HandlerFunc
+				fields  []string
+			}{
+				{h.Summary, []string{"models", "providers", "scenarios"}},
+				{h.TokenTrend, []string{"trend"}},
+			} {
+				rec := httptest.NewRecorder()
+				endpoint.handler(rec, httptest.NewRequest(http.MethodGet, "/?provider="+provider, nil))
+				if rec.Code != http.StatusOK {
+					t.Fatalf("empty dashboard: HTTP %d: %s", rec.Code, rec.Body.String())
+				}
+				var response map[string]json.RawMessage
+				if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+					t.Fatal(err)
+				}
+				for _, field := range endpoint.fields {
+					if string(response[field]) != "[]" {
+						t.Errorf("empty %s = %s, want []", field, response[field])
+					}
+				}
+			}
+		})
+	}
+}

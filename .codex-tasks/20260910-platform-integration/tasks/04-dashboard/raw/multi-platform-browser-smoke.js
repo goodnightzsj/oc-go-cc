@@ -12,7 +12,7 @@ async (page) => {
   const outputDir = '/tmp/oc-go-cc-multiplatform-' + Date.now() + '-' + Math.random().toString(16).slice(2);
   const result = {
     ok: false, origin, outputDir, scopes: [], patches: [], layouts: [], screenshots: [],
-    injectedFailures: [], unexpectedRequests: [], pageErrors: [], checks: 0,
+    injectedFailures: [], unexpectedRequests: [], pageErrors: [], checks: 0, billingQueries: 0,
   };
   const context = await page.context().browser().newContext({
     viewport: {width: 1440, height: 900}, locale: 'en-US', timezoneId: 'UTC', serviceWorkers: 'block',
@@ -21,6 +21,7 @@ async (page) => {
   tab.setDefaultTimeout(10000);
   let phase = 'fixture-identity';
   let expectedPatch = null;
+  let expectedBillingQuery = false;
   let fixtureConfirmed = false;
   let injection = null;
   const traffic = [];
@@ -42,21 +43,25 @@ async (page) => {
     const request = route.request();
     const url = new URL(request.url());
     const method = request.method();
-    const event = {phase, method, path: url.pathname, provider: url.searchParams.get('provider') || ''};
+    const event = {phase, method, path: url.pathname, provider: url.searchParams.get('provider') || '', billingRefresh: url.searchParams.get('billing_refresh')};
     const block = async reason => {
       result.unexpectedRequests.push({...event, origin: url.origin, reason});
       await route.abort('blockedbyclient');
     };
     if (url.origin !== origin) return block('external origin');
     if (!['GET', 'HEAD'].includes(method)) {
-      if (method !== 'POST' || url.pathname !== '/api/proxy/config' || !fixtureConfirmed || !expectedPatch) {
+      if (method === 'POST' && url.pathname === '/api/quota' && fixtureConfirmed && expectedBillingQuery && event.provider === 'aws-bedrock' && event.billingRefresh === '1') {
+        result.billingQueries++;
+        expectedBillingQuery = false;
+      } else if (method === 'POST' && url.pathname === '/api/proxy/config' && fixtureConfirmed && expectedPatch) {
+        let patch;
+        try { patch = request.postDataJSON(); } catch (_) { return block('invalid config patch'); }
+        if (!same(patch, expectedPatch)) return block('config patch exceeds the explicit expected fields');
+        result.patches.push({phase, patch});
+        expectedPatch = null; // Each explicit save permits exactly one request.
+      } else {
         return block('unapproved write');
       }
-      let patch;
-      try { patch = request.postDataJSON(); } catch (_) { return block('invalid config patch'); }
-      if (!same(patch, expectedPatch)) return block('config patch exceeds the selected timeout field');
-      result.patches.push({phase, patch});
-      expectedPatch = null; // Each explicit save permits exactly one request.
     } else if (url.pathname.startsWith('/api/') && !readPaths.has(url.pathname)) {
       return block('unexpected API');
     }
@@ -264,10 +269,14 @@ async (page) => {
         check((await tab.locator('#quota-openrouter-credits').innerText()).includes('$-1.00'), 'negative balance not shown');
         const text = await tab.locator('#quota-openrouter-accounts').innerText();
         check(text.includes('401') && text.includes('$2.00') && text.includes('$3.00'), 'key errors or BYOK usage absent');
+      } else if (provider === 'aws-bedrock') {
+        check(account.status === 'not_configured' && account.source === 'official_api' && account.reason === 'aws_billing_disabled', 'AWS billing must be disabled by default');
+        check(await tab.locator('#quota-bedrock').isVisible() && await tab.locator('#quota-go').isHidden(), 'AWS account view reused Go quota');
+        check(await tab.locator('#btn-fetch-bedrock-billing').isDisabled(), 'disabled AWS query button');
+        check((await tab.locator('#quota-bedrock-body').innerText()).includes('AWS billing queries are disabled'), 'AWS setup state absent');
       } else {
         check(account.status === 'unavailable' && account.source === 'none', 'unavailable account status');
-        check(account.reason === (provider === 'aws-bedrock' ? 'aws_billing_auth_required' : 'no_public_account_api'),
-          'account capability reason');
+        check(account.reason === 'no_public_account_api', 'account capability reason');
         check(await tab.locator('#quota-unavailable').isVisible() && await tab.locator('#quota-go').isHidden(),
           'unavailable platform displayed Go quota');
         check(await tab.locator('#quota-links a').count() > 0, 'official console links absent');
@@ -309,6 +318,43 @@ async (page) => {
       check(/^•+$/.test(after.openrouter.management_api_key), 'management key leaked in API');
       check(/^•+$/.test(await tab.locator('#cfg-openrouter-management-key').inputValue()), 'management key leaked in form');
     }
+
+    phase = 'settings/aws-billing';
+    const beforeBilling = await api('/api/proxy/config');
+    const billing = {enabled: true, profile: 'browser-synthetic', linked_account_id: '123456789012'};
+    await tab.locator('#cfg-bedrock-billing-enabled').check();
+    await tab.locator('#cfg-bedrock-billing-profile').fill(billing.profile);
+    await tab.locator('#cfg-bedrock-billing-account').fill(billing.linked_account_id);
+    expectedPatch = {aws_bedrock: {billing}};
+    const billingSaved = tab.waitForResponse(response => new URL(response.url()).pathname === '/api/proxy/config' && response.request().method() === 'POST');
+    await tab.locator('#btn-save-cfg').click();
+    check((await billingSaved).ok(), 'AWS billing configuration save');
+    await tab.waitForFunction(() => !document.getElementById('btn-save-cfg').disabled);
+    check(same(await api('/api/proxy/config'), {...beforeBilling, aws_bedrock: {...beforeBilling.aws_bedrock, billing}}), 'billing configuration changed inference or other platforms');
+
+    await openTab('quota');
+    const [ready] = await selectAndRead('quota', 'quota-provider', 'aws-bedrock', ['/api/quota', '/api/analytics/summary']);
+    await tab.waitForFunction(() => !document.getElementById('btn-refresh-quota').disabled);
+    check(ready.reason === 'aws_billing_refresh_required' && !ready.bedrock_billing, 'enabling or selecting AWS initiated a paid query');
+    phase = 'quota/aws-manual-billing';
+    expectedBillingQuery = true;
+    const billingResponse = tab.waitForResponse(response => new URL(response.url()).pathname === '/api/quota' && response.request().method() === 'POST');
+    await tab.locator('#btn-fetch-bedrock-billing').click();
+    const receivedBilling = await billingResponse;
+    check(receivedBilling.ok(), 'explicit billing POST failed');
+    const official = await receivedBilling.json();
+    check(official.status === 'available' && official.currency === 'EUR' && official.bedrock_billing.total_cost === -1.25, 'AWS signed cost and currency');
+    check(official.bedrock_billing.linked_account_id === billing.linked_account_id && official.bedrock_billing.daily.length === 2 && official.bedrock_billing.estimated, 'AWS account, daily rows or estimate metadata');
+    await tab.waitForFunction(() => document.getElementById('quota-bedrock-body').textContent.includes('-€1.25'));
+    check((await tab.locator('#quota-bedrock-body').innerText()).includes('Amazon Bedrock Mantle'), 'AWS service scope not shown');
+    check((await tab.locator('#quota-bedrock').innerText()).includes('Not an account balance'), 'AWS bill must not claim remaining balance');
+    await tab.waitForFunction(() => !document.getElementById('btn-refresh-quota').disabled);
+    const cachedBill = waitResponse('/api/quota', 'aws-bedrock');
+    await tab.locator('#btn-refresh-quota').click();
+    check((await (await cachedBill).json()).cached === true, 'ordinary refresh must use the billing snapshot');
+    check(result.billingQueries === 1 && traffic.every(item => item.method !== 'GET' || !item.billingRefresh), 'AWS query was repeated automatically');
+    await tab.screenshot({path: outputDir + '/desktop-aws-billing.png', fullPage: true});
+    result.screenshots.push({tab: 'quota', provider: 'aws-bedrock', width: 1440, path: outputDir + '/desktop-aws-billing.png'});
 
     phase = 'layout';
     for (const [width, height] of [[1440, 900], [768, 1024], [390, 844]]) {

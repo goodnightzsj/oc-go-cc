@@ -63,6 +63,7 @@ type quotaResponse struct {
 	CreditsStatus   string                   `json:"credits_status,omitempty"`
 	CreditsError    string                   `json:"credits_error,omitempty"`
 	CreditsEndpoint string                   `json:"credits_endpoint,omitempty"`
+	BedrockBilling  *quota.BedrockBilling    `json:"bedrock_billing,omitempty"`
 }
 
 type quotaCacheEntry struct {
@@ -114,7 +115,7 @@ func goQuotaKeys(providerKeys, globalKeys []string) []string {
 }
 
 func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -126,6 +127,18 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 	if !config.SupportedProvider(provider) {
 		http.Error(w, "unsupported quota provider", http.StatusBadRequest)
 		return
+	}
+	manualBilling := provider == "aws-bedrock" && r.URL.Query().Get("billing_refresh") == "1"
+	if (r.Method == http.MethodPost) != manualBilling {
+		http.Error(w, "billing refresh requires an explicit POST; other quota queries require GET", http.StatusMethodNotAllowed)
+		return
+	}
+	if r.Method == http.MethodPost {
+		// A paid query is an action, never a prefetchable GET or cross-site form.
+		if err := http.NewCrossOriginProtection().Check(r); err != nil {
+			http.Error(w, "cross-origin billing query denied", http.StatusForbidden)
+			return
+		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	cfg := s.atomicCfg.Get()
@@ -152,8 +165,9 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 		resp.Reason = "no_public_account_api"
 		resp.Links = []quotaLink{{Kind: "usage", URL: "https://commandcode.ai/usage"}, {Kind: "billing", URL: "https://commandcode.ai/billing"}, {Kind: "keys", URL: "https://commandcode.ai/settings/keys"}}
 	case "aws-bedrock":
-		resp.Reason = "aws_billing_auth_required"
 		resp.Links = []quotaLink{{Kind: "billing", URL: "https://console.aws.amazon.com/billing/home"}, {Kind: "docs", URL: "https://docs.aws.amazon.com/cost-management/latest/userguide/ce-api.html"}}
+		s.handleBedrockBilling(w, r, cfg, resp)
+		return
 	}
 	if len(cfg.ProviderAPIKeys(provider)) == 0 {
 		resp.Status = "not_configured"
@@ -242,6 +256,59 @@ func (s *Server) handleOpenRouterQuota(w http.ResponseWriter, r *http.Request, c
 	writeJSON(w, resp)
 }
 
+func (s *Server) handleBedrockBilling(w http.ResponseWriter, r *http.Request, cfg *config.Config, resp quotaResponse) {
+	resp.Source, resp.Endpoint = "official_api", quota.BedrockBillingEndpoint
+	resp.TTLSeconds = int(quota.BedrockBillingTTL.Seconds())
+	billing := cfg.AWSBedrock.Billing
+	if !billing.Enabled {
+		resp.Status, resp.Reason = "not_configured", "aws_billing_disabled"
+		writeJSON(w, resp)
+		return
+	}
+	if err := billing.Validate(); err != nil {
+		resp.Status, resp.Error = "error", err.Error()
+		writeJSON(w, resp)
+		return
+	}
+	// Legacy refresh=1 is sent on platform changes and by older clients. Only
+	// this separate POST action may initiate a paid Cost Explorer query.
+	manual := r.Method == http.MethodPost
+	began := time.Now().UTC()
+	identity := []string{billing.Profile, billing.LinkedAccountID, began.Format(time.DateOnly)}
+	s.bedrockBillingMu.Lock()
+	defer s.bedrockBillingMu.Unlock()
+	if cached := s.cachedQuota(resp.Provider, resp.Endpoint, identity, false); cached != nil && (!manual || cached.FetchedAt.After(began)) {
+		writeJSON(w, *cached)
+		return
+	}
+	if !manual {
+		resp.Status, resp.Reason = "unavailable", "aws_billing_refresh_required"
+		writeJSON(w, resp)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), quota.RequestTimeout)
+	defer cancel()
+	fetch := s.fetchBedrockBilling
+	if fetch == nil {
+		fetch = quota.FetchBedrockBilling
+	}
+	report, err := fetch(ctx, billing)
+	if err != nil {
+		resp.Status, resp.Error = "error", err.Error()
+	} else if report == nil {
+		resp.Status, resp.Error = "error", "AWS billing returned no report"
+	} else {
+		resp.BedrockBilling, resp.Currency = report, report.Currency
+		resp.Status = "available"
+		if report.TotalCost == nil {
+			resp.Status, resp.Reason = "unavailable", "aws_billing_no_data"
+		}
+	}
+	resp.FetchedAt = time.Now().UTC()
+	s.storeQuota(resp.Endpoint, identity, resp)
+	writeJSON(w, resp)
+}
+
 func quotaStatus(resp quotaResponse) string {
 	available, failed := 0, 0
 	for _, account := range resp.Accounts {
@@ -314,7 +381,7 @@ func (s *Server) cachedQuota(provider, endpoint string, keys []string, force boo
 	if !ok || entry.Identity != quotaCacheKey(endpoint, keys) {
 		return nil
 	}
-	if time.Since(entry.Response.FetchedAt) >= quotaCacheTTL {
+	if time.Since(entry.Response.FetchedAt) >= time.Duration(entry.Response.TTLSeconds)*time.Second {
 		return nil
 	}
 	cached := entry.Response

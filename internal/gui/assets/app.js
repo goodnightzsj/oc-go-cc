@@ -74,7 +74,22 @@ const TRANSLATIONS = {
     'quota.source.official_api': 'Source: official account API',
     'quota.source.none': 'Official account data not retrieved',
     'quota.reason.no_public_account_api': 'No public account quota API is documented for this platform. Use its official console for billing; the local ledger is shown below.',
-    'quota.reason.aws_billing_auth_required': 'AWS account billing requires separate AWS billing authorization. A Bedrock inference key does not grant it; use the AWS billing console.',
+    'quota.reason.aws_billing_disabled': 'AWS billing queries are disabled. Enable them in Settings with an explicit account ID and a separate AWS SDK identity.',
+    'quota.reason.aws_billing_refresh_required': 'Ready for a manual billing query. Platform changes and automatic refresh never call the paid AWS API.',
+    'quota.reason.aws_billing_no_data': 'No matching Bedrock billing data was returned for this account and period. This is not a zero balance; check the account, service coverage and AWS data delay.',
+    'aws.billingTitle': 'AWS official service costs',
+    'aws.billingQuery': 'Query AWS billing (paid)',
+    'aws.billingHint': 'Cost Explorer charges per API request, including pagination. Queries use a separate IAM identity and are never automatic. Ordinary refresh reads the cached snapshot only.',
+    'aws.billingScope': 'Last 30 complete UTC days · UnblendedCost for the services listed below. Not an account balance or this proxy’s ledger; AWS data can be delayed or revised.',
+    'aws.billingTotal': 'Reported service cost',
+    'aws.billingAccount': 'Billing account ID',
+    'aws.billingPeriod': 'UTC period (end exclusive)',
+    'aws.billingServices': 'Included AWS service names',
+    'aws.billingEstimated': 'AWS estimate; subject to revision',
+    'aws.billingReported': 'Reported by AWS',
+    'aws.billingEnable': 'Enable manual AWS billing queries (paid)',
+    'aws.billingProfile': 'AWS SDK profile (optional)',
+    'aws.billingConfigHint': 'Account ID is required when enabled. The service uses standard AWS SDK credentials or the selected profile, never a Bedrock inference key. IAM must allow ce:GetDimensionValues and ce:GetCostAndUsage.',
     'quota.noProviderKey': 'No {provider} inference API key configured',
     'quota.noProviderKeyHint': 'Add a provider key in Settings to query its key usage.',
     'quota.yes': 'Yes',
@@ -431,7 +446,22 @@ const TRANSLATIONS = {
     'quota.source.official_api': '来源：官方账户接口',
     'quota.source.none': '尚未获取官方账户数据',
     'quota.reason.no_public_account_api': '此平台尚未公开账户额度 API。请在官方控制台查看账单；下方仍提供本实例账本。',
-    'quota.reason.aws_billing_auth_required': 'AWS 账户账单需要独立的 AWS 账单授权，Bedrock 推理密钥不包含此权限；请前往 AWS 账单控制台。',
+    'quota.reason.aws_billing_disabled': 'AWS 账单查询默认关闭。请在设置中启用，并指定账单账户 ID 和独立 AWS SDK 身份。',
+    'quota.reason.aws_billing_refresh_required': '可手动查询账单。切换平台和自动刷新均不会调用收费 AWS 接口。',
+    'quota.reason.aws_billing_no_data': '该账户和时段未返回匹配的 Bedrock 账单数据；不代表余额为零。请核对账户、服务范围及 AWS 数据延迟。',
+    'aws.billingTitle': 'AWS 官方服务费用',
+    'aws.billingQuery': '查询 AWS 账单（收费）',
+    'aws.billingHint': 'Cost Explorer 按 API 请求收费，分页也会产生请求。查询使用独立 IAM 身份，绝不自动调用；普通刷新只读取缓存快照。',
+    'aws.billingScope': '最近 30 个完整 UTC 日 · 下列服务的 UnblendedCost，不是账户余额或本实例账本；AWS 数据可能延迟或修订。',
+    'aws.billingTotal': '已报告服务费用',
+    'aws.billingAccount': '账单账户 ID',
+    'aws.billingPeriod': 'UTC 时段（不含结束日）',
+    'aws.billingServices': '纳入合计的 AWS 服务名',
+    'aws.billingEstimated': 'AWS 预估，可能修订',
+    'aws.billingReported': 'AWS 已报告',
+    'aws.billingEnable': '启用手动 AWS 账单查询（收费）',
+    'aws.billingProfile': 'AWS SDK 配置档案（可选）',
+    'aws.billingConfigHint': '启用时必须填写账户 ID。服务使用标准 AWS SDK 凭证链或所选配置档案，不使用 Bedrock 推理密钥；IAM 需允许 ce:GetDimensionValues 和 ce:GetCostAndUsage。',
     'quota.noProviderKey': '未配置 {provider} 推理 API 密钥',
     'quota.noProviderKeyHint': '在设置中添加该平台密钥后，可查询密钥用量。',
     'quota.yes': '是',
@@ -1999,8 +2029,8 @@ const PROVIDERS = {
   'commandcode': {name: 'CommandCode', color: '#22d3ee'},
 };
 
-async function fetchJSON(url) {
-  const response = await fetch(url);
+async function fetchJSON(url, options) {
+  const response = await fetch(url, options);
   if (!response.ok) throw new Error(`HTTP ${response.status}: ${(await response.text()).trim()}`);
   return response.json();
 }
@@ -2295,6 +2325,9 @@ const CONFIG_FIELDS = [
   ['aws_bedrock.timeout_ms', 'cfg-bedrock-timeout', 'int'],
   ['aws_bedrock.stream_timeout_ms', 'cfg-bedrock-stream-timeout', 'int'],
   ['aws_bedrock.streaming_timeout_ms', 'cfg-bedrock-streaming-timeout', 'int'],
+  ['aws_bedrock.billing.enabled', 'cfg-bedrock-billing-enabled', 'bool'],
+  ['aws_bedrock.billing.profile', 'cfg-bedrock-billing-profile', 'string'],
+  ['aws_bedrock.billing.linked_account_id', 'cfg-bedrock-billing-account', 'string'],
 
   // OpenRouter
   ['openrouter.base_url', 'cfg-openrouter-base-url', 'string'],
@@ -3899,6 +3932,9 @@ const QuotaModule = {
 
   init() {
     document.getElementById('btn-refresh-quota')?.addEventListener('click', () => this.load(true));
+    document.getElementById('btn-fetch-bedrock-billing')?.addEventListener('click', () => {
+      if (this.provider === 'aws-bedrock') return this.loadAccounts(true, true);
+    });
     document.getElementById('quota-provider')?.addEventListener('change', event => {
       this.provider = event.target.value;
       return this.load(true);
@@ -3914,7 +3950,7 @@ const QuotaModule = {
     await Promise.all([this.loadAccounts(force), this.loadLocalUsage(force)]);
   },
 
-  async loadAccounts(force) {
+  async loadAccounts(force, billingRefresh = false) {
     const provider = this.provider;
     const changed = this.accountProvider !== provider;
     if (!changed && this.loading) return;
@@ -3928,7 +3964,9 @@ const QuotaModule = {
     try {
       const params = new URLSearchParams({provider});
       if (force) params.set('refresh', '1');
-      const view = await fetchJSON(`/api/quota?${params}`);
+      const manualBilling = provider === 'aws-bedrock' && billingRefresh;
+      if (manualBilling) params.set('billing_refresh', '1');
+      const view = await fetchJSON(`/api/quota?${params}`, manualBilling ? {method: 'POST'} : undefined);
       if (seq !== this.loadSeq || provider !== this.provider) return;
       if (!view || view.provider !== provider || !['available', 'partial', 'not_configured', 'unavailable', 'error'].includes(view.status)) {
         throw new Error(t('data.invalid'));
@@ -4008,17 +4046,22 @@ const QuotaModule = {
   syncRefreshButton() {
     const button = document.getElementById('btn-refresh-quota');
     if (button) button.disabled = this.loading || this.localLoading;
+    const billingButton = document.getElementById('btn-fetch-bedrock-billing');
+    if (billingButton) billingButton.disabled = this.loading || this.view?.reason === 'aws_billing_disabled';
   },
 
   render() {
     const isGo = this.provider === 'opencode-go';
     const isOpenRouter = this.provider === 'openrouter';
+    const isBedrock = this.provider === 'aws-bedrock';
     const go = document.getElementById('quota-go');
     const openrouter = document.getElementById('quota-openrouter');
+    const bedrock = document.getElementById('quota-bedrock');
     const unavailable = document.getElementById('quota-unavailable');
     if (go) go.hidden = !isGo;
     if (openrouter) openrouter.hidden = !isOpenRouter;
-    if (unavailable) unavailable.hidden = isGo || isOpenRouter;
+    if (bedrock) bedrock.hidden = !isBedrock;
+    if (unavailable) unavailable.hidden = isGo || isOpenRouter || isBedrock;
     this.syncRefreshButton();
     const view = this.view?.provider && this.view.provider !== this.provider ? null : this.view;
     const meta = [];
@@ -4046,6 +4089,10 @@ const QuotaModule = {
       this.renderModelLimits({});
       if (isOpenRouter) {
         this.renderOpenRouter(view);
+        return;
+      }
+      if (isBedrock) {
+        this.renderBedrockBilling(view);
         return;
       }
       this.setText('quota-unavailable-title', t('quota.notRetrieved').replace('{provider}', PROVIDERS[this.provider]?.name || this.provider));
@@ -4096,6 +4143,37 @@ const QuotaModule = {
     }
     this.clearSummary();
     this.renderModelLimits({});
+  },
+
+  renderBedrockBilling(view) {
+    const root = document.getElementById('quota-bedrock-body');
+    if (!root) return;
+    if (view?.error) {
+      root.innerHTML = `<div class="quota-notice is-error" role="alert">${escapeHtml(view.error)}</div>`;
+      return;
+    }
+    const data = view?.bedrock_billing;
+    if (!data || data.total_cost == null) {
+      root.innerHTML = `<div class="quota-notice">${escapeHtml(t(!view ? (this.loading ? 'data.loading' : 'detail.unavailable')
+        : view.reason ? 'quota.reason.' + view.reason : 'quota.reason.aws_billing_no_data'))}</div>`;
+      return;
+    }
+    if (!Number.isFinite(data.total_cost) || !/^[A-Z]{3}$/.test(data.currency || '') || !Array.isArray(data.daily) || !Array.isArray(data.services)) {
+      root.innerHTML = `<div class="quota-notice is-error" role="alert">${t('data.invalid')}</div>`;
+      return;
+    }
+    const money = new Intl.NumberFormat(currentLang === 'zh' ? 'zh-CN' : 'en-US', {style:'currency',currency:data.currency,maximumFractionDigits:8});
+    const formatCost = value => Number.isFinite(value) ? escapeHtml(money.format(value)) : '—';
+    const status = estimated => t(estimated ? 'aws.billingEstimated' : 'aws.billingReported');
+    root.innerHTML = `<dl class="quota-figures">
+      <div><dt>${t('aws.billingTotal')}</dt><dd>${formatCost(data.total_cost)}</dd></div>
+      <div><dt>${t('aws.billingAccount')}</dt><dd>${escapeHtml(data.linked_account_id)}</dd></div>
+      <div><dt>${t('aws.billingPeriod')}</dt><dd>${escapeHtml(data.start_date)} → ${escapeHtml(data.end_date)}</dd></div>
+    </dl><p class="page-meta">${escapeHtml(status(data.estimated))} · ${escapeHtml(data.currency)}</p>
+    <p class="page-meta">${t('aws.billingServices')}: ${data.services.map(escapeHtml).join(' · ')}</p>
+    <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th>${t('analytics.day')} (UTC)</th><th>${t('analytics.cost')} (${escapeHtml(data.currency)})</th><th>${t('filter.status')}</th></tr></thead><tbody>
+      ${data.daily.map(row => `<tr><td>${escapeHtml(row.date)}</td><td>${formatCost(row.cost)}</td><td>${escapeHtml(status(row.estimated))}</td></tr>`).join('')}
+    </tbody></table></div>`;
   },
 
   renderOpenRouter(view) {

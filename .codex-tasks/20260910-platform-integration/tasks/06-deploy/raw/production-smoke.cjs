@@ -30,7 +30,8 @@ function check(value, message) {
   const browser = await chromium.launch({channel: 'chrome', headless: true});
   const context = await browser.newContext({viewport: {width: 1440, height: 900}, locale: 'en-US', timezoneId: 'UTC', serviceWorkers: 'block'});
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  // Go quota may await a 15s account lookup followed by the 20s docs lookup.
+  page.setDefaultTimeout(45000);
   page.on('pageerror', error => result.pageErrors.push({phase, message: error.message}));
   await context.route('**/*', async route => {
     const request = route.request();

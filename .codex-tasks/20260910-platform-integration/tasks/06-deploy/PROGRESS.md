@@ -29,3 +29,10 @@
 - 生产脚本首次在第8检查失败：空账本 models=null，不是混入其他 provider。证据 `/tmp/oc-go-cc-deploy-verify.eRBwTX/production-smoke/result.json` 与 failure.png；pageErrors/blocked 均为空，仅运行到概览。
 - 进一步合成测试复现 OpenRouter quota 在无显式平台 Key 时错误使用全局 Key。生产未用实际 Key 复现，未走到该请求。
 - 已显式切回 `20260904193909-9182566bb4a6` 并重启，health 与 active 通过；没有恢复旧数据库、覆盖新账本或改变配置。修复及验收见 #4/#5。
+
+## 第二次部署与空性能数据补齐
+
+- `7104220a941f0b08ecc5974dcf731824071c50fe` 推送/部署成功，release `20260911054749-5d79176c40cf`，服务active/running、NRestarts=0。新备份 `predeploy-20260911-fix-JpiOdzd8`；配置不变、SQLite健康、原1390条平台记录无缺失。模型列表200、Responses入站GET按合同返回405，未发送真实推理请求。
+- 第二轮生产浏览器通过所有 Overview/History 平台切换，到第75项发现 `/api/perf/models` 空结果仍为null。证据 `/tmp/oc-go-cc-deploy-fix-verify.I3hRE1/production-smoke/result.json`；无脚本异常/写请求，尚未进入套餐。当前版本已包含凭证隔离修复，因此保留运行而非退回缺少该修复的版本。
+- 扩展原空账本回归覆盖性能端点，六种平台范围均先失败；在唯一HTTP输出处将空slice初始化为空数组，文档同步。修后最新全量641顶层/1039含子测试race、vet、六目标CGO=0构建通过；GUI全包race在测试fixture扩展后另行通过。
+- 新增仅测试用的 `ROUTATIC_BROWSER_EMPTY=1`，生产只读脚本对完整空账本再验收204项、29平台/页面组合、21布局通过，0脚本错误/0写请求；原含数据447矩阵证据仍保留。最终自动证据 `/tmp/oc-go-cc-release-final.AVax0F/`。fixture已关闭。

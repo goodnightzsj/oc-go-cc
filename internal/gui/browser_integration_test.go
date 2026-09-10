@@ -22,6 +22,7 @@ import (
 
 // An opt-in real GUI/SQLite fixture for the browser acceptance script. All
 // upstreams and credentials are synthetic; POST /api/proxy/stop ends the test.
+// ROUTATIC_BROWSER_EMPTY=1 keeps the ledger empty for first-run acceptance.
 func TestMultiPlatformBrowserServer(t *testing.T) {
 	if os.Getenv("ROUTATIC_BROWSER_SMOKE") != "1" {
 		t.Skip("set ROUTATIC_BROWSER_SMOKE=1 for the browser acceptance server")
@@ -92,6 +93,9 @@ func TestMultiPlatformBrowserServer(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	stamp := time.Now().UTC().Add(-10 * time.Second).Format(time.RFC3339Nano)
 	for i, provider := range providers {
+		if os.Getenv("ROUTATIC_BROWSER_EMPTY") == "1" {
+			break
+		}
 		for known := 0; known <= 1; known++ {
 			var cost, success any
 			if known == 1 {

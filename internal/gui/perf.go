@@ -105,7 +105,7 @@ func (s *Server) handlePerformance(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var output []modelPerf
+	output := make([]modelPerf, 0, len(result))
 	for _, perf := range result {
 		output = append(output, perf)
 	}

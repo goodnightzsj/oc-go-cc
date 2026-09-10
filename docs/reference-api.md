@@ -171,7 +171,7 @@ Explicit analytics ranges are `[from, to)` and limited to 92 days. The configure
 
 Unknown cost is not free usage: `unknown_cost_requests` accompanies the known monetary subtotal. Requests without known outcome details do not contribute to a success-rate denominator. Identical model IDs on different providers remain separate rows.
 
-Empty analytics collections (`models`, `providers`, `scenarios`, and `trend`) are JSON arrays (`[]`), not `null`, including newly configured platforms with no local requests.
+Empty analytics collections (`models`, `providers`, `scenarios`, and `trend`) and the `/api/perf/models` response are JSON arrays (`[]`), not `null`, including newly configured platforms with no local requests.
 
 ### `GET /api/quota`
 

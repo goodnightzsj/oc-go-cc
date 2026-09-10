@@ -40,3 +40,4 @@
 - 新源码全量 race 退出0：641顶层/1039含子测试、18个有测试包；vet 与六目标 CGO=0 构建成功，文件架构核对通过。原始 race 证据 `/tmp/oc-go-cc-deploy-fix-verify.I3hRE1/race.jsonl`。
 - 显式 Codex 两轮工具调用再验收成功，测试3.56s、包4.910s；仍只接合成上游。Chrome447项、31布局与249请求重新通过；失败注入、配置保存均仅在隔离fixture完成，fixture已关闭。
 - API/OpenRouter文档补充新边界；`git diff --check`通过；产品差异主线程复核完成，未将无回传的子代理计为审查通过。
+- 第二次部署性能空集合补齐后的验证：全量仍641顶层/1039含子测试race通过，vet及六目标CGO=0通过；最新fixture默认分支GUI全包race通过，并用空账本模式实际运行生产只读脚本204项/21布局通过。证据 `/tmp/oc-go-cc-release-final.AVax0F/`；当前协议未再改动，Codex双轮显式验证沿用上一修复轮。

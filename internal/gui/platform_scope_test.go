@@ -142,6 +142,7 @@ func TestEmptyPlatformDashboardCollections(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	h := NewAnalyticsHandler(db)
+	s := &Server{storage: db}
 	for _, provider := range []string{"", "opencode-go", "opencode-zen", "aws-bedrock", "openrouter", "commandcode"} {
 		t.Run("provider="+provider, func(t *testing.T) {
 			for _, endpoint := range []struct {
@@ -150,11 +151,18 @@ func TestEmptyPlatformDashboardCollections(t *testing.T) {
 			}{
 				{h.Summary, []string{"models", "providers", "scenarios"}},
 				{h.TokenTrend, []string{"trend"}},
+				{s.handlePerformance, nil},
 			} {
 				rec := httptest.NewRecorder()
 				endpoint.handler(rec, httptest.NewRequest(http.MethodGet, "/?provider="+provider, nil))
 				if rec.Code != http.StatusOK {
 					t.Fatalf("empty dashboard: HTTP %d: %s", rec.Code, rec.Body.String())
+				}
+				if endpoint.fields == nil {
+					if strings.TrimSpace(rec.Body.String()) != "[]" {
+						t.Errorf("empty performance = %s, want []", rec.Body.String())
+					}
+					continue
 				}
 				var response map[string]json.RawMessage
 				if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {

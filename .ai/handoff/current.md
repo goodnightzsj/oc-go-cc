@@ -7,10 +7,10 @@
 - Support CLI: Claude 的本项目历史 session 仅作为部署流程证据。
 
 ## Status
-- Current phase: Epic 5/7；详细状态以 CSV 为准。
-- Current step: 06-deploy 1/3，SSH只读预检完成，准备提交、备份与部署。
+- Current phase: Epic 5/7；生产边界修复和重新全量验证已完成，详细状态以 CSV 为准。
+- Current step: 06-deploy 1/3，准备提交已验证边界修复并重新部署；旧健康release仍运行。
 - Done: 上游语义融合、路由/记账修复、CommandCode 双客户端、五平台独立查询与 OpenRouter 官方额度接口。
-- Next: 提交推送 → 远端本地备份 → SSH部署测试 → UI/UX只读分析。
+- Next: 新修复全量/浏览器验证 → 提交推送 → SSH重新部署测试 → UI/UX只读分析。f135930已发布但已回退旧健康release；备份见06-deploy/PROGRESS.md。
 - Blockers: Zen/CommandCode 无公开账户查询合同；Bedrock 账单需要独立 IAM 权限；真实新平台账户未验证，不冒充已接入账户余额。
 
 ## Sources of Truth

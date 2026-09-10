@@ -2,7 +2,7 @@ id,task,task_type,status,depends_on,task_dir,acceptance_criteria,validation_comm
 1,上游调查与安全测试基线,single-full,DONE,,tasks/01-baseline,确认远端差异和采纳项且测试不访问用户数据,go test ./cmd/routatic-proxy ./internal/token,2026-09-10,1,日期基线与HOME和launchctl隔离完成;上游27项已筛选
 2,数据隔离与平台路由修复,single-full,DONE,1,tasks/02-correctness,账单保留其他平台且密钥路由格式熔断回归通过,go test -race -p 2 ./... -count=1,2026-09-10,0,隔离环境全量race通过;保留未匹配账单和其他平台行
 3,官方优先接入CommandCode及两客户端,single-full,DONE,2,tasks/03-commandcode,官方支持矩阵已核实;原生支持直接接入;缺口参考MAXeaglet反代且有协议验证,go test -race -p 2 ./... -count=1,2026-09-10,1,主线程协议终审与非对象工具参数修复完成;最新全量及显式Codex双轮冒烟通过;真实账户未验证
-4,五平台独立视图与套餐完整适配,single-full,DONE,3,tasks/04-dashboard,五平台独立查询不串数;官方可用套餐API接入;本地账本与官方额度明确分离;逐页回归通过,go test -race -p 2 ./... -count=1,2026-09-11,2,639顶层1029含子测试race通过;Chrome447断言31布局通过;无公开合同或授权的账户能力缺口保留并在部署门槛复核
-5,多平台文档与最终验证,single-full,DONE,4,tasks/05-validation,新增接口与能力矩阵文档一致;五平台逐页与全量回归及跨平台构建通过,go test -race -p 2 ./... -count=1,2026-09-11,0,639顶层1029含子测试race和vet通过;六目标无CGO与显式Codex双轮通过;文档30链接20JSON与2完整配置validate通过
-6,提交推送与SSH部署测试,single-full,IN_PROGRESS,5,tasks/06-deploy,远端运行目标提交且服务健康与页面API验收通过;数据配置保留,ssh root@23.80.89.173 systemctl is-active oc-go-cc.service,,0,SSH预检通过;远端main b555f5e;仅无关未跟踪.ace-tool需保留;准备备份并部署
+4,五平台独立视图与套餐完整适配,single-full,DONE,3,tasks/04-dashboard,五平台独立查询不串数;官方可用套餐API接入;本地账本与官方额度明确分离;逐页回归通过,go test -race -p 2 ./... -count=1,2026-09-11,3,9叶任务完成;生产边界修复后641顶层1039含子测试race及Chrome447断言31布局通过;账户能力缺口保留
+5,多平台文档与最终验证,single-full,DONE,4,tasks/05-validation,新增接口与能力矩阵文档一致;五平台逐页与全量回归及跨平台构建通过,go test -race -p 2 ./... -count=1,2026-09-11,0,修复后全量race/vet/六目标无CGO构建/Codex双轮和Chrome447断言重新通过;未沿用旧轮结果
+6,提交推送与SSH部署测试,single-full,IN_PROGRESS,5,tasks/06-deploy,远端运行目标提交且服务健康与页面API验收通过;数据配置保留,ssh root@23.80.89.173 systemctl is-active oc-go-cc.service,,1,首次生产冒烟失败后已回退;最新修复验证通过;准备新提交再部署;原备份保留
 7,部署后逐页UIUX美化分析,single-full,TODO,6,tasks/07-uiux,逐页数据呈现问题与美化建议有实际页面证据且不擅自改视觉,echo SKIP,,0,人工设计分析;须在部署测试之后进行

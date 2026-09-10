@@ -179,7 +179,7 @@ func (a *Analytics) ModelBreakdown(window Window) ([]ModelBreakdown, error) {
 	}
 	defer func() { _ = rows.Close() }()
 
-	var result []ModelBreakdown
+	result := make([]ModelBreakdown, 0)
 	for rows.Next() {
 		var mb ModelBreakdown
 		if err := rows.Scan(
@@ -396,7 +396,7 @@ func (a *Analytics) TokenTrend(window Window, granularity string) ([]DailyTokenP
 	}
 	defer func() { _ = rows.Close() }()
 
-	var result []DailyTokenPoint
+	result := make([]DailyTokenPoint, 0)
 	for rows.Next() {
 		var p DailyTokenPoint
 		if err := rows.Scan(&p.Date, &p.Requests, &p.KnownRequests, &p.ErrorRequests, &p.InputTokens, &p.OutputTokens, &p.CacheReadTokens, &p.CacheCreationTokens, &p.CostUSD, &p.UnknownCostRequests); err != nil {

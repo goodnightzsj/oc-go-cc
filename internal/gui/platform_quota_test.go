@@ -170,3 +170,47 @@ func TestOpenRouterManagementKeySettingsRoundTrip(t *testing.T) {
 		t.Fatal("partial save changed the management key placeholder")
 	}
 }
+
+func TestOpenRouterQuotaDoesNotProbeGlobalKeys(t *testing.T) {
+	for _, managementOnly := range []bool{false, true} {
+		t.Run(fmt.Sprintf("management-only=%t", managementOnly), func(t *testing.T) {
+			var keyHits, creditsHits atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/credits" {
+					creditsHits.Add(1)
+					if r.Header.Get("Authorization") != "Bearer synthetic-management" {
+						t.Error("account credits used an unrelated credential")
+					}
+					fmt.Fprint(w, `{"data":{"total_credits":1,"total_usage":0}}`)
+					return
+				}
+				keyHits.Add(1)
+				w.WriteHeader(http.StatusUnauthorized)
+			}))
+			defer upstream.Close()
+			managementKey := ""
+			if managementOnly {
+				managementKey = "synthetic-management"
+			}
+			raw := fmt.Sprintf(`{"api_key":"synthetic-global-go","openrouter":{"base_url":%q,"management_api_key":%q}}`,
+				upstream.URL+"/api/v1/chat/completions", managementKey)
+			srv, _ := configTestServer(t, raw)
+			rec := httptest.NewRecorder()
+			srv.handleQuota(rec, httptest.NewRequest(http.MethodGet, "/api/quota?provider=openrouter", nil))
+			var response quotaResponse
+			if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &response) != nil {
+				t.Fatalf("quota = HTTP %d: %s", rec.Code, rec.Body.String())
+			}
+			if keyHits.Load() != 0 || len(response.Accounts) != 0 {
+				t.Error("browsing an unconfigured platform sent a global inference key upstream")
+			}
+			if managementOnly {
+				if creditsHits.Load() != 1 || response.Credits == nil || response.Status != "available" {
+					t.Fatal("explicit management-key lookup was lost")
+				}
+			} else if creditsHits.Load() != 0 || response.Status != "not_configured" {
+				t.Fatal("unconfigured platform was treated as authorized")
+			}
+		})
+	}
+}

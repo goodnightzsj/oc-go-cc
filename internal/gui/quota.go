@@ -196,9 +196,10 @@ func (s *Server) handleGoQuota(w http.ResponseWriter, r *http.Request, cfg *conf
 }
 
 func (s *Server) handleOpenRouterQuota(w http.ResponseWriter, r *http.Request, cfg *config.Config, resp quotaResponse) {
-	// Use the same inference-key precedence as routing; management credentials
-	// have no global or inference-key fallback.
-	keys := goQuotaKeys(cfg.OpenRouter.EffectiveAPIKeys(), cfg.EffectiveAPIKeys())
+	// Browsing a platform is not permission to probe it with legacy global keys.
+	// Both quota lookups require explicit OpenRouter credentials; inference keeps
+	// its existing global-key fallback for configured routing targets.
+	keys := goQuotaKeys(cfg.OpenRouter.EffectiveAPIKeys(), nil)
 	managementKey := strings.TrimSpace(cfg.OpenRouter.ManagementAPIKey)
 	resp.CreditsStatus = "not_configured"
 	endpoint, creditsEndpoint, err := quota.OpenRouterURLs(cfg.OpenRouter.BaseURL)

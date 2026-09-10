@@ -7,3 +7,4 @@ id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,n
 6,实现有官方依据的平台套餐数据查询,DONE,认证错误未知余额字段与多key范围有测试;保留Go兼容,go test -race ./internal/quota -count=1,2026-09-11,1,解析及安全race通过1.429s;GUI/config管理key限额余额与平台缓存定向race通过1.549s;先失败后补实现;真实账户与AWS账单权限未验收
 7,补齐五平台页面交互与套餐本地数据,DONE,全部平台可独立查看本地数据与官方能力;旧请求不能覆盖新选择,go test -race -p 2 ./internal/config ./internal/gui ./internal/quota -count=1,2026-09-11,1,主线程最新config/gui/quota定向race全通过;CSV两页scope回归先失败后固定初始查询;未知零值及切换竞态回归通过
 8,验收五平台七页面与范围隔离,DONE,真实浏览器调用合成后端覆盖筛选与套餐失败路径;记录尚无真实账户验收,go test -race -p 2 ./... -count=1,2026-09-11,2,最新全量race通过;Chrome447断言31布局通过;修复390px套餐标题溢出并增补320px五平台;详见raw/multi-platform-browser-result.md;账户缺口仍明确保留
+9,修复部署发现的空集合与未配置额度凭证边界,DONE,五平台空模型趋势为数组;OpenRouter套餐不使用全局Key;显式管理Key独立可用,go test -race ./internal/gui ./internal/storage ./internal/quota -count=1,2026-09-11,1,两项新增测试先失败后通过;最新全量641顶层1039含子测试通过;Chrome447断言31布局重新通过;只改新额度查询不改推理兼容

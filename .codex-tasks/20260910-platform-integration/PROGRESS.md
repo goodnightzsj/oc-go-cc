@@ -4,12 +4,12 @@
 
 - 任务：修复全部已报告问题，独立接入 CommandCode，融合有价值的上游更新，分析 Codex/Claude Code 对接。
 - 形态：epic；5/7 子任务完成。
-- 当前：2026-09-11全平台页面/配置与能力状态实现及最新验证完成；#6准备提交推送与部署；#7必须部署测试后进行。缺少公开合同/授权的真实账户余额能力仍是缺口，不能声称全部账户已接入。
-- 真源：SUBTASKS.csv；当前 tasks/06-deploy/TODO.csv。
+- 当前：生产边界修复后全量641顶层/1039含子测试race、vet、六目标构建、Codex双轮与Chrome447断言/31布局通过，#6准备修复提交再部署；旧健康release仍运行，首次失败证据与备份保留。
+- 真源：SUBTASKS.csv；当前 tasks/06-deploy/TODO.csv，完成后才进入#7。
 - 起点：main，HEAD 684235d，初始工作区干净。origin=goodnightzsj/oc-go-cc；upstream=samueltuyizere/oc-go-cc（GitHub）。
 - 已知：上轮 /tmp/oc-go-cc-review.WPJFmt/ 与 /tmp/oc-go-cc-routing-review.yHSDWm/ 有合成复现；本轮不依赖缓存成功。全量基线有 tokenizer 外网 EOF、日期过期测试失败；init 测试未隔离 HOME。
 - 不读取或输出真实凭证，不读取本地真实 DB；部署已获授权但须在实现与验证完成后进行，部署前读 SSH 运行手册。
-- 下一步：备份后按已核实远端流程部署，并验收实际页面/API。既有llmdoc同步须由用户决定。
+- 下一步：修复后全量/浏览器验收 → 提交推送并重新部署 → 只读生产冒烟 → UI/UX分析。既有llmdoc同步须由用户决定。
 - 最新要求已落实：先核实 CommandCode 官网；Claude 模型走原生 Messages，Codex 公开合同缺口使用本项目 Responses 适配，并参考 MAXeaglet 的公开协议行为。日志、套餐入口、统计与独立配置保留并通过验收。
 
 ## 2026-09-10 启动
@@ -106,3 +106,11 @@
 - 最新全量639顶层/1029含子测试race、vet、六目标无CGO构建、Codex双轮工具调用通过；文档30本地链接20JSON块和2份完整配置validate通过。详见#4/#5恢复记录。
 - 从本项目Claude session重新仅抽取命令字符串，确认push→SSH→prod-deploy流程；远端只读预检已通过，main b555f5e，旧release健康，未跟踪.ace-tool保留。
 - 未提供公开接口/授权的实时账户余额仍明确未接入；部署不会修改凭证或虚构其能力。
+
+## 首次发布与边界回退
+
+- f135930 已推送并部署到 `20260911053033-1f4b2f90c746`；服务健康，配置散列不变，原 1390 条 provider_usage 记录无缺失。备份 `/root/oc-go-cc/.tmp/predeploy-20260911-5DZMJ0D0`，权限 0700。
+- 生产只读浏览器在 Overview 第8断言因空模型列表 null 失败，尚未到套餐、没有写请求；同期合成新测试复现空趋势 null 和 OpenRouter 额度错误使用全局 Key。
+- 为避免未配置平台被浏览时误发凭证，已切回旧 release `20260904193909-9182566bb4a6`，服务健康；只切换二进制，不恢复或覆盖配置/账本。
+- 修复保持原推理的凭证优先级，仅新 OpenRouter 额度查询要求显式平台 Key；模型/趋势空集合与其它分析列表统一。新增两项测试（含8个子用例）先失败，修后 gui/storage/quota race 全通过。
+- 本次恢复的只读独立代理未回传有效结论，已停止；不计为审查通过，由主线程负责源码追踪、复现、修改及最终验收。

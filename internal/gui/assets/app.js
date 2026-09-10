@@ -47,15 +47,56 @@ const TRANSLATIONS = {
     'quota.cached': 'cached',
     'quota.endpoint': 'Endpoint {url}',
     'quota.unofficial': 'Undocumented upstream endpoint; the response shape may change.',
-    'quota.modelLimits': 'Model usage this month',
-    'quota.modelLimitsNote': 'Spend at Go prices, directly comparable to the quota · allowances from Go docs · updated {time}',
+    'quota.modelLimits': 'Local model costs in this plan window',
+    'quota.modelLimitsNote': 'Go records in this instance, including estimates; not an account bill · allowances from Go docs · updated {time}',
     'quota.model': 'Model',
-    'quota.modelUsed': 'Usage this month',
+    'quota.modelUsed': 'Local recorded cost',
     'quota.modelAllowance': 'Monthly quota',
     'quota.percent': '%',
     'quota.total': 'Total',
-    'quota.poolShare': 'Pool-equivalent (× 60/allowance), reconciles with the official monthly percent',
-    'quota.indexLagNotice': 'Official usage index refreshes ~8h behind. Current display: index-closed records + proxy real-time traffic.',
+    'quota.poolShare': 'Local costs as a share of the documented allowances; not the official account percentage',
+    'quota.indexLagNotice': 'Account gauges come from the upstream quota endpoint. Model costs below come from this instance and may cover fewer requests.',
+    'quota.multiKeyUsage': 'Local records do not identify the account used. Per-model account usage is unavailable when multiple keys are configured.',
+    'quota.localUsageFail': 'Local model costs could not be loaded.',
+    'quota.notRetrieved': '{provider}: quota not retrieved',
+    'quota.providerUnavailable': 'This dashboard does not query plan limits for this platform. Its local request records remain available in History and Analytics.',
+    'quota.viewLocal': 'View local requests',
+    'quota.localTitle': 'Local ledger',
+    'quota.localNote': '{provider} · Last {days} days (UTC), as recorded by this instance. Includes estimates; not an account bill or balance.',
+    'quota.localLoadFail': 'Could not load the local ledger. Refresh to retry. ',
+    'quota.unknownCosts': 'Requests with unknown cost',
+    'quota.status.available': 'Account data retrieved',
+    'quota.status.partial': 'Some account data could not be retrieved',
+    'quota.status.not_configured': 'Account credentials not configured',
+    'quota.status.unavailable': 'Account data unavailable',
+    'quota.status.error': 'Account data lookup failed',
+    'quota.source.upstream_api': 'Source: upstream quota API',
+    'quota.source.official_api': 'Source: official account API',
+    'quota.source.none': 'Official account data not retrieved',
+    'quota.reason.no_public_account_api': 'No public account quota API is documented for this platform. Use its official console for billing; the local ledger is shown below.',
+    'quota.reason.aws_billing_auth_required': 'AWS account billing requires separate AWS billing authorization. A Bedrock inference key does not grant it; use the AWS billing console.',
+    'quota.noProviderKey': 'No {provider} inference API key configured',
+    'quota.noProviderKeyHint': 'Add a provider key in Settings to query its key usage.',
+    'quota.yes': 'Yes',
+    'quota.no': 'No',
+    'openrouter.managementKey': 'Management API key (optional)',
+    'openrouter.managementHint': 'Optional management key used only to query account balance, never for inference.',
+    'openrouter.keyScope': 'Key limits are spending caps, not account balances. Key usage and BYOK usage are shown separately; key balances are never added together.',
+    'openrouter.accountCredits': 'Account credits',
+    'openrouter.totalCredits': 'Total credits',
+    'openrouter.totalUsage': 'Account credit usage',
+    'openrouter.balance': 'Account balance',
+    'openrouter.noManagementKey': 'Account balance not queried. Add an optional OpenRouter management API key in Settings; inference keys are not used for this lookup.',
+    'openrouter.creditsFail': 'Account balance could not be retrieved',
+    'openrouter.limit': 'Key spending cap',
+    'openrouter.limitRemaining': 'Key cap remaining',
+    'openrouter.limitReset': 'Key cap reset interval',
+    'openrouter.noLimit': 'This key has no spending cap',
+    'openrouter.usage': 'OpenRouter usage',
+    'openrouter.byokUsage': 'BYOK usage',
+    'openrouter.includeByok': 'BYOK counts toward the key cap',
+    'openrouter.freeTier': 'Free-tier key',
+    'openrouter.expires': 'Key expiry',
     'cmd.gotoQuota': 'Go to Quota',
     'overview.title': 'Dashboard',
     'analytics.title': 'Usage Analytics',
@@ -70,6 +111,29 @@ const TRANSLATIONS = {
     'analytics.inout': 'in / out',
     'analytics.cost': 'Cost',
     'analytics.currencyUSD': 'USD',
+    'analytics.unknownCosts': '{n} requests with unknown cost; totals include known costs only',
+    'analytics.utc': 'Analytics dates and time buckets use UTC',
+    'label.apiKeys': 'API keys (comma-separated, takes precedence over the single key)',
+    'label.apiKeysHint': 'Replace the entire list to edit masked keys, or clear it to use the single key. Environment overrides still take precedence.',
+    'commandcode.keyHint': 'Uses its own API key; global keys are never sent to CommandCode.',
+    'commandcode.quotaHint': 'No public plan or balance API is documented. This dashboard does not fetch private billing pages; use CommandCode for official usage and billing.',
+    'commandcode.usage': 'Official usage',
+    'commandcode.billing': 'Official billing',
+    'commandcode.keys': 'Manage API keys',
+    'commandcode.docs': 'Provider API docs',
+    'commandcode.zdr': 'Zero Data Retention (ZDR)',
+    'label.chatURL': 'Chat Completions URL',
+    'label.messagesURL': 'Anthropic Messages URL',
+    'label.requestTimeout': 'Request timeout (ms)',
+    'label.streamIdleTimeout': 'Stream idle timeout (ms)',
+    'label.streamingTimeout': 'Streaming attempt timeout (ms)',
+    'label.timeoutHint': '0 uses the provider default. Idle timeout limits gaps between streamed data; attempt timeout limits the entire streaming request.',
+    'history.localScope': 'Statistics use records kept by this instance, including synced bills and local estimates. Direct-to-platform traffic may not be recorded here.',
+    'history.costSource': 'Cost source',
+    'history.allCostSources': 'All cost sources',
+    'history.costEstimated': 'Local estimate',
+    'history.costProvider': 'Synced platform bill',
+    'history.loadFail': 'History could not be refreshed; displayed data may be outdated. ',
     'analytics.p95Latency': 'p95 Latency',
     'analytics.latencyUnit': 'request-weighted',
     'analytics.cacheHitShort': 'cache hit',
@@ -78,6 +142,9 @@ const TRANSLATIONS = {
     'analytics.byProvider': 'Platform distribution',
     'analytics.noData': 'No data',
     'analytics.noTrend': 'No trend data',
+    'data.loading': 'Loading selected data…',
+    'data.loadFail': 'Could not load the selected data. Refresh to retry. ',
+    'data.invalid': 'Invalid data response',
     'analytics.singleDay': '(single-day data)',
     'analytics.dailyTrend': 'Daily Token Trend',
     'analytics.requestTrend': 'Request trend',
@@ -165,6 +232,7 @@ const TRANSLATIONS = {
     'section.modelDist': 'Model Distribution',
     'empty.noData': 'No data yet',
     'filter.allModels': 'All Models',
+    'filter.allProviders': 'All platforms',
     'filter.model': 'Model',
     'filter.provider': 'Provider',
     'filter.scenario': 'Scenario',
@@ -336,15 +404,56 @@ const TRANSLATIONS = {
     'quota.cached': '缓存',
     'quota.endpoint': '数据源 {url}',
     'quota.unofficial': '上游端点未公开，响应结构可能变化。',
-    'quota.modelLimits': '本月各模型用量',
-    'quota.modelLimitsNote': '用量按官方价格口径（与配额同列可比）· 额度来自 Go 文档 · 更新于 {time}',
+    'quota.modelLimits': '当前套餐窗口的本地模型费用',
+    'quota.modelLimitsNote': '此实例的 Go 记录（含估算），不等同于账户账单 · 额度来自 Go 文档 · 更新于 {time}',
     'quota.model': '模型',
-    'quota.modelUsed': '本月用量',
+    'quota.modelUsed': '本地记录费用',
     'quota.modelAllowance': '每月配额',
     'quota.percent': '%',
     'quota.total': '总计',
-    'quota.poolShare': '池等效合计（×60/额度），与官方月度占比一致',
-    'quota.indexLagNotice': '官方用量索引约 8 小时刷新，当前显示：索引已闭合记录 + 代理实时流量。',
+    'quota.poolShare': '本地费用按公开模型额度计算的占比，不代表官方账户占比',
+    'quota.indexLagNotice': '账户仪表来自上游额度接口；下方模型费用来自此实例记录，可能不包含账户的全部请求。',
+    'quota.multiKeyUsage': '本地记录没有账户归属。配置多个密钥时，不提供按账户计算的模型用量。',
+    'quota.localUsageFail': '本地模型费用加载失败。',
+    'quota.notRetrieved': '{provider}：额度未获取',
+    'quota.providerUnavailable': '面板暂不查询此平台的套餐额度，仍可在历史请求和用量分析中查看本地记录。',
+    'quota.viewLocal': '查看本地请求',
+    'quota.localTitle': '本实例账本',
+    'quota.localNote': '{provider} · 最近 {days} 天（UTC）的本实例记录，包含估算；不等同于账户账单或余额。',
+    'quota.localLoadFail': '本实例账本加载失败，请刷新重试。',
+    'quota.unknownCosts': '费用未知的请求数',
+    'quota.status.available': '账户数据已获取',
+    'quota.status.partial': '部分账户数据获取失败',
+    'quota.status.not_configured': '尚未配置账户凭证',
+    'quota.status.unavailable': '账户数据不可获取',
+    'quota.status.error': '账户数据查询失败',
+    'quota.source.upstream_api': '来源：上游额度接口',
+    'quota.source.official_api': '来源：官方账户接口',
+    'quota.source.none': '尚未获取官方账户数据',
+    'quota.reason.no_public_account_api': '此平台尚未公开账户额度 API。请在官方控制台查看账单；下方仍提供本实例账本。',
+    'quota.reason.aws_billing_auth_required': 'AWS 账户账单需要独立的 AWS 账单授权，Bedrock 推理密钥不包含此权限；请前往 AWS 账单控制台。',
+    'quota.noProviderKey': '未配置 {provider} 推理 API 密钥',
+    'quota.noProviderKeyHint': '在设置中添加该平台密钥后，可查询密钥用量。',
+    'quota.yes': '是',
+    'quota.no': '否',
+    'openrouter.managementKey': '管理 API 密钥（可选）',
+    'openrouter.managementHint': '可选的管理密钥，仅用于查询账户余额，不用于推理。',
+    'openrouter.keyScope': '密钥限额是消费上限，不是账户余额。平台用量与 BYOK 用量分别展示，不合计多个密钥的剩余额度。',
+    'openrouter.accountCredits': '账户点数',
+    'openrouter.totalCredits': '点数总额',
+    'openrouter.totalUsage': '账户点数已用',
+    'openrouter.balance': '账户余额',
+    'openrouter.noManagementKey': '尚未查询账户余额。可在设置中添加 OpenRouter 管理 API 密钥；此查询不会使用推理密钥。',
+    'openrouter.creditsFail': '账户余额获取失败',
+    'openrouter.limit': '密钥消费上限',
+    'openrouter.limitRemaining': '密钥剩余额度',
+    'openrouter.limitReset': '密钥额度重置周期',
+    'openrouter.noLimit': '此密钥未设置消费上限',
+    'openrouter.usage': 'OpenRouter 用量',
+    'openrouter.byokUsage': 'BYOK 用量',
+    'openrouter.includeByok': 'BYOK 计入密钥限额',
+    'openrouter.freeTier': '免费层级密钥',
+    'openrouter.expires': '密钥到期时间',
     'cmd.gotoQuota': '前往套餐额度',
     'overview.title': '仪表盘',
     'analytics.title': '用量分析',
@@ -359,6 +468,29 @@ const TRANSLATIONS = {
     'analytics.inout': '输入 / 输出',
     'analytics.cost': '费用',
     'analytics.currencyUSD': '美元（USD）',
+    'analytics.unknownCosts': '{n} 条请求费用未知；合计只包含已知费用',
+    'analytics.utc': '用量分析的日期与时间桶统一使用 UTC',
+    'label.apiKeys': 'API Keys（逗号分隔，优先于单个密钥）',
+    'label.apiKeysHint': '修改已脱敏的密钥时请替换完整列表；清空列表后使用单个密钥。环境变量覆盖仍然优先。',
+    'commandcode.keyHint': '使用独立 API 密钥；不会向 CommandCode 发送全局密钥。',
+    'commandcode.quotaHint': '官方未公开套餐或余额 API。面板不抓取私有账单页面；请前往 CommandCode 查看官方用量和账单。',
+    'commandcode.usage': '官方用量',
+    'commandcode.billing': '官方账单',
+    'commandcode.keys': '管理 API 密钥',
+    'commandcode.docs': 'Provider API 文档',
+    'commandcode.zdr': '零数据保留（ZDR）',
+    'label.chatURL': 'Chat Completions 完整地址',
+    'label.messagesURL': 'Anthropic Messages 完整地址',
+    'label.requestTimeout': '请求超时（毫秒）',
+    'label.streamIdleTimeout': '流式空闲超时（毫秒）',
+    'label.streamingTimeout': '流式单次请求超时（毫秒）',
+    'label.timeoutHint': '0 使用平台默认值。空闲超时限制流式数据间隔，单次请求超时限制整个流式请求。',
+    'history.localScope': '统计来自此实例保留的记录，包含同步账单与本地估算。客户端直连平台的流量可能不在这里。',
+    'history.costSource': '费用来源',
+    'history.allCostSources': '全部费用来源',
+    'history.costEstimated': '本地估算',
+    'history.costProvider': '已同步平台账单',
+    'history.loadFail': '历史请求刷新失败，已显示的数据可能过期。',
     'analytics.p95Latency': 'p95 延迟',
     'analytics.latencyUnit': '按请求数加权',
     'analytics.cacheHitShort': '缓存命中',
@@ -367,6 +499,9 @@ const TRANSLATIONS = {
     'analytics.byProvider': '平台分布',
     'analytics.noData': '暂无数据',
     'analytics.noTrend': '暂无趋势数据',
+    'data.loading': '正在加载所选数据…',
+    'data.loadFail': '所选数据加载失败，请刷新重试。',
+    'data.invalid': '数据响应格式无效',
     'analytics.singleDay': '（仅单日数据）',
     'analytics.dailyTrend': '每日 Token 趋势',
     'analytics.requestTrend': '请求趋势',
@@ -455,6 +590,7 @@ const TRANSLATIONS = {
     'section.modelDist': '模型调用分布',
     'empty.noData': '暂无数据',
     'filter.allModels': '全部模型',
+    'filter.allProviders': '全部平台',
     'filter.model': '模型',
     'filter.provider': '供应商',
     'filter.scenario': '场景',
@@ -631,7 +767,8 @@ function toggleLanguage() {
   // Analytics charts and distributions carry inline strings; reload them
   // so they pick up the new language instead of keeping stale ones.
   if (activeTab === 'analytics') AnalyticsModule.load(true);
-  if (QuotaModule.view) QuotaModule.render();
+  QuotaModule.render();
+  QuotaModule.renderLocalUsage();
   if (lastOverviewView) renderOverviewUsage(lastOverviewView.data, lastOverviewView.trend, lastOverviewView.latency);
 }
 
@@ -909,7 +1046,10 @@ let lastModelCounts = {};
 
 /* ── Performance Module ───────────────────────────────────────────── */
 const PerfModule = {
-  data: [],
+  data: null,
+  loadSeq: 0,
+  query: '',
+  error: '',
   sortField: 'count',
   sortDir: 'desc',
   timeRange: 'all',
@@ -922,6 +1062,8 @@ const PerfModule = {
         this.refresh();
       });
     }
+    document.getElementById('perf-provider')?.addEventListener('change', () => this.refresh());
+    document.getElementById('btn-refresh-perf')?.addEventListener('click', () => this.refresh());
 
     document.querySelectorAll('.perf-table .sortable').forEach(th => {
       th.addEventListener('click', () => {
@@ -944,12 +1086,34 @@ const PerfModule = {
   },
 
   async refresh() {
+    const seq = ++this.loadSeq;
+    const params = new URLSearchParams({range: this.timeRange});
+    const provider = document.getElementById('perf-provider')?.value;
+    if (provider) params.set('provider', provider);
+    if (this.query !== params.toString() || !this.data) {
+      this.query = params.toString();
+      this.data = null;
+      this.error = '';
+      this.render();
+    }
+    const errorEl = document.getElementById('perf-error');
+    if (errorEl) errorEl.hidden = true;
     try {
-      const r = await fetch('/api/perf/models?range=' + encodeURIComponent(this.timeRange));
-      if (!r.ok) return;
-      this.data = await r.json() || [];
+      const data = await fetchJSON(`/api/perf/models?${params}`);
+      if (seq !== this.loadSeq) return;
+      if (data !== null && !Array.isArray(data)) throw new Error(t('data.invalid'));
+      this.data = data || [];
+      this.error = '';
       this.render();
     } catch (e) {
+      if (seq !== this.loadSeq) return;
+      this.data = null;
+      this.error = e.message;
+      this.render();
+      if (errorEl) {
+        errorEl.textContent = t('data.loadFail') + e.message;
+        errorEl.hidden = false;
+      }
       console.error('PerfModule refresh failed:', e);
     }
   },
@@ -958,14 +1122,18 @@ const PerfModule = {
     const tbody = document.getElementById('perf-tbody');
     if (!tbody) return;
 
-    if (this.data.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" class="empty-state">' + t('empty.noData') + '</td></tr>';
+    if (!this.data || this.data.length === 0) {
+      const key = this.data ? 'empty.noData' : this.error ? 'detail.unavailable' : 'data.loading';
+      tbody.innerHTML = '<tr><td colspan="7" class="empty-state">' + t(key) + '</td></tr>';
       return;
     }
 
     const sorted = [...this.data].sort((a, b) => {
-      let aVal = a[this.sortField];
-      let bVal = b[this.sortField];
+      const value = row => this.sortField === 'success_rate'
+        ? (row.success != null && row.failed != null && row.success + row.failed > 0 ? row.success / (row.success + row.failed) : -1)
+        : row[this.sortField];
+      let aVal = value(a);
+      let bVal = value(b);
       if (aVal == null) aVal = 0;
       if (bVal == null) bVal = 0;
       if (typeof aVal === 'string') aVal = aVal.toLowerCase();
@@ -976,17 +1144,19 @@ const PerfModule = {
     });
 
     tbody.innerHTML = sorted.map(row => {
-      const successRate = row.count > 0 ? (row.success / row.count * 100).toFixed(1) : 0;
-      const successClass = successRate >= 99 ? 'success-rate' : (successRate >= 95 ? '' : 'error-rate');
+      const known = row.success != null && row.failed != null ? Number(row.success) + Number(row.failed) : 0;
+      const successRate = known > 0 ? (row.success / known * 100).toFixed(1) : null;
+      const successClass = successRate == null ? '' : successRate >= 99 ? 'success-rate' : (successRate >= 95 ? '' : 'error-rate');
+      const latency = value => row.count > 0 ? fmt(value) : '—';
       return `
         <tr>
-          <td class="perf-model">${escapeHtml(row.model)}</td>
+          <td class="perf-model">${escapeHtml(row.model)}<br><small>${escapeHtml(row.provider || t('detail.unknown'))}</small></td>
           <td>${fmt(row.count)}</td>
-          <td class="${successClass}">${successRate}%</td>
-          <td class="${this.getLatencyClass(row.avg_ms)}">${fmt(row.avg_ms)}</td>
-          <td class="${this.getLatencyClass(row.p50_ms)}">${fmt(row.p50_ms)}</td>
-          <td class="${this.getLatencyClass(row.p90_ms)}">${fmt(row.p90_ms)}</td>
-          <td class="${this.getLatencyClass(row.p99_ms)}">${fmt(row.p99_ms)}</td>
+          <td class="${successClass}">${successRate == null ? '—' : successRate + '%'}</td>
+          <td class="${this.getLatencyClass(row.avg_ms)}">${latency(row.avg_ms)}</td>
+          <td class="${this.getLatencyClass(row.p50_ms)}">${latency(row.p50_ms)}</td>
+          <td class="${this.getLatencyClass(row.p90_ms)}">${latency(row.p90_ms)}</td>
+          <td class="${this.getLatencyClass(row.p99_ms)}">${latency(row.p99_ms)}</td>
         </tr>
       `;
     }).join('');
@@ -1013,6 +1183,8 @@ function activateTab(name) {
   if (tabEl) tabEl.classList.add('active');
   if (panel) panel.classList.add('active');
   activeTab = name;
+  if (name === 'overview') refreshOverviewUsage();
+  if (name === 'performance') PerfModule.refresh();
   if (name === 'analytics' && AnalyticsModule && AnalyticsModule.load) {
     AnalyticsModule.load(true);
   }
@@ -1044,6 +1216,8 @@ let activeTab = 'overview';
 let overviewDays = 7;
 let overviewBreakdownMetric = 'requests';
 let lastOverviewView = null;
+let overviewLoadSeq = 0;
+let overviewQuery = '';
 // Upper bound on how many history rows are rendered into the DOM at once.
 // Keeps long-session history tables fast while the count reflects all rows.
 const HISTORY_RENDER_LIMIT = 200;
@@ -1102,16 +1276,13 @@ function debouncedRefresh() {
 
 /* ── /api/metrics ──────────────────────────────────────────────── */
 async function refreshMetrics() {
+  await Promise.all([refreshServiceStatus(), activeTab === 'overview' ? refreshOverviewUsage() : null]);
+}
+
+async function refreshServiceStatus() {
   try {
-    const latencyRange = overviewDays === 7 ? '7d' : overviewDays === 30 ? '30d' : 'all';
-    const [r, usageResponse, trendResponse, latencyResponse] = await Promise.all([
-      fetch('/api/metrics'),
-      fetch(`/api/analytics/summary?days=${overviewDays}&compare=1`),
-      fetch(`/api/analytics/tokens/trend?days=${overviewDays}`),
-      fetch(`/api/perf/aggregate?range=${latencyRange}`),
-    ]);
-    if (!r.ok) { markPollFail(); return; }
-    const d = await r.json();
+    // Process health remains global; usage failures must not mark the proxy down.
+    const d = await fetchJSON('/api/metrics');
     markPollOk();
 
     // status badge
@@ -1126,15 +1297,6 @@ async function refreshMetrics() {
       text.textContent = t('status.running');
     } else {
       text.textContent = t('status.stopped');
-    }
-
-    document.getElementById('m-total').textContent = fmt(d.requests_received);
-
-    if (usageResponse.ok) {
-      const usage = await usageResponse.json();
-      const trend = trendResponse.ok ? await trendResponse.json() : {trend: []};
-      const latency = latencyResponse.ok ? await latencyResponse.json() : null;
-      if (activeTab === 'overview') renderOverviewUsage(usage, trend.trend || [], latency);
     }
 
     // port info
@@ -1157,6 +1319,54 @@ async function refreshMetrics() {
   }
 }
 
+async function refreshOverviewUsage() {
+  const seq = ++overviewLoadSeq;
+  const params = new URLSearchParams({days: String(overviewDays)});
+  const latencyParams = new URLSearchParams({range: `${overviewDays}d`});
+  const provider = document.getElementById('overview-provider')?.value;
+  if (provider) {
+    params.set('provider', provider);
+    latencyParams.set('provider', provider);
+  }
+  if (overviewQuery !== params.toString() || !lastOverviewView) {
+    overviewQuery = params.toString();
+    clearOverviewUsage(true);
+  }
+  const errorEl = document.getElementById('overview-error');
+  if (errorEl) errorEl.hidden = true;
+  try {
+    const [usage, trend, latency] = await Promise.all([
+      fetchJSON(`/api/analytics/summary?${params}&compare=1`),
+      fetchJSON(`/api/analytics/tokens/trend?${params}`),
+      fetchJSON(`/api/perf/aggregate?${latencyParams}`),
+    ]);
+    if (seq !== overviewLoadSeq) return;
+    if (!usage?.summary || !trend || (trend.trend !== null && !Array.isArray(trend.trend)) || !latency) {
+      throw new Error(t('data.invalid'));
+    }
+    renderOverviewUsage(usage, trend.trend || [], latency);
+  } catch (e) {
+    if (seq !== overviewLoadSeq) return;
+    clearOverviewUsage();
+    if (errorEl) {
+      errorEl.textContent = t('data.loadFail') + e.message;
+      errorEl.hidden = false;
+    }
+  }
+}
+
+function clearOverviewUsage(loading = false) {
+  lastOverviewView = null;
+  ['m-total', 'm-tokens', 'm-cache-hit', 'm-throughput', 'm-success', 'm-cost'].forEach(id => {
+    document.getElementById(id).textContent = loading ? '…' : '—';
+    document.getElementById(id + '-note').textContent = '';
+  });
+  ['overview-generated', 'overview-latency'].forEach(id => { document.getElementById(id).textContent = ''; });
+  ['overview-request-trend', 'overview-token-trend', 'overview-provider-distribution', 'overview-model-distribution'].forEach(id => {
+    document.getElementById(id).innerHTML = `<div class="empty-state">${t(loading ? 'data.loading' : 'detail.unavailable')}</div>`;
+  });
+}
+
 function renderOverviewUsage(data, trend, latency) {
   const summary = data.summary || {};
   const input = Number(summary.input_tokens || 0);
@@ -1168,29 +1378,29 @@ function renderOverviewUsage(data, trend, latency) {
   const today = data.today || {};
   const retained = data.retained || {};
   const lastMinute = data.last_minute || {};
-  const compactTotal = value => fmtTok(Number(value || 0));
+  const compactTotal = item => hasUsageTokens(item) ? fmtTok(totalUsageTokens(item)) : '—';
   const set = (id, value) => {
     const el = document.getElementById(id);
     if (el) el.textContent = value;
   };
-  set('m-total', Number(summary.total_requests || 0).toLocaleString());
-  set('m-cost', fmtCost(summary.cost_usd ?? summary.est_cost_usd ?? 0));
-  set('m-tokens', fmtTok(total));
-  set('m-cache-hit', prompt > 0 ? `${(cacheRead / prompt * 100).toFixed(1)}%` : '—');
+  set('m-total', fmt(summary.total_requests));
+  set('m-cost', fmtAggregateCost(summary));
+  set('m-tokens', hasUsageTokens(summary) ? fmtTok(total) : '—');
+  set('m-cache-hit', hasUsageTokens(summary) && prompt > 0 ? `${(cacheRead / prompt * 100).toFixed(1)}%` : '—');
   set('m-total-note', today.total_requests != null
-    ? `${currentLang === 'zh' ? '今日' : 'Today'} ${fmt(Number(today.total_requests || 0))} · ${currentLang === 'zh' ? '累计' : 'All-time'} ${fmt(Number(retained.total_requests || 0))}`
+    ? `${currentLang === 'zh' ? '今日' : 'Today'} ${fmt(today.total_requests)} · ${currentLang === 'zh' ? '累计' : 'All-time'} ${fmt(retained.total_requests)}`
     : `${overviewDays} ${currentLang === 'zh' ? '天' : 'days'}`);
   set('m-tokens-note', today.input_tokens != null
-    ? `${currentLang === 'zh' ? '今日' : 'Today'} ${compactTotal(totalUsageTokens(today))} · ${currentLang === 'zh' ? '累计' : 'All-time'} ${compactTotal(totalUsageTokens(retained))}`
-    : `${fmtTok(input)} ${currentLang === 'zh' ? '输入' : 'input'} · ${fmtTok(output)} ${currentLang === 'zh' ? '输出' : 'output'}`);
-  set('m-cache-hit-note', `${fmtTok(cacheRead)} ${currentLang === 'zh' ? '读取' : 'read'}`);
-  set('m-cost-note', today.est_cost_usd != null
-    ? `${currentLang === 'zh' ? '今日' : 'Today'} ${fmtCost(today.est_cost_usd)} · ${currentLang === 'zh' ? '累计' : 'All-time'} ${fmtCost(retained.est_cost_usd)}`
+    ? `${currentLang === 'zh' ? '今日' : 'Today'} ${compactTotal(today)} · ${currentLang === 'zh' ? '累计' : 'All-time'} ${compactTotal(retained)}`
+    : '');
+  set('m-cache-hit-note', summary.cache_read_tokens != null ? `${fmtTok(cacheRead)} ${currentLang === 'zh' ? '读取' : 'read'}` : '');
+  set('m-cost-note', Number(summary.unknown_cost_requests || 0) > 0 ? costCoverageNote(summary) : today.est_cost_usd != null
+    ? `${currentLang === 'zh' ? '今日' : 'Today'} (UTC) ${fmtAggregateCost(today)} · ${currentLang === 'zh' ? '累计' : 'All-time'} ${fmtAggregateCost(retained)}`
     : t('analytics.currencyUSD'));
-  set('m-throughput', `${Number(lastMinute.total_requests || 0).toLocaleString()} RPM`);
-  set('m-throughput-note', `${fmtTok(totalUsageTokens(lastMinute))} TPM`);
+  set('m-throughput', lastMinute.total_requests != null ? `${fmt(lastMinute.total_requests)} RPM` : '—');
+  set('m-throughput-note', hasUsageTokens(lastMinute) ? `${compactTotal(lastMinute)} TPM` : '');
   const known = Number(summary.known_requests || 0);
-  set('m-success', known > 0 ? `${(Number(summary.success_rate || 0) * 100).toFixed(1)}%` : '—');
+  set('m-success', known > 0 && summary.success_rate != null ? `${(Number(summary.success_rate) * 100).toFixed(1)}%` : '—');
   set('m-success-note', t('analytics.knownRecords').replace('{n}', known.toLocaleString()));
   set('overview-generated', new Date().toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'}));
   set('overview-latency', Number(latency?.avg_latency_ms || 0) > 0
@@ -1237,12 +1447,18 @@ function renderModelList(counts) {
 let historyPage = 1;
 let historySize = 50;
 let historyTotal = 0;
+let historyLoadSeq = 0;
+let historyQuery = '';
 
 function dateInputValue(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function utcDateInputValue(date) {
+  return date.toISOString().slice(0, 10);
 }
 
 function historyDateBoundary(value, endOfDay) {
@@ -1262,6 +1478,7 @@ function historyQueryParams(page = historyPage, size = historySize) {
     scenario: document.getElementById('scenario-filter')?.value.trim(),
     success: document.getElementById('status-filter')?.value,
     streaming: document.getElementById('streaming-filter')?.value,
+    cost_source: document.getElementById('cost-source-filter')?.value,
   };
   Object.entries(values).forEach(([key, value]) => {
     if (value) params.set(key, value);
@@ -1277,13 +1494,13 @@ function historyQueryParams(page = historyPage, size = historySize) {
 
 function historyHasFilters() {
   return ['history-search', 'history-start', 'history-end', 'model-filter', 'provider-filter',
-    'scenario-filter', 'status-filter', 'streaming-filter']
+    'scenario-filter', 'status-filter', 'streaming-filter', 'cost-source-filter']
     .some(id => document.getElementById(id)?.value);
 }
 
 function resetHistoryFilters(refresh = true) {
   ['history-search', 'history-start', 'history-end', 'model-filter', 'provider-filter',
-    'scenario-filter', 'status-filter', 'streaming-filter'].forEach(id => {
+    'scenario-filter', 'status-filter', 'streaming-filter', 'cost-source-filter'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = '';
   });
@@ -1294,14 +1511,22 @@ function resetHistoryFilters(refresh = true) {
 }
 
 async function refreshHistory() {
+  const seq = ++historyLoadSeq;
+  const errorEl = document.getElementById('history-error');
   try {
     const params = historyQueryParams();
+    if (historyQuery !== params.toString()) {
+      historyQuery = params.toString();
+      clearHistoryView(true);
+    }
     const [r, summaryResponse] = await Promise.all([
       fetch(`/api/history?${params}`),
       fetch(`/api/history/summary?${params}`),
     ]);
-    if (!r.ok) return;
-    const data = await r.json();
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).trim()}`);
+    if (!summaryResponse.ok) throw new Error(`Summary HTTP ${summaryResponse.status}: ${(await summaryResponse.text()).trim()}`);
+    const [data, summary] = await Promise.all([r.json(), summaryResponse.json()]);
+    if (seq !== historyLoadSeq) return;
     // New paginated shape: { items, total, page, size }. Tolerate the old
     // bare-array shape too.
     if (Array.isArray(data)) {
@@ -1317,12 +1542,41 @@ async function refreshHistory() {
     }
     renderHistory();
     renderHistoryPager();
-    if (summaryResponse.ok) renderHistorySummary(await summaryResponse.json());
-  } catch(e) {}
+    renderHistorySummary(summary);
+    if (errorEl) errorEl.hidden = true;
+  } catch(e) {
+    if (seq !== historyLoadSeq) return;
+    if (!lastHistorySummary) clearHistoryView();
+    if (errorEl) {
+      errorEl.textContent = t('history.loadFail') + e.message;
+      errorEl.hidden = false;
+    }
+  }
 }
 
 let lastHistorySummary = null;
 let historyBreakdownMetric = 'tokens';
+
+function clearHistoryView(loading = false) {
+  allHistory = [];
+  historyTotal = 0;
+  lastHistorySummary = null;
+  const tip = document.getElementById('history-token-tip');
+  if (tip) tip.style.display = 'none';
+  if (loading) document.getElementById('history-error').hidden = true;
+  const message = t(loading ? 'data.loading' : 'detail.unavailable');
+  document.getElementById('history-tbody').innerHTML = `<tr><td colspan="7" class="empty-state">${message}</td></tr>`;
+  ['history-summary-requests', 'history-summary-success', 'history-summary-tokens', 'history-summary-cost'].forEach(id => {
+    document.getElementById(id).textContent = loading ? '…' : '—';
+  });
+  ['history-count', 'history-pageinfo', 'history-pagetotal', 'history-summary-token-note', 'history-summary-cost-note'].forEach(id => {
+    document.getElementById(id).textContent = '';
+  });
+  ['history-model-breakdown', 'history-provider-breakdown', 'history-scenario-breakdown'].forEach(id => {
+    document.getElementById(id).innerHTML = `<span class="compact-breakdown-value">${message}</span>`;
+  });
+  ['btn-history-prev', 'btn-history-next'].forEach(id => { document.getElementById(id).disabled = true; });
+}
 
 function renderHistorySummary(summary) {
   lastHistorySummary = summary;
@@ -1341,7 +1595,8 @@ function renderHistorySummary(summary) {
     `${t('detail.cacheRead')} ${fmtTok(summary.cache_read_tokens || 0)}`,
     `${t('detail.cacheCreation')} ${fmtTok(summary.cache_creation_tokens || 0)}`,
   ].join(' · '));
-  set('history-summary-cost', fmtCost(Number(summary.cost_usd || 0)));
+  set('history-summary-cost', fmtAggregateCost(summary));
+  set('history-summary-cost-note', costCoverageNote(summary));
   renderCompactBreakdown('history-model-breakdown', summary.models || []);
   renderCompactBreakdown('history-provider-breakdown', summary.providers || []);
   renderCompactBreakdown('history-scenario-breakdown', summary.scenarios || []);
@@ -1356,16 +1611,18 @@ function renderCompactBreakdown(id, items) {
     root.innerHTML = `<span class="compact-breakdown-value">${t('analytics.noData')}</span>`;
     return;
   }
-  const total = Math.max(1, top.reduce((sum, item) => sum + Number(item[metricKey] || 0), 0));
+  const total = items.reduce((sum, item) => sum + Number(item[metricKey] || 0), 0) || 1;
   root.innerHTML = top.map(item => {
-    const label = !item.name || item.name === 'unknown' ? 'override' : item.name;
+    const name = !item.name || item.name === 'unknown' ? t('detail.unknown') : item.name;
+    const label = item.provider ? `${name} (${item.provider})` : name;
+    const value = Number(item[metricKey] || 0);
     return `
     <div class="compact-breakdown-row">
-      <i class="compact-breakdown-fill" style="width:${Math.max(2, Number(item[metricKey] || 0) / total * 100).toFixed(1)}%"></i>
+      <i class="compact-breakdown-fill" style="width:${Math.max(value > 0 ? 2 : 0, value / total * 100).toFixed(1)}%"></i>
       <span class="compact-breakdown-name">${escapeHtml(label)}</span>
       <span class="compact-breakdown-stat"><strong>${Number(item.requests || 0).toLocaleString()}</strong><small>${t('analytics.requests')}</small></span>
       <span class="compact-breakdown-stat"><strong>${fmtTok(Number(item.tokens || 0))}</strong><small>Token</small></span>
-      <span class="compact-breakdown-stat"><strong>${fmtCost(Number(item.cost_usd || 0))}</strong><small>${t('analytics.cost')}</small></span>
+      <span class="compact-breakdown-stat" title="${escapeHtml(costCoverageNote(item))}"><strong>${fmtAggregateCost(item)}</strong><small>${t('analytics.cost')}</small></span>
     </div>`;
   }).join('');
 }
@@ -1405,6 +1662,7 @@ function renderHistoryPager() {
 function effectivePeakMultiplier(h) {
   const stored = Number(h.peak_multiplier);
   if (stored > 1) return stored;
+  if (h.provider !== 'opencode-go' && h.provider !== 'opencode_go') return 1;
   if (!/deepseek/i.test(String(h.model || ''))) return 1;
   const t = new Date(h.start_time);
   if (isNaN(t.getTime())) return 1;
@@ -1434,7 +1692,7 @@ function renderHistory() {
   tbody.innerHTML = limited.map(h => {
     const rowId = h.id || `${h.start_time}_${h.model || 'unknown'}_${h.duration_ms || 0}`;
     const cost = h.cost_usd != null ? fmtCost(h.cost_usd) : '—';
-    const detailsKnown = h.details_known !== false;
+    const detailsKnown = historyHasDetails(h);
     const streamLabel = detailsKnown
       ? (h.streaming ? t('history.streaming') : t('history.nonStreaming'))
       : t('detail.unknown');
@@ -1451,7 +1709,7 @@ function renderHistory() {
       <td><div class="history-model-cell"><strong>${escapeHtml(h.model) || '—'}</strong><small>${escapeHtml(h.provider) || '—'}</small></div></td>
       <td><span class="badge badge-scene" title="${t('detail.scenario')}: ${escapeHtml(h.scenario) || '—'}">${escapeHtml(h.scenario) || '—'}</span></td>
       <td><button type="button" class="history-token-trigger" data-token-id="${escapeHtml(rowId)}" aria-label="${t('detail.title')}">${totalTokens.toLocaleString()}</button></td>
-      <td>${cost}</td>
+      <td>${cost}<br><small>${costSourceLabel(h.cost_source)}</small></td>
       <td>${detailsKnown ? fmtDuration(h.duration_ms) : '—'}</td>
     </tr>
   `}).join('');
@@ -1648,10 +1906,12 @@ const HISTORY_CSV_COLUMNS = [
   ['cache_creation_tokens', r => r.cache_creation_tokens],
   ['output_tokens', r => r.output_tokens],
   ['cost_usd', r => r.cost_usd],
-  ['duration_ms', r => r.duration_ms],
-  ['streaming', r => r.streaming],
-  ['attempt', r => r.attempt],
-  ['success', r => r.success],
+  ['cost_source', r => r.cost_source],
+  ['details_known', r => historyHasDetails(r)],
+  ['duration_ms', r => historyHasDetails(r) ? r.duration_ms : null],
+  ['streaming', r => historyHasDetails(r) ? r.streaming : null],
+  ['attempt', r => historyHasDetails(r) ? r.attempt : null],
+  ['success', r => historyHasDetails(r) ? r.success : null],
   ['error_msg', r => r.error_msg || ''],
 ];
 
@@ -1664,9 +1924,11 @@ async function exportHistoryCSV() {
   if (btn) { btn.disabled = true; btn.textContent = t('export.working'); }
   try {
     const size = 500;
+    const params = historyQueryParams(1, size);
     const rows = [];
     for (let page = 1; ; page++) {
-      const r = await fetch(`/api/history?${historyQueryParams(page, size)}`);
+      params.set('page', String(page));
+      const r = await fetch(`/api/history?${params}`);
       if (!r.ok) throw new Error(`history page ${page}: ${r.status}`);
       const d = await r.json();
       const items = d.items || [];
@@ -1729,6 +1991,41 @@ function markPollFail() {
 }
 
 /* ── Helpers ───────────────────────────────────────────────────── */
+const PROVIDERS = {
+  'opencode-go': {name: 'OpenCode Go', color: '#818cf8'},
+  'opencode-zen': {name: 'OpenCode Zen', color: '#34d399'},
+  'aws-bedrock': {name: 'AWS Bedrock', color: '#fbbf24'},
+  'openrouter': {name: 'OpenRouter', color: '#fb7185'},
+  'commandcode': {name: 'CommandCode', color: '#22d3ee'},
+};
+
+async function fetchJSON(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`HTTP ${response.status}: ${(await response.text()).trim()}`);
+  return response.json();
+}
+
+function providerColor(provider) {
+  return PROVIDERS[String(provider || '').replace(/_/g, '-')]?.color || '#98989d';
+}
+
+function historyHasDetails(record) {
+  return record.details_known !== false && typeof record.success === 'boolean';
+}
+
+function costSourceLabel(source) {
+  return source === 'provider' ? t('history.costProvider')
+    : source === 'estimated' ? t('history.costEstimated') : t('detail.unknown');
+}
+
+function viewProviderHistory(provider) {
+  resetHistoryFilters(false);
+  document.getElementById('provider-filter').value = provider;
+  window.CustomSelect?.syncAll();
+  location.hash = 'history';
+  activateTab('history');
+}
+
 function fmt(n) { return n != null ? Number(n).toLocaleString() : '—'; }
 function fmtTok(n) {
   const value = Number(n || 0);
@@ -1744,16 +2041,22 @@ function totalUsageTokens(item) {
     + Number(item?.cache_read_tokens || 0) + Number(item?.cache_creation_tokens || 0);
 }
 
+function hasUsageTokens(item) {
+  return ['input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_creation_tokens']
+    .every(key => Number.isFinite(item?.[key]));
+}
+
 function fillRecentDailyTrend(points, days) {
   const byDate = new Map((points || []).map(point => [point.date, point]));
   const end = new Date();
+  end.setUTCHours(0, 0, 0, 0);
   const start = new Date(end);
-  start.setDate(start.getDate() - Math.max(0, days - 1));
+  start.setUTCDate(start.getUTCDate() - Math.max(0, days - 1));
   const result = [];
   while (start <= end) {
-    const date = dateInputValue(start);
+    const date = utcDateInputValue(start);
     result.push(byDate.get(date) || {date, requests:0, known_requests:0, error_requests:0, input_tokens:0, output_tokens:0, cache_read_tokens:0, cache_creation_tokens:0, cost_usd:0});
-    start.setDate(start.getDate() + 1);
+    start.setUTCDate(start.getUTCDate() + 1);
   }
   return result;
 }
@@ -1769,6 +2072,20 @@ function fmtCost(v) {
   if (abs < 0.01) return '$' + n.toFixed(abs < 0.001 ? 5 : 4);
   if (abs < 1) return '$' + n.toFixed(3);
   return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Aggregate amounts are known subtotals, not zero-cost promises for unpriced rows.
+function fmtAggregateCost(item) {
+  const unknown = Number(item?.unknown_cost_requests || 0);
+  const requests = Number(item?.total_requests ?? item?.requests ?? 0);
+  if (unknown > 0 && unknown >= requests) return '—';
+  const value = fmtCost(item?.cost_usd ?? item?.est_cost_usd);
+  return unknown > 0 ? `${value} + ?` : value;
+}
+
+function costCoverageNote(item) {
+  const unknown = Number(item?.unknown_cost_requests || 0);
+  return unknown > 0 ? t('analytics.unknownCosts').replace('{n}', unknown.toLocaleString()) : t('analytics.currencyUSD');
 }
 
 function chartTooltipMarkup(title, rows, footer) {
@@ -1945,14 +2262,18 @@ const CONFIG_FIELDS = [
   ['host', 'cfg-host', 'string'],
   ['port', 'cfg-port', 'int'],
   ['api_key', 'cfg-global-key', 'string'],
+  ['api_keys', 'cfg-global-keys', 'keys'],
   ['hot_reload', 'cfg-hot-reload', 'bool'],
 
   // OpenCode Go
   ['opencode_go.base_url', 'cfg-go-base-url', 'string'],
   ['opencode_go.anthropic_base_url', 'cfg-go-anthropic-url', 'string'],
+  ['opencode_go.responses_base_url', 'cfg-go-responses-url', 'string'],
   ['opencode_go.api_key', 'cfg-go-api-key', 'string'],
+  ['opencode_go.api_keys', 'cfg-go-api-keys', 'keys'],
   ['opencode_go.timeout_ms', 'cfg-go-timeout', 'int'],
   ['opencode_go.stream_timeout_ms', 'cfg-go-stream-timeout', 'int'],
+  ['opencode_go.streaming_timeout_ms', 'cfg-go-streaming-timeout', 'int'],
 
   // OpenCode Zen
   ['opencode_zen.base_url', 'cfg-zen-base-url', 'string'],
@@ -1960,16 +2281,39 @@ const CONFIG_FIELDS = [
   ['opencode_zen.responses_base_url', 'cfg-zen-responses-url', 'string'],
   ['opencode_zen.gemini_base_url', 'cfg-zen-gemini-url', 'string'],
   ['opencode_zen.api_key', 'cfg-zen-api-key', 'string'],
+  ['opencode_zen.api_keys', 'cfg-zen-api-keys', 'keys'],
   ['opencode_zen.timeout_ms', 'cfg-zen-timeout', 'int'],
   ['opencode_zen.stream_timeout_ms', 'cfg-zen-stream-timeout', 'int'],
+  ['opencode_zen.streaming_timeout_ms', 'cfg-zen-streaming-timeout', 'int'],
 
   // AWS Bedrock
   ['aws_bedrock.base_url', 'cfg-bedrock-base-url', 'string'],
   ['aws_bedrock.anthropic_base_url', 'cfg-bedrock-anthropic-url', 'string'],
   ['aws_bedrock.api_key', 'cfg-bedrock-api-key', 'string'],
+  ['aws_bedrock.api_keys', 'cfg-bedrock-api-keys', 'keys'],
   ['aws_bedrock.project_id', 'cfg-bedrock-project-id', 'string'],
   ['aws_bedrock.timeout_ms', 'cfg-bedrock-timeout', 'int'],
   ['aws_bedrock.stream_timeout_ms', 'cfg-bedrock-stream-timeout', 'int'],
+  ['aws_bedrock.streaming_timeout_ms', 'cfg-bedrock-streaming-timeout', 'int'],
+
+  // OpenRouter
+  ['openrouter.base_url', 'cfg-openrouter-base-url', 'string'],
+  ['openrouter.api_key', 'cfg-openrouter-api-key', 'string'],
+  ['openrouter.api_keys', 'cfg-openrouter-api-keys', 'keys'],
+  ['openrouter.management_api_key', 'cfg-openrouter-management-key', 'string'],
+  ['openrouter.timeout_ms', 'cfg-openrouter-timeout', 'int'],
+  ['openrouter.stream_timeout_ms', 'cfg-openrouter-stream-timeout', 'int'],
+  ['openrouter.streaming_timeout_ms', 'cfg-openrouter-streaming-timeout', 'int'],
+
+  // CommandCode uses independent credentials and complete native API URLs.
+  ['commandcode.base_url', 'cfg-commandcode-base-url', 'string'],
+  ['commandcode.anthropic_base_url', 'cfg-commandcode-anthropic-url', 'string'],
+  ['commandcode.api_key', 'cfg-commandcode-api-key', 'string'],
+  ['commandcode.api_keys', 'cfg-commandcode-api-keys', 'keys'],
+  ['commandcode.timeout_ms', 'cfg-commandcode-timeout', 'int'],
+  ['commandcode.stream_timeout_ms', 'cfg-commandcode-stream-timeout', 'int'],
+  ['commandcode.streaming_timeout_ms', 'cfg-commandcode-streaming-timeout', 'int'],
+  ['commandcode.zero_data_retention', 'cfg-commandcode-zdr', 'bool'],
 
   // Logging
   ['logging.level', 'cfg-log-level', 'string'],
@@ -2003,9 +2347,16 @@ function readFieldValue(field) {
     return v === !!current ? undefined : v;
   }
   if (field[2] === 'int') {
-    const v = raw.trim() === '' ? undefined : parseInt(raw, 10);
     const current = deepGet(currentProxyConfig, field[0]);
+    if (raw.trim() === '' && current == null) return undefined;
+    const v = Number(raw);
+    if (!Number.isSafeInteger(v) || v < 0) throw new Error(`${field[0]}: ${currentLang === 'zh' ? '请输入非负整数' : 'Enter a non-negative integer'}`);
     return v === current ? undefined : v;
+  }
+  if (field[2] === 'keys') {
+    const keys = raw.split(/[,\n]/).map(key => key.trim()).filter(Boolean);
+    const current = deepGet(currentProxyConfig, field[0]) || [];
+    return JSON.stringify(keys) === JSON.stringify(current) ? undefined : keys;
   }
   // string
   const v = raw;
@@ -2016,7 +2367,7 @@ function readFieldValue(field) {
 async function loadProxyConfig() {
   try {
     const r = await fetch('/api/proxy/config');
-    if (!r.ok) return;
+    if (!r.ok) throw new Error(await r.text());
     currentProxyConfig = await r.json();
     if (!currentProxyConfig) return;
 
@@ -2028,25 +2379,29 @@ async function loadProxyConfig() {
         el.checked = !!val;
       } else if (type === 'int') {
         el.value = val != null ? val : '';
+      } else if (type === 'keys') {
+        el.value = (val || []).join(', ');
       } else {
         el.value = val || '';
       }
     }
   } catch (e) {
     console.error('Failed to load proxy config:', e);
+    showSaveStatus(t('save.unloaded') + ': ' + e.message, 'error');
   }
 }
 
 async function saveProxyConfig() {
   if (!currentProxyConfig) {
-    showSaveStatus('Config not loaded, cannot save', 'error');
+    showSaveStatus(t('save.unloaded'), 'error');
     return;
   }
 
   const saveBtn = document.getElementById('btn-save-cfg');
   saveBtn.disabled = true;
-  saveBtn.textContent = 'Saving...';
+  saveBtn.textContent = t('status.saving');
 
+  try {
   // Build a patch object with only changed fields.
   const patch = {};
   for (const field of CONFIG_FIELDS) {
@@ -2058,13 +2413,10 @@ async function saveProxyConfig() {
 
   // If nothing changed, no-op.
   if (Object.keys(patch).length === 0) {
-    showSaveStatus('No changes to save', 'success');
-    saveBtn.disabled = false;
-    saveBtn.textContent = 'Save & Apply Config';
+    showSaveStatus(t('fallback.noChanges'), 'success');
     return;
   }
 
-  try {
     const r = await fetch('/api/proxy/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2072,18 +2424,18 @@ async function saveProxyConfig() {
     });
 
     if (r.ok) {
-      showSaveStatus('Config saved successfully!', 'success');
+      showSaveStatus(t('status.saveOk'), 'success');
       // Reload the full config from the server to stay in sync.
       await loadProxyConfig();
     } else {
       const txt = await r.text();
-      showSaveStatus('Save failed: ' + txt, 'error');
+      showSaveStatus(t('status.saveFail') + txt, 'error');
     }
   } catch (e) {
-    showSaveStatus('Network error, save failed', 'error');
+    showSaveStatus(t('status.saveFail') + e.message, 'error');
   } finally {
     saveBtn.disabled = false;
-    saveBtn.textContent = 'Save & Apply Config';
+    saveBtn.textContent = t('btn.save');
   }
 }
 
@@ -2131,7 +2483,9 @@ function togglePasswordVisibility(id) {
 let historyRefreshTimer = null;
 
 function scheduleHistoryRefresh() {
+  historyLoadSeq++;
   historyPage = 1;
+  clearHistoryView(true);
   if (historyRefreshTimer) clearTimeout(historyRefreshTimer);
   historyRefreshTimer = setTimeout(() => {
     historyRefreshTimer = null;
@@ -2139,10 +2493,10 @@ function scheduleHistoryRefresh() {
   }, 250);
 }
 
-['history-search', 'model-filter', 'provider-filter', 'scenario-filter'].forEach(id => {
+['history-search', 'model-filter', 'scenario-filter'].forEach(id => {
   document.getElementById(id)?.addEventListener('input', scheduleHistoryRefresh);
 });
-['history-start', 'history-end', 'status-filter', 'streaming-filter'].forEach(id => {
+['history-start', 'history-end', 'provider-filter', 'status-filter', 'streaming-filter', 'cost-source-filter'].forEach(id => {
   document.getElementById(id)?.addEventListener('change', scheduleHistoryRefresh);
 });
 document.getElementById('history-reset')?.addEventListener('click', () => resetHistoryFilters());
@@ -2188,8 +2542,9 @@ const modalClose = document.getElementById('modal-close');
 let modalReturnFocus = null;
 
 function showHistoryDetail(record) {
+  modal.querySelector('.modal-footer')?.remove();
   const tokenValue = value => value != null ? Number(value).toLocaleString() : '—';
-  const detailsKnown = record.details_known !== false;
+  const detailsKnown = historyHasDetails(record);
   const statusLabel = detailsKnown ? (record.success ? t('detail.success') : t('detail.failed')) : t('detail.unknown');
   modalBody.innerHTML = `
     <div class="detail-summary">
@@ -2215,12 +2570,20 @@ function showHistoryDetail(record) {
     </div>
     <div class="detail-metadata">
       <div class="detail-row"><span class="detail-label">${t('detail.requestId')}</span><span class="detail-value">${escapeHtml(record.id || '—')}</span></div>
+      <div class="detail-row"><span class="detail-label">${t('history.costSource')}</span><span class="detail-value">${costSourceLabel(record.cost_source)}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.requestType')}</span><span class="detail-value">${detailsKnown ? t(record.streaming ? 'detail.streaming' : 'detail.nonStreaming') : t('detail.unavailable')}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.attempt')}</span><span class="detail-value">${detailsKnown ? (record.attempt || 1) : t('detail.unavailable')}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.duration')}</span><span class="detail-value">${detailsKnown ? fmtDuration(record.duration_ms) : t('detail.unavailable')}</span></div>
     </div>
     ${record.error_msg ? `<div class="detail-error"><strong>${t('detail.error')}</strong><br>${escapeHtml(record.error_msg)}</div>` : ''}
   `;
+  openHistoryModal('detail.title');
+}
+
+function openHistoryModal(titleKey) {
+  const title = document.getElementById('modal-title');
+  title.dataset.i18n = titleKey;
+  title.textContent = t(titleKey);
   modalReturnFocus = document.activeElement;
   if (typeof modal?.showModal === 'function' && !modal.open) modal.showModal();
   else modal?.classList.add('visible');
@@ -2233,6 +2596,7 @@ function closeHistoryModal() {
 
 modalClose?.addEventListener('click', closeHistoryModal);
 modal?.addEventListener('close', function() {
+  modal.querySelector('.modal-footer')?.remove();
   const target = modalReturnFocus;
   modalReturnFocus = null;
   if (target && typeof target.focus === 'function') target.focus();
@@ -2403,14 +2767,12 @@ document.addEventListener('DOMContentLoaded', initAccordions);
 
 /* ── Config Backup/Restore ─────────────────────────────────────── */
 async function exportConfig() {
-  const anonymize = document.getElementById('export-anonymize').checked;
   const btn = document.getElementById('btn-export-config');
   btn.disabled = true;
   btn.textContent = t('status.exporting');
 
   try {
-    const url = '/api/config/export?anonymize=' + anonymize;
-    const response = await fetch(url);
+    const response = await fetch('/api/config/export');
     if (!response.ok) {
       throw new Error(await response.text());
     }
@@ -2440,7 +2802,7 @@ function importConfig() {
 }
 
 async function handleConfigImport(file) {
-  if (!file || file.type !== 'application/json') {
+  if (!file) {
     showSaveStatus(t('status.importInvalid'), 'error');
     return;
   }
@@ -2452,19 +2814,25 @@ async function handleConfigImport(file) {
   try {
     const content = await file.text();
     const config = JSON.parse(content);
+    const response = await fetch('/api/config/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config, apply: false })
+    });
+    if (!response.ok) throw new Error(await response.text());
+    const preview = await response.json();
 
     const previewHtml = `
       <div class="detail-row">
         <span class="detail-label">${t('modal.importConfirm')}</span>
       </div>
-      <pre style="max-height: 300px; overflow: auto; background: #3a3a3c; padding: 12px; border-radius: 4px; font-size: 11px; white-space: pre-wrap; word-break: break-all;">${escapeHtml(JSON.stringify(config, null, 2))}</pre>
+      <pre style="max-height: 300px; overflow: auto; padding: 12px; font-size: 12px; white-space: pre-wrap; word-break: break-all;">${escapeHtml(JSON.stringify(preview.config, null, 2))}</pre>
     `;
 
     modalBody.innerHTML = previewHtml;
-    document.getElementById('modal-title').textContent = t('modal.importPreview');
 
     const footerHtml = `
-      <div style="padding: 12px 16px; display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid #48484a;">
+      <div class="modal-footer" style="padding: 12px 16px; display: flex; gap: 8px; justify-content: flex-end;">
         <button class="btn btn-small" id="btn-import-cancel">${t('btn.cancel')}</button>
         <button class="btn btn-small btn-primary" id="btn-import-apply">${t('btn.apply')}</button>
       </div>
@@ -2475,15 +2843,17 @@ async function handleConfigImport(file) {
 
     modal.querySelector('.modal-content').insertAdjacentHTML('beforeend', footerHtml);
 
-    modal.classList.add('visible');
+    openHistoryModal('modal.importPreview');
 
     document.getElementById('btn-import-cancel').onclick = () => {
-      modal.classList.remove('visible');
+      closeHistoryModal();
       const footer = modal.querySelector('.modal-footer');
       if (footer) footer.remove();
     };
 
-    document.getElementById('btn-import-apply').onclick = async () => {
+    const applyBtn = document.getElementById('btn-import-apply');
+    applyBtn.onclick = async () => {
+      applyBtn.disabled = true;
       try {
         const response = await fetch('/api/config/import', {
           method: 'POST',
@@ -2495,7 +2865,7 @@ async function handleConfigImport(file) {
           throw new Error(await response.text());
         }
 
-        modal.classList.remove('visible');
+        closeHistoryModal();
         const footer = modal.querySelector('.modal-footer');
         if (footer) footer.remove();
 
@@ -2503,6 +2873,8 @@ async function handleConfigImport(file) {
         await loadProxyConfig();
       } catch (e) {
         showSaveStatus(t('status.importFail') + e.message, 'error');
+      } finally {
+        applyBtn.disabled = false;
       }
     };
   } catch (e) {
@@ -2526,6 +2898,10 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /* ── Fallback Chain Editor ─────────────────────────────────────── */
+function configModelKey(model) {
+  return (model.provider || 'opencode-go').replace(/_/g, '-') + '/' + model.model_id;
+}
+
 const FallbackModule = {
   chains: {},
   currentScenario: 'default',
@@ -2542,28 +2918,21 @@ const FallbackModule = {
       if (!r.ok) return;
       const config = await r.json();
 
-      // Build model list from scenario models + fallback entries
+      // Keep the complete model config, including its protocol and capabilities.
       const modelMap = new Map();
-      if (config.models) {
-        for (const [, m] of Object.entries(config.models)) {
-          if (m.model_id && !modelMap.has(m.model_id)) {
-            modelMap.set(m.model_id, { id: m.model_id, display_name: m.model_id, provider: m.provider || 'unknown' });
-          }
-        }
-      }
-      if (config.fallbacks) {
-        for (const models of Object.values(config.fallbacks)) {
-          for (const m of models) {
-            if (m.model_id && !modelMap.has(m.model_id)) {
-              modelMap.set(m.model_id, { id: m.model_id, display_name: m.model_id, provider: m.provider || 'unknown' });
-            }
-          }
-        }
+      const candidates = [
+        ...Object.values(config.models || {}),
+        ...Object.values(config.model_overrides || {}),
+        ...Object.values(config.model_family_overrides || {}),
+        ...Object.values(config.fallbacks || {}).flat(),
+      ];
+      for (const model of candidates) {
+        if (model.model_id && !modelMap.has(configModelKey(model))) modelMap.set(configModelKey(model), { ...model });
       }
       this.availableModels = [...modelMap.values()];
 
       // Discover all scenario keys from config.models
-      const scenarioKeys = Object.keys(config.models || {});
+      const scenarioKeys = [...new Set([...Object.keys(config.models || {}), ...Object.keys(config.fallbacks || {})])];
       this.chains = {};
       for (const key of scenarioKeys) {
         this.chains[key] = this.parseFallbackChain(config, key);
@@ -2573,7 +2942,7 @@ const FallbackModule = {
       const sel = document.getElementById('fallback-scenario');
       if (sel) {
         sel.innerHTML = scenarioKeys.map(k =>
-          `<option value="${k}">${k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>`
+          `<option value="${escapeHtml(k)}">${escapeHtml(k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()))}</option>`
         ).join('');
         this.currentScenario = scenarioKeys[0] || 'default';
         sel.value = this.currentScenario;
@@ -2599,21 +2968,22 @@ const FallbackModule = {
     if (!addSel) return;
     const chain = this.chains[this.currentScenario] || [];
     const available = this.availableModels
-      .filter(m => !chain.some(e => (e.model_id || e) === m.id));
+      .filter(m => !chain.some(e => configModelKey(e) === configModelKey(m)));
     addSel.innerHTML = '<option value="">' + t('fallback.selectModel') + '</option>' +
       available.map(m =>
-        `<option value="${escapeHtml(m.id)}">${escapeHtml(m.display_name || m.id)} (${escapeHtml(m.provider)})</option>`
+        `<option value="${escapeHtml(configModelKey(m))}">${escapeHtml(m.model_id)} (${escapeHtml(m.provider || 'opencode-go')})</option>`
       ).join('');
     addSel.disabled = available.length === 0;
   },
 
   onAddSelectChange() {
     const addSel = document.getElementById('fallback-add-model');
-    const modelId = addSel.value;
-    if (!modelId) return;
-    const model = this.availableModels.find(m => m.id === modelId);
+    const modelKey = addSel.value;
+    if (!modelKey) return;
+    const model = this.availableModels.find(m => configModelKey(m) === modelKey);
     if (model) {
-      (this.chains[this.currentScenario] || []).push({ model_id: modelId, provider: model.provider, temperature: 0, max_tokens: 0 });
+      if (!this.chains[this.currentScenario]) this.chains[this.currentScenario] = [];
+      this.chains[this.currentScenario].push({ ...model });
       this.renderChain();
     }
     addSel.value = '';
@@ -2634,9 +3004,8 @@ const FallbackModule = {
     list.classList.add('has-items');
     list.innerHTML = chain.map((entry, index) => {
       const modelId = entry.model_id || entry;
-      const model = this.availableModels.find(m => m.id === modelId);
-      const displayName = model ? (model.display_name || model.id) : modelId;
-      const provider = entry.provider || (model ? model.provider : '');
+      const displayName = modelId;
+      const provider = entry.provider || 'opencode-go';
       return `
         <li class="fallback-item" draggable="true" data-index="${index}" role="option">
           <span class="handle">⋮⋮</span>
@@ -2731,8 +3100,7 @@ const FallbackModule = {
       contentEl.innerHTML = '<div class="fallback-preview-chain">' +
         chain.map((entry, i) => {
           const modelId = entry.model_id || entry;
-          const model = this.availableModels.find(m => m.id === modelId);
-          const displayName = model ? (model.display_name || model.id) : modelId;
+          const displayName = `${modelId} (${entry.provider || 'opencode-go'})`;
           return `
             <span class="fallback-preview-model ${i === 0 ? 'primary' : ''}">${escapeHtml(displayName)}</span>
             ${i < chain.length - 1 ? '<span class="fallback-preview-arrow">→</span>' : ''}
@@ -2873,16 +3241,14 @@ const TestModule = {
       const r = await fetch('/api/proxy/config');
       if (!r.ok) return;
       const data = await r.json();
-      const modelIds = new Set();
       // Only collect model_overrides and model_family_overrides — the
       // top-level "models" keys are routing scenarios (fast, default,
       // long_context, etc.), not real model IDs.
-      Object.keys(data.model_overrides || {}).forEach(k => modelIds.add(k));
-      Object.keys(data.model_family_overrides || {}).forEach(k => modelIds.add(k));
-      [...modelIds].sort().forEach(id => {
+      const targets = {...data.model_family_overrides, ...data.model_overrides};
+      Object.keys(targets).sort().forEach(id => {
         const opt = document.createElement('option');
         opt.value = id;
-        opt.textContent = id;
+        opt.textContent = `${id} · ${configModelKey(targets[id])}`;
         this.testModelSelect.appendChild(opt);
       });
     } catch (e) {}
@@ -3029,9 +3395,9 @@ document.addEventListener('DOMContentLoaded', () => TestModule.init());
 
 /* ── Analytics Tab (minimal, vanilla JS + SVG/CSS) ─────────────── */
 const AnalyticsModule = {
-  palette: ['#818cf8', '#34d399', '#fbbf24', '#fb7185', '#22d3ee', '#c084fc'],
   loadSeq: 0,
   ready: false,
+  query: '',
   breakdownMetric: 'tokens',
   granularity: 'day',
   currentView: null,
@@ -3041,6 +3407,9 @@ const AnalyticsModule = {
   init() {
     const refreshBtn = document.getElementById('btn-refresh-analytics');
     if (refreshBtn) refreshBtn.addEventListener('click', () => this.load(true));
+    document.getElementById('analytics-provider')?.addEventListener('change', () => this.load(true));
+    document.getElementById('overview-provider')?.addEventListener('change', refreshOverviewUsage);
+    document.getElementById('btn-refresh-overview')?.addEventListener('click', refreshOverviewUsage);
     document.querySelectorAll('#analytics-breakdown-metric button').forEach(button => {
       button.addEventListener('click', () => {
         this.breakdownMetric = button.dataset.metric;
@@ -3059,7 +3428,7 @@ const AnalyticsModule = {
       button.addEventListener('click', () => {
         overviewDays = Number(button.dataset.days || 7);
         button.parentElement.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
-        refreshMetrics();
+        refreshOverviewUsage();
       });
     });
     document.querySelectorAll('#overview-breakdown-metric button').forEach(button => {
@@ -3075,9 +3444,9 @@ const AnalyticsModule = {
   initDateRange() {
     const end = new Date();
     const start = new Date(end);
-    start.setDate(start.getDate() - 6);
-    document.getElementById('analytics-start').value = dateInputValue(start);
-    document.getElementById('analytics-end').value = dateInputValue(end);
+    start.setUTCDate(start.getUTCDate() - 6);
+    document.getElementById('analytics-start').value = utcDateInputValue(start);
+    document.getElementById('analytics-end').value = utcDateInputValue(end);
     this.syncDateRange();
     document.getElementById('analytics-date-trigger')?.addEventListener('click', () => this.toggleDateRange());
     document.getElementById('analytics-date-cancel')?.addEventListener('click', () => this.closeDateRange());
@@ -3117,25 +3486,29 @@ const AnalyticsModule = {
     if (startDisplay) startDisplay.value = start;
     if (endDisplay) endDisplay.value = end;
     const label = document.getElementById('analytics-date-label');
-    if (label) label.textContent = start && end ? `${start} → ${end}` : t('filter.dateRange');
+    if (label) label.textContent = start && end ? `${start} → ${end} (UTC)` : t('filter.dateRange');
   },
 
   presetDateRange(days) {
     const end = new Date();
     const start = new Date(end);
-    start.setDate(start.getDate() - Math.max(0, days - 1));
-    document.getElementById('analytics-start-display').value = dateInputValue(start);
-    document.getElementById('analytics-end-display').value = dateInputValue(end);
+    start.setUTCDate(start.getUTCDate() - Math.max(0, days - 1));
+    document.getElementById('analytics-start-display').value = utcDateInputValue(start);
+    document.getElementById('analytics-end-display').value = utcDateInputValue(end);
   },
 
   applyDateRange() {
     const start = document.getElementById('analytics-start-display');
     const end = document.getElementById('analytics-end-display');
-    const valid = value => /^\d{4}-\d{2}-\d{2}$/.test(value) && dateInputValue(new Date(`${value}T00:00:00`)) === value;
+    const valid = value => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+      const date = new Date(`${value}T00:00:00Z`);
+      return !Number.isNaN(date.getTime()) && utcDateInputValue(date) === value;
+    };
     start.classList.toggle('invalid', !valid(start.value));
     end.classList.toggle('invalid', !valid(end.value));
     if (!valid(start.value) || !valid(end.value) || start.value > end.value) return;
-    const span = (new Date(`${end.value}T00:00:00`) - new Date(`${start.value}T00:00:00`)) / 86400000 + 1;
+    const span = (new Date(`${end.value}T00:00:00Z`) - new Date(`${start.value}T00:00:00Z`)) / 86400000 + 1;
     if (span > 92) {
       end.classList.add('invalid');
       return;
@@ -3150,43 +3523,39 @@ const AnalyticsModule = {
   queryParams() {
     const start = document.getElementById('analytics-start')?.value;
     const end = document.getElementById('analytics-end')?.value;
-    const from = new Date(`${start}T00:00:00`);
-    const to = new Date(`${end}T00:00:00`);
-    to.setDate(to.getDate() + 1);
-    return new URLSearchParams({
+    const from = new Date(`${start}T00:00:00Z`);
+    const to = new Date(`${end}T00:00:00Z`);
+    to.setUTCDate(to.getUTCDate() + 1);
+    const params = new URLSearchParams({
       from: from.toISOString(),
       to: to.toISOString(),
       granularity: this.granularity,
     });
-  },
-
-  loadingHtml() {
-    return '<div class="flex items-center justify-center py-12"><svg class="animate-spin h-6 w-6 text-[#98989d]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg><span class="ml-2 text-xs text-[#98989d]">Loading analytics…</span></div>';
+    const provider = document.getElementById('analytics-provider')?.value;
+    if (provider) params.set('provider', provider);
+    return params;
   },
 
   async load(force) {
     const seq = ++this.loadSeq;
     const params = this.queryParams();
     const genEl = document.getElementById('analytics-generated');
-    if (!this.ready) {
-      if (genEl) genEl.textContent = '';
-      ['kpi-requests','kpi-tokens','kpi-cost','kpi-input','kpi-cache-rate','kpi-output','kpi-cache-read','kpi-cache-write'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = '…';
-      });
-      this.showLoading();
+    if (!this.ready || this.query !== params.toString()) {
+      this.query = params.toString();
+      this.clearView(true);
     }
+    const errorEl = document.getElementById('analytics-error');
+    if (errorEl) errorEl.hidden = true;
 
     try {
-      const [summaryRes, trendRes] = await Promise.all([
-        fetch(`/api/analytics/summary?${params}`),
-        fetch(`/api/analytics/tokens/trend?${params}`)
+      const [summary, trend] = await Promise.all([
+        fetchJSON(`/api/analytics/summary?${params}`),
+        fetchJSON(`/api/analytics/tokens/trend?${params}`)
       ]);
-      if (!summaryRes.ok) throw new Error('summary fetch failed');
-      const summary = await summaryRes.json();
-      const trend = trendRes.ok ? await trendRes.json() : { trend: [] };
-
       if (seq !== this.loadSeq) return;
+      if (!summary?.summary || !trend || (trend.trend !== null && !Array.isArray(trend.trend))) {
+        throw new Error(t('data.invalid'));
+      }
       this.currentView = summary;
       this.currentTrend = this.fillTrend(trend.trend || []);
       this.renderKPIs(summary);
@@ -3202,43 +3571,57 @@ const AnalyticsModule = {
     } catch (e) {
       if (seq !== this.loadSeq) return;
       console.error('Analytics error:', e);
-      if (!this.ready) this.renderEmpty('Failed to load analytics');
-      if (genEl) genEl.textContent = 'Error';
+      this.clearView();
+      if (errorEl) {
+        errorEl.textContent = t('data.loadFail') + e.message;
+        errorEl.hidden = false;
+      }
     }
   },
 
-  showLoading() {
-    ['provider-distribution'].forEach(id => {
+  clearView(loading = false) {
+    this.ready = false;
+    this.currentView = null;
+    this.currentTrend = [];
+    ['kpi-requests','kpi-tokens','kpi-cost','kpi-input','kpi-cache-rate','kpi-output','kpi-cache-read','kpi-cache-write'].forEach(id => {
       const el = document.getElementById(id);
-      if (el) el.innerHTML = this.loadingHtml();
+      if (el) el.textContent = loading ? '…' : '—';
     });
+    ['analytics-generated','analytics-period-count','analytics-retained-range','kpi-tokens-note','kpi-cost-note','kpi-cache-rate-note'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = '';
+    });
+    const message = t(loading ? 'data.loading' : 'detail.unavailable');
+    document.getElementById('provider-distribution').innerHTML = `<div class="empty-state">${message}</div>`;
+    document.getElementById('analytics-period-tbody').innerHTML = `<tr><td colspan="9" class="empty-state">${message}</td></tr>`;
+    document.getElementById('analytics-model-tbody').innerHTML = `<tr><td colspan="5" class="empty-state">${message}</td></tr>`;
   },
 
   renderKPIs(data) {
     const s = data.summary || {};
     const fmt = (n) => n != null ? Number(n).toLocaleString() : '—';
+    const tokenValue = n => n != null ? fmtTok(n) : '—';
     document.getElementById('kpi-requests').textContent = fmt(s.total_requests);
     // Total tokens = input (non-cached new) + output + cache (read+creation).
     // This matches the billing structure and avoids underreporting when a large
     // fraction of input is served from cache at lower cost.
-    const totTok = (s.input_tokens||0) + (s.output_tokens||0)
-      + (s.cache_read_tokens||0) + (s.cache_creation_tokens||0);
-    document.getElementById('kpi-tokens').textContent = fmtTok(totTok);
+    document.getElementById('kpi-tokens').textContent = hasUsageTokens(s) ? fmtTok(totalUsageTokens(s)) : '—';
     document.getElementById('kpi-tokens-note').textContent = t('analytics.knownRecords').replace('{n}', Number(s.known_requests || 0).toLocaleString());
-    document.getElementById('kpi-input').textContent = fmtTok(s.input_tokens);
-    document.getElementById('kpi-output').textContent = fmtTok(s.output_tokens);
+    document.getElementById('kpi-input').textContent = tokenValue(s.input_tokens);
+    document.getElementById('kpi-output').textContent = tokenValue(s.output_tokens);
 
     // Cache hit rate is an input-side ratio: the denominator is everything that
     // arrived as prompt (fresh input + cache read + cache creation). Dividing by
     // total tokens instead would fold output in and drift with response length.
     const promptTok = (s.input_tokens||0) + (s.cache_read_tokens||0) + (s.cache_creation_tokens||0);
-    document.getElementById('kpi-cost').textContent = fmtCost(s.cost_usd ?? s.est_cost_usd ?? 0);
-    document.getElementById('kpi-cache-read').textContent = fmtTok(s.cache_read_tokens || 0);
-    document.getElementById('kpi-cache-rate').textContent = promptTok > 0
+    document.getElementById('kpi-cost').textContent = fmtAggregateCost(s);
+    document.getElementById('kpi-cost-note').textContent = costCoverageNote(s);
+    document.getElementById('kpi-cache-read').textContent = tokenValue(s.cache_read_tokens);
+    document.getElementById('kpi-cache-rate').textContent = hasUsageTokens(s) && promptTok > 0
       ? `${((s.cache_read_tokens || 0) / promptTok * 100).toFixed(1)}%`
       : '—';
-    document.getElementById('kpi-cache-rate-note').textContent = `${fmtTok(s.cache_read_tokens || 0)} ${currentLang === 'zh' ? '读取' : 'read'}`;
-    document.getElementById('kpi-cache-write').textContent = fmtTok(s.cache_creation_tokens || 0);
+    document.getElementById('kpi-cache-rate-note').textContent = s.cache_read_tokens != null ? `${fmtTok(s.cache_read_tokens)} ${currentLang === 'zh' ? '读取' : 'read'}` : '';
+    document.getElementById('kpi-cache-write').textContent = tokenValue(s.cache_creation_tokens);
   },
 
   renderDistributions(summary) {
@@ -3259,26 +3642,28 @@ const AnalyticsModule = {
       ...item,
       total_tokens: item.total_tokens ?? totalUsageTokens(item),
       cost_usd: item.cost_usd ?? item.est_cost_usd ?? 0,
-    })).sort((a, b) => Number(b[valueKey] || 0) - Number(a[valueKey] || 0)).slice(0, 12);
+    })).sort((a, b) => Number(b[valueKey] || 0) - Number(a[valueKey] || 0));
     root.classList.toggle('is-single', normalized.length === 1);
     if (!normalized.length) {
       root.innerHTML = `<div class="empty-state">${t('analytics.noData')}</div>`;
       return;
     }
-    const max = Math.max(1, ...normalized.map(item => Number(item[valueKey] || 0)));
-    const total = Math.max(1, normalized.reduce((sum, item) => sum + Number(item[valueKey] || 0), 0));
+    const max = Math.max(...normalized.map(item => Number(item[valueKey] || 0))) || 1;
+    const total = normalized.reduce((sum, item) => sum + Number(item[valueKey] || 0), 0) || 1;
+    const incompleteCost = valueKey === 'cost_usd' && normalized.some(item => Number(item.unknown_cost_requests || 0) > 0);
     const formatValue = value => valueKey === 'cost_usd' ? fmtCost(value)
       : valueKey === 'requests' ? Number(value || 0).toLocaleString() : fmtTok(value);
-    root.innerHTML = normalized.map((item, index) => {
+    root.innerHTML = normalized.slice(0, 12).map(item => {
       const rawLabel = dimension === 'model' ? item.model : item.provider;
-      const label = !rawLabel || rawLabel === 'unknown' ? t('detail.unknown') : rawLabel;
+      const name = !rawLabel || rawLabel === 'unknown' ? t('detail.unknown') : rawLabel;
+      const label = dimension === 'model' && item.provider ? `${name} (${item.provider})` : name;
       const value = Number(item[valueKey] || 0);
       const share = value / total * 100;
-      const meta = `${Number(item.requests || 0).toLocaleString()} ${t('analytics.requests')} · ${fmtTok(item.total_tokens)} Token · ${fmtCost(item.cost_usd)}`;
+      const meta = `${Number(item.requests || 0).toLocaleString()} ${t('analytics.requests')} · ${fmtTok(item.total_tokens)} Token · ${fmtAggregateCost(item)}`;
       return `<div class="analytics-distribution-row">
-        <div class="analytics-distribution-label"><span title="${this.escapeHtml(label)}">${this.escapeHtml(label)}</span><strong>${formatValue(value)}</strong></div>
-        <div class="analytics-distribution-track"><span style="width:${Math.max(value > 0 ? 2 : 0, value / max * 100).toFixed(1)}%;--distribution-color:${this.palette[index % this.palette.length]}"></span></div>
-        <small>${meta} · ${share.toFixed(1)}%</small>
+        <div class="analytics-distribution-label"><span title="${this.escapeHtml(label)}">${this.escapeHtml(label)}</span><strong>${valueKey === 'cost_usd' ? fmtAggregateCost(item) : formatValue(value)}</strong></div>
+        <div class="analytics-distribution-track"><span style="width:${Math.max(value > 0 ? 2 : 0, value / max * 100).toFixed(1)}%;--distribution-color:${providerColor(item.provider)}"></span></div>
+        <small title="${this.escapeHtml(costCoverageNote(item))}">${meta}${incompleteCost ? '' : ` · ${share.toFixed(1)}%`}</small>
       </div>`;
     }).join('');
   },
@@ -3291,22 +3676,22 @@ const AnalyticsModule = {
     const rows = [];
     const blank = date => ({date, requests:0, known_requests:0, error_requests:0, input_tokens:0, output_tokens:0, cache_read_tokens:0, cache_creation_tokens:0, cost_usd:0});
     if (this.granularity === 'hour') {
-      const cursor = new Date(`${startValue}T00:00:00`);
-      const end = new Date(`${endValue}T00:00:00`);
-      end.setDate(end.getDate() + 1);
+      const cursor = new Date(`${startValue}T00:00:00Z`);
+      const end = new Date(`${endValue}T00:00:00Z`);
+      end.setUTCDate(end.getUTCDate() + 1);
       while (cursor < end) {
         const key = cursor.toISOString().slice(0, 13) + ':00:00Z';
         rows.push(byKey.get(key) || blank(key));
-        cursor.setHours(cursor.getHours() + 1);
+        cursor.setUTCHours(cursor.getUTCHours() + 1);
       }
       return rows;
     }
-    const cursor = new Date(`${startValue}T00:00:00`);
-    const end = new Date(`${endValue}T00:00:00`);
+    const cursor = new Date(`${startValue}T00:00:00Z`);
+    const end = new Date(`${endValue}T00:00:00Z`);
     while (cursor <= end) {
-      const key = dateInputValue(cursor);
+      const key = utcDateInputValue(cursor);
       rows.push(byKey.get(key) || blank(key));
-      cursor.setDate(cursor.getDate() + 1);
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
     return rows;
   },
@@ -3314,7 +3699,7 @@ const AnalyticsModule = {
   trendLabel(value) {
     const date = String(value || '');
     if (date.includes('T')) {
-      return new Date(date).toLocaleString(undefined, {month:'2-digit', day:'2-digit', hour:'2-digit'});
+      return new Date(date).toLocaleString(undefined, {month:'2-digit', day:'2-digit', hour:'2-digit', timeZone:'UTC'}) + ' UTC';
     }
     return date.slice(5);
   },
@@ -3393,7 +3778,7 @@ const AnalyticsModule = {
       markersForIndex: index => visible.map(item => ({x:chart.x(index),y:chart.y(points[index][item.key])})),
       contentForIndex: index => {
       const point=points[index];
-      return chartTooltipMarkup(this.trendLabel(point.date), visible.map(item => ({label:item.label,value:Number(point[item.key]||0).toLocaleString(),color:item.color})), [{label:t('analytics.cost'),value:fmtCost(point.cost_usd||0)}]);
+      return chartTooltipMarkup(this.trendLabel(point.date), visible.map(item => ({label:item.label,value:Number(point[item.key]||0).toLocaleString(),color:item.color})), [{label:t('analytics.cost'),value:fmtAggregateCost(point)}]);
       },
     });
   },
@@ -3441,7 +3826,7 @@ const AnalyticsModule = {
       const point=points[index];
       const footer = [
         {label:t('analytics.requests'),value:Number(point.requests||0).toLocaleString()},
-        {label:t('analytics.cost'),value:fmtCost(point.cost_usd||0)},
+        {label:t('analytics.cost'),value:fmtAggregateCost(point)},
       ];
       if (showRate) footer.unshift({label:t('analytics.cacheHitShort'),value:`${rate(point).toFixed(1)}%`});
       return chartTooltipMarkup(this.trendLabel(point.date),visibleTokens.map(item=>({label:item.label,value:Number(point[item.key]||0).toLocaleString(),color:item.color})),footer);
@@ -3452,18 +3837,18 @@ const AnalyticsModule = {
   renderPeriodTable(points) {
     const body=document.getElementById('analytics-period-tbody');
     if (!body) return;
-    body.innerHTML=points.map(point=>`<tr><td>${this.escapeHtml(this.trendLabel(point.date))}</td><td>${Number(point.requests||0).toLocaleString()}</td><td>${Number(point.known_requests||0)>0?Number(point.error_requests||0).toLocaleString():'—'}</td><td>${Number(point.input_tokens||0).toLocaleString()}</td><td>${Number(point.output_tokens||0).toLocaleString()}</td><td>${Number(point.cache_read_tokens||0).toLocaleString()}</td><td>${Number(point.cache_creation_tokens||0).toLocaleString()}</td><td><strong>${totalUsageTokens(point).toLocaleString()}</strong></td><td>${fmtCost(point.cost_usd||0)}</td></tr>`).join('');
+    body.innerHTML=points.map(point=>`<tr><td>${this.escapeHtml(this.trendLabel(point.date))}</td><td>${Number(point.requests||0).toLocaleString()}</td><td>${Number(point.known_requests||0)>0?Number(point.error_requests||0).toLocaleString():'—'}</td><td>${Number(point.input_tokens||0).toLocaleString()}</td><td>${Number(point.output_tokens||0).toLocaleString()}</td><td>${Number(point.cache_read_tokens||0).toLocaleString()}</td><td>${Number(point.cache_creation_tokens||0).toLocaleString()}</td><td><strong>${totalUsageTokens(point).toLocaleString()}</strong></td><td title="${this.escapeHtml(costCoverageNote(point))}">${fmtAggregateCost(point)}</td></tr>`).join('');
     const count=document.getElementById('analytics-period-count');
     if (count) count.textContent=`${points.length} ${this.granularity==='hour'?t('analytics.hour'):t('analytics.day')}`;
   },
 
-  renderModelTable(models) {
-    const body=document.getElementById('analytics-model-tbody');
+  renderModelTable(models, containerId = 'analytics-model-tbody') {
+    const body=document.getElementById(containerId);
     if (!body) return;
     body.innerHTML=(models||[]).map(item=>{
       const prompt=Number(item.input_tokens||0)+Number(item.cache_read_tokens||0)+Number(item.cache_creation_tokens||0);
       const rate=prompt>0?Number(item.cache_read_tokens||0)/prompt*100:0;
-      return `<tr><td><code>${this.escapeHtml(item.model||t('detail.unknown'))}</code></td><td>${Number(item.requests||0).toLocaleString()}</td><td>${prompt>0?rate.toFixed(1)+'%':'—'}</td><td>${totalUsageTokens(item).toLocaleString()}</td><td>${fmtCost(item.est_cost_usd||0)}</td></tr>`;
+      return `<tr><td><code>${this.escapeHtml(item.model||t('detail.unknown'))}</code><br><small>${this.escapeHtml(item.provider || t('detail.unknown'))}</small></td><td>${Number(item.requests||0).toLocaleString()}</td><td>${prompt>0?rate.toFixed(1)+'%':'—'}</td><td>${totalUsageTokens(item).toLocaleString()}</td><td title="${this.escapeHtml(costCoverageNote(item))}">${fmtAggregateCost(item)}</td></tr>`;
     }).join('') || `<tr><td colspan="5" class="empty-state">${t('analytics.noData')}</td></tr>`;
   },
 
@@ -3475,13 +3860,6 @@ const AnalyticsModule = {
     root.textContent=t('analytics.retainedRange').replace('{from}',from).replace('{to}',to);
   },
 
-  renderEmpty(msg = 'No usage data yet. Run some requests or configure a model to see analytics.') {
-    ['provider-distribution'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.innerHTML = `<div class="empty-state">${msg}</div>`;
-    });
-  },
-
   escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
   }
@@ -3490,11 +3868,9 @@ const AnalyticsModule = {
 // Initialize dates and listeners before the queued hash activation runs.
 AnalyticsModule.init();
 
-/* ── Plan quota (OpenCode Go 5h / weekly / monthly) ────────────── */
-// Fed by /api/quota, which reads the upstream usage endpoint with the
-// configured OpenCode Go key(s) and caches the answer for 30s. Gauges show the
-// REMAINING share of each window, which is the number that decides whether the
-// next request goes through.
+/* ── Platform accounts and local ledger ───────────────────────── */
+// Account capabilities come from /api/quota. Local records are fetched
+// independently, so an unavailable account API never hides this instance's usage.
 const QUOTA_WINDOWS = [
   { key: 'rolling_5h', label: 'quota.rolling5h' },
   { key: 'weekly', label: 'quota.weekly' },
@@ -3507,50 +3883,191 @@ const QUOTA_RING_RADIUS = 54;
 const QUOTA_RING_LENGTH = 2 * Math.PI * QUOTA_RING_RADIUS;
 
 const QuotaModule = {
+  provider: 'opencode-go',
+  accountProvider: '',
   view: null,
+  loadSeq: 0,
   loading: false,
   lastLoadedAt: 0,
+  accountError: '',
+  localView: null,
+  localQuery: '',
+  localLoadSeq: 0,
+  localLoading: false,
+  localLastLoadedAt: 0,
+  localError: '',
 
   init() {
     document.getElementById('btn-refresh-quota')?.addEventListener('click', () => this.load(true));
+    document.getElementById('quota-provider')?.addEventListener('change', event => {
+      this.provider = event.target.value;
+      return this.load(true);
+    });
+    document.getElementById('quota-local-days')?.addEventListener('change', () => this.loadLocalUsage(true));
+    document.getElementById('quota-view-local')?.addEventListener('click', () => viewProviderHistory(this.provider));
     // A single ticker drives every countdown on the page and idles while the
     // Quota tab is hidden.
     setInterval(() => { if (activeTab === 'quota') this.tickCountdowns(); }, 1000);
   },
 
   async load(force) {
-    if (this.loading) return;
-    if (!force && Date.now() - this.lastLoadedAt < QUOTA_MIN_RELOAD_MS) return;
+    await Promise.all([this.loadAccounts(force), this.loadLocalUsage(force)]);
+  },
+
+  async loadAccounts(force) {
+    const provider = this.provider;
+    const changed = this.accountProvider !== provider;
+    if (!changed && this.loading) return;
+    if (!changed && !force && Date.now() - this.lastLoadedAt < QUOTA_MIN_RELOAD_MS) return;
+    const seq = ++this.loadSeq;
+    this.accountProvider = provider;
     this.loading = true;
-    const btn = document.getElementById('btn-refresh-quota');
-    if (btn && force) btn.disabled = true;
+    this.accountError = '';
+    if (changed) this.view = null;
+    this.render();
     try {
-      const r = await fetch('/api/quota' + (force ? '?refresh=1' : ''));
-      if (!r.ok) throw new Error((await r.text()).trim() || ('HTTP ' + r.status));
-      this.view = await r.json();
+      const params = new URLSearchParams({provider});
+      if (force) params.set('refresh', '1');
+      const view = await fetchJSON(`/api/quota?${params}`);
+      if (seq !== this.loadSeq || provider !== this.provider) return;
+      if (!view || view.provider !== provider || !['available', 'partial', 'not_configured', 'unavailable', 'error'].includes(view.status)) {
+        throw new Error(t('data.invalid'));
+      }
+      this.view = view;
       this.lastLoadedAt = Date.now();
-      this.render();
     } catch (e) {
-      this.renderError(e.message || String(e));
+      if (seq !== this.loadSeq || provider !== this.provider) return;
+      this.view = null;
+      this.accountError = e.message || String(e);
     } finally {
-      this.loading = false;
-      if (btn) btn.disabled = false;
+      if (seq === this.loadSeq) {
+        this.loading = false;
+        this.render();
+      }
     }
   },
 
-  render() {
-    const view = this.view;
-    const root = document.getElementById('quota-accounts');
-    if (!view || !root) return;
+  async loadLocalUsage(force) {
+    const provider = this.provider;
+    const days = document.getElementById('quota-local-days')?.value || '30';
+    const params = new URLSearchParams({provider, days});
+    const changed = this.localQuery !== params.toString();
+    if (!changed && this.localLoading) return;
+    if (!changed && !force && Date.now() - this.localLastLoadedAt < QUOTA_MIN_RELOAD_MS) return;
+    const seq = ++this.localLoadSeq;
+    this.localQuery = params.toString();
+    this.localLoading = true;
+    this.localError = '';
+    if (changed) this.localView = null;
+    this.renderLocalUsage();
+    this.syncRefreshButton();
+    try {
+      const data = await fetchJSON(`/api/analytics/summary?${params}`);
+      if (seq !== this.localLoadSeq || provider !== this.provider) return;
+      if (!data?.summary || data.provider !== provider) throw new Error(t('data.invalid'));
+      this.localView = data;
+      this.localLastLoadedAt = Date.now();
+    } catch (e) {
+      if (seq !== this.localLoadSeq || provider !== this.provider) return;
+      this.localView = null;
+      this.localError = e.message || String(e);
+    } finally {
+      if (seq === this.localLoadSeq) {
+        this.localLoading = false;
+        this.renderLocalUsage();
+        this.syncRefreshButton();
+      }
+    }
+  },
 
+  renderLocalUsage() {
+    const days = document.getElementById('quota-local-days')?.value || '30';
+    this.setText('quota-local-note', t('quota.localNote').replace('{provider}', PROVIDERS[this.provider]?.name || this.provider).replace('{days}', days));
+    const error = document.getElementById('quota-local-error');
+    if (error) {
+      error.hidden = !this.localError;
+      error.textContent = this.localError ? t('quota.localLoadFail') + this.localError : '';
+    }
+    const data = this.localView;
+    if (!data) {
+      ['quota-local-requests', 'quota-local-tokens', 'quota-local-cost', 'quota-local-unknown'].forEach(id => this.setText(id, this.localLoading ? '…' : '—'));
+      this.setText('quota-local-cost-note', '');
+      const body = document.getElementById('quota-local-model-tbody');
+      if (body) body.innerHTML = `<tr><td colspan="5" class="empty-state">${t(this.localLoading ? 'data.loading' : 'detail.unavailable')}</td></tr>`;
+      return;
+    }
+    const s = data.summary;
+    this.setText('quota-local-requests', fmt(s.total_requests));
+    this.setText('quota-local-tokens', hasUsageTokens(s) ? fmtTok(totalUsageTokens(s)) : '—');
+    this.setText('quota-local-cost', fmtAggregateCost(s));
+    this.setText('quota-local-unknown', fmt(s.unknown_cost_requests));
+    this.setText('quota-local-cost-note', costCoverageNote(s));
+    AnalyticsModule.renderModelTable(data.models || [], 'quota-local-model-tbody');
+  },
+
+  syncRefreshButton() {
+    const button = document.getElementById('btn-refresh-quota');
+    if (button) button.disabled = this.loading || this.localLoading;
+  },
+
+  render() {
+    const isGo = this.provider === 'opencode-go';
+    const isOpenRouter = this.provider === 'openrouter';
+    const go = document.getElementById('quota-go');
+    const openrouter = document.getElementById('quota-openrouter');
+    const unavailable = document.getElementById('quota-unavailable');
+    if (go) go.hidden = !isGo;
+    if (openrouter) openrouter.hidden = !isOpenRouter;
+    if (unavailable) unavailable.hidden = isGo || isOpenRouter;
+    this.syncRefreshButton();
+    const view = this.view?.provider && this.view.provider !== this.provider ? null : this.view;
     const meta = [];
-    if (view.fetched_at) meta.push(t('quota.updated').replace('{time}', fmtTime(view.fetched_at)));
-    if (view.cached) meta.push(t('quota.cached'));
-    this.setText('quota-meta', meta.join(' · '));
-    this.setText('quota-endpoint', view.endpoint ? t('quota.endpoint').replace('{url}', view.endpoint) : '');
+    if (view?.status) meta.push(t('quota.status.' + view.status));
+    if (view?.currency) meta.push(view.currency);
+    if (view?.fetched_at) meta.push(t('quota.updated').replace('{time}', fmtTime(view.fetched_at)));
+    if (view?.cached) meta.push(t('quota.cached'));
+    this.setText('quota-meta', !view && this.loading ? t('data.loading') : meta.join(' · '));
+    this.setText('quota-source', view?.source ? t('quota.source.' + view.source) : '');
+    this.setText('quota-endpoint', view?.endpoint ? t('quota.endpoint').replace('{url}', view.endpoint) : '');
+    const error = document.getElementById('quota-error');
+    if (error) {
+      error.hidden = !this.accountError;
+      error.textContent = this.accountError ? t('quota.loadFail') + ': ' + this.accountError : '';
+    }
+    const links = document.getElementById('quota-links');
+    if (links) {
+      const labels = {docs:'commandcode.docs', usage:'commandcode.usage', billing:'commandcode.billing', keys:'commandcode.keys'};
+      links.innerHTML = (view?.links || []).filter(link => labels[link.kind] && /^https?:\/\//i.test(link.url)).map(link =>
+        `<a class="btn btn-small" href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer">${t(labels[link.kind])}</a>`).join('');
+      links.hidden = !links.innerHTML;
+    }
+    if (!isGo) {
+      this.clearSummary();
+      this.renderModelLimits({});
+      if (isOpenRouter) {
+        this.renderOpenRouter(view);
+        return;
+      }
+      this.setText('quota-unavailable-title', t('quota.notRetrieved').replace('{provider}', PROVIDERS[this.provider]?.name || this.provider));
+      this.setText('quota-unavailable-note', !view && this.loading ? t('data.loading')
+        : this.accountError ? t('detail.unavailable')
+        : view?.reason ? t('quota.reason.' + view.reason) : t('quota.providerUnavailable'));
+      return;
+    }
+    const root = document.getElementById('quota-accounts');
+    if (!root) return;
+    if (!view) {
+      if (this.accountError) this.renderError(this.accountError);
+      else {
+        root.innerHTML = `<div class="quota-notice">${t(this.loading ? 'data.loading' : 'detail.unavailable')}</div>`;
+        this.clearSummary();
+        this.renderModelLimits({});
+      }
+      return;
+    }
 
     if (view.error) {
-      root.innerHTML = `<div class="quota-notice is-error"><strong>${t('quota.loadFail')}</strong><span>${escapeHtml(view.error)}</span></div>`;
+      root.innerHTML = `<div class="quota-notice is-error" role="alert"><strong>${t('quota.loadFail')}</strong><span>${escapeHtml(view.error)}</span></div>`;
       this.clearSummary();
       this.renderModelLimits(view);
       return;
@@ -3575,9 +4092,70 @@ const QuotaModule = {
   renderError(message) {
     const root = document.getElementById('quota-accounts');
     if (root) {
-      root.innerHTML = `<div class="quota-notice is-error"><strong>${t('quota.loadFail')}</strong><span>${escapeHtml(message)}</span></div>`;
+      root.innerHTML = `<div class="quota-notice is-error" role="alert"><strong>${t('quota.loadFail')}</strong><span>${escapeHtml(message)}</span></div>`;
     }
     this.clearSummary();
+    this.renderModelLimits({});
+  },
+
+  renderOpenRouter(view) {
+    const creditsRoot = document.getElementById('quota-openrouter-credits');
+    const heading = `<h2 class="section-heading">${t('openrouter.accountCredits')}</h2>`;
+    const credits = view?.credits;
+    if (creditsRoot) {
+      if (view?.credits_status === 'available' && Number.isFinite(credits?.total_credits) && Number.isFinite(credits?.total_usage)) {
+        creditsRoot.innerHTML = heading + `<dl class="quota-figures">
+          <div><dt>${t('openrouter.totalCredits')}</dt><dd>${fmtCost(credits.total_credits)}</dd></div>
+          <div><dt>${t('openrouter.totalUsage')}</dt><dd>${fmtCost(credits.total_usage)}</dd></div>
+          <div><dt>${t('openrouter.balance')}</dt><dd>${fmtCost(credits.total_credits - credits.total_usage)}</dd></div>
+        </dl><p class="page-meta">${escapeHtml(view.credits_endpoint || '')}</p>`;
+      } else if (view?.credits_status === 'error' || view?.credits_status === 'available') {
+        creditsRoot.innerHTML = heading + `<div class="quota-notice is-error" role="alert"><strong>${t('openrouter.creditsFail')}</strong><span>${escapeHtml(view.credits_error || t('data.invalid'))}</span></div>`;
+      } else {
+        creditsRoot.innerHTML = heading + `<div class="quota-notice">${t(!view ? (this.loading ? 'data.loading' : 'detail.unavailable')
+          : view.credits_status === 'not_configured' ? 'openrouter.noManagementKey' : 'detail.unavailable')}</div>`;
+      }
+    }
+    const root = document.getElementById('quota-openrouter-accounts');
+    if (!root) return;
+    if (!view) {
+      root.innerHTML = `<div class="quota-notice">${t(this.loading ? 'data.loading' : 'detail.unavailable')}</div>`;
+    } else if (view.error) {
+      root.innerHTML = `<div class="quota-notice is-error" role="alert"><strong>${t('quota.loadFail')}</strong><span>${escapeHtml(view.error)}</span></div>`;
+    } else if (!view.accounts?.length) {
+      root.innerHTML = `<div class="quota-notice"><strong>${t('quota.noProviderKey').replace('{provider}', 'OpenRouter')}</strong><span>${t('quota.noProviderKeyHint')}</span></div>`;
+    } else {
+      root.innerHTML = view.accounts.map(account => this.renderOpenRouterAccount(account)).join('');
+    }
+  },
+
+  renderOpenRouterAccount(account) {
+    const head = `<div class="quota-account-head"><span class="quota-key">${t('quota.keyLabel')} <code>${escapeHtml(account.key_hint || '—')}</code></span></div>`;
+    const data = account.openrouter;
+    if (account.error || !data || !Number.isFinite(data.usage) || (data.limit !== null && !Number.isFinite(data.limit))) {
+      return `<section class="quota-account analytics-section">${head}<div class="quota-notice is-error" role="alert"><strong>${t('quota.loadFail')}</strong><span>${escapeHtml(account.error || t('data.invalid'))}</span></div></section>`;
+    }
+    const yesNo = value => value === true ? t('quota.yes') : value === false ? t('quota.no') : '—';
+    const fields = [
+      ['openrouter.limit', data.limit === null ? t('openrouter.noLimit') : fmtCost(data.limit)],
+      ['openrouter.limitRemaining', fmtCost(data.limit_remaining)],
+      ['openrouter.limitReset', data.limit_reset ?? '—'],
+      ['openrouter.includeByok', yesNo(data.include_byok_in_limit)],
+      ['openrouter.freeTier', yesNo(data.is_free_tier)],
+      ['openrouter.expires', data.expires_at ?? '—'],
+    ];
+    const periods = [
+      ['perf.allTime', 'usage', 'byok_usage'],
+      ['analytics.day', 'usage_daily', 'byok_usage_daily'],
+      ['quota.weekly', 'usage_weekly', 'byok_usage_weekly'],
+      ['quota.monthly', 'usage_monthly', 'byok_usage_monthly'],
+    ];
+    return `<section class="quota-account analytics-section">${head}
+      <dl class="quota-figures">${fields.map(([label, value]) => `<div><dt>${t(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl>
+      <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th>${t('analytics.period')}</th><th>${t('openrouter.usage')}</th><th>${t('openrouter.byokUsage')}</th></tr></thead>
+        <tbody>${periods.map(([label, usage, byok]) => `<tr><td>${t(label)}</td><td>${fmtCost(data[usage])}</td><td>${fmtCost(data[byok])}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </section>`;
   },
 
   renderAccount(account) {
@@ -3586,7 +4164,7 @@ const QuotaModule = {
       : '';
     if (account.error) {
       return `<section class="quota-account">${head}
-        <div class="quota-notice is-error"><strong>${t('quota.loadFail')}</strong><span>${escapeHtml(account.error)}</span></div>
+        <div class="quota-notice is-error" role="alert"><strong>${t('quota.loadFail')}</strong><span>${escapeHtml(account.error)}</span></div>
       </section>`;
     }
     const windows = this.windowsOf(account);
@@ -3602,19 +4180,19 @@ const QuotaModule = {
 
   renderWindow(item) {
     const w = item.window;
-    const used = Math.min(100, Math.max(0, Number(w.used_percent || 0)));
-    const left = 100 - used;
-    const level = this.levelOf(used);
-    const offset = QUOTA_RING_LENGTH * (1 - left / 100);
+    const used = w.has_percent ? Math.min(100, Math.max(0, Number(w.used_percent))) : null;
+    const left = used != null ? 100 - used : null;
+    const level = used != null ? ' level-' + this.levelOf(used) : '';
+    const offset = left != null ? QUOTA_RING_LENGTH * (1 - left / 100) : QUOTA_RING_LENGTH;
     const deadline = this.deadlineOf(w, item.fetchedAt);
     const limit = w.limit_dollars != null ? Number(w.limit_dollars) : null;
     const usedDollars = w.used_dollars != null ? Number(w.used_dollars) : null;
     const leftDollars = limit != null && usedDollars != null ? Math.max(0, limit - usedDollars) : null;
-    const badge = used >= 100
+    const badge = used != null && used >= 100
       ? `<span class="quota-badge is-crit">${t('quota.exhausted')}</span>`
       : (w.status && w.status !== 'ok' ? `<span class="quota-badge is-warn">${escapeHtml(w.status)}</span>` : '');
 
-    return `<article class="quota-card level-${level}">
+    return `<article class="quota-card${level}">
       <header class="quota-card-head">
         <span class="quota-card-label">${t(item.label)}</span>
         ${badge}
@@ -3626,7 +4204,7 @@ const QuotaModule = {
                   stroke-dasharray="${QUOTA_RING_LENGTH.toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}"></circle>
         </svg>
         <div class="quota-gauge-center">
-          <strong>${left.toFixed(left >= 10 ? 0 : 1)}<span class="quota-unit">%</span></strong>
+          <strong>${left != null ? `${left.toFixed(left >= 10 ? 0 : 1)}<span class="quota-unit">%</span>` : '—'}</strong>
           <span>${t('quota.leftShort')}</span>
         </div>
       </div>
@@ -3649,8 +4227,10 @@ const QuotaModule = {
     accounts.forEach(account => {
       if (account.report?.plan) plan = account.report.plan;
       this.windowsOf(account).forEach(item => {
-        const used = Number(item.window.used_percent || 0);
-        if (!tightest || used > Number(tightest.window.used_percent || 0)) tightest = item;
+        if (item.window.has_percent) {
+          const used = Number(item.window.used_percent);
+          if (!tightest || used > Number(tightest.window.used_percent)) tightest = item;
+        }
         const deadline = this.deadlineOf(item.window, item.fetchedAt);
         if (deadline != null && (nextReset == null || deadline < nextReset.deadline)) {
           nextReset = { deadline, label: item.label };
@@ -3688,19 +4268,21 @@ const QuotaModule = {
     this.setText('quota-plan-note', t('quota.keyCount').replace('{n}', accounts.length));
   },
 
-  // renderModelLimits renders the console-style monthly table — every model in
-  // the plan with its weighted usage, quota and share. Per-model spend comes
-  // from the proxy's own SQLite ledger (model_usage); the allowances are
-  // synced daily from the Go docs (model_limits).
+  // Model costs come from this instance's Go ledger; account gauges above
+  // remain authoritative for account usage. Missing rows are never free usage.
   renderModelLimits(view) {
     const root = document.getElementById('quota-model-limits');
     if (!root) return;
+    if (view.model_usage_error) {
+      root.innerHTML = `<div class="quota-notice is-error" role="alert"><strong>${t('quota.localUsageFail')}</strong><span>${escapeHtml(view.model_usage_error)}</span></div>`;
+      return;
+    }
     const ml = view.model_limits;
     const rows = view.model_usage || (ml?.models || []).map(m => ({
       model: m.model,
-      used_usd: 0,
+      used_usd: null,
       allowance_usd: m.allowance_usd,
-      percent: 0,
+      percent: null,
     }));
     if (!rows.length) {
       root.innerHTML = '';
@@ -3708,18 +4290,18 @@ const QuotaModule = {
     }
     const body = rows.map(m => `<tr>
         <td>${escapeHtml(m.model)}</td>
-        <td class="quota-model-number">${m.used_usd != null ? fmtCost(m.used_usd) : '—'}</td>
+        <td class="quota-model-number" title="${escapeHtml(costCoverageNote(m))}">${fmtAggregateCost({...m, cost_usd:m.used_usd})}</td>
         <td class="quota-model-number">${m.allowance_usd != null ? fmtCost(m.allowance_usd) : '—'}</td>
-        <td class="quota-model-number">${(m.percent || 0).toFixed(1)}%</td>
+        <td class="quota-model-number">${m.percent != null ? Number(m.percent).toFixed(1) + '%' : '—'}</td>
       </tr>`).join('');
-    const totalUsed = rows.reduce((sum, m) => sum + (Number(m.used_usd) || 0), 0);
-    // Rows carry the price currency; the total reconciles with the official
-    // window percent by converting each row back to $60-pool equivalents
-    // (used × 60/allowance) — DeepSeek's ×2 pool multiplier included. The
-    // official window percent also stays on the account cards above.
-    const poolUsed = rows.reduce((sum, m) => sum + (Number(m.used_usd) || 0) * (60 / (Number(m.allowance_usd) || 60)), 0);
-    const poolPercent = poolUsed > 0 ? poolUsed / 60 * 100 : null;
-    root.innerHTML = `<div class="quota-model-head">
+    const totals = {
+      requests: rows.reduce((sum, m) => sum + Number(m.requests || 0), 0),
+      unknown_cost_requests: rows.reduce((sum, m) => sum + Number(m.unknown_cost_requests || 0), 0),
+      cost_usd: rows.every(m => m.used_usd != null) ? rows.reduce((sum, m) => sum + Number(m.used_usd), 0) : null,
+    };
+    const poolPercent = rows.every(m => m.percent != null) ? rows.reduce((sum, m) => sum + Number(m.percent), 0) : null;
+    const accountNotice = (view.accounts || []).length > 1 ? `<p class="quota-disclaimer">${t('quota.multiKeyUsage')}</p>` : '';
+    root.innerHTML = `${accountNotice}<div class="quota-model-head">
         <span class="quota-model-title">${t('quota.modelLimits')}</span>
         <span class="quota-model-meta">${t('quota.modelLimitsNote').replace('{time}', ml?.fetched_at ? fmtTime(ml.fetched_at) : '—')}</span>
       </div>
@@ -3729,7 +4311,7 @@ const QuotaModule = {
           <tbody>${body}</tbody>
           <tfoot><tr>
             <td>${t('quota.total')}</td>
-            <td class="quota-model-number">${fmtCost(totalUsed)}</td>
+            <td class="quota-model-number" title="${escapeHtml(costCoverageNote(totals))}">${fmtAggregateCost(totals)}</td>
             <td class="quota-model-number">—</td>
             <td class="quota-model-number" title="${t('quota.poolShare')}">${poolPercent != null ? poolPercent.toFixed(1) + '%' : '—'}</td>
           </tr></tfoot>

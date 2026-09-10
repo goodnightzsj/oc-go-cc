@@ -34,8 +34,7 @@ type ModelRecord struct {
 	ToolCall      bool
 	Vision        bool
 	ContextWindow int64
-	CostInput     float64
-	CostOutput    float64
+	Rates         *Rates
 }
 
 // Provider holds a provider's configuration as loaded from the database.
@@ -156,6 +155,10 @@ func (r *CatalogRepo) ReplaceBatch(ctx context.Context, providers []ProviderReco
 	for _, m := range models {
 		provider := providerFromModelKey(m.ID)
 		modelName := ModelNameFromKey(m.ID)
+		var costInput, costOutput any
+		if m.Rates != nil {
+			costInput, costOutput = m.Rates.Input, m.Rates.Output
+		}
 
 		supportsTools := 1
 		if !m.ToolCall {
@@ -174,7 +177,7 @@ func (r *CatalogRepo) ReplaceBatch(ctx context.Context, providers []ProviderReco
 			INSERT OR REPLACE INTO models (id, provider, name, display_name, context_window, cost_input_per_m, cost_output_per_m, supports_tools, supports_vision, supports_reasoning, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM models WHERE id = ?), ?))
 		`,
-			m.ID, provider, modelName, m.Name, m.ContextWindow, m.CostInput, m.CostOutput,
+			m.ID, provider, modelName, m.Name, m.ContextWindow, costInput, costOutput,
 			supportsTools, supportsVision, supportsReasoning, m.ID, now)
 		if err != nil {
 			return err
@@ -254,14 +257,8 @@ func (r *CatalogRepo) Load(ctx context.Context) (*IndexedCatalog, error) {
 		if contextWindow.Valid {
 			m.Limit = &Limit{Context: contextWindow.Int64}
 		}
-		if costInput.Valid || costOutput.Valid {
-			m.Rates = &Rates{}
-			if costInput.Valid {
-				m.Rates.Input = costInput.Float64
-			}
-			if costOutput.Valid {
-				m.Rates.Output = costOutput.Float64
-			}
+		if costInput.Valid && costOutput.Valid {
+			m.Rates = &Rates{Input: costInput.Float64, Output: costOutput.Float64}
 		}
 
 		if m.Vision {

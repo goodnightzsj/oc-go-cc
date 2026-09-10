@@ -56,6 +56,16 @@ func TestAnonymizeConfig_MasksEveryKeyField(t *testing.T) {
 	}
 }
 
+func TestAnonymizeConfigPreservesEmptyKeyPool(t *testing.T) {
+	got, err := anonymizeConfig(&config.Config{APIKeys: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.APIKeys) != 0 {
+		t.Fatal("an empty key pool must not be displayed as a configured credential")
+	}
+}
+
 // TestStripMaskedKeys_DropsMaskedFields asserts a replayed masked GET response
 // cannot overwrite the real key on disk, at any nesting depth.
 func TestStripMaskedKeys_DropsMaskedFields(t *testing.T) {

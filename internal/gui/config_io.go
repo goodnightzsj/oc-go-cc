@@ -2,8 +2,11 @@ package gui
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/routatic/proxy/internal/config"
@@ -54,7 +57,9 @@ func anonymizeMap(m map[string]interface{}) {
 					m[key] = keyMask
 				}
 			case []interface{}:
-				m[key] = []string{keyMask}
+				if len(v) > 0 {
+					m[key] = []string{keyMask}
+				}
 			}
 		} else if nested, ok := value.(map[string]interface{}); ok {
 			anonymizeMap(nested)
@@ -118,46 +123,138 @@ func (s *Server) handleConfigImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var cfg config.Config
-	if err := json.Unmarshal(req.Config, &cfg); err != nil {
+	var patch map[string]json.RawMessage
+	if err := json.Unmarshal(req.Config, &patch); err != nil {
 		http.Error(w, fmt.Sprintf("invalid config: %v", err), http.StatusBadRequest)
 		return
 	}
-
-	if cfg.Host == "" {
-		http.Error(w, "host is required", http.StatusBadRequest)
+	cfg, err := s.updateProxyConfig(patch, req.Apply)
+	if err != nil {
+		writeConfigError(w, err)
 		return
 	}
-	if cfg.Port < 1 || cfg.Port > 65535 {
-		http.Error(w, "port must be between 1 and 65535", http.StatusBadRequest)
+	redacted, err := anonymizeConfig(cfg)
+	if err != nil {
+		http.Error(w, "failed to redact config", http.StatusInternalServerError)
 		return
 	}
 
 	resp := map[string]interface{}{
 		"valid":  true,
-		"config": cfg,
+		"config": redacted,
 	}
-
 	if req.Apply {
-		configPath := s.atomicCfg.Path()
-		var patch map[string]json.RawMessage
-		if err := json.Unmarshal(req.Config, &patch); err != nil {
-			http.Error(w, fmt.Sprintf("invalid config: %v", err), http.StatusBadRequest)
-			return
-		}
-		stripMaskedKeys(patch)
-		if err := applyConfigPatch(configPath, patch); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		if err := s.atomicCfg.Reload(); err != nil {
-			http.Error(w, fmt.Sprintf("failed to reload config: %v", err), http.StatusInternalServerError)
-			return
-		}
-
 		resp["applied"] = true
 	}
-
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, resp)
+}
+
+// updateProxyConfig keeps preview and save on the same validation path. Merge
+// raw JSON so environment placeholders and omitted defaults never get written
+// back as resolved values. Serializing through publication prevents concurrent
+// settings saves and imports from losing each other's changes.
+func (s *Server) updateProxyConfig(patch map[string]json.RawMessage, apply bool) (*config.Config, error) {
+	if patch == nil {
+		return nil, errors.New("config must be a JSON object")
+	}
+	if err := stripMaskedKeys(patch); err != nil {
+		return nil, err
+	}
+	s.proxyConfigMu.Lock()
+	defer s.proxyConfigMu.Unlock()
+
+	// Follow an existing config symlink, as the previous in-place write did.
+	configPath, err := filepath.EvalSymlinks(s.atomicCfg.Path())
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve config path: %w", err)
+	}
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read current config: %w", err)
+	}
+	var merged map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &merged); err != nil {
+		return nil, fmt.Errorf("failed to parse current config: %w", err)
+	}
+	if merged == nil {
+		return nil, errors.New("current config must be a JSON object")
+	}
+	for field, value := range patch {
+		// Settings sends partial provider/connection objects. Routing maps and
+		// arrays are full replacements, so removed entries stay removed.
+		switch field {
+		case "opencode_go", "opencode_zen", "aws_bedrock", "openrouter",
+			"commandcode", "anthropic_first", "logging", "catalog", "storage":
+			value, err = mergeConfigSettings(merged[field], value)
+			if err != nil {
+				return nil, fmt.Errorf("failed to merge %s: %w", field, err)
+			}
+		}
+		merged[field] = value
+	}
+	data, err := json.MarshalIndent(merged, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize config: %w", err)
+	}
+	data = append(data, '\n')
+	cfg, err := config.LoadJSON(data)
+	if err != nil {
+		return nil, err
+	}
+	if apply {
+		if err := writeConfigFile(configPath, data); err != nil {
+			return nil, err
+		}
+		s.atomicCfg.ApplyLoaded(cfg)
+	}
+	return cfg, nil
+}
+
+func mergeConfigSettings(current, patch json.RawMessage) (json.RawMessage, error) {
+	var oldFields, fields map[string]json.RawMessage
+	if json.Unmarshal(patch, &fields) != nil || len(fields) == 0 ||
+		json.Unmarshal(current, &oldFields) != nil || oldFields == nil {
+		return patch, nil
+	}
+	for field, value := range fields {
+		merged, err := mergeConfigSettings(oldFields[field], value)
+		if err != nil {
+			return nil, err
+		}
+		oldFields[field] = merged
+	}
+	return json.Marshal(oldFields)
+}
+
+func writeConfigFile(path string, data []byte) error {
+	file, err := os.CreateTemp(filepath.Dir(path), ".routatic-config-*.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create config file: %w", err)
+	}
+	defer os.Remove(file.Name())
+	defer file.Close()
+	if _, err := file.Write(data); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("failed to sync config file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("failed to close config file: %w", err)
+	}
+	if err := os.Rename(file.Name(), path); err != nil {
+		return fmt.Errorf("failed to replace config file: %w", err)
+	}
+	return nil
+}
+
+func writeConfigError(w http.ResponseWriter, err error) {
+	status := http.StatusBadRequest
+	var pathErr *os.PathError
+	var linkErr *os.LinkError
+	if errors.As(err, &pathErr) || errors.As(err, &linkErr) {
+		status = http.StatusInternalServerError
+	}
+	http.Error(w, err.Error(), status)
 }

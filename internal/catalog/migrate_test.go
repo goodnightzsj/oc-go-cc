@@ -81,6 +81,58 @@ func TestMigrateFromJSON(t *testing.T) {
 	}
 }
 
+func TestMigratePreservesMissingAndFreePrices(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "catalog.db")
+	db, err := storage.Open(storage.Config{DatabasePath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	jsonPath := filepath.Join(dir, "catalog.json")
+	fixture := `{"providers":{"commandcode":{"name":"commandcode"}},"models":{
+		"commandcode/deepseek-v4-flash":{"id":"deepseek-v4-flash","name":"Missing"},
+		"commandcode/qwen3.7-plus":{"id":"qwen3.7-plus","name":"Free","rates":{"input":0,"output":0}},
+		"commandcode/paid-model":{"id":"paid-model","name":"Paid","rates":{"input":2,"output":8}}
+	}}`
+	if err := os.WriteFile(jsonPath, []byte(fixture), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ImportFromJSON(context.Background(), db, jsonPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = storage.Open(storage.Config{DatabasePath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx, err := LoadFromSQLite(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := idx.Models["commandcode/deepseek-v4-flash"].Rates; got != nil {
+		t.Errorf("missing rates became known or were seeded for another platform: %+v", got)
+	}
+	if got := idx.Models["commandcode/qwen3.7-plus"].Rates; got == nil || got.Input != 0 || got.Output != 0 {
+		t.Errorf("explicit free rates changed: %+v", got)
+	}
+	if got := idx.Models["commandcode/paid-model"].Rates; got == nil || got.Input != 2 || got.Output != 8 {
+		t.Errorf("explicit paid rates changed: %+v", got)
+	}
+	if _, err := db.DB().Exec(`UPDATE models SET cost_output_per_m = NULL WHERE id = 'commandcode/paid-model'`); err != nil {
+		t.Fatal(err)
+	}
+	idx, err = LoadFromSQLite(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := idx.Models["commandcode/paid-model"].Rates; got != nil {
+		t.Errorf("partial rates became known complete rates: %+v", got)
+	}
+}
+
 // ImportFromJSON must refresh the SQLite catalog every time, not only on the
 // first run. It used to bail out once catalog_last_sync was set, so every
 // `routatic-proxy catalog sync` after the first downloaded a fresh catalog and

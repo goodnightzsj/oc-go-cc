@@ -19,6 +19,7 @@ const (
 	defaultPort             = 3456
 	defaultBaseURL          = "https://opencode.ai/zen/go/v1/chat/completions"
 	defaultAnthropicBaseURL = "https://opencode.ai/zen/go/v1/messages"
+	defaultResponsesBaseURL = "https://opencode.ai/zen/go/v1/responses"
 	defaultTimeoutMs        = 300000
 	defaultLogLevel         = "info"
 	defaultAnthropicAPIURL  = "https://api.anthropic.com"
@@ -30,7 +31,9 @@ const (
 	defaultZenResponsesBaseURL = "https://opencode.ai/zen/v1/responses"
 	defaultZenGeminiBaseURL    = "https://opencode.ai/zen/v1/models"
 
-	defaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
+	defaultOpenRouterBaseURL           = "https://openrouter.ai/api/v1/chat/completions"
+	defaultCommandCodeBaseURL          = "https://api.commandcode.ai/provider/v1/chat/completions"
+	defaultCommandCodeAnthropicBaseURL = "https://api.commandcode.ai/provider/v1/messages"
 )
 
 // envVarPattern matches ${ENV_VAR} placeholders in config values.
@@ -78,19 +81,29 @@ func Load() (*Config, error) {
 
 // LoadFromPath reads configuration from the given JSON file path.
 func LoadFromPath(path string) (*Config, error) {
-	cfg, err := loadJSON(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("loading config from %s: %w", path, err)
 	}
+	return LoadJSON(data)
+}
 
-	applyEnvOverrides(cfg)
-	applyDefaults(cfg)
+// LoadJSON validates a config using the same environment and defaults as a
+// disk load. The input remains unchanged so callers can persist placeholders.
+func LoadJSON(data []byte) (*Config, error) {
+	var cfg Config
+	if err := json.Unmarshal([]byte(interpolateEnvVars(string(data))), &cfg); err != nil {
+		return nil, fmt.Errorf("parsing JSON: %w", err)
+	}
 
-	if err := validate(cfg); err != nil {
+	applyEnvOverrides(&cfg)
+	applyDefaults(&cfg)
+
+	if err := validate(&cfg); err != nil {
 		return nil, fmt.Errorf("validating config: %w", err)
 	}
 
-	return cfg, nil
+	return &cfg, nil
 }
 
 // ResolveConfigPath determines which config file to load.
@@ -120,24 +133,6 @@ func ExpandHome(path string) string {
 		return filepath.Join(home, path[2:])
 	}
 	return path
-}
-
-// loadJSON reads and parses the configuration file.
-func loadJSON(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	// Interpolate environment variables before parsing.
-	data = []byte(interpolateEnvVars(string(data)))
-
-	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing JSON: %w", err)
-	}
-
-	return &cfg, nil
 }
 
 // interpolateEnvVars replaces ${ENV_VAR} patterns with their actual values.
@@ -204,6 +199,23 @@ func applyEnvOverrides(cfg *Config) {
 		cfg.OpenRouter.APIKeys = parseCommaSeparatedKeys(v)
 		cfg.OpenRouter.APIKey = ""
 	}
+	if v := envValue("ROUTATIC_PROXY_OPENROUTER_MANAGEMENT_API_KEY"); v != "" {
+		cfg.OpenRouter.ManagementAPIKey = v
+	}
+	if v := envValue("ROUTATIC_PROXY_COMMANDCODE_API_KEY"); v != "" {
+		cfg.CommandCode.APIKey = v
+		cfg.CommandCode.APIKeys = nil
+	}
+	if v := envValue("ROUTATIC_PROXY_COMMANDCODE_API_KEYS"); v != "" {
+		cfg.CommandCode.APIKeys = parseCommaSeparatedKeys(v)
+		cfg.CommandCode.APIKey = ""
+	}
+	if v := envValue("ROUTATIC_PROXY_COMMANDCODE_URL"); v != "" {
+		cfg.CommandCode.BaseURL = v
+	}
+	if v := envValue("ROUTATIC_PROXY_COMMANDCODE_ANTHROPIC_URL"); v != "" {
+		cfg.CommandCode.AnthropicBaseURL = v
+	}
 
 	if v := envValue("ROUTATIC_PROXY_HOST"); v != "" {
 		cfg.Host = v
@@ -256,6 +268,9 @@ func applyDefaults(cfg *Config) {
 	if cfg.OpenCodeGo.AnthropicBaseURL == "" {
 		cfg.OpenCodeGo.AnthropicBaseURL = defaultAnthropicBaseURL
 	}
+	if cfg.OpenCodeGo.ResponsesBaseURL == "" {
+		cfg.OpenCodeGo.ResponsesBaseURL = defaultResponsesBaseURL
+	}
 	if cfg.OpenCodeGo.TimeoutMs == 0 {
 		cfg.OpenCodeGo.TimeoutMs = defaultTimeoutMs
 	}
@@ -280,6 +295,21 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.OpenRouter.BaseURL == "" {
 		cfg.OpenRouter.BaseURL = defaultOpenRouterBaseURL
+	}
+	if cfg.CommandCode.BaseURL == "" {
+		cfg.CommandCode.BaseURL = defaultCommandCodeBaseURL
+	}
+	if cfg.CommandCode.AnthropicBaseURL == "" {
+		cfg.CommandCode.AnthropicBaseURL = defaultCommandCodeAnthropicBaseURL
+	}
+	if cfg.CommandCode.TimeoutMs == 0 {
+		cfg.CommandCode.TimeoutMs = defaultTimeoutMs
+	}
+	if cfg.CommandCode.StreamTimeoutMs == 0 {
+		cfg.CommandCode.StreamTimeoutMs = cfg.CommandCode.TimeoutMs
+	}
+	if cfg.CommandCode.StreamingTimeoutMs == 0 {
+		cfg.CommandCode.StreamingTimeoutMs = cfg.CommandCode.TimeoutMs
 	}
 	if cfg.OpenCodeZen.TimeoutMs == 0 {
 		cfg.OpenCodeZen.TimeoutMs = defaultTimeoutMs
@@ -313,7 +343,12 @@ func applyDefaults(cfg *Config) {
 
 // validate checks that all required configuration fields are present.
 func validate(cfg *Config) error {
-	if cfg.APIKey == "" && len(cfg.APIKeys) == 0 {
+	if cfg.Port < 0 || cfg.Port > 65535 {
+		return fmt.Errorf("port must be between 1 and 65535 (0 uses the default)")
+	}
+	if len(cfg.EffectiveAPIKeys()) == 0 && len(cfg.OpenCodeGo.EffectiveAPIKeys()) == 0 &&
+		len(cfg.OpenCodeZen.EffectiveAPIKeys()) == 0 && len(cfg.AWSBedrock.EffectiveAPIKeys()) == 0 &&
+		len(cfg.OpenRouter.EffectiveAPIKeys()) == 0 && len(cfg.CommandCode.EffectiveAPIKeys()) == 0 {
 		return fmt.Errorf("api_key or api_keys is required (set via config file or ROUTATIC_PROXY_API_KEY env var; OC_GO_CC_API_KEY is still supported)")
 	}
 	if cfg.AnthropicFirst.Enabled {
@@ -359,7 +394,41 @@ func validate(cfg *Config) error {
 	if err := validateAPIKeys(cfg.OpenRouter.APIKeys); err != nil {
 		return fmt.Errorf("openrouter.api_keys: %w", err)
 	}
+	if err := validateSingleAPIKey(cfg.OpenRouter.ManagementAPIKey); err != nil {
+		return fmt.Errorf("openrouter.management_api_key: %w", err)
+	}
+	if err := validateSingleAPIKey(cfg.CommandCode.APIKey); err != nil {
+		return fmt.Errorf("commandcode.api_key: %w", err)
+	}
+	if err := validateAPIKeys(cfg.CommandCode.APIKeys); err != nil {
+		return fmt.Errorf("commandcode.api_keys: %w", err)
+	}
+	for field, endpoint := range map[string]string{
+		"base_url":           cfg.CommandCode.BaseURL,
+		"anthropic_base_url": cfg.CommandCode.AnthropicBaseURL,
+	} {
+		if endpoint == "" { // validate is also used on configs before defaults.
+			continue
+		}
+		u, err := url.Parse(endpoint)
+		if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return fmt.Errorf("commandcode.%s must be an absolute http or https URL without credentials or fragment", field)
+		}
+	}
+	if cfg.CommandCode.TimeoutMs < 0 || cfg.CommandCode.StreamTimeoutMs < 0 || cfg.CommandCode.StreamingTimeoutMs < 0 {
+		return fmt.Errorf("commandcode timeouts must not be negative")
+	}
 
+	if err := validateOverrideMap("models", cfg.Models); err != nil {
+		return err
+	}
+	for scenario, fallbacks := range cfg.Fallbacks {
+		for i, model := range fallbacks {
+			if err := validateModelConfig(fmt.Sprintf("fallbacks[%q][%d]", scenario, i), model); err != nil {
+				return err
+			}
+		}
+	}
 	if err := validateModelOverrides(cfg.ModelOverrides); err != nil {
 		return err
 	}
@@ -490,12 +559,27 @@ func validateModelFamilyOverrides(overrides map[string]ModelConfig) error {
 // config section for error messages.
 func validateOverrideMap(label string, overrides map[string]ModelConfig) error {
 	for key, mc := range overrides {
-		if mc.ModelID == "" {
-			return fmt.Errorf("%s[%q] is missing required field model_id", label, key)
+		if err := validateModelConfig(fmt.Sprintf("%s[%q]", label, key), mc); err != nil {
+			return err
 		}
-		if mc.Provider != "" && mc.Provider != "opencode-go" && mc.Provider != "opencode-zen" {
-			return fmt.Errorf("%s[%q] has invalid provider %q (must be \"opencode-go\" or \"opencode-zen\")", label, key, mc.Provider)
-		}
+	}
+	return nil
+}
+
+func validateModelConfig(label string, mc ModelConfig) error {
+	if strings.TrimSpace(mc.ModelID) == "" {
+		return fmt.Errorf("%s is missing required field model_id", label)
+	}
+	if !SupportedProvider(mc.Provider) {
+		return fmt.Errorf("%s has invalid provider %q", label, mc.Provider)
+	}
+	switch mc.WireFormat {
+	case "", "auto", "openai", "anthropic", "responses", "gemini":
+	default:
+		return fmt.Errorf("%s has invalid wire_format %q", label, mc.WireFormat)
+	}
+	if NormalizeProvider(mc.Provider) == "commandcode" && mc.WireFormat != "" && mc.WireFormat != "auto" && mc.WireFormat != "openai" && mc.WireFormat != "anthropic" {
+		return fmt.Errorf("%s: commandcode supports only openai or anthropic upstream wire formats", label)
 	}
 	return nil
 }

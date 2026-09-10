@@ -2,6 +2,7 @@ package transformer
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/core"
@@ -25,49 +26,103 @@ func AnthropicForModel(req *types.MessageRequest, model config.ModelConfig, stre
 }
 
 // AnthropicToResponses converts an Anthropic request to a ResponsesRequest.
-func AnthropicToResponses(anthropicReq *types.MessageRequest, model config.ModelConfig) *types.ResponsesRequest {
-	req := core.NormalizeRequest(anthropicReq)
+func AnthropicToResponses(anthropicReq *types.MessageRequest, model config.ModelConfig) (*types.ResponsesRequest, error) {
+	// Reuse the existing parameter/tool validation and model overrides. Build
+	// input from the original blocks so mixed text/tool chronology is retained.
+	chat, err := AnthropicToChatCompletion(anthropicReq, model)
+	if err != nil {
+		return nil, err
+	}
 	responsesReq := &types.ResponsesRequest{
-		Model: model.ModelID,
+		Model: model.ModelID, Temperature: chat.Temperature, TopP: chat.TopP,
+		ParallelToolCalls: chat.ParallelToolCalls,
+	}
+	if chat.MaxTokens != nil {
+		responsesReq.MaxOutputTokens = *chat.MaxTokens
+	}
+	if chat.ReasoningEffort != nil {
+		responsesReq.Reasoning = &types.ResponsesReasoning{Effort: *chat.ReasoningEffort}
+	}
+	if chat.ToolChoice != nil {
+		choice := chat.ToolChoice
+		if named, ok := choice.(map[string]any); ok {
+			function := named["function"].(map[string]string)
+			choice = map[string]string{"type": "function", "name": function["name"]}
+		}
+		responsesReq.ToolChoice, _ = json.Marshal(choice)
 	}
 
 	// System prompt becomes a "developer" role input.
-	if req.SystemPrompt != "" {
+	if system := anthropicReq.SystemText(); system != "" {
 		responsesReq.Input = append(responsesReq.Input, types.ResponsesInput{
 			Role:    "developer",
-			Content: rawJSONString(req.SystemPrompt),
+			Content: rawJSONString(system),
 		})
 	}
 
-	// Convert messages.
-	for _, msg := range req.Messages {
-		input := types.ResponsesInput{Role: msg.Role}
-		content := msg.Content
-
-		// For assistant messages with tool calls, serialize as text.
-		if len(msg.ToolCalls) > 0 {
-			for _, tc := range msg.ToolCalls {
-				content += "[Tool: " + tc.Name + "(" + tc.Arguments + ")]"
+	for _, msg := range anthropicReq.Messages {
+		text := ""
+		flushText := func() {
+			if text != "" {
+				responsesReq.Input = append(responsesReq.Input, types.ResponsesInput{Role: msg.Role, Content: rawJSONString(text)})
+				text = ""
 			}
 		}
-
-		if content != "" {
-			input.Content = rawJSONString(content)
+		for _, block := range msg.ContentBlocks() {
+			switch block.Type {
+			case "text":
+				text += block.Text
+			case "thinking":
+				// Anthropic's opaque reasoning/signature is not Responses state.
+				// Keep the pre-existing cross-protocol omission of this history.
+			case "tool_use":
+				flushText()
+				if block.ID == "" || block.Name == "" {
+					return nil, fmt.Errorf("Responses tool_use requires id and name")
+				}
+				arguments := string(block.Input)
+				if arguments == "" {
+					arguments = "{}"
+				}
+				if !json.Valid([]byte(arguments)) {
+					return nil, fmt.Errorf("invalid Responses tool arguments")
+				}
+				responsesReq.Input = append(responsesReq.Input, types.ResponsesInput{Type: "function_call", CallID: block.ID, Name: block.Name, Arguments: arguments})
+			case "tool_result":
+				flushText()
+				if block.GetToolID() == "" {
+					return nil, fmt.Errorf("Responses tool_result requires tool_use_id")
+				}
+				responsesReq.Input = append(responsesReq.Input, types.ResponsesInput{Type: "function_call_output", CallID: block.GetToolID(), Output: rawJSONString(block.TextContent())})
+			case "image":
+				flushText()
+				if !model.Vision {
+					return nil, fmt.Errorf("Responses image input requires a vision-capable model")
+				}
+				url, err := imageSourceURL(block.Source)
+				if err != nil {
+					return nil, err
+				}
+				content, _ := json.Marshal([]map[string]string{{"type": "input_image", "image_url": url}})
+				responsesReq.Input = append(responsesReq.Input, types.ResponsesInput{Role: msg.Role, Content: content})
+			default:
+				return nil, fmt.Errorf("unsupported Responses input block %q", block.Type)
+			}
 		}
-		responsesReq.Input = append(responsesReq.Input, input)
+		flushText()
 	}
 
 	// Convert tools.
-	for _, tool := range req.Tools {
+	for _, tool := range chat.Tools {
 		responsesReq.Tools = append(responsesReq.Tools, types.ResponsesTool{
 			Type:        "function",
-			Name:        tool.Name,
-			Description: tool.Description,
-			Parameters:  tool.InputSchema,
+			Name:        tool.Function.Name,
+			Description: tool.Function.Description,
+			Parameters:  tool.Function.Parameters,
 		})
 	}
 
-	return responsesReq
+	return responsesReq, nil
 }
 
 // AnthropicToGemini converts an Anthropic request to a GeminiRequest.
@@ -169,17 +224,12 @@ func OpenAIResponseToNormalized(openaiResp *types.ChatCompletionResponse, modelI
 
 	// Map usage. UsageInfo is a value type; check if it was populated.
 	if openaiResp.Usage.PromptTokens > 0 || openaiResp.Usage.CompletionTokens > 0 {
-		// OpenAI-standard cached_tokens counts as cache read; DeepSeek-style
-		// hit/miss fields are read separately.
-		cacheRead := openaiResp.Usage.PromptCacheHitTokens
-		if openaiResp.Usage.PromptTokensDetails != nil {
-			cacheRead += openaiResp.Usage.PromptTokensDetails.CachedTokens
-		}
+		input, cacheRead, cacheCreate := splitPromptTokens(&openaiResp.Usage)
 		nr.Usage = core.NormalizedUsage{
-			InputTokens:         openaiResp.Usage.PromptTokens,
+			InputTokens:         input,
 			OutputTokens:        openaiResp.Usage.CompletionTokens,
 			CacheReadTokens:     cacheRead,
-			CacheCreationTokens: openaiResp.Usage.PromptCacheMissTokens,
+			CacheCreationTokens: cacheCreate,
 		}
 	}
 
@@ -189,8 +239,9 @@ func OpenAIResponseToNormalized(openaiResp *types.ChatCompletionResponse, modelI
 // ResponsesToNormalized converts an OpenAI ResponsesResponse to NormalizedResponse.
 func ResponsesToNormalized(responsesResp *types.ResponsesResponse, modelID string) *core.NormalizedResponse {
 	nr := &core.NormalizedResponse{
-		ID:    responsesResp.ID,
-		Model: modelID,
+		ID:         responsesResp.ID,
+		Model:      modelID,
+		StopReason: "end_turn",
 	}
 
 	for _, output := range responsesResp.Output {
@@ -204,6 +255,7 @@ func ResponsesToNormalized(responsesResp *types.ResponsesResponse, modelID strin
 			}
 			nr.Messages = append(nr.Messages, nm)
 		case "function_call":
+			nr.StopReason = "tool_use"
 			nm := core.NormalizedMessage{
 				Role: "assistant",
 				ToolCalls: []core.NormalizedToolCall{
@@ -218,11 +270,12 @@ func ResponsesToNormalized(responsesResp *types.ResponsesResponse, modelID strin
 		}
 	}
 
-	nr.StopReason = "end_turn"
-
+	if responsesResp.IncompleteDetails != nil && responsesResp.IncompleteDetails.Reason == "max_output_tokens" {
+		nr.StopReason = "max_tokens"
+	}
+	usage := responsesUsageToAnthropic(&responsesResp.Usage)
 	nr.Usage = core.NormalizedUsage{
-		InputTokens:  responsesResp.Usage.InputTokens,
-		OutputTokens: responsesResp.Usage.OutputTokens,
+		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, CacheReadTokens: usage.CacheReadInputTokens,
 	}
 
 	return nr

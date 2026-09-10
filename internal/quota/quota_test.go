@@ -2,10 +2,29 @@ package quota
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 )
+
+func TestParsePercentPreservesReportedLimit(t *testing.T) {
+	for _, limit := range []float64{100, 0} {
+		rep, err := Parse([]byte(fmt.Sprintf(`{"monthly":{"percent":50,"limitDollars":%v}}`, limit)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		window := rep.Monthly
+		if window == nil || window.LimitDollars == nil || window.UsedDollars == nil {
+			t.Fatalf("missing quota values: %+v", window)
+		}
+		if *window.LimitDollars != limit || *window.UsedDollars != limit/2 || !window.PercentDerived {
+			t.Errorf("limit %v: got limit=%v used=%v derived=%v", limit, *window.LimitDollars, *window.UsedDollars, window.PercentDerived)
+		}
+	}
+}
 
 func TestParseNestedPercentOnlyDerivesDollars(t *testing.T) {
 	rep, err := Parse([]byte(`{
@@ -88,6 +107,9 @@ func TestUsageURL(t *testing.T) {
 		{"https://mirror.example/zen/go/v1/messages", "https://mirror.example/zen/go/v1/usage", false},
 		{"https://mirror.example/zen/go/v1/usage", "https://mirror.example/zen/go/v1/usage", false},
 		{"https://mirror.example/custom", "", true},
+		{"https://user:secret@mirror.example/v1/usage", "", true},
+		{"https://mirror.example/v1/usage?secret=key", "", true},
+		{"file:///v1/usage", "", true},
 	}
 	for _, tc := range cases {
 		got, err := UsageURL(tc.base)
@@ -136,5 +158,32 @@ func TestFetchSendsBearerAndSurfacesStatus(t *testing.T) {
 
 	if _, err := Fetch(context.Background(), srv.Client(), srv.URL, "  "); err == nil {
 		t.Fatal("expected an error when no key is provided")
+	}
+}
+
+func TestGoQuotaFetchProtectsCredentialBoundary(t *testing.T) {
+	var forwarded atomic.Bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		forwarded.Store(true)
+		fmt.Fprint(w, `{"monthly":{"usagePercent":0}}`)
+	}))
+	defer target.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/redirect" {
+			http.Redirect(w, r, target.URL, http.StatusFound)
+			return
+		}
+		w.WriteHeader(http.StatusBadGateway)
+		fmt.Fprint(w, r.Header.Get("Authorization"))
+	}))
+	defer srv.Close()
+	for _, path := range []string{"/failure", "/redirect"} {
+		_, err := Fetch(context.Background(), srv.Client(), srv.URL+path, "synthetic-sensitive-key")
+		if err == nil || strings.Contains(err.Error(), "synthetic-sensitive-key") {
+			t.Errorf("%s: expected safe explicit failure, got %v", path, err)
+		}
+	}
+	if forwarded.Load() {
+		t.Error("a quota redirect received the inference credential")
 	}
 }

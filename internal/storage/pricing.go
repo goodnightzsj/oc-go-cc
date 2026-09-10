@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"database/sql"
 	"time"
 
 	"github.com/routatic/proxy/internal/history"
@@ -23,10 +24,29 @@ func parseRequestTime(s string) time.Time {
 	return t
 }
 
-// costForTokensAt prices a request at time t, applying the provider peak
-// multiplier (history.PeakMultiplier) on top of the base seeded rates.
-// Aggregations that cannot see individual timestamps keep using costForTokens
-// (off-peak base rates).
+// costForTokensAt prices OpenCode Go tokens at time t using its seeded rates.
 func costForTokensAt(model string, in, out, cacheRead, cacheCreate int64, modelsInputPerM, modelsOutputPerM float64, t time.Time) float64 {
 	return costForTokens(model, in, out, cacheRead, cacheCreate, modelsInputPerM, modelsOutputPerM) * history.PeakMultiplier(model, t)
+}
+
+// costForProviderTokensAt returns a complete estimate only when every consumed
+// token category has a known rate. Catalog prices are provider-specific and do
+// not include cache rates; a missing rate must not be interpreted as free usage.
+func costForProviderTokensAt(provider, model string, in, out, cacheRead, cacheCreate int64, inputRate, outputRate sql.NullFloat64, t time.Time) (float64, bool) {
+	isGo := provider == "" || provider == "opencode-go"
+	if isGo {
+		if _, _, _, _, ok := PriceForModel(model); ok {
+			return costForTokensAt(model, in, out, cacheRead, cacheCreate, 0, 0, t), true
+		}
+	}
+	if !inputRate.Valid || !outputRate.Valid || cacheRead != 0 || (!isGo && cacheCreate != 0) {
+		return 0, false
+	}
+	// Go's existing fallback contract bills cache creation at the input rate.
+	input := in
+	if isGo {
+		input += cacheCreate
+	}
+	cost := (float64(input)*inputRate.Float64 + float64(out)*outputRate.Float64) / 1_000_000
+	return cost * history.ProviderPeakMultiplier(provider, model, t), true
 }

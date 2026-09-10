@@ -61,3 +61,20 @@ type Provider interface {
 	// forwarding them.
 	Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error)
 }
+
+// ModelWireFormat keeps the sender and stream decoder on the same protocol.
+// Explicit model configuration takes precedence over provider inference.
+func ModelWireFormat(p Provider, model config.ModelConfig) WireFormat {
+	switch model.WireFormat {
+	case "openai":
+		return WireFormatOpenAIChat
+	case "anthropic":
+		return WireFormatAnthropic
+	case "responses":
+		return WireFormatOpenAIResponses
+	case "gemini":
+		return WireFormatGemini
+	default:
+		return p.WireFormat(model.ModelID)
+	}
+}

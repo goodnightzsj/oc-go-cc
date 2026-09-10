@@ -10,7 +10,8 @@ import (
 
 // Latency provides methods for recording and querying latency samples.
 type Latency struct {
-	db *Database
+	db       *Database
+	provider string
 }
 
 // NewLatency creates a new Latency repository backed by the given database.
@@ -18,51 +19,60 @@ func NewLatency(db *Database) *Latency {
 	return &Latency{db: db}
 }
 
-// ModelLatencyStats holds latency percentiles and counts for a single model.
+// ForProvider leaves the shared repository unchanged while scoping both samples
+// and outcome counts to the same provider. Empty preserves the all-provider view.
+func (l *Latency) ForProvider(provider string) *Latency {
+	return &Latency{db: l.db, provider: provider}
+}
+
+// ModelLatencyStats holds latency percentiles and counts for one provider/model.
 //
 // The JSON tags matter: /api/analytics/latency serialises this type straight to
 // the dashboard, so the field names below are the wire contract. Durations are
 // exposed as whole milliseconds (via MarshalJSON) rather than Go's native
 // nanoseconds, because that is the unit the UI labels and renders.
 type ModelLatencyStats struct {
-	Model string        `json:"model"`
-	Count int64         `json:"count"`
-	Avg   time.Duration `json:"-"`
-	P50   time.Duration `json:"-"`
-	P90   time.Duration `json:"-"`
-	P95   time.Duration `json:"-"`
-	P99   time.Duration `json:"-"`
-	Min   time.Duration `json:"-"`
-	Max   time.Duration `json:"-"`
+	Provider string        `json:"provider"`
+	Model    string        `json:"model"`
+	Count    int64         `json:"count"`
+	Avg      time.Duration `json:"-"`
+	P50      time.Duration `json:"-"`
+	P90      time.Duration `json:"-"`
+	P95      time.Duration `json:"-"`
+	P99      time.Duration `json:"-"`
+	Min      time.Duration `json:"-"`
+	Max      time.Duration `json:"-"`
 }
 
 // MarshalJSON emits millisecond fields so the dashboard reads plain numbers in
 // the unit it displays, instead of raw nanosecond durations.
 func (s ModelLatencyStats) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Model string `json:"model"`
-		Count int64  `json:"count"`
-		AvgMs int64  `json:"avg_ms"`
-		P50Ms int64  `json:"p50_ms"`
-		P90Ms int64  `json:"p90_ms"`
-		P95Ms int64  `json:"p95_ms"`
-		P99Ms int64  `json:"p99_ms"`
-		MinMs int64  `json:"min_ms"`
-		MaxMs int64  `json:"max_ms"`
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+		Count    int64  `json:"count"`
+		AvgMs    int64  `json:"avg_ms"`
+		P50Ms    int64  `json:"p50_ms"`
+		P90Ms    int64  `json:"p90_ms"`
+		P95Ms    int64  `json:"p95_ms"`
+		P99Ms    int64  `json:"p99_ms"`
+		MinMs    int64  `json:"min_ms"`
+		MaxMs    int64  `json:"max_ms"`
 	}{
-		Model: s.Model,
-		Count: s.Count,
-		AvgMs: s.Avg.Milliseconds(),
-		P50Ms: s.P50.Milliseconds(),
-		P90Ms: s.P90.Milliseconds(),
-		P95Ms: s.P95.Milliseconds(),
-		P99Ms: s.P99.Milliseconds(),
-		MinMs: s.Min.Milliseconds(),
-		MaxMs: s.Max.Milliseconds(),
+		Provider: s.Provider,
+		Model:    s.Model,
+		Count:    s.Count,
+		AvgMs:    s.Avg.Milliseconds(),
+		P50Ms:    s.P50.Milliseconds(),
+		P90Ms:    s.P90.Milliseconds(),
+		P95Ms:    s.P95.Milliseconds(),
+		P99Ms:    s.P99.Milliseconds(),
+		MinMs:    s.Min.Milliseconds(),
+		MaxMs:    s.Max.Milliseconds(),
 	})
 }
 
-// maxSamplesPerModel bounds how many request rows GetStats pulls per model.
+// maxSamplesPerModel bounds how many request rows GetStats pulls per provider/model.
 // Percentiles over the most recent 20k samples are representative, and this
 // keeps a long-running proxy from loading millions of rows into memory.
 const maxSamplesPerModel = 20000
@@ -72,42 +82,43 @@ func (l *Latency) GetStats(since time.Time) ([]ModelLatencyStats, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Cap the samples per model rather than overall: percentiles need a model's
-	// own distribution, so a global LIMIT would let one chatty model starve the
-	// others. Keeping the most recent maxSamplesPerModel rows per model bounds
-	// memory while leaving each model's recent distribution intact.
+	// Cap samples per provider/model so a chatty platform cannot starve another
+	// platform's samples for the same model. Each Count is a bounded sample count,
+	// not the total number of requests used to calculate success rates.
 	// duration_ms on requests is the same measurement the dedicated
 	// latency_samples table used to duplicate. Synthetic rows imported by
 	// `costs sync-requests` carry duration_ms=0 and details_known=0, so they are
 	// excluded rather than being counted as instant responses.
 	query := `
-		SELECT model, duration_ms
+		SELECT provider, model, duration_ms
 		FROM (
-			SELECT model, duration_ms,
-			       ROW_NUMBER() OVER (PARTITION BY model ORDER BY start_time DESC) AS rn
+			SELECT COALESCE(provider, '') AS provider, model, duration_ms,
+			       ROW_NUMBER() OVER (PARTITION BY COALESCE(provider, ''), model ORDER BY julianday(start_time) DESC) AS rn
 			FROM requests
-			WHERE start_time >= ?
+				WHERE julianday(start_time) >= julianday(?)
+				  AND (? = '' OR provider = ?)
 			  AND duration_ms > 0
 			  AND details_known = 1
 		)
 		WHERE rn <= ?
-		ORDER BY model
+		ORDER BY provider, model
 	`
 
-	rows, err := l.db.DB().QueryContext(ctx, query, since.Format(time.RFC3339Nano), maxSamplesPerModel)
+	rows, err := l.db.DB().QueryContext(ctx, query, since.UTC().Format(time.RFC3339Nano), l.provider, l.provider, maxSamplesPerModel)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 
-	samplesByModel := make(map[string][]int64)
+	type modelKey struct{ provider, model string }
+	samplesByModel := make(map[modelKey][]int64)
 	for rows.Next() {
-		var model string
+		var key modelKey
 		var latencyMs int64
-		if err := rows.Scan(&model, &latencyMs); err != nil {
+		if err := rows.Scan(&key.provider, &key.model, &latencyMs); err != nil {
 			return nil, err
 		}
-		samplesByModel[model] = append(samplesByModel[model], latencyMs)
+		samplesByModel[key] = append(samplesByModel[key], latencyMs)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -115,26 +126,33 @@ func (l *Latency) GetStats(since time.Time) ([]ModelLatencyStats, error) {
 	}
 
 	var stats []ModelLatencyStats
-	for model, samples := range samplesByModel {
-		stats = append(stats, calculateStats(model, samples))
+	for key, samples := range samplesByModel {
+		stat := calculateStats(key.model, samples)
+		stat.Provider = key.provider
+		stats = append(stats, stat)
 	}
 
 	return stats, nil
 }
 
-// GetSuccessCounts returns the count of successful and failed requests per model since the given time.
+// GetSuccessCounts returns known request outcomes since the given time, keyed
+// by provider + "/" + model. Empty legacy providers retain the leading slash.
+// Imported billing rows have unknown outcomes and do not enter either count.
 func (l *Latency) GetSuccessCounts(since time.Time) (map[string]int64, map[string]int64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	query := `
-		SELECT model, success, COUNT(*)
+		SELECT COALESCE(provider, ''), model, success, COUNT(*)
 		FROM requests
-		WHERE start_time >= ?
-		GROUP BY model, success
+			WHERE julianday(start_time) >= julianday(?)
+			  AND (? = '' OR provider = ?)
+		  AND details_known = 1
+		  AND success IN (0, 1)
+		GROUP BY COALESCE(provider, ''), model, success
 	`
 
-	rows, err := l.db.DB().QueryContext(ctx, query, since.Format(time.RFC3339Nano))
+	rows, err := l.db.DB().QueryContext(ctx, query, since.UTC().Format(time.RFC3339Nano), l.provider, l.provider)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -144,15 +162,16 @@ func (l *Latency) GetSuccessCounts(since time.Time) (map[string]int64, map[strin
 	failureCounts := make(map[string]int64)
 
 	for rows.Next() {
-		var model string
+		var provider, model string
 		var success, count int64
-		if err := rows.Scan(&model, &success, &count); err != nil {
+		if err := rows.Scan(&provider, &model, &success, &count); err != nil {
 			return nil, nil, err
 		}
+		key := provider + "/" + model
 		if success == 1 {
-			successCounts[model] = count
+			successCounts[key] = count
 		} else {
-			failureCounts[model] = count
+			failureCounts[key] = count
 		}
 	}
 
@@ -179,9 +198,7 @@ func calculateStats(model string, samples []int64) ModelLatencyStats {
 		return min(max(int(math.Ceil(float64(count)*fraction))-1, 0), count-1)
 	}
 
-	// p50 keeps its original truncating form; the upper percentiles round up so
-	// a small sample set still reports its slow tail instead of the median.
-	p50Idx := min(max(int(float64(count)*0.50)-1, 0), count-1)
+	p50Idx := pctIdx(0.50)
 	p90Idx := pctIdx(0.90)
 	p95Idx := pctIdx(0.95)
 	p99Idx := pctIdx(0.99)
@@ -211,6 +228,8 @@ func ParseTimeRange(rangeParam string) time.Time {
 		return time.Now().Add(-7 * 24 * time.Hour)
 	case "30d":
 		return time.Now().Add(-30 * 24 * time.Hour)
+	case "90d":
+		return time.Now().Add(-90 * 24 * time.Hour)
 	default:
 		return time.Time{}
 	}

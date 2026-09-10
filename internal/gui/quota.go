@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/quota"
 	"github.com/routatic/proxy/internal/storage"
 )
@@ -28,37 +29,56 @@ const limitsRefreshTTL = 24 * time.Hour
 // limitsFetchTimeout is the per-attempt bound for pulling the docs page.
 const limitsFetchTimeout = 20 * time.Second
 
-// quotaAccount is the quota picture for one configured API key. Report and Error
-// are mutually exclusive.
+// quotaAccount reports one key's quota, never an aggregate account balance.
+// Report/OpenRouter and Error are mutually exclusive.
 type quotaAccount struct {
-	KeyHint string        `json:"key_hint"`
-	Report  *quota.Report `json:"report,omitempty"`
-	Error   string        `json:"error,omitempty"`
+	KeyHint    string               `json:"key_hint"`
+	Report     *quota.Report        `json:"report,omitempty"`
+	OpenRouter *quota.OpenRouterKey `json:"openrouter,omitempty"`
+	Error      string               `json:"error,omitempty"`
+}
+
+type quotaLink struct {
+	Kind string `json:"kind"`
+	URL  string `json:"url"`
 }
 
 type quotaResponse struct {
-	Endpoint    string             `json:"endpoint"`
-	Accounts    []quotaAccount     `json:"accounts"`
-	ModelLimits *quota.ModelLimits `json:"model_limits,omitempty"`
-	ModelUsage  []quotaModelUsage  `json:"model_usage,omitempty"`
-	FetchedAt   time.Time          `json:"fetched_at"`
-	TTLSeconds  int                `json:"ttl_seconds"`
-	Cached      bool               `json:"cached"`
-	Error       string             `json:"error,omitempty"`
+	Provider        string                   `json:"provider"`
+	Status          string                   `json:"status"`
+	Source          string                   `json:"source"`
+	Reason          string                   `json:"reason,omitempty"`
+	Currency        string                   `json:"currency,omitempty"`
+	Links           []quotaLink              `json:"links"`
+	Endpoint        string                   `json:"endpoint"`
+	Accounts        []quotaAccount           `json:"accounts"`
+	ModelLimits     *quota.ModelLimits       `json:"model_limits,omitempty"`
+	ModelUsage      []quotaModelUsage        `json:"model_usage"`
+	ModelUsageError string                   `json:"model_usage_error,omitempty"`
+	FetchedAt       time.Time                `json:"fetched_at"`
+	TTLSeconds      int                      `json:"ttl_seconds"`
+	Cached          bool                     `json:"cached"`
+	Error           string                   `json:"error,omitempty"`
+	Credits         *quota.OpenRouterCredits `json:"credits,omitempty"`
+	CreditsStatus   string                   `json:"credits_status,omitempty"`
+	CreditsError    string                   `json:"credits_error,omitempty"`
+	CreditsEndpoint string                   `json:"credits_endpoint,omitempty"`
 }
 
-// quotaModelUsage is one row of the console-style monthly usage table: what
-// this instance spent on the model in the current plan month, priced in the
-// same currency as the docs allowance (the official Go price, not pool
-// equivalents), so used_usd is directly comparable to allowance_usd. The
-// shared-$60-pool conversion (× 60/allowance — the per-model multiplier the
-// OpenCode ledger applies, e.g. DeepSeek V4 Flash ×2) is applied only to the
-// table's total row, which reconciles with the official monthly percent.
+type quotaCacheEntry struct {
+	Identity string
+	Response quotaResponse
+}
+
+// quotaModelUsage contains local Go ledger costs, not an official account bill.
+// UsedUSD is the known subtotal; a missing price makes Percent unknown.
 type quotaModelUsage struct {
-	Model        string  `json:"model"`
-	UsedUSD      float64 `json:"used_usd"`
-	AllowanceUSD float64 `json:"allowance_usd"`
-	Percent      float64 `json:"percent"`
+	Model               string   `json:"model"`
+	UsedUSD             float64  `json:"used_usd"`
+	AllowanceUSD        float64  `json:"allowance_usd"`
+	Percent             *float64 `json:"percent"`
+	Requests            int64    `json:"requests"`
+	UnknownCostRequests int64    `json:"unknown_cost_requests"`
 }
 
 // maskKeyHint renders a key as a stable, non-reversible label. Only the last
@@ -98,40 +118,154 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if s.atomicCfg == nil {
+	if s.atomicCfg == nil || s.atomicCfg.Get() == nil {
 		http.Error(w, "proxy config not available", http.StatusServiceUnavailable)
 		return
 	}
-
-	force := r.URL.Query().Get("refresh") == "1"
+	provider := config.NormalizeProvider(strings.TrimSpace(r.URL.Query().Get("provider")))
+	if !config.SupportedProvider(provider) {
+		http.Error(w, "unsupported quota provider", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
 	cfg := s.atomicCfg.Get()
+	resp := quotaResponse{
+		Provider: provider, Source: "none", Status: "unavailable",
+		Accounts: []quotaAccount{}, ModelUsage: []quotaModelUsage{},
+		FetchedAt: time.Now().UTC(), TTLSeconds: int(quotaCacheTTL.Seconds()),
+	}
+	switch provider {
+	case "opencode-go":
+		resp.Source, resp.Currency = "upstream_api", "USD"
+		resp.Links = []quotaLink{{Kind: "billing", URL: "https://opencode.ai/auth"}, {Kind: "docs", URL: "https://opencode.ai/docs/go/"}}
+		s.handleGoQuota(w, r, cfg, resp)
+		return
+	case "openrouter":
+		resp.Source, resp.Currency = "official_api", "USD"
+		resp.Links = []quotaLink{{Kind: "billing", URL: "https://openrouter.ai/settings/credits"}, {Kind: "usage", URL: "https://openrouter.ai/activity"}, {Kind: "keys", URL: "https://openrouter.ai/settings/keys"}}
+		s.handleOpenRouterQuota(w, r, cfg, resp)
+		return
+	case "opencode-zen":
+		resp.Reason = "no_public_account_api"
+		resp.Links = []quotaLink{{Kind: "billing", URL: "https://opencode.ai/auth"}, {Kind: "docs", URL: "https://opencode.ai/docs/zen/"}}
+	case "commandcode":
+		resp.Reason = "no_public_account_api"
+		resp.Links = []quotaLink{{Kind: "usage", URL: "https://commandcode.ai/usage"}, {Kind: "billing", URL: "https://commandcode.ai/billing"}, {Kind: "keys", URL: "https://commandcode.ai/settings/keys"}}
+	case "aws-bedrock":
+		resp.Reason = "aws_billing_auth_required"
+		resp.Links = []quotaLink{{Kind: "billing", URL: "https://console.aws.amazon.com/billing/home"}, {Kind: "docs", URL: "https://docs.aws.amazon.com/cost-management/latest/userguide/ce-api.html"}}
+	}
+	if len(cfg.ProviderAPIKeys(provider)) == 0 {
+		resp.Status = "not_configured"
+	}
+	writeJSON(w, resp)
+}
+
+func (s *Server) handleGoQuota(w http.ResponseWriter, r *http.Request, cfg *config.Config, resp quotaResponse) {
+	force := r.URL.Query().Get("refresh") == "1"
 	keys := goQuotaKeys(cfg.OpenCodeGo.EffectiveAPIKeys(), cfg.EffectiveAPIKeys())
 
 	endpoint, err := quota.UsageURL(cfg.OpenCodeGo.BaseURL)
 	if err != nil {
-		writeJSON(w, quotaResponse{FetchedAt: time.Now().UTC(), TTLSeconds: int(quotaCacheTTL.Seconds()), Error: err.Error()})
+		resp.Status, resp.Error = "error", err.Error()
+		writeJSON(w, resp)
 		return
 	}
+	resp.Endpoint = endpoint
 	if len(keys) == 0 {
-		writeJSON(w, quotaResponse{Endpoint: endpoint, Accounts: []quotaAccount{}, FetchedAt: time.Now().UTC(), TTLSeconds: int(quotaCacheTTL.Seconds())})
+		resp.Status = "not_configured"
+		writeJSON(w, resp)
 		return
 	}
 
-	if cached := s.cachedQuota(endpoint, keys, force); cached != nil {
+	if cached := s.cachedQuota(resp.Provider, endpoint, keys, force); cached != nil {
 		writeJSON(w, *cached)
 		return
 	}
 
-	resp := quotaResponse{
-		Endpoint:    endpoint,
-		Accounts:    fetchQuotaAccounts(r.Context(), endpoint, keys),
-		ModelLimits: s.ensureModelLimits(r.Context()),
-		FetchedAt:   time.Now().UTC(),
-		TTLSeconds:  int(quotaCacheTTL.Seconds()),
+	resp.Accounts = fetchQuotaAccounts(r.Context(), resp.Provider, endpoint, keys)
+	resp.ModelLimits = s.ensureModelLimits(r.Context())
+	resp.ModelUsage, err = s.monthlyModelUsage(resp.Accounts, resp.ModelLimits)
+	if err != nil {
+		resp.ModelUsageError = err.Error()
 	}
-	resp.ModelUsage = s.monthlyModelUsage(resp.Accounts, resp.ModelLimits)
+	resp.Status = quotaStatus(resp)
+	resp.FetchedAt = time.Now().UTC()
 	s.storeQuota(endpoint, keys, resp)
 	writeJSON(w, resp)
+}
+
+func (s *Server) handleOpenRouterQuota(w http.ResponseWriter, r *http.Request, cfg *config.Config, resp quotaResponse) {
+	// Use the same inference-key precedence as routing; management credentials
+	// have no global or inference-key fallback.
+	keys := goQuotaKeys(cfg.OpenRouter.EffectiveAPIKeys(), cfg.EffectiveAPIKeys())
+	managementKey := strings.TrimSpace(cfg.OpenRouter.ManagementAPIKey)
+	resp.CreditsStatus = "not_configured"
+	endpoint, creditsEndpoint, err := quota.OpenRouterURLs(cfg.OpenRouter.BaseURL)
+	if err != nil {
+		resp.Status, resp.Error = "error", err.Error()
+		writeJSON(w, resp)
+		return
+	}
+	resp.Endpoint, resp.CreditsEndpoint = endpoint, creditsEndpoint
+	if len(keys) == 0 && managementKey == "" {
+		resp.Status = "not_configured"
+		writeJSON(w, resp)
+		return
+	}
+	cacheKeys := append(append([]string{}, keys...), managementKey)
+	if cached := s.cachedQuota(resp.Provider, endpoint, cacheKeys, r.URL.Query().Get("refresh") == "1"); cached != nil {
+		writeJSON(w, *cached)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), quota.RequestTimeout)
+	defer cancel()
+	var wg sync.WaitGroup
+	if managementKey != "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			credits, err := quota.FetchOpenRouterCredits(ctx, nil, creditsEndpoint, managementKey)
+			if err != nil {
+				resp.CreditsStatus, resp.CreditsError = "error", err.Error()
+				return
+			}
+			resp.Credits, resp.CreditsStatus = credits, "available"
+		}()
+	}
+	resp.Accounts = fetchQuotaAccounts(ctx, resp.Provider, endpoint, keys)
+	wg.Wait()
+	resp.Status = quotaStatus(resp)
+	resp.FetchedAt = time.Now().UTC()
+	s.storeQuota(endpoint, cacheKeys, resp)
+	writeJSON(w, resp)
+}
+
+func quotaStatus(resp quotaResponse) string {
+	available, failed := 0, 0
+	for _, account := range resp.Accounts {
+		if account.Error != "" {
+			failed++
+		} else if account.Report != nil || account.OpenRouter != nil {
+			available++
+		}
+	}
+	if resp.Credits != nil {
+		available++
+	}
+	if resp.CreditsError != "" || resp.ModelUsageError != "" {
+		failed++
+	}
+	if available == 0 {
+		if failed > 0 {
+			return "error"
+		}
+		return "not_configured"
+	}
+	if failed > 0 {
+		return "partial"
+	}
+	return "available"
 }
 
 // fetchQuotaAccounts queries every key in parallel and keeps the configured
@@ -140,7 +274,7 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 // The lookup is detached from the browser request: the result is cached and
 // shared, so a dashboard poll abandoned mid-flight must not fill the cache with
 // "context canceled" errors for the rest of the TTL.
-func fetchQuotaAccounts(parent context.Context, endpoint string, keys []string) []quotaAccount {
+func fetchQuotaAccounts(parent context.Context, provider, endpoint string, keys []string) []quotaAccount {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), quota.RequestTimeout)
 	defer cancel()
 
@@ -152,12 +286,15 @@ func fetchQuotaAccounts(parent context.Context, endpoint string, keys []string) 
 		go func(i int, key string) {
 			defer wg.Done()
 			accounts[i] = quotaAccount{KeyHint: maskKeyHint(key)}
-			report, err := quota.Fetch(ctx, client, endpoint, key)
+			var err error
+			if provider == "openrouter" {
+				accounts[i].OpenRouter, err = quota.FetchOpenRouterKey(ctx, client, endpoint, key)
+			} else {
+				accounts[i].Report, err = quota.Fetch(ctx, client, endpoint, key)
+			}
 			if err != nil {
 				accounts[i].Error = err.Error()
-				return
 			}
-			accounts[i].Report = report
 		}(i, key)
 	}
 	wg.Wait()
@@ -166,19 +303,20 @@ func fetchQuotaAccounts(parent context.Context, endpoint string, keys []string) 
 
 // cachedQuota returns the cached response when it is still fresh and was built
 // from the same endpoint and key set; otherwise nil.
-func (s *Server) cachedQuota(endpoint string, keys []string, force bool) *quotaResponse {
+func (s *Server) cachedQuota(provider, endpoint string, keys []string, force bool) *quotaResponse {
 	if force {
 		return nil
 	}
 	s.quotaMu.Lock()
 	defer s.quotaMu.Unlock()
-	if s.quotaCache == nil || s.quotaCacheFor != quotaCacheKey(endpoint, keys) {
+	entry, ok := s.quotaCache[provider]
+	if !ok || entry.Identity != quotaCacheKey(endpoint, keys) {
 		return nil
 	}
-	if time.Since(s.quotaCache.FetchedAt) >= quotaCacheTTL {
+	if time.Since(entry.Response.FetchedAt) >= quotaCacheTTL {
 		return nil
 	}
-	cached := *s.quotaCache
+	cached := entry.Response
 	cached.Cached = true
 	return &cached
 }
@@ -186,8 +324,10 @@ func (s *Server) cachedQuota(endpoint string, keys []string, force bool) *quotaR
 func (s *Server) storeQuota(endpoint string, keys []string, resp quotaResponse) {
 	s.quotaMu.Lock()
 	defer s.quotaMu.Unlock()
-	s.quotaCache = &resp
-	s.quotaCacheFor = quotaCacheKey(endpoint, keys)
+	if s.quotaCache == nil {
+		s.quotaCache = make(map[string]quotaCacheEntry)
+	}
+	s.quotaCache[resp.Provider] = quotaCacheEntry{Identity: quotaCacheKey(endpoint, keys), Response: resp}
 }
 
 // quotaCacheKey identifies the endpoint and key set a cached response belongs
@@ -243,69 +383,51 @@ func (s *Server) limitsLoop(ctx context.Context) {
 // after the subscription start implied by resets_at (2026-09-06T06:44Z minus
 // 31 days = 2026-08-06T06:44Z). Sizing it as 30 days would drop 8/6 from the
 // window and undercount every opening day of the cycle.
-func (s *Server) monthlyModelUsage(accounts []quotaAccount, limits *quota.ModelLimits) []quotaModelUsage {
-	if limits == nil || s.storage == nil {
-		return nil
+func (s *Server) monthlyModelUsage(accounts []quotaAccount, limits *quota.ModelLimits) ([]quotaModelUsage, error) {
+	// Local records do not carry account/key identity. A first-account window
+	// cannot safely be used to attribute traffic across a multi-key pool.
+	if limits == nil || s.storage == nil || len(accounts) != 1 {
+		return nil, nil
 	}
 	reset := findMonthlyReset(accounts)
 	if reset.IsZero() {
-		return nil
+		return nil, nil
 	}
 	win, err := storage.NewAnalytics(s.storage).WindowBetween(reset.Add(-31*24*time.Hour), reset)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	breakdown, err := storage.NewAnalytics(s.storage).ModelBreakdown(win)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	raw := make(map[string]float64, len(breakdown))
+	raw := make(map[string]quotaModelUsage, len(breakdown))
 	for _, b := range breakdown {
-		raw[normalizeModelName(b.Model)] += b.EstCostUSD
-	}
-	// Scale raw ledger spend so the sum of the rows matches the official
-	// monthly total (the pool tracks pricing-internal multipliers that
-	// 60/allowance only approximates; calibrating against the authoritative
-	// window keeps the per-model rows and the total reconciling with the
-	// official remaining percent). Without an official total we fall back to
-	// the allowance-derived multiplier.
-	var rawSum float64
-	for _, v := range raw {
-		rawSum += v
-	}
-	scale := 0.0
-	if len(accounts) > 0 && accounts[0].Report != nil && accounts[0].Report.Monthly != nil && accounts[0].Report.Monthly.UsedDollars != nil {
-		if official := *accounts[0].Report.Monthly.UsedDollars; official > 0 && rawSum > 0 {
-			scale = official / rawSum
+		if b.Provider != "opencode-go" && b.Provider != "opencode_go" {
+			continue
 		}
+		name := normalizeModelName(b.Model)
+		row := raw[name]
+		row.UsedUSD += b.EstCostUSD
+		row.Requests += b.Requests
+		row.UnknownCostRequests += b.UnknownCostRequests
+		raw[name] = row
 	}
 	rows := make([]quotaModelUsage, 0, len(limits.Models))
 	for _, m := range limits.Models {
-		spent, used := raw[normalizeModelName(m.Model)]
+		row, used := raw[normalizeModelName(m.Model)]
 		if !used {
 			// Only models this instance has actually served show up; the rest
 			// of the plan table stays out of the way.
 			continue
 		}
-		// Row spend is priced in the official Go price currency: the ledger
-		// holds official prices, and the calibration can only move the cost
-		// toward the official total, so dividing the calibrated pool-equivalent
-		// spend back by the pool multiplier (× 60/allowance) keeps the row
-		// comparable to the docs allowance. A DeepSeek row can therefore never
-		// read "$46 used of $30" through double scaling — it shows ~$23 vs $30.
-		poolWeight := 1.0
-		if m.AllowanceUSD > 0 {
-			poolWeight = 60 / m.AllowanceUSD
+		row.Model = m.Model
+		row.AllowanceUSD = m.AllowanceUSD
+		if row.UnknownCostRequests == 0 && m.AllowanceUSD > 0 {
+			percent := row.UsedUSD / m.AllowanceUSD * 100
+			row.Percent = &percent
 		}
-		rowUsed := spent
-		if scale > 0 && poolWeight > 0 {
-			rowUsed = spent * scale / poolWeight
-		}
-		percent := 0.0
-		if m.AllowanceUSD > 0 && rowUsed > 0 {
-			percent = rowUsed / m.AllowanceUSD * 100
-		}
-		rows = append(rows, quotaModelUsage{Model: m.Model, UsedUSD: rowUsed, AllowanceUSD: m.AllowanceUSD, Percent: percent})
+		rows = append(rows, row)
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].UsedUSD != rows[j].UsedUSD {
@@ -313,7 +435,7 @@ func (s *Server) monthlyModelUsage(accounts []quotaAccount, limits *quota.ModelL
 		}
 		return rows[i].Model < rows[j].Model
 	})
-	return rows
+	return rows, nil
 }
 
 // findMonthlyReset returns the monthly window's next reset from the first

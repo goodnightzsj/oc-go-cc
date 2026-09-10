@@ -141,6 +141,52 @@ func (t *RequestTransformer) TransformRequest(
 	if len(anthropicReq.Tools) > 0 {
 		openaiReq.Tools = t.transformTools(anthropicReq.Tools)
 	}
+	if len(anthropicReq.ToolChoice) > 0 {
+		var choice struct {
+			Type            string `json:"type"`
+			Name            string `json:"name"`
+			DisableParallel *bool  `json:"disable_parallel_tool_use"`
+		}
+		if err := json.Unmarshal(anthropicReq.ToolChoice, &choice); err != nil {
+			return nil, fmt.Errorf("invalid tool_choice: %w", err)
+		}
+		switch choice.Type {
+		case "auto", "none":
+			openaiReq.ToolChoice = choice.Type
+		case "any":
+			openaiReq.ToolChoice = "required"
+		case "tool":
+			if strings.TrimSpace(choice.Name) == "" {
+				return nil, fmt.Errorf("tool_choice.name is required for a named tool")
+			}
+			openaiReq.ToolChoice = map[string]any{"type": "function", "function": map[string]string{"name": choice.Name}}
+		default:
+			return nil, fmt.Errorf("unsupported tool_choice type %q", choice.Type)
+		}
+		if choice.DisableParallel != nil {
+			parallel := !*choice.DisableParallel
+			openaiReq.ParallelToolCalls = &parallel
+		}
+	}
+	if len(anthropicReq.OutputConfig) > 0 {
+		var output struct {
+			Effort string          `json:"effort"`
+			Format json.RawMessage `json:"format"`
+		}
+		if err := json.Unmarshal(anthropicReq.OutputConfig, &output); err != nil {
+			return nil, fmt.Errorf("invalid output_config: %w", err)
+		}
+		if len(output.Format) > 0 && string(output.Format) != "null" {
+			return nil, fmt.Errorf("output_config.format is not supported by the Chat Completions adapter")
+		}
+		switch output.Effort {
+		case "":
+		case "low", "medium", "high", "xhigh", "max":
+			openaiReq.ReasoningEffort = &output.Effort
+		default:
+			return nil, fmt.Errorf("unsupported output_config.effort %q", output.Effort)
+		}
+	}
 
 	return openaiReq, nil
 }
@@ -429,14 +475,29 @@ func (t *RequestTransformer) transformMessage(msg types.Message, modelID string,
 func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, vision bool) ([]types.ChatMessage, error) {
 	var result []types.ChatMessage
 	var textParts []string
-	var imageParts []types.ChatContentPart
+	var parts []types.ChatContentPart
+	visionImage := false
 	hasImage := false
 
 	for _, block := range blocks {
 		switch block.Type {
 		case "text":
 			textParts = append(textParts, block.Text)
+			parts = append(parts, types.ChatContentPart{Type: "text", Text: block.Text})
 		case "tool_result":
+			// Chat tool messages accept text, not images or document blocks.
+			// Native Messages forwarding retains them; conversion must not drop them.
+			if len(block.Content) > 0 && strings.HasPrefix(strings.TrimSpace(string(block.Content)), "[") {
+				var inner []types.ContentBlock
+				if err := json.Unmarshal(block.Content, &inner); err != nil {
+					return nil, fmt.Errorf("invalid tool_result content: %w", err)
+				}
+				for _, part := range inner {
+					if part.Type != "text" {
+						return nil, fmt.Errorf("tool_result content type %q requires native Messages forwarding", part.Type)
+					}
+				}
+			}
 			// In OpenAI, tool results are separate messages with role "tool"
 			toolContent := block.TextContent()
 			result = append(result, types.ChatMessage{
@@ -445,17 +506,23 @@ func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, v
 				ToolCallID: block.GetToolID(),
 			})
 		case "image":
-			if block.Source != nil {
-				if vision {
-					imageParts = append(imageParts, types.ChatContentPart{
-						Type: "image_url",
-						ImageURL: &types.ImageURL{
-							URL: fmt.Sprintf("data:%s;base64,%s", block.Source.MediaType, block.Source.Data),
-						},
-					})
-				} else {
-					hasImage = true
+			if block.Source == nil {
+				return nil, fmt.Errorf("image source is required")
+			}
+			if vision {
+				imageURL, err := imageSourceURL(block.Source)
+				if err != nil {
+					return nil, err
 				}
+				visionImage = true
+				parts = append(parts, types.ChatContentPart{
+					Type: "image_url",
+					ImageURL: &types.ImageURL{
+						URL: imageURL,
+					},
+				})
+			} else {
+				hasImage = true
 			}
 		}
 	}
@@ -465,17 +532,9 @@ func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, v
 	// immediately after the assistant message that emitted tool_calls.
 	// If the Anthropic user turn also includes free-form text and/or images,
 	// emit it as a subsequent user message after all tool results.
-	if len(textParts) > 0 || len(imageParts) > 0 || hasImage {
-		if len(imageParts) > 0 {
-			// Multimodal message: build content array with text + image_url parts
-			var parts []types.ChatContentPart
-			if len(textParts) > 0 {
-				parts = append(parts, types.ChatContentPart{
-					Type: "text",
-					Text: strings.Join(textParts, ""),
-				})
-			}
-			parts = append(parts, imageParts...)
+	if len(textParts) > 0 || visionImage || hasImage {
+		if visionImage {
+			// Keep image/text interleaving, which determines what each caption describes.
 			contentJSON, err := json.Marshal(parts)
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal multimodal content: %w", err)
@@ -499,6 +558,26 @@ func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, v
 	}
 
 	return result, nil
+}
+
+func imageSourceURL(source *types.ImageSource) (string, error) {
+	if source == nil {
+		return "", fmt.Errorf("image source is required")
+	}
+	switch source.Type {
+	case "url":
+		if source.URL == "" {
+			return "", fmt.Errorf("image source URL is required")
+		}
+		return source.URL, nil
+	case "base64", "":
+		if source.MediaType == "" || source.Data == "" {
+			return "", fmt.Errorf("base64 image media_type and data are required")
+		}
+		return fmt.Sprintf("data:%s;base64,%s", source.MediaType, source.Data), nil
+	default:
+		return "", fmt.Errorf("unsupported image source type %q", source.Type)
+	}
 }
 
 // transformAssistantMessage converts an assistant message with potential tool_use blocks.

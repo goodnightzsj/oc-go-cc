@@ -37,10 +37,10 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:     appName,
 		Aliases: []string{"oc-go-cc"},
-		Short:   "Proxy Claude Code requests to OpenCode Go API",
-		Long: `routatic-proxy is a CLI proxy tool that allows you to use your OpenCode Go
-subscription with Claude Code. It intercepts Claude Code's Anthropic API requests,
-transforms them to OpenAI format, and forwards them to OpenCode Go.
+		Short:   "Route Claude Code and Codex requests to configured model providers",
+		Long: `routatic-proxy routes Claude Code Messages and Codex Responses requests to
+OpenCode Go, OpenCode Zen, AWS Bedrock, OpenRouter, and CommandCode.
+Native protocols are forwarded directly; other protocols use the matching adapter.
 
 Configuration is stored at ~/.config/routatic-proxy/config.json.
 Legacy ~/.config/oc-go-cc/config.json and OC_GO_CC_* environment variables are still supported.`,
@@ -235,7 +235,7 @@ Press Ctrl+C to stop the server.`,
 				fmt.Printf("Forwarding to Anthropic first: %s\n", cfg.AnthropicFirst.BaseURL)
 				fmt.Printf("OpenCode fallback: %s\n", cfg.OpenCodeGo.BaseURL)
 			} else {
-				fmt.Printf("Forwarding to: %s\n", cfg.OpenCodeGo.BaseURL)
+				fmt.Printf("Routing through configured providers (%d model entries)\n", len(cfg.Models))
 			}
 			fmt.Println()
 			fmt.Println("Configure Claude Code with:")
@@ -382,6 +382,7 @@ The --provider flag pre-configures the config with provider-specific defaults:
   - opencode-zen: OpenCode Zen (pay-as-you-go, Claude/GPT/Gemini)
   - aws-bedrock: AWS Bedrock Mantle (run models on your AWS infrastructure)
   - openrouter: OpenRouter (unified API for 100+ models)
+  - commandcode: CommandCode official Provider API (Messages and Chat Completions)
 
 Without --provider, a default config optimized for OpenCode Go is created.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -440,7 +441,7 @@ Without --provider, a default config optimized for OpenCode Go is created.`,
 	}
 
 	cmd.Flags().StringVar(&provider, "provider", "",
-		"Provider preset: opencode-go, opencode-zen, aws-bedrock, openrouter")
+		"Provider preset: opencode-go, opencode-zen, aws-bedrock, openrouter, commandcode")
 
 	return cmd
 }
@@ -473,9 +474,13 @@ func validateCmd() *cobra.Command {
 			if keys := cfg.EffectiveAPIKeys(); len(keys) > 1 {
 				fmt.Printf("  API Keys: %d keys (round-robin)\n", len(keys))
 			} else if len(keys) == 1 {
-				fmt.Printf("  API Key: %s...\n", maskString(keys[0], 8))
+				fmt.Println("  Global API key: configured")
 			}
-			fmt.Printf("  Base URL: %s\n", cfg.OpenCodeGo.BaseURL)
+			for _, name := range []string{"opencode-go", "opencode-zen", "aws-bedrock", "openrouter", "commandcode"} {
+				if keys := cfg.ProviderAPIKeys(name); len(keys) > 0 {
+					fmt.Printf("  %s: %d key(s) available\n", name, len(keys))
+				}
+			}
 			fmt.Printf("  Models configured: %d\n", len(cfg.Models))
 			fmt.Printf("  Fallback chains: %d\n", len(cfg.Fallbacks))
 			return nil
@@ -575,7 +580,7 @@ func checkClaudeEnv(source string, env map[string]string, expectedURL string, an
 			fmt.Printf("%s: ANTHROPIC_AUTH_TOKEN is set; unset it to keep the saved Claude subscription login active\n", source)
 			conflicts++
 		} else if value != "unused" {
-			fmt.Printf("%s: ANTHROPIC_AUTH_TOKEN is %q, expected \"unused\"\n", source, value)
+			fmt.Printf("%s: ANTHROPIC_AUTH_TOKEN is set to a non-placeholder value; expected \"unused\" for this local proxy\n", source)
 			conflicts++
 		}
 	} else if !anthropicFirst {
@@ -784,14 +789,6 @@ func getPIDPath() string {
 		return filepath.Join(os.TempDir(), pidFileName)
 	}
 	return paths.PIDFile
-}
-
-// maskString masks all but the first `visible` characters of a string.
-func maskString(s string, visible int) string {
-	if len(s) <= visible {
-		return s
-	}
-	return s[:visible] + "..."
 }
 
 //go:embed templates/default_config.json

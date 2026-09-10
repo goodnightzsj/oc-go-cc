@@ -1,0 +1,4 @@
+id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,notes
+1,获取远端引用并筛选上游修复,DONE,上游差异和采纳依据已记录,git log HEAD..upstream/main --oneline,2026-09-10,0,27项完成筛选;见raw/upstream-review.md
+2,隔离测试HOME与tokenizer外网依赖,DONE,命令测试只操作临时数据且token计数测试可重复,go test ./cmd/routatic-proxy ./internal/token,2026-09-10,0,init tests隔离HOME/USERPROFILE;公开tokenizer缓存在临时目录
+3,修复固定日期基线并验证,DONE,日期变动不再使回归失效,go test ./internal/storage,2026-09-10,1,基线首次1个固定日期失败;改为相对时间后PASS

@@ -133,3 +133,71 @@ func TestBackfillRequestCostsMigratesExistingRows(t *testing.T) {
 		t.Fatalf("backfilled row = %+v, want positive cost", rows)
 	}
 }
+
+func TestRequestsQueryPreservesUnknownOutcomesAndUsage(t *testing.T) {
+	db := newCostTestDB(t)
+	repo := NewRequests(db)
+	for _, tt := range []struct {
+		id           string
+		detailsKnown int
+		success      any
+		wantKnown    bool
+		wantSuccess  bool
+	}{
+		{"success", 1, 1, true, true},
+		{"failure", 1, 0, true, false},
+		{"legacy-null", 1, nil, false, false},
+		{"invalid-positive", 1, 2, false, false},
+		{"invalid-negative", 1, -1, false, false},
+		{"imported-success", 0, 1, false, true},
+		{"imported-failure", 0, 0, false, false},
+	} {
+		t.Run(tt.id, func(t *testing.T) {
+			original := history.RequestRecord{
+				ID: tt.id, Model: "shared-model", Provider: "commandcode", Scenario: "default",
+				StartTime: time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC), Duration: 1500 * time.Millisecond,
+				InputTokens: 11, OutputTokens: 7, CacheReadTokens: 3, CacheCreationTokens: 5,
+				CostUSD: 0.125, CostKnown: true, CostSource: CostSourceProvider,
+				Streaming: true, Attempt: 2, ErrorMsg: "retained diagnostic",
+			}
+			if err := repo.Insert(original); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.DB().Exec(`UPDATE requests SET details_known = ?, success = ? WHERE id = ?`, tt.detailsKnown, tt.success, tt.id); err != nil {
+				t.Fatal(err)
+			}
+			rows, count, err := repo.Query(RequestQuery{Search: tt.id})
+			if err != nil || count != 1 || len(rows) != 1 {
+				t.Fatalf("Query = %+v, %d, %v", rows, count, err)
+			}
+			got := rows[0]
+			if got.DetailsKnown != tt.wantKnown || got.Success != tt.wantSuccess {
+				t.Errorf("outcome = known:%v success:%v, want known:%v success:%v", got.DetailsKnown, got.Success, tt.wantKnown, tt.wantSuccess)
+			}
+			if got.InputTokens != original.InputTokens || got.OutputTokens != original.OutputTokens ||
+				got.CacheReadTokens != original.CacheReadTokens || got.CacheCreationTokens != original.CacheCreationTokens ||
+				got.DisplayInputTokens() != 19 || got.CostUSD != original.CostUSD || !got.CostKnown || got.CostSource != CostSourceProvider {
+				t.Errorf("unknown outcome changed available usage or cost: %+v", got)
+			}
+			if got.Duration != original.Duration || got.Streaming != original.Streaming || got.Attempt != original.Attempt || got.ErrorMsg != original.ErrorMsg {
+				t.Errorf("unknown outcome erased detail values: %+v", got)
+			}
+		})
+	}
+	for _, success := range []bool{false, true} {
+		rows, count, err := repo.Query(RequestQuery{Success: &success})
+		if err != nil || count != 1 || len(rows) != 1 {
+			t.Fatalf("filter success=%v: rows=%+v count=%d error=%v", success, rows, count, err)
+		}
+		if !rows[0].DetailsKnown || rows[0].Success != success {
+			t.Errorf("filter success=%v included unknown or mismatched outcome: %+v", success, rows[0])
+		}
+	}
+	summary, err := repo.Summary(RequestQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.TotalRequests != 7 || summary.SuccessRows != 2 || summary.SuccessRate != 0.5 || summary.TotalTokens != 7*26 || summary.CostUSD != 7*0.125 {
+		t.Errorf("summary must preserve all usage and count only known outcomes: %+v", summary)
+	}
+}

@@ -19,12 +19,12 @@ import (
 	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/internal/metrics"
 	"github.com/routatic/proxy/internal/provider"
-	"github.com/routatic/proxy/internal/storage"
-	"path/filepath"
 	"github.com/routatic/proxy/internal/router"
+	"github.com/routatic/proxy/internal/storage"
 	"github.com/routatic/proxy/internal/token"
 	"github.com/routatic/proxy/internal/transformer"
 	"github.com/routatic/proxy/pkg/types"
+	"path/filepath"
 )
 
 func boolPtr(b bool) *bool { return &b }
@@ -198,9 +198,8 @@ func TestBuildModelChain_NoOverride_UsesScenarioRoute(t *testing.T) {
 	}
 }
 
-func TestBuildModelChain_Override_AppendsScenarioChainDeduped(t *testing.T) {
-	// The override's primary overlaps with the default scenario's primary.
-	// The dedup logic must drop the duplicate.
+func TestBuildModelChain_Override_PreservesDifferentProvider(t *testing.T) {
+	// The same model ID on Zen and Go is a different fallback target.
 	cfg := &config.Config{
 		Models: map[string]config.ModelConfig{
 			"default": {Provider: "opencode-go", ModelID: "kimi-k2.6"},
@@ -227,11 +226,13 @@ func TestBuildModelChain_Override_AppendsScenarioChainDeduped(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Order: [override.primary=kimi-k2.6, scenario.primary=kimi-k2.6 (DROPPED), scenario.fallbacks...]
-	// Final chain: [kimi-k2.6, mimo-v2.5-pro, qwen3.6-plus]
-	want := []string{"kimi-k2.6", "mimo-v2.5-pro", "qwen3.6-plus"}
+	// Shared Go fallbacks are deduplicated, but Go's primary stays in the chain.
+	want := []string{"kimi-k2.6", "mimo-v2.5-pro", "qwen3.6-plus", "kimi-k2.6"}
 	if got := chainIDs(chain); !equalStrings(got, want) {
-		t.Errorf("chain = %v, want %v (dedup must drop scenario.primary that overlaps override.primary)", got, want)
+		t.Fatalf("chain = %v, want %v", got, want)
+	}
+	if chain[0].Provider != "opencode-zen" || chain[3].Provider != "opencode-go" {
+		t.Fatal("cross-provider fallback identity was lost")
 	}
 
 	// Primary must come from the override (preserving the override's settings).

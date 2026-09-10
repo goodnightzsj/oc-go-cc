@@ -29,7 +29,7 @@ type RequestRecord struct {
 	Attempt  int    // attempt number in fallback chain (1 = primary, >1 = fallback)
 
 	// PeakMultiplier is the billing multiplier applied by the upstream
-	// (1 = off-peak base rate, 2 = deepseek weekday peak). 0 means unpriced.
+	// (1 = off-peak base rate, 2 = deepseek weekday peak). 0 means unspecified.
 	PeakMultiplier float64 `json:"peak_multiplier"`
 }
 
@@ -42,15 +42,25 @@ func PeakMultiplier(model string, t time.Time) float64 {
 	if t.IsZero() || !strings.Contains(strings.ToLower(model), "deepseek") {
 		return 1
 	}
+	t = t.UTC()
 	wd := t.Weekday()
 	if wd == time.Saturday || wd == time.Sunday {
 		return 1
 	}
-	h := t.UTC().Hour()
+	h := t.Hour()
 	if (h >= 1 && h < 4) || (h >= 6 && h < 10) {
 		return 2
 	}
 	return 1
+}
+
+// ProviderPeakMultiplier applies OpenCode Go's peak rule only to its requests.
+// An empty provider retains the interpretation of legacy OpenCode Go records.
+func ProviderPeakMultiplier(provider, model string, t time.Time) float64 {
+	if provider != "" && provider != "opencode-go" {
+		return 1
+	}
+	return PeakMultiplier(model, t)
 }
 
 // DisplayInputTokens is the total input a user consumed (raw + cache), used

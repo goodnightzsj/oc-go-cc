@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,7 +25,7 @@ func TestRunCostsReconcileDryRunAndApply(t *testing.T) {
 		t.Fatalf("open storage: %v", err)
 	}
 	if err := storage.NewRequests(db).Insert(history.RequestRecord{
-		ID: "request-1", Model: "deepseek-v4-flash", StartTime: startedAt, Duration: 2705 * time.Millisecond,
+		ID: "request-1", Model: "deepseek-v4-flash", Provider: "opencode-go", StartTime: startedAt, Duration: 2705 * time.Millisecond,
 		CacheCreationTokens: 10, OutputTokens: 2, CacheReadTokens: 30, Success: true,
 	}); err != nil {
 		t.Fatalf("insert request: %v", err)
@@ -48,7 +49,8 @@ func TestRunCostsReconcileDryRunAndApply(t *testing.T) {
 	}
 
 	cmd, output := newCaptureCommand(t)
-	if err := runCostsReconcile(cmd, configPath, inputPath, false); err != nil {
+	cmd.SetErr(io.Discard)
+	if err := runCostsReconcile(cmd, configPath, inputPath, "opencode-go", false); err != nil {
 		t.Fatalf("dry run: %v", err)
 	}
 	var report storage.ProviderCostReport
@@ -60,7 +62,8 @@ func TestRunCostsReconcileDryRunAndApply(t *testing.T) {
 	}
 
 	cmd, output = newCaptureCommand(t)
-	if err := runCostsReconcile(cmd, configPath, inputPath, true); err != nil {
+	cmd.SetErr(io.Discard)
+	if err := runCostsReconcile(cmd, configPath, inputPath, "opencode-go", true); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	if err := json.Unmarshal(output.Bytes(), &report); err != nil {
@@ -137,6 +140,7 @@ func TestRunCostsSyncRequestsUsesPersistedSnapshot(t *testing.T) {
 	}
 
 	cmd, output := newCaptureCommand(t)
+	cmd.SetErr(io.Discard)
 	if err := runCostsSyncRequests(cmd, configPath, false); err != nil {
 		t.Fatalf("dry-run sync: %v", err)
 	}

@@ -27,18 +27,19 @@ func TextContent(s string) json.RawMessage {
 
 // ChatCompletionRequest represents a request to the OpenAI Chat Completions API.
 type ChatCompletionRequest struct {
-	Model           string          `json:"model"`
-	Messages        []ChatMessage   `json:"messages"`
-	Stream          *bool           `json:"stream,omitempty"`
-	Temperature     *float64        `json:"temperature,omitempty"`
-	TopP            *float64        `json:"top_p,omitempty"`
-	MaxTokens       *int            `json:"max_tokens,omitempty"`
-	ReasoningEffort *string         `json:"reasoning_effort,omitempty"`
-	Thinking        json.RawMessage `json:"thinking,omitempty"`
-	Tools           []ToolDef       `json:"tools,omitempty"`
-	ToolChoice      interface{}     `json:"tool_choice,omitempty"`
-	Stop            interface{}     `json:"stop,omitempty"`
-	StreamOptions   *StreamOptions  `json:"stream_options,omitempty"`
+	Model             string          `json:"model"`
+	Messages          []ChatMessage   `json:"messages"`
+	Stream            *bool           `json:"stream,omitempty"`
+	Temperature       *float64        `json:"temperature,omitempty"`
+	TopP              *float64        `json:"top_p,omitempty"`
+	MaxTokens         *int            `json:"max_tokens,omitempty"`
+	ReasoningEffort   *string         `json:"reasoning_effort,omitempty"`
+	Thinking          json.RawMessage `json:"thinking,omitempty"`
+	Tools             []ToolDef       `json:"tools,omitempty"`
+	ToolChoice        interface{}     `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool           `json:"parallel_tool_calls,omitempty"`
+	Stop              interface{}     `json:"stop,omitempty"`
+	StreamOptions     *StreamOptions  `json:"stream_options,omitempty"`
 }
 
 // StreamOptions controls streaming response metadata from OpenAI-compatible APIs.

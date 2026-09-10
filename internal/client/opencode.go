@@ -13,25 +13,11 @@ import (
 	"time"
 
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/internal/debug"
 	"github.com/routatic/proxy/internal/models"
 	"github.com/routatic/proxy/pkg/types"
 )
-
-// extractRequestID converts a context value to a string request ID.
-func extractRequestID(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	switch s := v.(type) {
-	case string:
-		return s
-	case []byte:
-		return string(s)
-	default:
-		return fmt.Sprintf("%v", v)
-	}
-}
 
 // captureReadCloser wraps an io.ReadCloser with a TeeReader so every byte read
 // (including streaming SSE) is also piped to the capture goroutine. Close closes
@@ -78,6 +64,7 @@ const (
 	ProviderOpenCodeZen = "opencode-zen"
 	ProviderAWSBedrock  = "aws-bedrock"
 	ProviderOpenRouter  = "openrouter"
+	ProviderCommandCode = "commandcode"
 )
 
 // APIError represents an HTTP API error returned by an upstream provider.
@@ -115,29 +102,7 @@ func (c *OpenCodeClient) nextAPIKey(keys []string) string {
 // getProviderAPIKeys returns the API keys for a specific provider.
 // It checks provider-specific keys first, then falls back to global keys for backward compatibility.
 func (c *OpenCodeClient) getProviderAPIKeys(modelConfig config.ModelConfig) []string {
-	cfg := c.atomic.Get()
-
-	switch {
-	case IsBedrock(modelConfig):
-		if keys := cfg.AWSBedrock.EffectiveAPIKeys(); len(keys) > 0 {
-			return keys
-		}
-	case IsZen(modelConfig):
-		if keys := cfg.OpenCodeZen.EffectiveAPIKeys(); len(keys) > 0 {
-			return keys
-		}
-	case IsOpenRouter(modelConfig):
-		if keys := cfg.OpenRouter.EffectiveAPIKeys(); len(keys) > 0 {
-			return keys
-		}
-	default:
-		if keys := cfg.OpenCodeGo.EffectiveAPIKeys(); len(keys) > 0 {
-			return keys
-		}
-	}
-
-	// Fallback to global keys for backward compatibility
-	return cfg.EffectiveAPIKeys()
+	return c.atomic.Get().ProviderAPIKeys(Provider(modelConfig))
 }
 
 // ProviderKeyCount returns the number of API keys configured for a provider.
@@ -147,27 +112,7 @@ func ProviderKeyCount(atomicCfg *config.AtomicConfig, provider string) int {
 	if atomicCfg == nil {
 		return 1 // Default to single-key behavior
 	}
-	cfg := atomicCfg.Get()
-
-	var keys []string
-	switch provider {
-	case ProviderOpenCodeGo:
-		keys = cfg.OpenCodeGo.EffectiveAPIKeys()
-	case ProviderOpenCodeZen:
-		keys = cfg.OpenCodeZen.EffectiveAPIKeys()
-	case ProviderAWSBedrock:
-		keys = cfg.AWSBedrock.EffectiveAPIKeys()
-	case ProviderOpenRouter:
-		keys = cfg.OpenRouter.EffectiveAPIKeys()
-	default:
-		// Unknown provider - default to global keys
-		keys = cfg.EffectiveAPIKeys()
-	}
-
-	if len(keys) == 0 {
-		return 1 // Default to single-key behavior
-	}
-	return len(keys)
+	return max(1, len(atomicCfg.Get().ProviderAPIKeys(provider)))
 }
 
 // NewOpenCodeClient creates a client for sending requests to OpenCode Go,
@@ -223,6 +168,11 @@ func (c *OpenCodeClient) StreamIdleTimeout(modelConfig config.ModelConfig) time.
 		if ms <= 0 {
 			ms = cfg.OpenRouter.TimeoutMs
 		}
+	case Provider(modelConfig) == ProviderCommandCode:
+		ms = cfg.CommandCode.StreamTimeoutMs
+		if ms <= 0 {
+			ms = cfg.CommandCode.TimeoutMs
+		}
 	default:
 		ms = cfg.OpenCodeGo.StreamTimeoutMs
 		if ms <= 0 {
@@ -249,6 +199,8 @@ func (c *OpenCodeClient) RequestTimeout(model config.ModelConfig) time.Duration 
 		timeoutMs = cfg.OpenCodeZen.TimeoutMs
 	case IsOpenRouter(model):
 		timeoutMs = cfg.OpenRouter.TimeoutMs
+	case Provider(model) == ProviderCommandCode:
+		timeoutMs = cfg.CommandCode.TimeoutMs
 	default:
 		timeoutMs = cfg.OpenCodeGo.TimeoutMs
 	}
@@ -281,6 +233,11 @@ func (c *OpenCodeClient) StreamingTimeout(model config.ModelConfig) time.Duratio
 		if timeoutMs <= 0 {
 			timeoutMs = cfg.OpenRouter.TimeoutMs
 		}
+	case Provider(model) == ProviderCommandCode:
+		timeoutMs = cfg.CommandCode.StreamingTimeoutMs
+		if timeoutMs <= 0 {
+			timeoutMs = cfg.CommandCode.TimeoutMs
+		}
 	default:
 		timeoutMs = cfg.OpenCodeGo.StreamingTimeoutMs
 		if timeoutMs <= 0 {
@@ -297,18 +254,7 @@ func (c *OpenCodeClient) StreamingTimeout(model config.ModelConfig) time.Duratio
 // Normalizes underscores to hyphens so that both "aws_bedrock" and "aws-bedrock"
 // resolve to the same canonical form. Defaults to ProviderOpenCodeGo if empty.
 func Provider(model config.ModelConfig) string {
-	p := model.Provider
-	if p == "" {
-		return ProviderOpenCodeGo
-	}
-	// Normalize underscores to hyphens for consistent matching.
-	for i := range p {
-		if p[i] == '_' {
-			// strings.ReplaceAll would allocate; do an in-place scan + build only when needed.
-			return strings.ReplaceAll(p, "_", "-")
-		}
-	}
-	return p
+	return config.NormalizeProvider(model.Provider)
 }
 
 // IsZen returns true if the model uses the OpenCode Zen provider.
@@ -329,7 +275,7 @@ func IsOpenRouter(model config.ModelConfig) bool {
 // getEndpoint returns the appropriate endpoint config for a model.
 func (c *OpenCodeClient) getEndpoint(modelID string, modelConfig config.ModelConfig) endpointConfig {
 	cfg := c.atomic.Get()
-	apiKey := c.nextAPIKey(c.getProviderAPIKeys(modelConfig))
+	apiKey := c.nextAPIKey(cfg.ProviderAPIKeys(Provider(modelConfig)))
 
 	if IsBedrock(modelConfig) {
 		bedrock := cfg.AWSBedrock
@@ -351,7 +297,14 @@ func (c *OpenCodeClient) getEndpoint(modelID string, modelConfig config.ModelCon
 	}
 
 	if IsOpenRouter(modelConfig) {
-		return endpointConfig{BaseURL: cfg.OpenRouter.BaseURL, APIKey: apiKey}
+		endpoint := strings.TrimRight(cfg.OpenRouter.BaseURL, "/")
+		if strings.HasSuffix(endpoint, "/v1") {
+			endpoint += "/chat/completions"
+		}
+		return endpointConfig{BaseURL: endpoint, APIKey: apiKey}
+	}
+	if Provider(modelConfig) != ProviderOpenCodeGo {
+		return endpointConfig{}
 	}
 
 	// Default: OpenCode Go
@@ -374,7 +327,13 @@ func (c *OpenCodeClient) ChatCompletion(
 	req *types.ChatCompletionRequest,
 	modelConfig config.ModelConfig,
 ) (*http.Response, error) {
+	if !config.SupportedProvider(Provider(modelConfig)) {
+		return nil, fmt.Errorf("unsupported provider %q", Provider(modelConfig))
+	}
 	endpoint := c.getEndpoint(modelID, modelConfig)
+	if endpoint.APIKey == "" {
+		return nil, fmt.Errorf("no API key configured for provider %q", Provider(modelConfig))
+	}
 
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -383,7 +342,7 @@ func (c *OpenCodeClient) ChatCompletion(
 
 	// Capture upstream request before sending
 	if c.captureLogger != nil {
-		c.captureLogger.CaptureUpstreamRequest(extractRequestID(ctx.Value("requestID")), Provider(modelConfig), body)
+		c.captureLogger.CaptureUpstreamRequest(core.RequestMetadataFromContext(ctx).RequestID, Provider(modelConfig), body)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
@@ -392,6 +351,7 @@ func (c *OpenCodeClient) ChatCompletion(
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
+	SetProviderHeaders(httpReq, Provider(modelConfig))
 	// Anthropic endpoint uses x-api-key; OpenAI endpoint uses Bearer
 	if models.IsAnthropicModel(modelID) {
 		httpReq.Header.Set("x-api-key", endpoint.APIKey)
@@ -418,7 +378,7 @@ func (c *OpenCodeClient) ChatCompletion(
 	// pipe write end on Close so the async capture goroutine always finishes.
 	if c.captureLogger != nil {
 		resp.Body = CaptureBody(resp.Body, func(data []byte) {
-			c.captureLogger.CaptureUpstreamResponse(extractRequestID(ctx.Value("requestID")), Provider(modelConfig), data)
+			c.captureLogger.CaptureUpstreamResponse(core.RequestMetadataFromContext(ctx).RequestID, Provider(modelConfig), data)
 		})
 	}
 

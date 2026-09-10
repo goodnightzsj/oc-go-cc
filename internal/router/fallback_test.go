@@ -76,7 +76,7 @@ func TestExecuteWithFallback_NonRetryableDoesNotOpenCircuit(t *testing.T) {
 	}
 
 	// Circuit breaker should still be closed since errors were non-retryable
-	cb := h.getCircuitBreaker("model-a")
+	cb := h.getCircuitBreaker("opencode-go/model-a")
 	if cb.State() != CircuitClosed {
 		t.Errorf("model-a circuit should be closed after non-retryable errors, got %v", cb.State())
 	}
@@ -109,7 +109,7 @@ func TestExecuteWithFallback_RetryableOpensCircuit(t *testing.T) {
 	}
 
 	// Circuit breaker should be OPEN after retryable failure
-	cb := h.getCircuitBreaker("model-a")
+	cb := h.getCircuitBreaker("opencode-go/model-a")
 	if cb.State() != CircuitOpen {
 		t.Errorf("model-a circuit should be open after retryable error, got %v", cb.State())
 	}
@@ -143,13 +143,13 @@ func TestExecuteWithFallback_NonRetryableThenRetryable(t *testing.T) {
 	}
 
 	// model-a circuit should be closed (non-retryable)
-	cbA := h.getCircuitBreaker("model-a")
+	cbA := h.getCircuitBreaker("opencode-go/model-a")
 	if cbA.State() != CircuitClosed {
 		t.Errorf("model-a circuit should be closed after non-retryable error, got %v", cbA.State())
 	}
 
 	// model-b circuit should be open (retryable)
-	cbB := h.getCircuitBreaker("model-b")
+	cbB := h.getCircuitBreaker("opencode-go/model-b")
 	if cbB.State() != CircuitOpen {
 		t.Errorf("model-b circuit should be open after retryable error, got %v", cbB.State())
 	}
@@ -219,7 +219,7 @@ func TestExecuteWithFallback_StopsOnCanceledAfterFirstModel(t *testing.T) {
 	}
 
 	states := handler.GetCircuitStates()
-	if _, ok := states["model-b"]; ok {
+	if _, ok := states["opencode-go/model-b"]; ok {
 		t.Error("model-b should not have a circuit breaker entry")
 	}
 }
@@ -370,7 +370,7 @@ func TestExecuteWithFallback_CircuitBreakerDoesNotCountClientCancellation(t *tes
 	}
 
 	states := handler.GetCircuitStates()
-	if state, ok := states["model-a"]; ok {
+	if state, ok := states["opencode-go/model-a"]; ok {
 		if state == "open" {
 			t.Error("model-a circuit breaker should NOT be open for client cancellation")
 		}
@@ -395,7 +395,7 @@ func TestExecuteWithFallback_RealModelFailurePenalizesCircuitBreaker(t *testing.
 
 	// model-a's circuit breaker should be open because of real failure
 	states := handler.GetCircuitStates()
-	state, ok := states["model-a"]
+	state, ok := states["opencode-go/model-a"]
 	if !ok {
 		t.Fatal("model-a should have circuit breaker entry")
 	}
@@ -427,7 +427,7 @@ func TestExecuteWithFallback_ParentDeadlineExceededNotPenalized(t *testing.T) {
 	}
 
 	states := handler.GetCircuitStates()
-	if state, ok := states["model-a"]; ok && state == "open" {
+	if state, ok := states["opencode-go/model-a"]; ok && state == "open" {
 		t.Error("model-a circuit breaker should NOT be open for parent deadline exceeded")
 	}
 }
@@ -454,10 +454,10 @@ func TestExecuteWithFallback_AllModelsFailRecordsFailures(t *testing.T) {
 	}
 
 	states := handler.GetCircuitStates()
-	if _, ok := states["model-a"]; !ok {
+	if _, ok := states["opencode-go/model-a"]; !ok {
 		t.Error("model-a should have circuit breaker entry")
 	}
-	if _, ok := states["model-b"]; !ok {
+	if _, ok := states["opencode-go/model-b"]; !ok {
 		t.Error("model-b should have circuit breaker entry")
 	}
 }
@@ -548,7 +548,7 @@ func TestExecuteWithFallback_UsageLimitErrorStopsFallback(t *testing.T) {
 
 	// Circuit breaker should not be affected by usage limit errors
 	states := handler.GetCircuitStates()
-	if state, ok := states["model-a"]; ok && state == "open" {
+	if state, ok := states["opencode-go/model-a"]; ok && state == "open" {
 		t.Error("model-a circuit breaker should NOT be open for usage limit error")
 	}
 }
@@ -656,7 +656,7 @@ func TestExecuteWithFallback_AuthErrorShortCircuits(t *testing.T) {
 
 	// Circuit breaker should not be affected by auth errors (they're non-retryable)
 	states := handler.GetCircuitStates()
-	if state, ok := states["model-a"]; ok && state == "open" {
+	if state, ok := states["opencode-go/model-a"]; ok && state == "open" {
 		t.Error("model-a circuit breaker should NOT be open for auth error")
 	}
 }
@@ -772,12 +772,12 @@ func TestProviderKeyCount(t *testing.T) {
 			want:     2,
 		},
 		{
-			name: "fallback to global keys for unknown provider",
+			name: "unknown provider does not receive global keys",
 			config: &config.Config{
 				APIKeys: []string{"global1", "global2"},
 			},
 			provider: "unknown-provider",
-			want:     2,
+			want:     1,
 		},
 		{
 			name: "empty keys defaults to single",

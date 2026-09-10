@@ -21,6 +21,7 @@ func TestProviderCostReconciliationClassifiesWithoutGuessing(t *testing.T) {
 		{ID: "ambiguous-b", Model: "deepseek-v4-flash", StartTime: base.Add(200 * time.Millisecond), Duration: time.Second, CacheCreationTokens: 20, OutputTokens: 3, Success: true},
 		{ID: "conflict", Model: "deepseek-v4-flash", StartTime: base.Add(time.Second), Duration: 1200 * time.Millisecond, CacheCreationTokens: 40, OutputTokens: 4, Success: true},
 	} {
+		rec.Provider = "opencode-go"
 		if err := repo.Insert(rec); err != nil {
 			t.Fatalf("insert %s: %v", rec.ID, err)
 		}
@@ -33,7 +34,7 @@ func TestProviderCostReconciliationClassifiesWithoutGuessing(t *testing.T) {
 		{Time: base.Add(3 * time.Second), Model: "deepseek-v4-flash", InputTokens: 50, OutputTokens: 5, ProviderCostUnits: 4567},
 	}
 
-	report, err := db.ReconcileProviderCosts(context.Background(), providerRows, false)
+	report, err := db.ReconcileProviderCosts(context.Background(), "opencode-go", providerRows, false)
 	if err != nil {
 		t.Fatalf("dry run: %v", err)
 	}
@@ -41,7 +42,7 @@ func TestProviderCostReconciliationClassifiesWithoutGuessing(t *testing.T) {
 		t.Fatalf("unexpected report: %+v", report)
 	}
 
-	report, err = db.ReconcileProviderCosts(context.Background(), providerRows, true)
+	report, err = db.ReconcileProviderCosts(context.Background(), "opencode-go", providerRows, true)
 	if !errors.Is(err, ErrAmbiguousProviderCosts) {
 		t.Fatalf("apply error = %v, want ErrAmbiguousProviderCosts", err)
 	}
@@ -57,7 +58,7 @@ func TestProviderCostReconciliationAppliesExactMatches(t *testing.T) {
 	completedAt := time.Date(2026, 8, 6, 7, 0, 0, 0, time.UTC)
 	startedAt := completedAt.Add(-1662 * time.Millisecond)
 	if err := repo.Insert(history.RequestRecord{
-		ID: "request-1", Model: "deepseek-v4-flash", StartTime: startedAt, Duration: 2705 * time.Millisecond,
+		ID: "request-1", Model: "deepseek-v4-flash", Provider: "opencode-go", StartTime: startedAt, Duration: 2705 * time.Millisecond,
 		CacheCreationTokens: 10, OutputTokens: 2, CacheReadTokens: 30, Success: true,
 	}); err != nil {
 		t.Fatalf("insert request: %v", err)
@@ -68,7 +69,7 @@ func TestProviderCostReconciliationAppliesExactMatches(t *testing.T) {
 		InputTokens: 10, OutputTokens: 2, CacheReadTokens: 30,
 		ProviderCostUnits: 1234,
 	}
-	report, err := db.ReconcileProviderCosts(context.Background(), []ProviderCostRecord{row}, true)
+	report, err := db.ReconcileProviderCosts(context.Background(), "opencode-go", []ProviderCostRecord{row}, true)
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -85,7 +86,7 @@ func TestProviderCostReconciliationAppliesExactMatches(t *testing.T) {
 		t.Fatalf("applied cost/source = %.8f/%q, want 0.00001234/%q", cost, source, CostSourceProvider)
 	}
 
-	report, err = db.ReconcileProviderCosts(context.Background(), []ProviderCostRecord{row}, true)
+	report, err = db.ReconcileProviderCosts(context.Background(), "opencode-go", []ProviderCostRecord{row}, true)
 	if err != nil {
 		t.Fatalf("idempotent apply: %v", err)
 	}

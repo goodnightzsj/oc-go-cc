@@ -32,7 +32,7 @@ func TestQuotaAssetsExposePlanWindows(t *testing.T) {
 		}
 	}
 	for _, marker := range []string{
-		"QuotaModule", "'/api/quota'", "refresh=1", "QUOTA_RING_LENGTH", "fmtCountdown",
+		"QuotaModule", "/api/quota?${params}", "params.set('refresh', '1')", "QUOTA_RING_LENGTH", "fmtCountdown",
 		"tickCountdowns", "data-deadline", "rolling_5h", "percent_derived", "key_hint",
 		"case 'quota':", "levelOf(", "deadlineOf(", "renderModelLimits", "model_limits", "model_usage",
 		"used_usd",

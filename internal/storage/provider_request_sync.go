@@ -8,28 +8,37 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 )
 
-// ProviderRequestSyncReport describes the one-time correction that makes the
-// primary request history agree with the persisted provider usage snapshot.
+const providerUsageTarget = "opencode-go"
+
+// ProviderRequestSyncReport describes a non-destructive sync of the persisted
+// OpenCode Go account snapshot. Unmatched local rows are never removed.
 type ProviderRequestSyncReport struct {
-	SnapshotRows      int       `json:"snapshot_rows"`
-	SnapshotAt        time.Time `json:"snapshot_at"`
-	ObservedStart     time.Time `json:"observed_start"`
-	ObservedEnd       time.Time `json:"observed_end"`
-	SnapshotCostUSD   float64   `json:"snapshot_cost_usd"`
-	CandidateRows     int       `json:"candidate_rows"`
-	MatchedDetails    int       `json:"matched_details"`
-	ExistingImported  int       `json:"existing_imported"`
-	WouldInsert       int       `json:"would_insert"`
-	WouldRemove       int       `json:"would_remove"`
-	WouldUpdate       int       `json:"would_update"`
-	Inserted          int       `json:"inserted"`
-	Removed           int       `json:"removed"`
-	Updated           int       `json:"updated"`
-	ProjectedRequests int64     `json:"projected_requests"`
-	ProjectedCostUSD  float64   `json:"projected_cost_usd"`
+	TargetProvider     string              `json:"target_provider"`
+	SnapshotRows       int                 `json:"snapshot_rows"`
+	SnapshotAt         time.Time           `json:"snapshot_at"`
+	ObservedStart      time.Time           `json:"observed_start"`
+	ObservedEnd        time.Time           `json:"observed_end"`
+	SnapshotCostUSD    float64             `json:"snapshot_cost_usd"`
+	CandidateRows      int                 `json:"candidate_rows"`
+	PreservedUnmatched int                 `json:"preserved_unmatched"`
+	Ambiguous          int                 `json:"ambiguous"`
+	Conflicting        int                 `json:"conflicting"`
+	MatchedDetails     int                 `json:"matched_details"`
+	ExistingImported   int                 `json:"existing_imported"`
+	WouldInsert        int                 `json:"would_insert"`
+	WouldRemove        int                 `json:"would_remove"` // Always zero; retained for report compatibility.
+	WouldUpdate        int                 `json:"would_update"`
+	Inserted           int                 `json:"inserted"`
+	Removed            int                 `json:"removed"` // Always zero; unmatched rows are preserved.
+	Updated            int                 `json:"updated"`
+	ProjectedRequests  int64               `json:"projected_requests"`
+	ProjectedCostUSD   float64             `json:"projected_cost_usd"`
+	IssueExamples      []ProviderCostIssue `json:"issue_examples,omitempty"`
+	IssuesTruncated    bool                `json:"issues_truncated,omitempty"`
 }
 
 type providerRequestSyncRow struct {
@@ -54,12 +63,13 @@ type providerRequestCandidate struct {
 	usageTrusted bool
 }
 
-// SyncProviderUsageRequests preserves uniquely matched local requests, drops
-// untrustworthy rows inside the snapshot boundary, and fills every missing
-// provider row. Rows created after the snapshot are outside the correction.
-// Dry runs compute the exact projected totals without writing.
+// SyncProviderUsageRequests matches only OpenCode Go requests to the account
+// snapshot. The export's provider field is a physical backend, not a platform
+// identity. Missing rows may be imported, but incomplete snapshots cannot prove
+// that unmatched local requests are duplicates. Ambiguous apply runs fail
+// without writes; conflicting rows are reported and left unchanged.
 func (d *Database) SyncProviderUsageRequests(ctx context.Context, apply bool) (ProviderRequestSyncReport, error) {
-	var report ProviderRequestSyncReport
+	report := ProviderRequestSyncReport{TargetProvider: providerUsageTarget}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return report, err
@@ -100,62 +110,75 @@ func (d *Database) SyncProviderUsageRequests(ctx context.Context, apply bool) (P
 	report.CandidateRows = len(candidates)
 
 	requestIDs := make([]string, len(providerRows))
-	occurrences := map[string]int{}
-	desiredByID := make(map[string]int, len(providerRows))
-	for i, row := range providerRows {
-		canonical := providerRequestCanonical(row.ProviderCostRecord)
-		occurrences[canonical]++
-		requestIDs[i] = providerRequestID(canonical, occurrences[canonical])
-		desiredByID[requestIDs[i]] = i
-	}
-
-	mapped := make(map[int]int, len(providerRows))
-	usedCandidates := make(map[int]bool, len(candidates))
-	for candidateIndex, candidate := range candidates {
-		providerIndex, ok := desiredByID[candidate.id]
-		if !ok {
-			continue
-		}
-		if candidate.detailsKnown {
-			return report, fmt.Errorf("generated request id %q collides with a local request", candidate.id)
-		}
-		mapped[providerIndex] = candidateIndex
-		usedCandidates[candidateIndex] = true
-		report.ExistingImported++
-	}
-
 	providerByIdentity := map[string][]int{}
 	for i, row := range providerRows {
-		if _, ok := mapped[i]; ok {
-			continue
-		}
+		requestIDs[i] = providerRequestID(providerRequestCanonical(row.ProviderCostRecord))
 		fresh := row.InputTokens + row.CacheWrite5mTokens + row.CacheWrite1hTokens
 		identity := providerCostFingerprint(row.Model, fresh, row.OutputTokens, row.CacheReadTokens)
 		providerByIdentity[identity] = append(providerByIdentity[identity], i)
 	}
 	candidatesByIdentity := map[string][]int{}
+	candidatesByTimeModel := map[string]int{}
 	for i, candidate := range candidates {
-		if usedCandidates[i] || !candidate.detailsKnown {
-			continue
-		}
 		identity := providerCostFingerprint(candidate.model, candidate.input+candidate.cacheNew, candidate.output, candidate.cacheRead)
 		candidatesByIdentity[identity] = append(candidatesByIdentity[identity], i)
+		for _, observedAt := range []time.Time{candidate.completedAt, candidate.completedAt.Add(-time.Second)} {
+			candidatesByTimeModel[providerCostTimeModel(observedAt, candidate.model)]++
+		}
 	}
-	for identity, providerIndexes := range providerByIdentity {
+	identities := make([]string, 0, len(providerByIdentity))
+	for identity := range providerByIdentity {
+		identities = append(identities, identity)
+	}
+	slices.Sort(identities)
+	mapped := make(map[int]int, len(providerRows))
+	usedCandidates := make(map[int]bool, len(candidates))
+	skipped := make(map[int]bool)
+	for _, identity := range identities {
+		providerIndexes := providerByIdentity[identity]
 		candidateIndexes := candidatesByIdentity[identity]
-		if len(providerIndexes) != 1 || len(candidateIndexes) != 1 {
+		if len(providerIndexes) > 1 || len(candidateIndexes) > 1 {
+			report.Ambiguous += len(providerIndexes)
+			for _, i := range providerIndexes {
+				skipped[i] = true
+				report.addIssue("ambiguous", providerRows[i].ProviderCostRecord, len(candidateIndexes))
+			}
 			continue
 		}
-		providerIndex, candidateIndex := providerIndexes[0], candidateIndexes[0]
-		skew := candidates[candidateIndex].completedAt.UTC().Unix() - providerRows[providerIndex].Time.UTC().Unix()
+		providerIndex := providerIndexes[0]
+		row := providerRows[providerIndex]
+		if len(candidateIndexes) == 0 {
+			if count := candidatesByTimeModel[providerCostTimeModel(row.Time, row.Model)]; count > 0 {
+				skipped[providerIndex] = true
+				report.Conflicting++
+				report.addIssue("token_conflict", row.ProviderCostRecord, count)
+			}
+			continue
+		}
+		candidateIndex := candidateIndexes[0]
+		candidate := candidates[candidateIndex]
+		skew := candidate.completedAt.UTC().Unix() - row.Time.UTC().Unix()
 		if skew < 0 || skew > 1 {
+			skipped[providerIndex] = true
+			report.Conflicting++
+			report.addIssue("completion_time_conflict", row.ProviderCostRecord, 1)
+			continue
+		}
+		if providerCostConflicts(candidate.cost, candidate.costSource, row.costUSD()) {
+			skipped[providerIndex] = true
+			report.Conflicting++
+			report.addIssue("provider_cost_conflict", row.ProviderCostRecord, 1)
 			continue
 		}
 		mapped[providerIndex] = candidateIndex
 		usedCandidates[candidateIndex] = true
-		report.MatchedDetails++
+		if candidate.detailsKnown {
+			report.MatchedDetails++
+		} else {
+			report.ExistingImported++
+		}
 	}
-	canonicalProviders := providerRequestProviderMappings(providerRows, candidates, mapped)
+	report.PreservedUnmatched = len(candidates) - len(usedCandidates)
 
 	var currentRequests int64
 	var currentCost float64
@@ -165,17 +188,10 @@ func (d *Database) SyncProviderUsageRequests(ctx context.Context, apply bool) (P
 	report.ProjectedRequests = currentRequests
 	report.ProjectedCostUSD = currentCost
 
-	for i, candidate := range candidates {
-		if usedCandidates[i] {
+	for providerIndex, row := range providerRows {
+		if skipped[providerIndex] {
 			continue
 		}
-		report.WouldRemove++
-		report.ProjectedRequests--
-		if candidate.cost.Valid {
-			report.ProjectedCostUSD -= candidate.cost.Float64
-		}
-	}
-	for providerIndex, row := range providerRows {
 		candidateIndex, ok := mapped[providerIndex]
 		if !ok {
 			report.WouldInsert++
@@ -185,8 +201,7 @@ func (d *Database) SyncProviderUsageRequests(ctx context.Context, apply bool) (P
 		}
 		candidate := candidates[candidateIndex]
 		cost := row.costUSD()
-		provider := canonicalProvider(row.Provider, canonicalProviders)
-		if providerRequestNeedsUpdate(candidate, cost, provider) {
+		if providerRequestNeedsUpdate(candidate, cost, providerUsageTarget) {
 			report.WouldUpdate++
 			if candidate.cost.Valid {
 				report.ProjectedCostUSD -= candidate.cost.Float64
@@ -198,16 +213,20 @@ func (d *Database) SyncProviderUsageRequests(ctx context.Context, apply bool) (P
 	if !apply {
 		return report, nil
 	}
-	if err := applyProviderRequestSync(ctx, tx, providerRows, candidates, requestIDs, mapped, usedCandidates, canonicalProviders, &report); err != nil {
+	if report.Ambiguous > 0 {
+		return report, ErrAmbiguousProviderCosts
+	}
+	applied := report
+	if err := applyProviderRequestSync(ctx, tx, providerRows, candidates, requestIDs, mapped, skipped, &applied); err != nil {
 		return report, err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(cost_usd), 0) FROM requests`).Scan(&report.ProjectedRequests, &report.ProjectedCostUSD); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(cost_usd), 0) FROM requests`).Scan(&applied.ProjectedRequests, &applied.ProjectedCostUSD); err != nil {
 		return report, err
 	}
 	if err := tx.Commit(); err != nil {
 		return report, err
 	}
-	return report, nil
+	return applied, nil
 }
 
 func providerUsageRowsForSync(ctx context.Context, tx *sql.Tx) ([]providerRequestSyncRow, error) {
@@ -250,10 +269,11 @@ func providerRequestCandidatesForSync(ctx context.Context, tx *sql.Tx, minTime, 
 		       COALESCE(cache_read_tokens, 0), COALESCE(cache_creation_tokens, 0),
 		       cost_usd, cost_source, details_known, usage_trusted
 		FROM requests
-		WHERE julianday(start_time) + (COALESCE(duration_ms, 0) / 86400000.0) >= julianday(?)
+		WHERE REPLACE(provider, '_', '-') = ?
+		  AND julianday(start_time) + (COALESCE(duration_ms, 0) / 86400000.0) >= julianday(?)
 		  AND julianday(start_time) + (COALESCE(duration_ms, 0) / 86400000.0) < julianday(?)
 		  AND julianday(created_at) <= julianday(?)`,
-		minTime.UTC().Truncate(time.Second).Format(time.RFC3339Nano),
+		providerUsageTarget, minTime.UTC().Truncate(time.Second).Format(time.RFC3339Nano),
 		maxTime.UTC().Truncate(time.Second).Add(2*time.Second).Format(time.RFC3339Nano),
 		snapshotAt.UTC().Format(time.RFC3339Nano))
 	if err != nil {
@@ -285,33 +305,27 @@ func providerRequestCandidatesForSync(ctx context.Context, tx *sql.Tx, minTime, 
 	return out, rows.Err()
 }
 
-func applyProviderRequestSync(ctx context.Context, tx *sql.Tx, providerRows []providerRequestSyncRow, candidates []providerRequestCandidate, requestIDs []string, mapped map[int]int, usedCandidates map[int]bool, canonicalProviders map[string]string, report *ProviderRequestSyncReport) error {
-	for i, candidate := range candidates {
-		if usedCandidates[i] {
+func applyProviderRequestSync(ctx context.Context, tx *sql.Tx, providerRows []providerRequestSyncRow, candidates []providerRequestCandidate, requestIDs []string, mapped map[int]int, skipped map[int]bool, report *ProviderRequestSyncReport) error {
+	for providerIndex, row := range providerRows {
+		if skipped[providerIndex] {
 			continue
 		}
-		result, err := tx.ExecContext(ctx, `DELETE FROM requests WHERE id = ?`, candidate.id)
-		if err != nil {
-			return err
-		}
-		removed, _ := result.RowsAffected()
-		report.Removed += int(removed)
-	}
-	for providerIndex, row := range providerRows {
-		provider := canonicalProvider(row.Provider, canonicalProviders)
 		if candidateIndex, ok := mapped[providerIndex]; ok {
 			candidate := candidates[candidateIndex]
 			cost := row.costUSD()
-			if providerRequestNeedsUpdate(candidate, cost, provider) {
+			if providerRequestNeedsUpdate(candidate, cost, providerUsageTarget) {
 				scenario := candidate.scenario
 				if !candidate.detailsKnown {
 					scenario = "override"
 				}
-				result, err := tx.ExecContext(ctx, `UPDATE requests SET provider = ?, scenario = ?, cost_usd = ?, cost_source = ?, usage_trusted = 1 WHERE id = ?`, provider, scenario, cost, CostSourceProvider, candidate.id)
+				result, err := tx.ExecContext(ctx, `UPDATE requests SET provider = ?, scenario = ?, cost_usd = ?, cost_source = ?, usage_trusted = 1 WHERE id = ?`, providerUsageTarget, scenario, cost, CostSourceProvider, candidate.id)
 				if err != nil {
 					return err
 				}
-				updated, _ := result.RowsAffected()
+				updated, err := result.RowsAffected()
+				if err != nil {
+					return err
+				}
 				report.Updated += int(updated)
 			}
 			continue
@@ -322,49 +336,20 @@ func applyProviderRequestSync(ctx context.Context, tx *sql.Tx, providerRows []pr
 				input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
 				cost_usd, cost_source, details_known, usage_trusted, streaming, success, error_msg, attempt, created_at
 			) VALUES (?, ?, ?, 'override', ?, 0, ?, ?, ?, ?, ?, ?, 0, 1, 0, 0, '', 1, ?)`,
-			requestIDs[providerIndex], row.Model, provider, row.Time.UTC().Format(time.RFC3339Nano),
+			requestIDs[providerIndex], row.Model, providerUsageTarget, row.Time.UTC().Format(time.RFC3339Nano),
 			row.InputTokens, row.OutputTokens, row.CacheReadTokens,
 			row.CacheWrite5mTokens+row.CacheWrite1hTokens, row.costUSD(), CostSourceProvider,
 			row.snapshotAt.UTC().Format(time.RFC3339Nano))
 		if err != nil {
 			return err
 		}
-		inserted, _ := result.RowsAffected()
+		inserted, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
 		report.Inserted += int(inserted)
 	}
 	return nil
-}
-
-func providerRequestProviderMappings(providerRows []providerRequestSyncRow, candidates []providerRequestCandidate, mapped map[int]int) map[string]string {
-	observed := map[string]map[string]bool{}
-	for providerIndex, candidateIndex := range mapped {
-		candidate := candidates[candidateIndex]
-		if !candidate.detailsKnown || providerRows[providerIndex].Provider == "" || candidate.provider == "" {
-			continue
-		}
-		raw := providerRows[providerIndex].Provider
-		if observed[raw] == nil {
-			observed[raw] = map[string]bool{}
-		}
-		observed[raw][candidate.provider] = true
-	}
-	canonical := map[string]string{}
-	for raw, providers := range observed {
-		if len(providers) != 1 {
-			continue
-		}
-		for provider := range providers {
-			canonical[raw] = provider
-		}
-	}
-	return canonical
-}
-
-func canonicalProvider(provider string, mappings map[string]string) string {
-	if canonical := mappings[provider]; canonical != "" {
-		return canonical
-	}
-	return provider
 }
 
 func providerRequestNeedsUpdate(candidate providerRequestCandidate, cost float64, provider string) bool {
@@ -381,7 +366,17 @@ func providerRequestCanonical(row ProviderCostRecord) string {
 		row.CacheWrite5mTokens, row.CacheWrite1hTokens, row.ProviderCostUnits)
 }
 
-func providerRequestID(canonical string, occurrence int) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%d", canonical, occurrence)))
+func providerRequestID(canonical string) string {
+	sum := sha256.Sum256([]byte(providerUsageTarget + "|" + canonical))
 	return "req_" + hex.EncodeToString(sum[:12])
+}
+
+func (r *ProviderRequestSyncReport) addIssue(kind string, row ProviderCostRecord, candidates int) {
+	if len(r.IssueExamples) >= maxProviderCostIssueExamples {
+		r.IssuesTruncated = true
+		return
+	}
+	r.IssueExamples = append(r.IssueExamples, ProviderCostIssue{
+		Kind: kind, Time: row.Time, Model: row.Model, CandidateCount: candidates,
+	})
 }

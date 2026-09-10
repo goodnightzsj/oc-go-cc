@@ -2,22 +2,24 @@ package gui
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/routatic/proxy/internal/storage"
 )
 
 type modelPerf struct {
-	Model   string `json:"model"`
-	Count   int64  `json:"count"`
-	Success int64  `json:"success"`
-	Failed  int64  `json:"failed"`
-	AvgMs   int64  `json:"avg_ms"`
-	P50Ms   int64  `json:"p50_ms"`
-	P90Ms   int64  `json:"p90_ms"`
-	P99Ms   int64  `json:"p99_ms"`
-	MinMs   int64  `json:"min_ms"`
-	MaxMs   int64  `json:"max_ms"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	Count    int64  `json:"count"`
+	Success  int64  `json:"success"`
+	Failed   int64  `json:"failed"`
+	AvgMs    int64  `json:"avg_ms"`
+	P50Ms    int64  `json:"p50_ms"`
+	P90Ms    int64  `json:"p90_ms"`
+	P99Ms    int64  `json:"p99_ms"`
+	MinMs    int64  `json:"min_ms"`
+	MaxMs    int64  `json:"max_ms"`
 }
 
 func modelPerfFromFields(model string, count int64, avg, p50, p90, p99, min, max time.Duration) modelPerf {
@@ -34,44 +36,50 @@ func modelPerfFromFields(model string, count int64, avg, p50, p90, p99, min, max
 }
 
 func (s *Server) handlePerformance(w http.ResponseWriter, r *http.Request) {
+	provider, err := requestedProvider(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if provider != "" && s.storage == nil {
+		http.Error(w, "platform performance requires persistent storage", http.StatusServiceUnavailable)
+		return
+	}
 	rangeParam := r.URL.Query().Get("range")
 	since := storage.ParseTimeRange(rangeParam)
 
 	result := make(map[string]modelPerf)
 
 	if s.storage != nil {
-		latency := storage.NewLatency(s.storage)
+		latency := storage.NewLatency(s.storage).ForProvider(provider)
 
 		modelStats, err := latency.GetStats(since)
-		if err == nil {
-			for _, stat := range modelStats {
-				result[stat.Model] = modelPerfFromFields(stat.Model, stat.Count, stat.Avg, stat.P50, stat.P90, stat.P99, stat.Min, stat.Max)
-			}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		for _, stat := range modelStats {
+			perf := modelPerfFromFields(stat.Model, stat.Count, stat.Avg, stat.P50, stat.P90, stat.P99, stat.Min, stat.Max)
+			perf.Provider = stat.Provider
+			result[stat.Provider+"/"+stat.Model] = perf
 		}
 
-		successCounts, failureCounts, _ := latency.GetSuccessCounts(since)
-		for model, count := range successCounts {
-			if perf, exists := result[model]; exists {
-				perf.Success = count
-				result[model] = perf
-			} else {
-				result[model] = modelPerf{
-					Model:   model,
-					Success: count,
-					Failed:  failureCounts[model],
-				}
-			}
+		successCounts, failureCounts, err := latency.GetSuccessCounts(since)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-		for model, count := range failureCounts {
-			if perf, exists := result[model]; exists {
-				perf.Failed = count
-				result[model] = perf
-			} else {
-				result[model] = modelPerf{
-					Model:  model,
-					Failed: count,
-				}
-			}
+		for key, count := range successCounts {
+			perf := result[key]
+			perf.Provider, perf.Model, _ = strings.Cut(key, "/")
+			perf.Success = count
+			result[key] = perf
+		}
+		for key, count := range failureCounts {
+			perf := result[key]
+			perf.Provider, perf.Model, _ = strings.Cut(key, "/")
+			perf.Failed = count
+			result[key] = perf
 		}
 	} else if s.met != nil {
 		snap := s.met.GetSnapshot()
@@ -106,6 +114,15 @@ func (s *Server) handlePerformance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePerformanceAggregate(w http.ResponseWriter, r *http.Request) {
+	provider, err := requestedProvider(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if provider != "" && s.storage == nil {
+		http.Error(w, "platform performance requires persistent storage", http.StatusServiceUnavailable)
+		return
+	}
 	rangeParam := r.URL.Query().Get("range")
 	since := storage.ParseTimeRange(rangeParam)
 
@@ -119,9 +136,13 @@ func (s *Server) handlePerformanceAggregate(w http.ResponseWriter, r *http.Reque
 	agg := aggregate{}
 
 	if s.storage != nil {
-		latency := storage.NewLatency(s.storage)
+		latency := storage.NewLatency(s.storage).ForProvider(provider)
 		latencyStats, err := latency.GetStats(since)
-		if err == nil && len(latencyStats) > 0 {
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if len(latencyStats) > 0 {
 			var totalCount int64
 			var totalLatency time.Duration
 			for _, stat := range latencyStats {
@@ -133,7 +154,11 @@ func (s *Server) handlePerformanceAggregate(w http.ResponseWriter, r *http.Reque
 			}
 		}
 
-		successCounts, failureCounts, _ := latency.GetSuccessCounts(since)
+		successCounts, failureCounts, err := latency.GetSuccessCounts(since)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		for _, s := range successCounts {
 			agg.TotalSuccess += s
 		}

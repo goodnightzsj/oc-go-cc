@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -75,6 +76,11 @@ func UsageURL(baseURL string) (string, error) {
 	if base == "" {
 		return DefaultUsageURL, nil
 	}
+	u, err := url.Parse(base)
+	if err != nil || u == nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+		u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.ForceQuery {
+		return "", fmt.Errorf("Go base_url must be an HTTP(S) API URL without credentials, query or fragment")
+	}
 	if strings.HasSuffix(base, "/usage") {
 		return base, nil
 	}
@@ -83,7 +89,7 @@ func UsageURL(baseURL string) (string, error) {
 			return strings.TrimSuffix(base, suffix) + "/usage", nil
 		}
 	}
-	return "", fmt.Errorf("cannot derive the usage endpoint from base_url %q", baseURL)
+	return "", fmt.Errorf("cannot derive the usage endpoint from the configured Go base_url")
 }
 
 // windowRaw tolerates every field naming seen in the wild so far.
@@ -153,11 +159,13 @@ func (w *windowRaw) normalize(planLimit float64) *Window {
 	}
 	out.LimitDollars = w.LimitDollars
 
-	// Percent-only responses: derive dollars from the published plan limits.
+	// Prefer an explicit upstream limit; published Go limits fill only missing values.
 	if out.UsedDollars == nil && out.HasPercent {
-		used := planLimit * out.UsedPercent / 100
+		if out.LimitDollars == nil {
+			out.LimitDollars = &planLimit
+		}
+		used := *out.LimitDollars * out.UsedPercent / 100
 		out.UsedDollars = &used
-		out.LimitDollars = &planLimit
 		out.PercentDerived = true
 	}
 	// Dollars without a percentage: the UI needs a fill ratio either way.
@@ -242,9 +250,8 @@ func Parse(body []byte) (*Report, error) {
 	return rep, nil
 }
 
-// Fetch reads and parses the quota windows for one API key. Upstream failures
-// are reported verbatim (including status code) so the UI can show the real
-// reason instead of an empty panel.
+// Fetch reads and parses the quota windows for one API key. Report status codes
+// but never upstream error bodies, which can echo authentication headers.
 func Fetch(ctx context.Context, client *http.Client, url, key string) (*Report, error) {
 	if strings.TrimSpace(key) == "" {
 		return nil, fmt.Errorf("no API key")
@@ -256,19 +263,19 @@ func Fetch(ctx context.Context, client *http.Client, url, key string) (*Report, 
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Accept", "application/json")
 
-	if client == nil {
-		client = &http.Client{Timeout: RequestTimeout}
+	bounded := http.Client{Timeout: RequestTimeout}
+	if client != nil {
+		bounded = *client
+		if bounded.Timeout == 0 {
+			bounded.Timeout = RequestTimeout
+		}
 	}
-	resp, err := client.Do(req)
+	bounded.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := bounded.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, fmt.Errorf("quota request failed: %s", strings.ReplaceAll(err.Error(), key, "[redacted]"))
 	}
 	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
 
 	switch resp.StatusCode {
 	case http.StatusUnauthorized, http.StatusForbidden:
@@ -278,17 +285,20 @@ func Fetch(ctx context.Context, client *http.Client, url, key string) (*Report, 
 	case http.StatusTooManyRequests:
 		return nil, fmt.Errorf("HTTP 429: rate limited, retry later")
 	}
-	if resp.StatusCode >= 400 {
-		msg := strings.TrimSpace(string(body))
-		if len(msg) > 200 {
-			msg = msg[:200] + "…"
-		}
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, msg)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if len(body) > maxResponseBytes {
+		return nil, fmt.Errorf("quota response exceeds size limit")
 	}
 
 	rep, err := Parse(body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s", strings.ReplaceAll(err.Error(), key, "[redacted]"))
 	}
 	return rep, nil
 }

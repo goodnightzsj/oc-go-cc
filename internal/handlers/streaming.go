@@ -77,7 +77,7 @@ func (sp *StreamProxy) proxyAnthropicPassthroughStream(
 		if n > 0 {
 			ping()
 			if _, werr := w.Write(buf[:n]); werr != nil {
-				return transformer.ErrClientDisconnected
+				return fmt.Errorf("failed to forward upstream stream: %w", werr)
 			}
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()

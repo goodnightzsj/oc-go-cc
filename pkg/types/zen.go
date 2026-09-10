@@ -7,17 +7,27 @@ import "encoding/json"
 
 // ResponsesRequest represents a request to the OpenAI Responses API.
 type ResponsesRequest struct {
-	Model     string              `json:"model"`
-	Input     []ResponsesInput    `json:"input"`
-	Stream    bool                `json:"stream,omitempty"`
-	Tools     []ResponsesTool     `json:"tools,omitempty"`
-	Reasoning *ResponsesReasoning `json:"reasoning,omitempty"`
+	Model             string              `json:"model"`
+	Input             []ResponsesInput    `json:"input"`
+	Stream            bool                `json:"stream,omitempty"`
+	Tools             []ResponsesTool     `json:"tools,omitempty"`
+	Reasoning         *ResponsesReasoning `json:"reasoning,omitempty"`
+	MaxOutputTokens   int                 `json:"max_output_tokens,omitempty"`
+	Temperature       *float64            `json:"temperature,omitempty"`
+	TopP              *float64            `json:"top_p,omitempty"`
+	ToolChoice        json.RawMessage     `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool               `json:"parallel_tool_calls,omitempty"`
 }
 
 // ResponsesInput represents a single input item in the Responses request.
 type ResponsesInput struct {
-	Role    string          `json:"role"`
-	Content json.RawMessage `json:"content,omitempty"`
+	Type      string          `json:"type,omitempty"`
+	Role      string          `json:"role,omitempty"`
+	Content   json.RawMessage `json:"content,omitempty"`
+	CallID    string          `json:"call_id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Arguments string          `json:"arguments,omitempty"`
+	Output    json.RawMessage `json:"output,omitempty"`
 }
 
 // ResponsesTool represents a tool definition for the Responses API.
@@ -35,12 +45,18 @@ type ResponsesReasoning struct {
 
 // ResponsesResponse represents a response from the OpenAI Responses API.
 type ResponsesResponse struct {
-	ID      string            `json:"id"`
-	Object  string            `json:"object"`
-	Created int64             `json:"created"`
-	Model   string            `json:"model"`
-	Output  []ResponsesOutput `json:"output"`
-	Usage   ResponsesUsage    `json:"usage"`
+	ID                string                      `json:"id"`
+	Object            string                      `json:"object"`
+	Created           int64                       `json:"created"`
+	Model             string                      `json:"model"`
+	Output            []ResponsesOutput           `json:"output"`
+	Usage             ResponsesUsage              `json:"usage"`
+	Status            string                      `json:"status,omitempty"`
+	IncompleteDetails *ResponsesIncompleteDetails `json:"incomplete_details,omitempty"`
+}
+
+type ResponsesIncompleteDetails struct {
+	Reason string `json:"reason"`
 }
 
 // ResponsesOutput represents a single output item.
@@ -62,17 +78,21 @@ type ResponsesContent struct {
 
 // ResponsesUsage represents token usage in a Responses response.
 type ResponsesUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens        int                  `json:"input_tokens"`
+	OutputTokens       int                  `json:"output_tokens"`
+	InputTokensDetails *PromptTokensDetails `json:"input_tokens_details,omitempty"`
 }
 
 // ResponsesChunk represents a streaming chunk from the Responses API.
 type ResponsesChunk struct {
-	Type   string            `json:"type"`
-	ID     string            `json:"id,omitempty"`
-	Delta  string            `json:"delta,omitempty"`
-	Output []ResponsesOutput `json:"output,omitempty"`
-	Usage  *ResponsesUsage   `json:"usage,omitempty"`
+	Type     string             `json:"type"`
+	ID       string             `json:"id,omitempty"`
+	Delta    string             `json:"delta,omitempty"`
+	Output   []ResponsesOutput  `json:"output,omitempty"`
+	Usage    *ResponsesUsage    `json:"usage,omitempty"`
+	ItemID   string             `json:"item_id,omitempty"`
+	Item     *ResponsesOutput   `json:"item,omitempty"`
+	Response *ResponsesResponse `json:"response,omitempty"`
 }
 
 // Google Gemini API types.

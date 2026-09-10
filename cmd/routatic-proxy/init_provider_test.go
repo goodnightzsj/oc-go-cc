@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/routatic/proxy/internal/config"
 )
 
 func TestInitCmd_ProviderFlag(t *testing.T) {
@@ -36,6 +38,11 @@ func TestInitCmd_ProviderFlag(t *testing.T) {
 			wantProvider: "opencode-go",
 		},
 		{
+			name:         "commandcode provider",
+			provider:     "commandcode",
+			wantProvider: "commandcode",
+		},
+		{
 			name:           "unknown provider returns error",
 			provider:       "unknown-provider",
 			wantErr:        true,
@@ -47,6 +54,8 @@ func TestInitCmd_ProviderFlag(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create temp directory
 			tmpDir := t.TempDir()
+			t.Setenv("HOME", tmpDir)
+			t.Setenv("USERPROFILE", tmpDir)
 			configPath := filepath.Join(tmpDir, "config.json")
 
 			// Use ROUTATIC_PROXY_CONFIG to control config location
@@ -110,6 +119,8 @@ func TestInitCmd_ProviderFlag(t *testing.T) {
 func TestInitCmd_NoProviderFlag(t *testing.T) {
 	// Create temp directory
 	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 	configPath := filepath.Join(tmpDir, "config.json")
 
 	// Use ROUTATIC_PROXY_CONFIG to control config location
@@ -161,6 +172,8 @@ func TestInitCmd_NoProviderFlag(t *testing.T) {
 func TestInitCmd_ConfigAlreadyExists(t *testing.T) {
 	// Create temp directory with existing config
 	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 	configPath := filepath.Join(tmpDir, "config.json")
 
 	// Write existing config
@@ -207,7 +220,7 @@ func TestGetProviderConfig_UnknownProvider(t *testing.T) {
 }
 
 func TestGetProviderConfig_AllProviders(t *testing.T) {
-	providers := []string{"opencode-go", "opencode-zen", "aws-bedrock", "openrouter"}
+	providers := []string{"opencode-go", "opencode-zen", "aws-bedrock", "openrouter", "commandcode"}
 
 	for _, provider := range providers {
 		t.Run(provider, func(t *testing.T) {
@@ -309,4 +322,33 @@ func mustParseConfig(t *testing.T, s string) map[string]any {
 		t.Fatalf("invalid JSON config: %v", err)
 	}
 	return m
+}
+
+func TestCommandCodePresetIsIndependent(t *testing.T) {
+	t.Setenv("ROUTATIC_PROXY_COMMANDCODE_API_KEY", "test-commandcode-key")
+	t.Setenv("ROUTATIC_PROXY_API_KEY", "")
+	t.Setenv("OC_GO_CC_API_KEY", "")
+	raw, err := getProviderConfig("commandcode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadJSON([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.EffectiveAPIKeys()) != 0 || len(cfg.ProviderAPIKeys("commandcode")) != 1 {
+		t.Fatal("preset must use only CommandCode credentials")
+	}
+	for name, model := range cfg.Models {
+		if model.Provider != "commandcode" {
+			t.Fatalf("model %s points at another provider", name)
+		}
+	}
+	if cfg.CommandCode.BaseURL != "https://api.commandcode.ai/provider/v1/chat/completions" ||
+		cfg.CommandCode.AnthropicBaseURL != "https://api.commandcode.ai/provider/v1/messages" {
+		t.Fatal("preset must call the official complete endpoints")
+	}
+	if cfg.Models["default"].ModelID != "claude-sonnet-4-6" || !cfg.Models["default"].Vision {
+		t.Fatal("default must use native Messages with image support")
+	}
 }

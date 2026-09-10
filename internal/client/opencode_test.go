@@ -463,8 +463,9 @@ func TestOpenRouterEndpoint(t *testing.T) {
 	model := config.ModelConfig{Provider: ProviderOpenRouter, ModelID: "openrouter-model"}
 	endpoint := c.getEndpoint("openrouter-model", model)
 
-	if endpoint.BaseURL != cfg.OpenRouter.BaseURL {
-		t.Errorf("getEndpoint BaseURL = %q, want %q", endpoint.BaseURL, cfg.OpenRouter.BaseURL)
+	wantURL := cfg.OpenRouter.BaseURL + "/chat/completions"
+	if endpoint.BaseURL != wantURL {
+		t.Errorf("getEndpoint BaseURL = %q, want %q", endpoint.BaseURL, wantURL)
 	}
 	if endpoint.APIKey != cfg.OpenRouter.APIKey {
 		t.Errorf("getEndpoint APIKey = %q, want %q", endpoint.APIKey, cfg.OpenRouter.APIKey)

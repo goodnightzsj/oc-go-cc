@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/routatic/proxy/internal/config"
@@ -34,7 +35,8 @@ func costsSyncRequestsCmd() *cobra.Command {
 	var apply bool
 	cmd := &cobra.Command{
 		Use:   "sync-requests",
-		Short: "Dry-run or correct request history from the persisted usage snapshot",
+		Short: "Dry-run or sync OpenCode Go history from the persisted account snapshot",
+		Long:  "Sync only an OpenCode Go account snapshot. Unmatched requests are preserved; partial snapshots cannot identify accounts or deduplicate cross-account retries.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCostsSyncRequests(cmd, configPath, apply)
 		},
@@ -60,23 +62,35 @@ func costsImportCmd() *cobra.Command {
 }
 
 func costsReconcileCmd() *cobra.Command {
-	var configPath, inputPath string
+	var configPath, inputPath, targetProvider string
 	var apply bool
 	cmd := &cobra.Command{
 		Use:   "reconcile",
 		Short: "Dry-run or apply sanitized provider request costs",
+		Long:  "Reconcile a sanitized snapshot belonging to --provider. The export's provider field identifies a physical backend, not the configured platform. Account identities and cross-account retries cannot be inferred.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCostsReconcile(cmd, configPath, inputPath, apply)
+			return runCostsReconcile(cmd, configPath, inputPath, targetProvider, apply)
 		},
 	}
 	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Path to config file")
 	cmd.Flags().StringVar(&inputPath, "input", "", "Path to sanitized provider usage JSON")
+	cmd.Flags().StringVar(&targetProvider, "provider", "", "Configured platform that owns the account snapshot")
 	cmd.Flags().BoolVar(&apply, "apply", false, "Apply unique exact matches after the dry run")
 	_ = cmd.MarkFlagRequired("input")
+	_ = cmd.MarkFlagRequired("provider")
 	return cmd
 }
 
-func runCostsReconcile(cmd *cobra.Command, configPath, inputPath string, apply bool) error {
+func runCostsReconcile(cmd *cobra.Command, configPath, inputPath, targetProvider string, apply bool) error {
+	targetProvider = strings.TrimSpace(targetProvider)
+	if targetProvider == "" {
+		return errors.New("--provider is required")
+	}
+	if !config.SupportedProvider(targetProvider) {
+		return fmt.Errorf("unsupported --provider %q", targetProvider)
+	}
+	targetProvider = config.NormalizeProvider(targetProvider)
+	cmd.PrintErrln("Warning: use only a snapshot from " + targetProvider + "; account identities and cross-account retries cannot be inferred.")
 	capture, db, err := openProviderCapture(configPath, inputPath)
 	if err != nil {
 		return err
@@ -89,7 +103,7 @@ func runCostsReconcile(cmd *cobra.Command, configPath, inputPath string, apply b
 	}
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
-	report, reconcileErr := db.ReconcileProviderCosts(ctx, capture.Rows, apply)
+	report, reconcileErr := db.ReconcileProviderCosts(ctx, targetProvider, capture.Rows, apply)
 	encoder := json.NewEncoder(cmd.OutOrStdout())
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(report); err != nil {
@@ -130,6 +144,7 @@ func runCostsImport(cmd *cobra.Command, configPath, inputPath string) error {
 }
 
 func runCostsSyncRequests(cmd *cobra.Command, configPath string, apply bool) error {
+	cmd.PrintErrln("Warning: sync-requests accepts only an OpenCode Go account snapshot; unmatched requests are preserved and cross-account retries are not deduplicated.")
 	db, err := openSyncRequestStorage(configPath)
 	if err != nil {
 		return err
@@ -142,13 +157,13 @@ func runCostsSyncRequests(cmd *cobra.Command, configPath string, apply bool) err
 	}
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
-	report, err := db.SyncProviderUsageRequests(ctx, apply)
-	if err != nil {
-		return err
-	}
+	report, syncErr := db.SyncProviderUsageRequests(ctx, apply)
 	encoder := json.NewEncoder(cmd.OutOrStdout())
 	encoder.SetIndent("", "  ")
-	return encoder.Encode(report)
+	if err := encoder.Encode(report); err != nil {
+		return fmt.Errorf("write report: %w", err)
+	}
+	return syncErr
 }
 
 // sync-requests only needs the storage block. Decoding the full runtime config

@@ -217,11 +217,8 @@ func TestHandleQuotaMonthlyModelUsage(t *testing.T) {
 			_, _ = w.Write([]byte(docsFixture))
 			return
 		}
-		// usedDollars = 26.9 while raw ledger spend is 13.45 (11.45 + 2.00):
-		// the official total calibrates the scale to exactly ×2. Rows keep the
-		// price currency (×2 calibration ÷ pool weight) so they stay comparable
-		// to the docs allowance; the pool-equivalent total (26.9) reconciles
-		// with the official window percent.
+		// Official totals include traffic outside this proxy and must not rescale
+		// the per-model costs recorded by this instance.
 		_, _ = w.Write([]byte(`{"monthly":{"usedPercent":44.8,"usedDollars":26.9,"resetsAt":"2026-09-06T06:44:54.961Z"}}`))
 	}))
 	defer upstream.Close()
@@ -236,13 +233,14 @@ func TestHandleQuotaMonthlyModelUsage(t *testing.T) {
 
 	// DeepSeek V4 Flash: $11.45 of raw spend; GLM-5.2: $2.00. Both fall inside
 	// the current plan month window [reset-31d, reset) (31-day subscription
-	// cycle); an older record must not count. The official monthly total
-	// (usedDollars 26.9) calibrates the scale to ×2.
+	// cycle); an older record and other platforms must not count.
 	for _, rec := range []history.RequestRecord{
-		{ID: "quota-dsf-1", Model: "deepseek-v4-flash", StartTime: reset.Add(-5 * 24 * time.Hour), CostUSD: 10.0, CostKnown: true, CostSource: "estimated"},
-		{ID: "quota-dsf-2", Model: "deepseek-v4-flash", StartTime: reset.Add(-2 * 24 * time.Hour), CostUSD: 1.45, CostKnown: true, CostSource: "estimated"},
-		{ID: "quota-glm-1", Model: "glm-5.2", StartTime: reset.Add(-3 * 24 * time.Hour), CostUSD: 2.0, CostKnown: true, CostSource: "estimated"},
-		{ID: "quota-old-1", Model: "deepseek-v4-flash", StartTime: reset.Add(-45 * 24 * time.Hour), CostUSD: 99.0, CostKnown: true, CostSource: "estimated"},
+		{ID: "quota-dsf-1", Provider: "opencode-go", Model: "deepseek-v4-flash", StartTime: reset.Add(-5 * 24 * time.Hour), CostUSD: 10.0, CostKnown: true, CostSource: "estimated"},
+		{ID: "quota-dsf-2", Provider: "opencode-go", Model: "deepseek-v4-flash", StartTime: reset.Add(-2 * 24 * time.Hour), CostUSD: 1.45, CostKnown: true, CostSource: "estimated"},
+		{ID: "quota-glm-1", Provider: "opencode-go", Model: "glm-5.2", StartTime: reset.Add(-3 * 24 * time.Hour), CostUSD: 2.0, CostKnown: true, CostSource: "estimated"},
+		{ID: "quota-old-1", Provider: "opencode-go", Model: "deepseek-v4-flash", StartTime: reset.Add(-45 * 24 * time.Hour), CostUSD: 99.0, CostKnown: true, CostSource: "estimated"},
+		{ID: "quota-commandcode", Provider: "commandcode", Model: "deepseek-v4-flash", StartTime: reset.Add(-time.Hour), CostUSD: 20, CostKnown: true, CostSource: "estimated"},
+		{ID: "quota-unknown-provider", Model: "glm-5.2", StartTime: reset.Add(-time.Hour), CostUSD: 20, CostKnown: true, CostSource: "estimated"},
 	} {
 		if err := requests.Insert(rec); err != nil {
 			t.Fatalf("insert %s: %v", rec.ID, err)
@@ -263,15 +261,16 @@ func TestHandleQuotaMonthlyModelUsage(t *testing.T) {
 		byModel[row.Model] = row
 	}
 	dsf := byModel["DeepSeek V4 Flash"]
-	// Row spend is priced in the official price currency (×2 pool-equivalent
-	// calibration divided back out), so it stays comparable to the $30 docs
-	// allowance: 11.45 raw × 2 scale ÷ 2 pool weight = 11.45.
-	if math.Abs(dsf.UsedUSD-11.45) > 1e-6 || dsf.AllowanceUSD != 30 || math.Abs(dsf.Percent-11.45/30*100) > 1e-6 {
+	// These are local recorded costs, never calibrated from an account total.
+	if math.Abs(dsf.UsedUSD-11.45) > 1e-6 || dsf.AllowanceUSD != 30 || dsf.Percent == nil || math.Abs(*dsf.Percent-11.45/30*100) > 1e-6 {
 		t.Errorf("DeepSeek used = %v (want 11.45 raw, %.2f%%), allowance = %v", dsf.UsedUSD, 11.45/30*100, dsf.AllowanceUSD)
 	}
 	glm := byModel["GLM-5.2"]
-	if math.Abs(glm.UsedUSD-4.0) > 1e-6 || math.Abs(glm.Percent-4.0/60*100) > 1e-6 {
-		t.Errorf("GLM row = %+v, want $4.00 (×2 scale ÷ 1 pool weight), %.2f%%", glm, 4.0/60*100)
+	if math.Abs(glm.UsedUSD-2.0) > 1e-6 || glm.Percent == nil || math.Abs(*glm.Percent-2.0/60*100) > 1e-6 {
+		t.Errorf("GLM row = %+v, want $2.00 local recorded cost, %.2f%%", glm, 2.0/60*100)
+	}
+	if resp.Accounts[0].Report.Monthly.UsedPercent != 44.8 || *resp.Accounts[0].Report.Monthly.UsedDollars != 26.9 {
+		t.Error("local aggregation changed the official quota response")
 	}
 	// Most-spent first.
 	if resp.ModelUsage[0].Model != "DeepSeek V4 Flash" {

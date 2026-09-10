@@ -17,20 +17,21 @@ func TestSyncProviderUsageRequestsCorrectsHistoryAndIsIdempotent(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	repo := NewRequests(db)
-	observedAt := time.Date(2026, 8, 6, 7, 0, 0, 0, time.UTC)
+	observedAt := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
 	capturedAt := time.Now().UTC().Add(time.Minute)
 
 	if err := repo.Insert(history.RequestRecord{
-		ID: "exact-local", Model: "deepseek-v4-flash", Provider: "platform-a", Scenario: "complex",
+		ID: "exact-local", Model: "deepseek-v4-flash", Provider: "opencode-go", Scenario: "complex",
 		StartTime: observedAt.Add(-1500 * time.Millisecond), Duration: 1800 * time.Millisecond,
 		InputTokens: 10, OutputTokens: 2, CacheReadTokens: 30, Success: true,
 	}); err != nil {
 		t.Fatalf("insert exact request: %v", err)
 	}
 	if err := repo.Insert(history.RequestRecord{
-		ID: "dirty-local", Model: "deepseek-v4-flash", Provider: "platform-a",
+		ID: "dirty-local", Model: "deepseek-v4-flash", Provider: "opencode-go",
 		StartTime: observedAt.Add(time.Second), Duration: 500 * time.Millisecond,
 		InputTokens: 9999, OutputTokens: 3, Success: true,
+		CostKnown: true, CostUSD: 0.25,
 	}); err != nil {
 		t.Fatalf("insert dirty request: %v", err)
 	}
@@ -43,8 +44,8 @@ func TestSyncProviderUsageRequestsCorrectsHistoryAndIsIdempotent(t *testing.T) {
 	}
 
 	providerRows := []ProviderCostRecord{
-		{Time: observedAt, Model: "deepseek-v4-flash", Provider: "snapshot-platform", Plan: "lite", InputTokens: 10, OutputTokens: 2, CacheReadTokens: 30, ProviderCostUnits: 1234},
-		{Time: observedAt.Add(time.Second), Model: "kimi-k2.6", Provider: "snapshot-platform", Plan: "lite", InputTokens: 20, OutputTokens: 4, CacheWrite5mTokens: 5, ProviderCostUnits: 5678},
+		{Time: observedAt, Model: "deepseek-v4-flash", Provider: "inf-go.oa-compat", Plan: "lite", InputTokens: 10, OutputTokens: 2, CacheReadTokens: 30, ProviderCostUnits: 1234},
+		{Time: observedAt.Add(time.Second), Model: "kimi-k2.6", Provider: "inf-go.oa-compat", Plan: "lite", InputTokens: 20, OutputTokens: 4, CacheWrite5mTokens: 5, ProviderCostUnits: 5678},
 	}
 	if err := db.ReplaceProviderUsage(context.Background(), capturedAt, providerRows); err != nil {
 		t.Fatalf("replace provider usage: %v", err)
@@ -54,7 +55,7 @@ func TestSyncProviderUsageRequestsCorrectsHistoryAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dry run: %v", err)
 	}
-	if dry.SnapshotRows != 2 || dry.MatchedDetails != 1 || dry.WouldRemove != 1 || dry.WouldInsert != 1 || dry.ProjectedRequests != 3 {
+	if dry.TargetProvider != "opencode-go" || dry.SnapshotRows != 2 || dry.MatchedDetails != 1 || dry.WouldRemove != 0 || dry.PreservedUnmatched != 1 || dry.WouldInsert != 1 || dry.ProjectedRequests != 4 {
 		t.Fatalf("unexpected dry-run report: %+v", dry)
 	}
 	if _, count, _ := repo.Query(RequestQuery{}); count != 3 {
@@ -65,10 +66,10 @@ func TestSyncProviderUsageRequestsCorrectsHistoryAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
-	if applied.Removed != 1 || applied.Inserted != 1 || applied.ProjectedRequests != 3 {
+	if applied.Removed != 0 || applied.PreservedUnmatched != 1 || applied.Inserted != 1 || applied.ProjectedRequests != 4 {
 		t.Fatalf("unexpected apply report: %+v", applied)
 	}
-	if math.Abs(applied.ProjectedCostUSD-(1+0.00001234+0.00005678)) > 1e-12 {
+	if math.Abs(applied.ProjectedCostUSD-(1.25+0.00001234+0.00005678)) > 1e-12 {
 		t.Fatalf("projected cost = %.8f", applied.ProjectedCostUSD)
 	}
 
@@ -83,19 +84,19 @@ func TestSyncProviderUsageRequestsCorrectsHistoryAndIsIdempotent(t *testing.T) {
 	if !byID["exact-local"].DetailsKnown || byID["exact-local"].CostSource != CostSourceProvider {
 		t.Fatalf("exact local row was not preserved: %+v", byID["exact-local"])
 	}
-	if _, ok := byID["dirty-local"]; ok {
-		t.Fatal("dirty local row was not removed")
+	if rec, ok := byID["dirty-local"]; !ok || rec.InputTokens != 9999 || rec.CostUSD != 0.25 {
+		t.Fatal("unmatched local row was removed or changed")
 	}
 	var imported history.RequestRecord
-	for id, rec := range byID {
-		if id != "exact-local" && id != "later-live" {
+	for _, rec := range byID {
+		if !rec.DetailsKnown {
 			imported = rec
 		}
 	}
-	if imported.ID == "" || imported.DetailsKnown || imported.Model != "kimi-k2.6" || imported.Provider != "platform-a" || imported.Scenario != "override" || imported.CacheCreationTokens != 5 {
+	if imported.ID == "" || imported.DetailsKnown || imported.Model != "kimi-k2.6" || imported.Provider != "opencode-go" || imported.Scenario != "override" || imported.CacheCreationTokens != 5 {
 		t.Fatalf("unexpected imported row: %+v", imported)
 	}
-	if byID["exact-local"].Provider != "platform-a" {
+	if byID["exact-local"].Provider != "opencode-go" {
 		t.Fatalf("exact request provider changed: %+v", byID["exact-local"])
 	}
 	analytics := &Analytics{db: db, baseline: observedAt.Add(30 * time.Minute)}

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/routatic/proxy/internal/config"
 )
 
 // TestApplyConfigPatch_PreservesEnvPlaceholders asserts that saving an unrelated
@@ -32,8 +34,9 @@ func TestApplyConfigPatch_PreservesEnvPlaceholders(t *testing.T) {
 	// The user edits only the port in the settings form.
 	patch := map[string]json.RawMessage{"port": json.RawMessage(`3457`)}
 
-	if err := applyConfigPatch(path, patch); err != nil {
-		t.Fatalf("applyConfigPatch: %v", err)
+	srv := &Server{atomicCfg: config.NewAtomicConfig(nil, path)}
+	if _, err := srv.updateProxyConfig(patch, true); err != nil {
+		t.Fatalf("updateProxyConfig: %v", err)
 	}
 
 	saved, err := os.ReadFile(path)
@@ -61,13 +64,14 @@ func TestApplyConfigPatch_PreservesEnvPlaceholders(t *testing.T) {
 func TestApplyConfigPatch_RejectsInvalidPort(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
-	original := `{"host":"127.0.0.1","port":3456}` + "\n"
+	original := `{"host":"127.0.0.1","port":3456,"api_key":"synthetic-key"}` + "\n"
 	if err := os.WriteFile(path, []byte(original), 0600); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
 
 	patch := map[string]json.RawMessage{"port": json.RawMessage(`70000`)}
-	if err := applyConfigPatch(path, patch); err == nil {
+	srv := &Server{atomicCfg: config.NewAtomicConfig(nil, path)}
+	if _, err := srv.updateProxyConfig(patch, true); err == nil {
 		t.Fatal("expected an error for an out-of-range port, got nil")
 	}
 

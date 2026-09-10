@@ -41,9 +41,11 @@ func (p *OpenCodeGoProvider) WireFormat(modelID string) core.WireFormat {
 
 // Execute sends a non-streaming request and returns the response.
 func (p *OpenCodeGoProvider) Execute(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
-	switch p.WireFormat(model.ModelID) {
+	switch core.ModelWireFormat(p, model) {
 	case core.WireFormatAnthropic:
 		return p.executeAnthropic(ctx, req, model)
+	case core.WireFormatOpenAIResponses:
+		return p.executeResponses(ctx, req, model)
 	default:
 		return p.executeOpenAI(ctx, req, model)
 	}
@@ -51,9 +53,11 @@ func (p *OpenCodeGoProvider) Execute(ctx context.Context, req *types.MessageRequ
 
 // Stream sends a streaming request and returns an io.ReadCloser for SSE events.
 func (p *OpenCodeGoProvider) Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
-	switch p.WireFormat(model.ModelID) {
+	switch core.ModelWireFormat(p, model) {
 	case core.WireFormatAnthropic:
 		return p.streamAnthropic(ctx, req, model)
+	case core.WireFormatOpenAIResponses:
+		return p.streamResponses(ctx, req, model)
 	default:
 		return p.streamOpenAI(ctx, req, model)
 	}
@@ -64,7 +68,7 @@ func (p *OpenCodeGoProvider) Stream(ctx context.Context, req *types.MessageReque
 func (p *OpenCodeGoProvider) executeOpenAI(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeGo.BaseURL
-	apiKey := p.nextAPIKey(cfg.EffectiveAPIKeys())
+	apiKey := p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
 
 	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
 	if err != nil {
@@ -104,7 +108,7 @@ func (p *OpenCodeGoProvider) executeOpenAI(ctx context.Context, req *types.Messa
 func (p *OpenCodeGoProvider) streamOpenAI(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeGo.BaseURL
-	apiKey := p.nextAPIKey(cfg.EffectiveAPIKeys())
+	apiKey := p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
 
 	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
 	if err != nil {
@@ -113,22 +117,49 @@ func (p *OpenCodeGoProvider) streamOpenAI(ctx context.Context, req *types.Messag
 	streamTrue := true
 	openaiReq.Stream = &streamTrue
 
-	if p.capture != nil {
-		raw, err := json.Marshal(openaiReq)
-		if err == nil {
-			p.capture.CaptureUpstreamRequest(rid(ctx), p.Name(), raw)
-		}
-	}
-
 	resp, err := p.doRequest(ctx, endpoint, apiKey, openaiReq, true)
 	if err != nil {
 		return nil, err
 	}
 
-	if p.capture != nil {
-		return client.CaptureBody(resp.Body, func(data []byte) {
-			p.capture.CaptureUpstreamResponse(rid(ctx), p.Name(), data)
-		}), nil
+	return resp.Body, nil
+}
+
+func (p *OpenCodeGoProvider) executeResponses(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
+	body, err := p.responsesRequest(ctx, req, model, false)
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		return nil, fmt.Errorf("read Responses response: %w", err)
+	}
+	var response types.ResponsesResponse
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return nil, fmt.Errorf("decode Responses response: %w", err)
+	}
+	if response.Status == "failed" || response.Status == "cancelled" {
+		return nil, fmt.Errorf("upstream Responses status: %s", response.Status)
+	}
+	encoded, err := json.Marshal(core.DenormalizeResponse(transformer.ResponsesToNormalized(&response, model.ModelID)))
+	return &core.ExecuteResult{Body: encoded}, err
+}
+
+func (p *OpenCodeGoProvider) streamResponses(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
+	return p.responsesRequest(ctx, req, model, true)
+}
+
+func (p *OpenCodeGoProvider) responsesRequest(ctx context.Context, req *types.MessageRequest, model config.ModelConfig, stream bool) (io.ReadCloser, error) {
+	cfg := p.atomic.Get()
+	payload, err := transformer.AnthropicToResponses(req, model)
+	if err != nil {
+		return nil, err
+	}
+	payload.Stream = stream
+	resp, err := p.doRequest(ctx, cfg.OpenCodeGo.ResponsesBaseURL, p.nextAPIKey(cfg.ProviderAPIKeys(p.Name())), payload, stream)
+	if err != nil {
+		return nil, err
 	}
 	return resp.Body, nil
 }
@@ -138,10 +169,9 @@ func (p *OpenCodeGoProvider) streamOpenAI(ctx context.Context, req *types.Messag
 func (p *OpenCodeGoProvider) executeAnthropic(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeGo.AnthropicBaseURL
-	apiKey := p.nextAPIKey(cfg.EffectiveAPIKeys())
+	apiKey := p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
 
-	anthropicReq := transformer.AnthropicForModel(req, model, false)
-	rawBody, err := json.Marshal(anthropicReq)
+	rawBody, err := anthropicPayload(ctx, req, model, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal anthropic request: %w", err)
 	}
@@ -153,6 +183,8 @@ func (p *OpenCodeGoProvider) executeAnthropic(ctx context.Context, req *types.Me
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 	httpReq.Header.Set("x-api-key", apiKey)
+	client.SetProviderHeaders(httpReq, p.Name())
+	client.SetAnthropicHeaders(httpReq)
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
@@ -176,10 +208,9 @@ func (p *OpenCodeGoProvider) executeAnthropic(ctx context.Context, req *types.Me
 func (p *OpenCodeGoProvider) streamAnthropic(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeGo.AnthropicBaseURL
-	apiKey := p.nextAPIKey(cfg.EffectiveAPIKeys())
+	apiKey := p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
 
-	anthropicReq := transformer.AnthropicForModel(req, model, true)
-	rawBody, err := json.Marshal(anthropicReq)
+	rawBody, err := anthropicPayload(ctx, req, model, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal anthropic request: %w", err)
 	}
@@ -192,6 +223,8 @@ func (p *OpenCodeGoProvider) streamAnthropic(ctx context.Context, req *types.Mes
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 	httpReq.Header.Set("x-api-key", apiKey)
 	httpReq.Header.Set("Accept", "text/event-stream")
+	client.SetProviderHeaders(httpReq, p.Name())
+	client.SetAnthropicHeaders(httpReq)
 
 	if p.capture != nil {
 		p.capture.CaptureUpstreamRequest(rid(ctx), p.Name(), rawBody)
@@ -220,19 +253,16 @@ func (p *OpenCodeGoProvider) streamAnthropic(ctx context.Context, req *types.Mes
 
 // rid extracts the request ID from the handler context for capture correlation.
 func rid(ctx context.Context) string {
-	switch v := ctx.Value("requestID").(type) {
-	case string:
-		return v
-	case []byte:
-		return string(v)
-	}
-	return ""
+	return core.RequestMetadataFromContext(ctx).RequestID
 }
 
 func (p *OpenCodeGoProvider) doRequest(ctx context.Context, endpoint, apiKey string, req any, stream bool) (*http.Response, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+	if p.capture != nil {
+		p.capture.CaptureUpstreamRequest(rid(ctx), p.Name(), body)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
@@ -241,6 +271,7 @@ func (p *OpenCodeGoProvider) doRequest(ctx context.Context, endpoint, apiKey str
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	client.SetProviderHeaders(httpReq, p.Name())
 	if stream {
 		httpReq.Header.Set("Accept", "text/event-stream")
 	}
@@ -256,5 +287,10 @@ func (p *OpenCodeGoProvider) doRequest(ctx context.Context, endpoint, apiKey str
 		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
 	}
 
+	if p.capture != nil {
+		resp.Body = client.CaptureBody(resp.Body, func(data []byte) {
+			p.capture.CaptureUpstreamResponse(rid(ctx), p.Name(), data)
+		})
+	}
 	return resp, nil
 }

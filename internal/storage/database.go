@@ -229,6 +229,7 @@ func (d *Database) initSchema(ctx context.Context) error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_requests_start_time ON requests(start_time);
+	CREATE INDEX IF NOT EXISTS idx_requests_start_instant ON requests(julianday(start_time) DESC, id ASC);
 	CREATE INDEX IF NOT EXISTS idx_requests_model ON requests(model);
 	CREATE INDEX IF NOT EXISTS idx_requests_created_at ON requests(created_at);
 
@@ -329,45 +330,51 @@ func (d *Database) clearCatalogAPIKeys(ctx context.Context) error {
 	return err
 }
 
-// BackfillRequestCosts fills missing trustworthy per-request costs using the
-// same pricing rules as analytics aggregates.
+// BackfillRequestCosts fills missing trustworthy per-request costs when the
+// provider's prices are known. Stored provider costs and unknown prices remain unchanged.
 func (d *Database) BackfillRequestCosts(ctx context.Context) (int64, error) {
 	baseline := ""
 	if !d.analyticsBaseline.IsZero() {
 		baseline = d.analyticsBaseline.Format(time.RFC3339Nano)
 	}
 	rows, err := d.db.QueryContext(ctx, `
-		SELECT r.id, r.model,
+		SELECT r.id, r.model, COALESCE(r.provider, ''),
 		       COALESCE(r.input_tokens, 0),
 		       COALESCE(r.output_tokens, 0),
 		       COALESCE(r.cache_read_tokens, 0),
 		       COALESCE(r.cache_creation_tokens, 0),
-		       COALESCE(m.cost_input_per_m, 0),
-		       COALESCE(m.cost_output_per_m, 0),
+		       m.cost_input_per_m,
+		       m.cost_output_per_m,
 		       r.start_time
 		FROM requests r
-		LEFT JOIN models m ON m.id = r.model
+		LEFT JOIN models m ON m.name = r.model AND m.provider = COALESCE(NULLIF(r.provider, ''), 'opencode-go')
 		WHERE r.cost_usd IS NULL
-		  AND (? = '' OR r.start_time >= ?)
+		  AND (? = '' OR julianday(r.start_time) >= julianday(?) OR r.usage_trusted = 1)
 	`, baseline, baseline)
 	if err != nil {
 		return 0, err
 	}
 	type requestCostRow struct {
-		id                                      string
-		model                                   string
-		input, output, cacheRead, cacheCreation int64
-		modelsInputPerM, modelsOutputPerM       float64
-		startTime                               string
+		id   string
+		cost float64
 	}
 	var pending []requestCostRow
 	for rows.Next() {
-		var row requestCostRow
-		if err := rows.Scan(&row.id, &row.model, &row.input, &row.output, &row.cacheRead, &row.cacheCreation, &row.modelsInputPerM, &row.modelsOutputPerM, &row.startTime); err != nil {
+		var id, model, provider, startTime string
+		var input, output, cacheRead, cacheCreation int64
+		var inputRate, outputRate sql.NullFloat64
+		if err := rows.Scan(&id, &model, &provider, &input, &output, &cacheRead, &cacheCreation, &inputRate, &outputRate, &startTime); err != nil {
 			_ = rows.Close()
 			return 0, err
 		}
-		pending = append(pending, row)
+		cost, known := costForProviderTokensAt(provider, model, input, output, cacheRead, cacheCreation, inputRate, outputRate, parseRequestTime(startTime))
+		if known {
+			pending = append(pending, requestCostRow{id: id, cost: cost})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, err
 	}
 	if err := rows.Close(); err != nil {
 		return 0, err
@@ -380,26 +387,27 @@ func (d *Database) BackfillRequestCosts(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	stmt, err := tx.PrepareContext(ctx, `UPDATE requests SET cost_usd = ?, cost_source = ? WHERE id = ?`)
+	defer func() { _ = tx.Rollback() }()
+	stmt, err := tx.PrepareContext(ctx, `UPDATE requests SET cost_usd = ?, cost_source = ? WHERE id = ? AND cost_usd IS NULL`)
 	if err != nil {
-		_ = tx.Rollback()
 		return 0, err
 	}
 	defer func() { _ = stmt.Close() }()
 
 	var updated int64
 	for _, row := range pending {
-		cost := costForTokensAt(row.model, row.input, row.output, row.cacheRead, row.cacheCreation, row.modelsInputPerM, row.modelsOutputPerM, parseRequestTime(row.startTime))
-		res, err := stmt.ExecContext(ctx, cost, CostSourceEstimated, row.id)
+		res, err := stmt.ExecContext(ctx, row.cost, CostSourceEstimated, row.id)
 		if err != nil {
-			_ = tx.Rollback()
-			return updated, err
+			return 0, err
 		}
-		n, _ := res.RowsAffected()
+		n, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
 		updated += n
 	}
 	if err := tx.Commit(); err != nil {
-		return updated, err
+		return 0, err
 	}
 	return updated, nil
 }
@@ -437,7 +445,7 @@ func expandPath(path string) string {
 }
 
 // priceEntry defines a pricing rule for models whose id/name/display_name
-// contains the match substring. Applied only if current cost is 0/NULL.
+// contains the match substring. Catalog seeding only fills absent Go rates.
 type priceEntry struct {
 	Match      string  `json:"match"`
 	Input      float64 `json:"input"`
@@ -484,14 +492,8 @@ func PriceForModel(model string) (inputPerM, outputPerM, cacheReadPerM, cacheWri
 	return inputPerM, outputPerM, cacheReadPerM, cacheWritePerM, ok
 }
 
-// SeedDefaultModelPrices inserts realistic default pricing for common models
-// (GLM, Kimi, Qwen, Grok, DeepSeek, Claude, GPT, MiniMax, Nemotron, MiMo, etc.)
-// so that /api/analytics/* endpoints immediately show non-zero USD costs
-// without requiring user config or catalog rates.
-//
-// The seeder is idempotent: it only updates rows where cost_input_per_m or
-// cost_output_per_m is NULL or 0. This preserves any prices already set by
-// catalog sync (internal/catalog) or user overrides.
+// SeedDefaultModelPrices fills missing OpenCode Go catalog rates. Explicit zero
+// rates, partial rates, and other providers' prices are left untouched.
 //
 // Prices are approximate current public list prices (per million tokens, USD)
 // sourced from official provider documentation and pricing pages as of
@@ -512,7 +514,8 @@ func (d *Database) SeedDefaultModelPrices(ctx context.Context) error {
 		_, err := d.db.ExecContext(ctx, `
 			UPDATE models
 			SET cost_input_per_m = ?, cost_output_per_m = ?
-			WHERE (cost_input_per_m IS NULL OR cost_input_per_m = 0)
+			WHERE provider IN ('', 'opencode-go')
+			  AND cost_input_per_m IS NULL AND cost_output_per_m IS NULL
 			  AND (id LIKE '%' || ? || '%'
 			    OR name LIKE '%' || ? || '%'
 			    OR display_name LIKE '%' || ? || '%')

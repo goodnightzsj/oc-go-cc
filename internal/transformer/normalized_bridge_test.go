@@ -66,7 +66,10 @@ func TestAnthropicToResponses_SystemPromptWithNewline(t *testing.T) {
 		},
 	}
 
-	responsesReq := AnthropicToResponses(req, config.ModelConfig{ModelID: "gpt-5"})
+	responsesReq, err := AnthropicToResponses(req, config.ModelConfig{ModelID: "gpt-5"})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// The original bug: content was built by wrapping the raw string in quotes
 	// instead of JSON-encoding it, so any newline produced invalid JSON.

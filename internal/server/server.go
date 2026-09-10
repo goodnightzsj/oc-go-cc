@@ -68,6 +68,7 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 	_ = providerRegistry.Register(provider.NewOpenCodeGoProvider(atomic, captureLogger))
 	_ = providerRegistry.Register(provider.NewOpenCodeZenProvider(atomic))
 	_ = providerRegistry.Register(provider.NewAWSBedrockProvider(atomic))
+	_ = providerRegistry.Register(provider.NewCommandCodeProvider(atomic, captureLogger))
 
 	// Create status store for the statusline endpoint.
 	statusStore := status.NewStore(0)
@@ -128,6 +129,7 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 
 	// API routes.
 	mux.Handle("/v1/messages", handlers.NewAnthropicFirstHandler(atomic, http.HandlerFunc(messagesHandler.HandleMessages)))
+	mux.HandleFunc("/v1/responses", messagesHandler.HandleResponses)
 	mux.HandleFunc("/v1/messages/count_tokens", healthHandler.HandleCountTokens)
 	mux.HandleFunc("/v1/models", modelsHandler.HandleListModels)
 	mux.HandleFunc("/health", healthHandler.HandleHealth)
@@ -192,7 +194,7 @@ func (s *Server) Start() error {
 	s.logger.Info("starting routatic-proxy",
 		"host", cfg.Host,
 		"port", cfg.Port,
-		"base_url", cfg.OpenCodeGo.BaseURL,
+		"models_configured", len(cfg.Models),
 	)
 
 	s.mu.Lock()

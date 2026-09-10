@@ -119,9 +119,9 @@ func TestClassifyEndpoint(t *testing.T) {
 			expected: EndpointChatCompletions,
 		},
 		{
-			name:     "grok-build-0.1 uses chat completions endpoint",
+			name:     "grok-build-0.1 uses responses endpoint",
 			modelID:  "grok-build-0.1",
-			expected: EndpointChatCompletions,
+			expected: EndpointResponses,
 		},
 		{
 			name:     "big-pickle uses chat completions endpoint",
@@ -166,6 +166,17 @@ func TestClassifyEndpoint(t *testing.T) {
 				t.Fatalf("ClassifyEndpoint(%q) = %v, want %v", tt.modelID, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestClassifyEndpointNewFamilyMembers(t *testing.T) {
+	for _, id := range []string{"gpt-future", "grok-future", "muse-spark-future"} {
+		if got := ClassifyEndpoint(id); got != EndpointResponses {
+			t.Fatalf("%s: %v", id, got)
+		}
+	}
+	if got := ClassifyEndpoint("gemini-future"); got != EndpointGemini {
+		t.Fatalf("gemini: %v", got)
 	}
 }
 

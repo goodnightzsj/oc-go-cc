@@ -1,0 +1,9 @@
+id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,notes
+1,验收独立设置与平台数据隔离,DONE,配置局部保存密钥脱敏与日志统计归属正确,go test -race -p 2 ./... -count=1,2026-09-10,0,最终全量通过;浏览器实测两字段PATCH不发送未改字段或掩码;CommandCode不请求Go套餐
+2,修复并回归小额零与未知费用分布,DONE,小于1美元比例正确且未知价格不伪装完整占比,go test -race -p 2 ./... -count=1,2026-09-10,0,上海及洛杉矶行为测试通过;0.1加0.2显示33.3和66.7百分比;Top-N保留完整分母及未知状态
+3,执行面板交互与兼容性冒烟,DONE,筛选设置套餐统计在隔离浏览器可用并记录验证边界,node --check internal/gui/assets/app.js,2026-09-10,0,Chromium152三宽度七页面及键盘筛选设置保存通过;结果见raw/browser-smoke-result.md;未实测其他浏览器或设备
+4,核实五平台官方套餐与余额接口,DONE,直接官方来源与认证字段范围明确并记录缺口,echo SKIP,2026-09-11,0,官方文档人工核对;OpenRouter key与management credits;Zen/CommandCode无公开账户合同;AWS需独立IAM账单权限;见raw/platform-quota-capabilities.md
+5,贯通概览性能分析独立平台查询,DONE,五平台同名模型查询和对比趋势不串数;非法平台显式失败,go test -race ./internal/gui -run 'Test(DashboardProviderScope|PlatformPerformanceWithoutStorageIsExplicit)$' -count=1,2026-09-11,0,合成五平台同名模型和未知旧行的汇总趋势比较性能矩阵通过;包含别名规范化与非法provider
+6,实现有官方依据的平台套餐数据查询,DONE,认证错误未知余额字段与多key范围有测试;保留Go兼容,go test -race ./internal/quota -count=1,2026-09-11,1,解析及安全race通过1.429s;GUI/config管理key限额余额与平台缓存定向race通过1.549s;先失败后补实现;真实账户与AWS账单权限未验收
+7,补齐五平台页面交互与套餐本地数据,DONE,全部平台可独立查看本地数据与官方能力;旧请求不能覆盖新选择,go test -race -p 2 ./internal/config ./internal/gui ./internal/quota -count=1,2026-09-11,1,主线程最新config/gui/quota定向race全通过;CSV两页scope回归先失败后固定初始查询;未知零值及切换竞态回归通过
+8,验收五平台七页面与范围隔离,DONE,真实浏览器调用合成后端覆盖筛选与套餐失败路径;记录尚无真实账户验收,go test -race -p 2 ./... -count=1,2026-09-11,2,最新全量race通过;Chrome447断言31布局通过;修复390px套餐标题溢出并增补320px五平台;详见raw/multi-platform-browser-result.md;账户缺口仍明确保留

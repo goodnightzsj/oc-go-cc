@@ -15,6 +15,7 @@
 [![OpenCode Zen](https://img.shields.io/badge/OpenCode_Zen-7C4DFF?style=for-the-badge&logo=codeforces&logoColor=white)](https://opencode.ai/docs/zen/)
 [![AWS Bedrock](https://img.shields.io/badge/AWS_Bedrock-FF9900?style=for-the-badge&logo=amazon-aws&logoColor=white)](https://aws.amazon.com/bedrock/)
 [![OpenRouter](https://img.shields.io/badge/OpenRouter-10A37F?style=for-the-badge&logo=openai&logoColor=white)](https://openrouter.ai/)
+[![CommandCode](https://img.shields.io/badge/CommandCode-555555?style=for-the-badge)](https://commandcode.ai/docs/provider)
 [![Anthropic](https://img.shields.io/badge/Anthropic-D4A574?style=for-the-badge&logo=anthropic&logoColor=black)](https://www.anthropic.com/)
 
 </div>
@@ -25,13 +26,14 @@
 | **OpenCode Zen** | Curated, tested models with pay-as-you-go pricing | Claude/GPT/Gemini access without multiple API keys |
 | **AWS Bedrock** | Enterprise-grade models on your own AWS infrastructure | Enterprises needing data sovereignty and compliance |
 | **OpenRouter** | Unified API for 100+ LLMs with automatic failover | Experimenting with models from multiple providers |
+| **CommandCode** | Official Provider API with independent credentials | Native Claude Messages and a stateless Codex Responses adapter |
 | **Anthropic** | Native Claude models with anthropic-first failover mode | Claude-first workflows with OpenCode fallback |
 
 ---
 
-A Go CLI proxy that lets you route [Claude Code](https://docs.anthropic.com/en/docs/claude-code) requests through multiple upstream providers with automatic model selection and format transformation.
+A Go CLI proxy that routes [Claude Code](https://code.claude.com/docs/en/llm-gateway-connect) Messages and [Codex](https://developers.openai.com/codex/config-advanced) Responses requests through configured upstream providers.
 
-`routatic-proxy` sits between Claude Code and your chosen providers, intercepting Anthropic API requests, transforming them to the appropriate format (OpenAI, Anthropic, Responses, or Gemini), and forwarding them upstream. Claude Code thinks it's talking to Anthropic — but your requests go to the models and providers you configure.
+`routatic-proxy` uses native Anthropic forwarding where supported, and otherwise converts to the configured upstream format (OpenAI Chat Completions, Anthropic Messages, Responses, or Gemini). The Codex endpoint supports an explicitly bounded stateless Responses subset; see [CommandCode and client setup](docs/commandcode.md) for configuration and limitations.
 
 `oc-go-cc` remains available as a compatibility alias, and existing `OC_GO_CC_*` environment variables and `~/.config/oc-go-cc/config.json` files are still recognized.
 
@@ -43,8 +45,8 @@ OpenCode Go gives you access to powerful open coding models for **$5/month** (th
 
 ## Features
 
-- **Multi-Provider** — Route through OpenCode Go, OpenCode Zen, AWS Bedrock, or OpenRouter from a single config
-- **Transparent Proxy** — Claude Code sends Anthropic-format requests, proxy transforms to provider-native format and back
+- **Multi-Provider** — Route through OpenCode Go, OpenCode Zen, AWS Bedrock, OpenRouter, or CommandCode from a single config
+- **Client Protocols** — Claude Code Messages and stateless Codex Responses, with shared routing, request logs, and usage accounting
 - **Model Routing** — Automatically routes to different models based on context (default, thinking, long context, background)
 - **Streaming Scenario Routing** — Configurable routing for streaming requests (see [CONFIGURATION.md](CONFIGURATION.md#streaming-scenario-routing))
 - **Fallback Chains** — If a model fails, automatically tries the next one in your configured chain
@@ -59,23 +61,25 @@ See [docs/architecture.md](docs/architecture.md) for system design and request f
 
 ## GUI Version
 
-This repository provides a cross-platform GUI for `routatic-proxy`:
-
-- **macOS** — Native Cocoa window with system tray integration (requires CGO). Download the `.dmg` from the **Releases** page.
-- **Linux** — Browser-based GUI via `xdg-open` (default, no CGO required). For system tray: build with `CGO_ENABLED=1` and install `libappindicator-gtk3-devel` (Fedora) or `libayatana-appindicator3-dev` (Ubuntu/Debian).
-- **Windows** — GUI not supported (CLI only).
+`routatic-proxy start` runs the proxy and the browser dashboard at `http://127.0.0.1:3445`. The browser dashboard does not require CGO. Native tray integration is available only on macOS builds with CGO; it is distinct from the web dashboard.
 
 **Dashboard tabs:** Overview, History, Performance, Fallback, Usage Analytics, Quota, and Settings.
 
-The **Quota** tab reads the OpenCode Go plan windows (5-hour rolling, weekly, monthly) live with your configured OpenCode Go key(s) and shows the remaining budget, spend, and reset countdown per window. Keys never reach the browser — the dashboard only receives a masked hint such as `••••a1b2`. The upstream usage endpoint is undocumented, so the response shape may change; responses are cached for 30 seconds.
+Overview, History, Performance, and Usage Analytics have independent five-provider filters. Totals, trends, comparisons, and model rows use the selected scope. History CSV exports retain their initial filters even if the selection changes between pages.
 
-Per-model monthly allowances are synced daily from the [Go docs](https://opencode.ai/docs/go) (zh page first, en fallback; pricing variants like Peak/Off-Peak merge into one row). The usage table lists only the models this instance has actually served, showing their spend this month priced in the official Go price currency — directly comparable to the per-model quota from the docs. The total row converts each row back to shared-$60-pool equivalents (used × 60/allowance, the same per-model multiplier the OpenCode ledger applies) so the total percent reconciles with the official monthly window percent.
+The **Quota** tab separates each provider's local request/token/cost ledger from account data. OpenCode Go retains its 5-hour, weekly, and monthly windows. OpenRouter shows each inference key's cap and UTC usage, with BYOK usage separate; account Credits require the independent `openrouter.management_api_key`. Only masked key hints reach the browser, and account results are cached per provider for 30 seconds.
+
+Go per-model allowances come from the [Go docs](https://opencode.ai/docs/go). Per-model spend is this instance's local estimate, not an official account bill; it is shown only when one configured Go key has a known monthly window. Multiple keys cannot be attributed to accounts from the local ledger. Go's usage endpoint is undocumented and may change. No public account-query contract has been verified for Zen or CommandCode; AWS billing requires separate IAM authorization and is not integrated. These providers still have scoped local usage and official links, without borrowing Go quotas or presenting unavailable balances as zero. See the [capability matrix](docs/platform-integration-review.md#五平台页面与账户能力).
+
+Unknown costs are displayed as `—`, or a known subtotal followed by `+ ?`, instead of being presented as free usage. Analytics date buckets and the overview's today boundary use UTC; history date filters and individual timestamps use browser-local time.
 
 ```bash
-routatic-proxy ui
+routatic-proxy start
+# Or start in the background:
+routatic-proxy start -b
 ```
 
-On macOS, this opens a native window. On Linux, it opens your default browser.
+Open `http://127.0.0.1:3445` in your browser. Use `serve` for proxy-only operation.
 
 ### Dashboard Preview
 
@@ -131,17 +135,20 @@ See [INSTALLATION.md](INSTALLATION.md) for Homebrew, Scoop, Docker, and build-fr
 
 Prefer a GUI for switching providers? routatic-proxy works with [CC-Switch](https://github.com/farion1231/cc-switch) — see [Using with CC-Switch](CONFIGURATION.md#using-with-cc-switch).
 
+For CommandCode, use `routatic-proxy init --provider commandcode` with a new config path, or add the independent platform settings to your existing configuration. See [the client setup guide](docs/commandcode.md) before configuring Codex or Claude Code; existing files are not overwritten by `init`.
+
 ## CLI Commands
 
 ```
 routatic-proxy serve              Start the proxy server
+routatic-proxy start              Start proxy and dashboard (http://127.0.0.1:3445)
+routatic-proxy start -b           Start proxy and dashboard in the background
 routatic-proxy serve -b           Start in background (detached from terminal)
 routatic-proxy stop               Stop the running proxy server
 routatic-proxy status             Check if the proxy is running
 routatic-proxy init               Create default configuration file
 routatic-proxy validate           Validate configuration file
 routatic-proxy models             List all available models
-routatic-proxy ui                 Launch the GUI dashboard
 routatic-proxy autostart enable   Enable auto-start on login
 routatic-proxy update              Update to the latest release
 routatic-proxy --version          Show version
@@ -152,6 +159,8 @@ routatic-proxy --version          Show version
 | Document | Description |
 |----------|-------------|
 | [docs/openrouter.md](docs/openrouter.md) | OpenRouter provider setup and configuration |
+| [docs/commandcode.md](docs/commandcode.md) | CommandCode independent config, Claude Code/Codex setup, and compatibility boundaries |
+| [docs/platform-integration-review.md](docs/platform-integration-review.md) | Correctness fixes, selected upstream commits, and validation scope |
 | [CONFIGURATION.md](CONFIGURATION.md) | Config file reference, env vars, model routing, fallback chains |
 | [MODELS.md](MODELS.md) | Complete model capabilities, costs, and routing recommendations |
 | [INSTALLATION.md](INSTALLATION.md) | Homebrew, Scoop, build from source, Docker |

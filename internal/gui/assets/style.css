@@ -1249,5 +1249,6 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
 }
 @media (max-width: 620px) {
   .quota-window-grid { grid-template-columns: minmax(0, 1fr); }
+  .quota-page .page-heading { align-items: stretch; flex-direction: column; }
   .quota-endpoint { max-width: 100%; }
 }

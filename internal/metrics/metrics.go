@@ -244,24 +244,21 @@ func calculateModelStats(model string, samples []time.Duration) ModelLatencyStat
 
 // CalculateP95 calculates the p95 latency from the snapshot.
 func (s Snapshot) CalculateP95() time.Duration {
-	if len(s.Latencies) == 0 {
-		return 0
-	}
-	index := int(float64(len(s.Latencies)) * 0.95)
-	if index >= len(s.Latencies) {
-		index = len(s.Latencies) - 1
-	}
-	return s.Latencies[index]
+	return s.latencyPercentile(0.95)
 }
 
 // CalculateP99 calculates the p99 latency from the snapshot.
 func (s Snapshot) CalculateP99() time.Duration {
+	return s.latencyPercentile(0.99)
+}
+
+// latencyPercentile uses nearest rank without changing the snapshot sample order.
+func (s Snapshot) latencyPercentile(fraction float64) time.Duration {
 	if len(s.Latencies) == 0 {
 		return 0
 	}
-	index := int(float64(len(s.Latencies)) * 0.99)
-	if index >= len(s.Latencies) {
-		index = len(s.Latencies) - 1
-	}
-	return s.Latencies[index]
+	sorted := slices.Clone(s.Latencies)
+	slices.Sort(sorted)
+	index := int(math.Ceil(float64(len(sorted))*fraction)) - 1
+	return sorted[index]
 }

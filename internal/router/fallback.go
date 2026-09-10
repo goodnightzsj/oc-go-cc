@@ -135,6 +135,7 @@ func (cb *CircuitBreaker) State() CircuitState {
 // FallbackResult contains the result of a fallback attempt.
 type FallbackResult struct {
 	ModelID   string
+	Provider  string
 	Attempted int
 }
 
@@ -201,6 +202,9 @@ func (h *FallbackHandler) ExecuteWithFallback(
 	executor func(context.Context, config.ModelConfig) ([]byte, error),
 ) (*FallbackResult, []byte, error) {
 	totalModels := len(models)
+	if totalModels == 0 {
+		return &FallbackResult{}, nil, errors.New("no models available for fallback")
+	}
 	blockedProviders := make(map[string]bool)
 	var usageLimitErr error
 	var authErr error
@@ -220,7 +224,7 @@ func (h *FallbackHandler) ExecuteWithFallback(
 			continue
 		}
 
-		cb := h.getCircuitBreaker(model.ModelID)
+		cb := h.getCircuitBreaker(config.ModelKey(model))
 
 		// Skip models with open circuit breakers
 		if !cb.AllowRequest() {
@@ -247,6 +251,7 @@ func (h *FallbackHandler) ExecuteWithFallback(
 			)
 			return &FallbackResult{
 				ModelID:   model.ModelID,
+				Provider:  provider,
 				Attempted: i + 1,
 			}, body, nil
 		}
@@ -317,6 +322,7 @@ func (h *FallbackHandler) ExecuteWithFallback(
 	if authErr != nil {
 		return &FallbackResult{
 			ModelID:   models[0].ModelID,
+			Provider:  client.Provider(models[0]),
 			Attempted: authAttempted,
 		}, nil, authErr
 	}
@@ -324,12 +330,14 @@ func (h *FallbackHandler) ExecuteWithFallback(
 	if usageLimitErr != nil {
 		return &FallbackResult{
 			ModelID:   models[0].ModelID,
+			Provider:  client.Provider(models[0]),
 			Attempted: totalModels,
 		}, nil, usageLimitErr
 	}
 
 	return &FallbackResult{
 		ModelID:   models[0].ModelID,
+		Provider:  client.Provider(models[0]),
 		Attempted: totalModels,
 	}, nil, fmt.Errorf("all models failed (%d attempts)", totalModels)
 }

@@ -40,8 +40,13 @@ func TestHistoryAssetsKeepKeyboardDialogAndPromptTokens(t *testing.T) {
 			t.Errorf("index.html missing server-side History filter %q", marker)
 		}
 	}
-	if strings.Contains(string(page), `id="cost-source-filter"`) || strings.Contains(string(app), "costSourceLabel") {
-		t.Error("History must not expose internal cost provenance")
+	for _, marker := range []string{`id="cost-source-filter"`, `value="estimated"`, `value="provider"`} {
+		if !strings.Contains(string(page), marker) {
+			t.Errorf("History must distinguish local estimates from synced platform bills: missing %q", marker)
+		}
+	}
+	if !strings.Contains(string(app), "costSourceLabel") {
+		t.Error("History must label the cost source in rows and details")
 	}
 	for _, forbidden := range []string{`id="history-trend-metric"`, `id="history-filter-trend"`, "renderHistoryMiniTrend"} {
 		if strings.Contains(string(page), forbidden) || strings.Contains(string(app), forbidden) {

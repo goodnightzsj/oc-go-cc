@@ -45,15 +45,14 @@ Add the `openrouter` provider to your `~/.config/routatic-proxy/config.json`:
 
 ```json
 {
-  "providers": {
-    "openrouter": {
-      "enabled": true,
-      "api_key": "${ROUTATIC_PROXY_OPENROUTER_API_KEY}",
-      "base_url": "https://openrouter.ai/api/v1"
-    }
+  "openrouter": {
+    "api_key": "${ROUTATIC_PROXY_OPENROUTER_API_KEY}",
+    "base_url": "https://openrouter.ai/api/v1/chat/completions"
   }
 }
 ```
+
+This is a configuration fragment to merge into an existing file. The runtime reads the top-level `openrouter` object, not `providers.openrouter`. Configure a model target with `provider: "openrouter"`; adding credentials alone does not change the routing rules.
 
 ## Configuration
 
@@ -61,15 +60,15 @@ Add the `openrouter` provider to your `~/.config/routatic-proxy/config.json`:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | `string` | No | Provider display name (defaults to "openrouter") |
-| `base_url` | `string` | No | API endpoint base URL. Default: `https://openrouter.ai/api/v1` |
+| `base_url` | `string` | No | Complete Chat Completions endpoint. Default: `https://openrouter.ai/api/v1/chat/completions` |
 | `api_key` | `string` | Yes* | Single API key for authentication. Required if `api_keys` not set |
 | `api_keys` | `string[]` | Yes* | Multiple API keys for round-robin rotation. Required if `api_key` not set |
-| `enabled` | `bool` | No | Whether this provider is active. Default: `true` |
+| `management_api_key` | `string` | No | Separate management key for account Credits only; never used for inference |
 | `timeout_ms` | `int` | No | Request timeout in milliseconds. Default: `300000` (5 minutes) |
 | `stream_timeout_ms` | `int` | No | Per-chunk timeout during streaming. Default: `60000` (1 minute) |
+| `streaming_timeout_ms` | `int` | No | Total streaming-attempt timeout; when unset uses `timeout_ms` |
 
-*At least one of `api_key` or `api_keys` must be configured.
+*Provider-specific inference keys take precedence over the legacy global key pool. Prefer an explicit OpenRouter key so a global key intended for another provider is not reused. A management key alone does not authorize inference.
 
 ### Environment Variables
 
@@ -77,9 +76,9 @@ Add the `openrouter` provider to your `~/.config/routatic-proxy/config.json`:
 |----------|-------------|------------|
 | `ROUTATIC_PROXY_OPENROUTER_API_KEY` | Single API key override | Highest |
 | `ROUTATIC_PROXY_OPENROUTER_API_KEYS` | Comma-separated keys for round-robin | Highest |
-| `ROUTATIC_PROXY_OPENROUTER_BASE_URL` | Custom base URL override | Highest |
+| `ROUTATIC_PROXY_OPENROUTER_MANAGEMENT_API_KEY` | Account Credits management key | Highest |
 
-Environment variables take precedence over config file values. Config values support `${VAR}` interpolation.
+Environment variables take precedence over config file values. Config values support `${VAR}` interpolation. There is no automatic `ROUTATIC_PROXY_OPENROUTER_BASE_URL` override; use `openrouter.base_url` directly or reference your own environment variable there.
 
 Precedence order: `*_API_KEYS` → `*_API_KEY` → config file `api_keys` → config file `api_key`
 
@@ -89,11 +88,8 @@ Precedence order: `*_API_KEYS` → `*_API_KEY` → config file `api_keys` → co
 
 ```json
 {
-  "providers": {
-    "openrouter": {
-      "enabled": true,
-      "api_key": "sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxx"
-    }
+  "openrouter": {
+    "api_key": "${ROUTATIC_PROXY_OPENROUTER_API_KEY}"
   }
 }
 ```
@@ -104,15 +100,8 @@ For load balancing across multiple API keys:
 
 ```json
 {
-  "providers": {
-    "openrouter": {
-      "enabled": true,
-      "api_keys": [
-        "sk-or-v1-key-1",
-        "sk-or-v1-key-2",
-        "sk-or-v1-key-3"
-      ]
-    }
+  "openrouter": {
+    "api_keys": ["${OPENROUTER_KEY_1}", "${OPENROUTER_KEY_2}"]
   }
 }
 ```
@@ -123,12 +112,9 @@ For enterprise/self-hosted OpenRouter deployments:
 
 ```json
 {
-  "providers": {
-    "openrouter": {
-      "enabled": true,
-      "base_url": "https://openrouter.mycompany.com/api/v1",
-      "api_key": "${OPENROUTER_API_KEY}"
-    }
+  "openrouter": {
+    "base_url": "https://openrouter.mycompany.com/api/v1/chat/completions",
+    "api_key": "${OPENROUTER_API_KEY}"
   }
 }
 ```
@@ -137,59 +123,45 @@ For enterprise/self-hosted OpenRouter deployments:
 
 ```json
 {
-  "providers": {
-    "openrouter": {
-      "enabled": true,
-      "api_key": "${ROUTATIC_PROXY_OPENROUTER_API_KEY}",
-      "base_url": "https://openrouter.ai/api/v1",
-      "timeout_ms": 300000,
-      "stream_timeout_ms": 60000
-    }
+  "host": "127.0.0.1",
+  "port": 3456,
+  "respect_requested_model": false,
+  "catalog": {"enabled": false},
+  "openrouter": {
+    "api_key": "${ROUTATIC_PROXY_OPENROUTER_API_KEY}",
+    "base_url": "https://openrouter.ai/api/v1/chat/completions",
+    "timeout_ms": 300000,
+    "stream_timeout_ms": 60000
   },
   "models": {
-    "openrouter/openai/gpt-4o": {
-      "enabled": true,
-      "display_name": "GPT-4o (via OpenRouter)"
-    },
-    "openrouter/anthropic/claude-3.5-sonnet": {
-      "enabled": true,
-      "display_name": "Claude 3.5 Sonnet (via OpenRouter)"
-    },
-    "openrouter/anthropic/claude-3-opus": {
-      "enabled": true,
-      "display_name": "Claude 3 Opus (via OpenRouter)"
-    },
-    "openrouter/anthropic/claude-3.5-haiku": {
-      "enabled": true,
-      "display_name": "Claude 3.5 Haiku (via OpenRouter)"
-    },
-    "openrouter/google/gemini-2.0-flash-exp": {
-      "enabled": true,
-      "display_name": "Gemini 2.0 Flash (via OpenRouter)"
-    },
-    "openrouter/google/gemini-pro-1.5": {
-      "enabled": true,
-      "display_name": "Gemini 1.5 Pro (via OpenRouter)"
-    },
-    "openrouter/meta-llama/llama-3.3-70b-instruct": {
-      "enabled": true,
-      "display_name": "Llama 3.3 70B (via OpenRouter)"
-    },
-    "openrouter/meta-llama/llama-3.1-405b": {
-      "enabled": true,
-      "display_name": "Llama 3.1 405B (via OpenRouter)"
-    },
-    "openrouter/mistralai/mistral-large": {
-      "enabled": true,
-      "display_name": "Mistral Large (via OpenRouter)"
-    },
-    "openrouter/deepseek/deepseek-chat": {
-      "enabled": true,
-      "display_name": "DeepSeek V3 (via OpenRouter)"
+    "default": {
+      "provider": "openrouter",
+      "model_id": "openai/gpt-4o",
+      "max_tokens": 4096
+    }
+  },
+  "model_overrides": {
+    "openrouter": {
+      "provider": "openrouter",
+      "model_id": "openai/gpt-4o",
+      "max_tokens": 4096
     }
   }
 }
 ```
+
+The model above is an example, not a claim of current account access. Replace `model_id` with an available OpenRouter model, run `routatic-proxy validate`, and request the `openrouter` alias from your client.
+
+## Quota and Account Credits
+
+Select **OpenRouter** in the Quota tab. Local usage includes only requests that pass through this instance; it is fetched separately from upstream account data.
+
+- `GET /api/v1/key` uses each configured inference key and returns that key's cap and UTC daily/weekly/monthly usage. BYOK usage is shown separately. A `null` cap means no per-key cap, not an unlimited account balance; missing optional usage values remain unknown.
+- `GET /api/v1/credits` requires a separate **Management Key**. Set `openrouter.management_api_key` in Settings, or `ROUTATIC_PROXY_OPENROUTER_MANAGEMENT_API_KEY` in the service environment. It is never put in the inference pool and never falls back to the inference key. Account balance is `total_credits - total_usage`, including negative balances.
+- Multiple keys are not summed or assumed to belong to one account. Errors are shown per key; one failed key does not hide another key's data. The response is cached per platform for 30 seconds and invalidated by endpoint/key changes.
+- Custom gateways must implement these endpoints at their own configured origin. The proxy never sends a private gateway key to the public OpenRouter host as a quota fallback.
+
+Official contracts: [Key limits and UTC usage](https://openrouter.ai/docs/api_reference/limits), [account Credits and Management Key requirement](https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits). Local HTTP response fields are documented in the [dashboard API reference](reference-api.md#dashboard-apis).
 
 ## Cost-Based Routing Integration
 

@@ -53,12 +53,22 @@
     <div class="page-shell overview-page">
     <div class="page-heading analytics-heading">
       <div><h1 data-i18n="overview.title">Dashboard</h1><span class="page-meta" id="overview-generated"></span><span class="page-meta" id="overview-latency"></span></div>
-      <div class="metric-segment range-segment" id="overview-range" role="group" aria-label="Dashboard range">
-        <button type="button" data-days="7" class="active" data-i18n="analytics.last7d">Last 7 days</button>
-        <button type="button" data-days="30" data-i18n="analytics.last30d">Last 30 days</button>
-        <button type="button" data-days="90" data-i18n="analytics.last90d">Last 90 days</button>
+      <div class="analytics-controls">
+        <label for="overview-provider" data-i18n="filter.provider">Provider</label>
+        <select class="filter-select" id="overview-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
+          <option value="" data-i18n-option="filter.allProviders">All platforms</option>
+          <option value="opencode-go">OpenCode Go</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option><option value="commandcode">CommandCode</option>
+        </select>
+        <div class="metric-segment range-segment" id="overview-range" role="group" aria-label="Dashboard range">
+          <button type="button" data-days="7" class="active" data-i18n="analytics.last7d">Last 7 days</button>
+          <button type="button" data-days="30" data-i18n="analytics.last30d">Last 30 days</button>
+          <button type="button" data-days="90" data-i18n="analytics.last90d">Last 90 days</button>
+        </div>
+        <button type="button" class="btn btn-small" id="btn-refresh-overview" data-i18n="analytics.refresh">Refresh</button>
       </div>
     </div>
+    <p class="page-meta" data-i18n="history.localScope">Statistics use records kept by this instance, including synced bills and local estimates. Direct-to-platform traffic may not be recorded here.</p>
+    <p id="overview-error" hidden role="alert" style="color:var(--ui-red)"></p>
     <div class="metric-band metric-grid overview-metrics reference-metrics">
       <div class="metric-cell overview-metric">
         <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="metric.total">Total Requests</div>
@@ -121,12 +131,14 @@
         </div>
         <button class="btn btn-small command-button" id="history-export" data-i18n="export.csv">Export CSV</button>
       </div>
+      <p class="page-meta" data-i18n="history.localScope">Statistics use records kept by this instance, including synced bills and local estimates. Direct-to-platform traffic may not be recorded here.</p>
+      <p id="history-error" hidden role="alert" style="color:var(--ui-red)"></p>
       <div class="history-summary-band" aria-label="Filtered history summary">
         <div class="history-summary-metrics">
           <div><span data-i18n="history.filteredRequests">Filtered requests</span><strong id="history-summary-requests">--</strong></div>
           <div><span data-i18n="history.successRate">Success rate</span><strong id="history-summary-success">--</strong></div>
           <div><span data-i18n="history.filteredTokens">Tokens</span><strong id="history-summary-tokens">--</strong><small class="history-summary-note" id="history-summary-token-note"></small></div>
-          <div><span data-i18n="history.filteredCost">Recorded cost</span><strong id="history-summary-cost">--</strong></div>
+          <div><span data-i18n="history.filteredCost">Recorded cost</span><strong id="history-summary-cost">--</strong><small class="history-summary-note" id="history-summary-cost-note"></small></div>
         </div>
         <div class="insight-toolbar">
           <span data-i18n="history.distribution">Distribution details</span>
@@ -172,7 +184,10 @@
           </div>
         </div>
         <input type="text" id="model-filter" class="history-filter-input" placeholder="Model" data-i18n-placeholder="filter.model" aria-label="Filter by model">
-        <input type="text" id="provider-filter" class="history-filter-input" placeholder="Provider" data-i18n-placeholder="filter.provider" aria-label="Filter by provider">
+        <select class="filter-select" id="provider-filter" aria-label="Provider" data-i18n-aria-label="filter.provider">
+          <option value="" data-i18n-option="filter.allProviders">All platforms</option>
+          <option value="opencode-go">OpenCode Go</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option><option value="commandcode">CommandCode</option>
+        </select>
         <input type="text" id="scenario-filter" class="history-filter-input" placeholder="Scenario" data-i18n-placeholder="filter.scenario" aria-label="Filter by scenario">
         <select class="filter-select" id="status-filter" aria-label="Filter by status">
           <option value="" data-i18n-option="filter.allStatuses">All statuses</option>
@@ -183,6 +198,11 @@
           <option value="" data-i18n-option="filter.allStreams">All request types</option>
           <option value="true" data-i18n-option="filter.streaming">Streaming only</option>
           <option value="false" data-i18n-option="filter.nonStreaming">Non-streaming only</option>
+        </select>
+        <select class="filter-select" id="cost-source-filter" aria-label="Cost source" data-i18n-aria-label="history.costSource">
+          <option value="" data-i18n-option="history.allCostSources">All cost sources</option>
+          <option value="estimated" data-i18n-option="history.costEstimated">Local estimate</option>
+          <option value="provider" data-i18n-option="history.costProvider">Synced platform bill</option>
         </select>
         <button class="btn btn-small" id="history-reset" data-i18n="filter.reset">Reset</button>
       </div>
@@ -326,14 +346,22 @@
 
   <!-- Performance Tab -->
   <div class="tab-content flex-1 overflow-y-auto p-4" id="tab-performance">
-    <div class="flex items-center justify-end mb-3">
+    <div class="analytics-controls mb-3">
+      <label for="perf-provider" data-i18n="filter.provider">Provider</label>
+      <select class="filter-select" id="perf-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
+        <option value="" data-i18n-option="filter.allProviders">All platforms</option>
+        <option value="opencode-go">OpenCode Go</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option><option value="commandcode">CommandCode</option>
+      </select>
       <select class="filter-select" id="perf-time-range" aria-label="Time range filter">
         <option value="1h" data-i18n="perf.lastHour">Last Hour</option>
         <option value="24h" data-i18n="perf.last24h">Last 24 Hours</option>
         <option value="7d" data-i18n="perf.last7d">Last 7 Days</option>
         <option value="all" selected data-i18n="perf.allTime">All Time</option>
       </select>
+      <button type="button" class="btn btn-small" id="btn-refresh-perf" data-i18n="analytics.refresh">Refresh</button>
     </div>
+    <p class="page-meta" data-i18n="history.localScope">Statistics use records kept by this instance, including synced bills and local estimates. Direct-to-platform traffic may not be recorded here.</p>
+    <p id="perf-error" hidden role="alert" style="color:var(--ui-red)"></p>
     <div class="overflow-x-auto">
       <table class="perf-table w-full text-xs border-collapse" role="grid">
         <thead>
@@ -394,11 +422,17 @@
           <span class="page-meta" id="analytics-generated"></span>
         </div>
         <div class="analytics-controls">
+          <label for="analytics-provider" data-i18n="filter.provider">Provider</label>
+          <select class="filter-select" id="analytics-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
+            <option value="" data-i18n-option="filter.allProviders">All platforms</option>
+            <option value="opencode-go">OpenCode Go</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option><option value="commandcode">CommandCode</option>
+          </select>
           <button class="btn btn-small" id="btn-refresh-analytics" data-i18n="analytics.refresh">Refresh</button>
         </div>
       </div>
 
       <div class="usage-filter-bar">
+        <span class="page-meta" data-i18n="analytics.utc">Analytics dates and time buckets use UTC</span>
         <div class="history-date-range" id="analytics-date-range">
           <input type="hidden" id="analytics-start">
           <input type="hidden" id="analytics-end">
@@ -428,6 +462,8 @@
           </div>
         </div>
       </div>
+      <p class="page-meta" data-i18n="history.localScope">Statistics use records kept by this instance, including synced bills and local estimates. Direct-to-platform traffic may not be recorded here.</p>
+      <p id="analytics-error" hidden role="alert" style="color:var(--ui-red)"></p>
 
       <div class="metric-band metric-grid analytics-metrics usage-metrics">
         <div class="metric-cell">
@@ -441,7 +477,7 @@
         <div class="metric-cell">
           <div class="metric-label" data-i18n="analytics.cost">Cost</div>
           <div class="metric-value" id="kpi-cost">--</div>
-          <div class="metric-note" data-i18n="analytics.currencyUSD">USD</div>
+          <div class="metric-note" id="kpi-cost-note">USD</div>
         </div>
         <div class="metric-cell">
           <div class="metric-label" data-i18n="analytics.inputTokens">Input tokens</div><div class="metric-value" id="kpi-input">--</div><div class="metric-note" data-i18n="analytics.freshInput">Fresh input</div>
@@ -488,14 +524,22 @@
         <div>
           <h1 data-i18n="quota.title">Plan Quota</h1>
           <span class="page-meta" id="quota-meta"></span>
+          <span class="page-meta" id="quota-source"></span>
           <span class="page-meta quota-endpoint" id="quota-endpoint"></span>
         </div>
         <div class="analytics-controls">
+          <label class="sr-only" for="quota-provider" data-i18n="filter.provider">Provider</label>
+          <select class="filter-select" id="quota-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
+            <option value="opencode-go">OpenCode Go</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option><option value="commandcode">CommandCode</option>
+          </select>
           <button class="btn btn-small btn-icon" id="btn-refresh-quota"><svg width="14" height="14"><use href="#icon-refresh"/></svg><span class="sr-only" data-i18n="quota.refresh">Refresh</span></button>
         </div>
       </div>
+      <p id="quota-error" hidden role="alert" style="color:var(--ui-red)"></p>
+      <div id="quota-links" class="analytics-controls"></div>
 
-      <div class="metric-band metric-grid usage-metrics quota-metrics" aria-label="Quota summary">
+      <div id="quota-go">
+      <div class="metric-band metric-grid usage-metrics quota-metrics" aria-label="OpenCode Go quota summary">
         <div class="metric-cell">
           <div class="metric-label" data-i18n="quota.bottleneck">Tightest window</div>
           <div class="metric-value" id="quota-bottleneck">--</div>
@@ -521,6 +565,42 @@
       <div id="quota-accounts" class="quota-accounts" aria-live="polite"></div>
       <div id="quota-model-limits" class="quota-model-limits"></div>
       <p class="quota-disclaimer" data-i18n="quota.unofficial">Undocumented upstream endpoint; the response shape may change.</p>
+      </div>
+      <section id="quota-unavailable" hidden aria-live="polite">
+        <div class="quota-notice">
+          <strong id="quota-unavailable-title"></strong>
+          <span id="quota-unavailable-note"></span>
+        </div>
+      </section>
+      <section id="quota-openrouter" hidden aria-live="polite">
+        <div id="quota-openrouter-credits" class="analytics-section"></div>
+        <p class="quota-disclaimer" data-i18n="openrouter.keyScope">Key limits are spending caps, not account balances. Key usage and BYOK usage are shown separately; key balances are never added together.</p>
+        <div id="quota-openrouter-accounts" class="quota-accounts"></div>
+      </section>
+
+      <section class="analytics-section" id="quota-local">
+        <div class="section-heading">
+          <h2 data-i18n="quota.localTitle">Local ledger</h2>
+          <div class="analytics-controls">
+            <label for="quota-local-days" data-i18n="filter.dateRange">Date range</label>
+            <select class="filter-select" id="quota-local-days" aria-label="Date range" data-i18n-aria-label="filter.dateRange">
+              <option value="7" data-i18n-option="analytics.last7d">Last 7 days</option>
+              <option value="30" selected data-i18n-option="analytics.last30d">Last 30 days</option>
+              <option value="90" data-i18n-option="analytics.last90d">Last 90 days</option>
+            </select>
+            <button type="button" class="btn btn-small" id="quota-view-local" data-i18n="quota.viewLocal">View local requests</button>
+          </div>
+        </div>
+        <p class="page-meta" id="quota-local-note"></p>
+        <p id="quota-local-error" hidden role="alert" style="color:var(--ui-red)"></p>
+        <div class="metric-band metric-grid usage-metrics">
+          <div class="metric-cell"><div class="metric-label" data-i18n="analytics.totalRequests">Total Requests</div><div class="metric-value" id="quota-local-requests">--</div></div>
+          <div class="metric-cell"><div class="metric-label" data-i18n="analytics.totalTokens">Total Tokens</div><div class="metric-value" id="quota-local-tokens">--</div></div>
+          <div class="metric-cell"><div class="metric-label" data-i18n="history.filteredCost">Recorded cost</div><div class="metric-value" id="quota-local-cost">--</div><div class="metric-note" id="quota-local-cost-note"></div></div>
+          <div class="metric-cell"><div class="metric-label" data-i18n="quota.unknownCosts">Requests with unknown cost</div><div class="metric-value" id="quota-local-unknown">--</div></div>
+        </div>
+        <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th data-i18n="th.modelPlatform">Model / Platform</th><th data-i18n="analytics.requests">Requests</th><th data-i18n="analytics.cacheHitShort">Cache hit</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="analytics.cost">Cost</th></tr></thead><tbody id="quota-local-model-tbody"></tbody></table></div>
+      </section>
     </div>
   </div>
 
@@ -595,7 +675,7 @@
           <div class="flex items-center gap-2">
             <button class="btn btn-small" id="btn-export-config" data-i18n="btn.export">Export</button>
             <label class="checkbox-inline flex items-center gap-1 text-xs text-[#98989d] cursor-pointer">
-              <input type="checkbox" id="export-anonymize" class="cursor-pointer">
+              <input type="checkbox" id="export-anonymize" class="cursor-pointer" checked disabled>
               <span data-i18n="label.anonymize">Anonymize</span>
             </label>
           </div>
@@ -612,8 +692,9 @@
       </div>
     </div>
 
-    <div class="mt-5 mb-2 text-[13px] font-semibold text-[#f5f5f7]">Proxy Configuration</div>
+    <div class="mt-5 mb-2 text-[13px] font-semibold text-[#f5f5f7]" data-i18n="section.proxyConfig">Proxy Configuration</div>
     <div class="bg-[#2c2c2e] border border-[#48484a] rounded-lg p-4 mt-3 shadow-lg shadow-black/20">
+      <p class="page-meta" id="provider-timeout-hint" data-i18n="label.timeoutHint">0 uses the provider default. Idle timeout limits gaps between streamed data; attempt timeout limits the entire streaming request.</p>
       <fieldset class="border border-[#48484a] rounded p-3 mb-3 bg-[#2c2c2e]">
         <legend class="text-sm font-semibold px-1.5 text-[#f5f5f7]">OpenCode Go</legend>
         <div class="mb-2">
@@ -625,6 +706,10 @@
           <input type="text" id="cfg-go-anthropic-url" placeholder="https://opencode.ai/zen/go/v1/messages" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
         </div>
         <div class="mb-2">
+          <label for="cfg-go-responses-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Responses Base URL</label>
+          <input type="text" id="cfg-go-responses-url" placeholder="https://opencode.ai/zen/go/v1/responses" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
           <label for="cfg-go-api-key" class="block text-[11px] font-medium text-[#98989d] mb-0.5">API Key</label>
           <div class="input-with-btn flex gap-1 w-full">
             <input type="password" id="cfg-go-api-key" placeholder="Use env var or leave empty" class="flex-1 px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
@@ -632,6 +717,10 @@
               <svg width="14" height="14"><use href="#icon-eye"/></svg>
             </button>
           </div>
+        </div>
+        <div class="mb-2">
+          <label for="cfg-go-api-keys" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.apiKeys">API keys (comma-separated, takes precedence over the single key)</label>
+          <input type="password" id="cfg-go-api-keys" autocomplete="new-password" aria-describedby="api-keys-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
         </div>
         <div class="flex gap-2.5">
           <div class="flex-1 mb-2">
@@ -642,6 +731,10 @@
             <label for="cfg-go-stream-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Stream Timeout (ms)</label>
             <input type="number" id="cfg-go-stream-timeout" placeholder="" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
           </div>
+        </div>
+        <div class="mb-2">
+          <label for="cfg-go-streaming-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamingTimeout">Streaming attempt timeout (ms)</label>
+          <input type="number" id="cfg-go-streaming-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
         </div>
       </fieldset>
 
@@ -675,6 +768,10 @@
             </button>
           </div>
         </div>
+        <div class="mb-2">
+          <label for="cfg-zen-api-keys" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.apiKeys">API keys (comma-separated, takes precedence over the single key)</label>
+          <input type="password" id="cfg-zen-api-keys" autocomplete="new-password" aria-describedby="api-keys-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
         <div class="flex gap-2.5">
           <div class="flex-1 mb-2">
             <label for="cfg-zen-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Timeout (ms)</label>
@@ -684,6 +781,10 @@
             <label for="cfg-zen-stream-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Stream Timeout (ms)</label>
             <input type="number" id="cfg-zen-stream-timeout" placeholder="" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
           </div>
+        </div>
+        <div class="mb-2">
+          <label for="cfg-zen-streaming-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamingTimeout">Streaming attempt timeout (ms)</label>
+          <input type="number" id="cfg-zen-streaming-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
         </div>
       </fieldset>
 
@@ -713,6 +814,10 @@
           <label for="cfg-bedrock-project-id" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Project ID</label>
           <input type="text" id="cfg-bedrock-project-id" placeholder="" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
         </div>
+        <div class="mb-2">
+          <label for="cfg-bedrock-api-keys" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.apiKeys">API keys (comma-separated, takes precedence over the single key)</label>
+          <input type="password" id="cfg-bedrock-api-keys" autocomplete="new-password" aria-describedby="api-keys-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
         <div class="flex gap-2.5">
           <div class="flex-1 mb-2">
             <label for="cfg-bedrock-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Timeout (ms)</label>
@@ -723,6 +828,80 @@
             <input type="number" id="cfg-bedrock-stream-timeout" placeholder="" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
           </div>
         </div>
+        <div class="mb-2">
+          <label for="cfg-bedrock-streaming-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamingTimeout">Streaming attempt timeout (ms)</label>
+          <input type="number" id="cfg-bedrock-streaming-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+      </fieldset>
+
+      <fieldset class="border border-[#48484a] rounded p-3 mb-3 bg-[#2c2c2e]">
+        <legend class="text-sm font-semibold px-1.5 text-[#f5f5f7]">OpenRouter</legend>
+        <div class="mb-2">
+          <label for="cfg-openrouter-base-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Base URL</label>
+          <input type="text" id="cfg-openrouter-base-url" placeholder="https://openrouter.ai/api/v1/chat/completions" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-openrouter-api-key" class="block text-[11px] font-medium text-[#98989d] mb-0.5">API Key</label>
+          <input type="password" id="cfg-openrouter-api-key" placeholder="" autocomplete="new-password" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-openrouter-api-keys" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.apiKeys">API keys (comma-separated, takes precedence over the single key)</label>
+          <input type="password" id="cfg-openrouter-api-keys" autocomplete="new-password" aria-describedby="api-keys-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-openrouter-management-key" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="openrouter.managementKey">Management API key (optional)</label>
+          <input type="password" id="cfg-openrouter-management-key" autocomplete="new-password" aria-describedby="openrouter-management-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+          <p class="page-meta" id="openrouter-management-hint" data-i18n="openrouter.managementHint">Optional management key used only to query account balance, never for inference.</p>
+        </div>
+        <div class="mb-2">
+          <label for="cfg-openrouter-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Timeout (ms)</label>
+          <input type="number" id="cfg-openrouter-timeout" placeholder="300000" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-openrouter-stream-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Stream Timeout (ms)</label>
+          <input type="number" id="cfg-openrouter-stream-timeout" placeholder="" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-openrouter-streaming-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamingTimeout">Streaming attempt timeout (ms)</label>
+          <input type="number" id="cfg-openrouter-streaming-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+      </fieldset>
+
+      <fieldset class="border border-[#48484a] rounded p-3 mb-3 bg-[#2c2c2e]">
+        <legend class="text-sm font-semibold px-1.5 text-[#f5f5f7]">CommandCode</legend>
+        <p class="text-xs text-[#98989d] mb-2" data-i18n="commandcode.keyHint">Uses its own API key; global keys are never sent to CommandCode.</p>
+        <div class="mb-2">
+          <label for="cfg-commandcode-base-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.chatURL">Chat Completions URL</label>
+          <input type="url" id="cfg-commandcode-base-url" placeholder="https://api.commandcode.ai/provider/v1/chat/completions" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-commandcode-anthropic-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.messagesURL">Anthropic Messages URL</label>
+          <input type="url" id="cfg-commandcode-anthropic-url" placeholder="https://api.commandcode.ai/provider/v1/messages" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-commandcode-api-key" class="block text-[11px] font-medium text-[#98989d] mb-0.5">API Key</label>
+          <input type="password" id="cfg-commandcode-api-key" placeholder="" autocomplete="new-password" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-commandcode-api-keys" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.apiKeys">API keys (comma-separated, takes precedence over the single key)</label>
+          <input type="password" id="cfg-commandcode-api-keys" autocomplete="new-password" aria-describedby="api-keys-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-commandcode-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.requestTimeout">Request timeout (ms)</label>
+          <input type="number" id="cfg-commandcode-timeout" placeholder="300000" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-commandcode-stream-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamIdleTimeout">Stream idle timeout (ms)</label>
+          <input type="number" id="cfg-commandcode-stream-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-commandcode-streaming-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamingTimeout">Streaming attempt timeout (ms)</label>
+          <input type="number" id="cfg-commandcode-streaming-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <label class="flex items-center gap-1.5 text-xs mb-2"><input type="checkbox" id="cfg-commandcode-zdr"><span data-i18n="commandcode.zdr">Zero Data Retention (ZDR)</span></label>
+        <p class="text-xs text-[#98989d]" data-i18n="commandcode.quotaHint">No public plan or balance API is documented. This dashboard does not fetch private billing pages; use CommandCode for official usage and billing.</p>
+        <a class="btn btn-small" href="https://commandcode.ai/docs/provider" target="_blank" rel="noopener noreferrer" data-i18n="commandcode.docs">Provider API docs</a>
+        <a class="btn btn-small" href="https://commandcode.ai/settings/keys" target="_blank" rel="noopener noreferrer" data-i18n="commandcode.keys">Manage API keys</a>
       </fieldset>
 
       <fieldset class="border border-[#48484a] rounded p-3 mb-3 bg-[#2c2c2e]">
@@ -749,6 +928,11 @@
             </button>
           </div>
         </div>
+        <div class="mb-2">
+          <label for="cfg-global-keys" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.apiKeys">API keys (comma-separated, takes precedence over the single key)</label>
+          <input type="password" id="cfg-global-keys" autocomplete="new-password" aria-describedby="api-keys-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <p id="api-keys-hint" class="text-xs text-[#98989d] mb-2" data-i18n="label.apiKeysHint">Replace the entire list to edit masked keys, or clear it to use the single key. Environment overrides still take precedence.</p>
         <div class="checkbox-group mb-0">
           <label class="flex items-center gap-1.5 text-xs text-[#f5f5f7] font-normal cursor-pointer">
             <input type="checkbox" id="cfg-hot-reload"> Hot Reload
@@ -770,7 +954,7 @@
       </fieldset>
 
       <button class="btn btn-primary w-full mt-4" id="btn-save-cfg" onclick="saveProxyConfig()" style="margin-top: 16px;" data-i18n="btn.save">Save &amp; Apply Config</button>
-      <div id="save-status" class="save-status mt-2.5 text-xs text-center"></div>
+      <div id="save-status" class="save-status mt-2.5 text-xs text-center" role="status" aria-live="polite"></div>
     </div>
 
     <div class="mt-4 text-xs text-[#98989d]">

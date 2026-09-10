@@ -46,6 +46,13 @@ var providerPresets = map[string]ProviderPreset{
 		BaseURL:     "https://openrouter.ai/api/v1/chat/completions",
 		Generator:   getOpenRouterConfig,
 	},
+	"commandcode": {
+		Name:        "CommandCode",
+		EnvVarName:  "ROUTATIC_PROXY_COMMANDCODE_API_KEY",
+		Description: "CommandCode official Provider API (native Claude Messages and OpenAI Chat Completions)",
+		BaseURL:     "https://api.commandcode.ai/provider/v1/chat/completions",
+		Generator:   getCommandCodeConfig,
+	},
 }
 
 // getProviderConfig returns a config template optimized for a specific provider.
@@ -376,4 +383,38 @@ func getOpenCodeZenConfig() string {
 // nothing to keep in sync by hand.
 func getOpenCodeGoConfig() string {
 	return getDefaultConfig()
+}
+
+func getCommandCodeConfig() string {
+	return `{
+  "host": "127.0.0.1",
+  "port": 3456,
+  "hot_reload": false,
+  "enable_streaming_scenario_routing": true,
+  "respect_requested_model": false,
+  "models": {
+    "default": { "provider": "commandcode", "model_id": "claude-sonnet-4-6", "max_tokens": 8192, "vision": true }
+  },
+  "model_overrides": {
+    "commandcode": { "provider": "commandcode", "model_id": "claude-sonnet-4-6", "max_tokens": 8192, "vision": true },
+    "claude-sonnet-4-6": { "provider": "commandcode", "model_id": "claude-sonnet-4-6", "max_tokens": 8192, "vision": true },
+    "deepseek/deepseek-v4-flash": { "provider": "commandcode", "model_id": "deepseek/deepseek-v4-flash", "max_tokens": 8192 }
+  },
+  "model_family_overrides": {
+    "claude": { "provider": "commandcode", "model_id": "claude-sonnet-4-6", "max_tokens": 8192, "vision": true }
+  },
+  "commandcode": {
+    "base_url": "https://api.commandcode.ai/provider/v1/chat/completions",
+    "anthropic_base_url": "https://api.commandcode.ai/provider/v1/messages",
+    "api_key": "${ROUTATIC_PROXY_COMMANDCODE_API_KEY}",
+    "api_keys": [],
+    "timeout_ms": 300000,
+    "stream_timeout_ms": 60000,
+    "streaming_timeout_ms": 600000,
+    "zero_data_retention": false
+  },
+  "catalog": { "enabled": false },
+  "logging": { "level": "info", "requests": true }
+}
+`
 }

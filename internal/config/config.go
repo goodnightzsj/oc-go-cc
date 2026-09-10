@@ -1,11 +1,14 @@
 // Package config handles application configuration loading and validation.
 package config
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Config is the root configuration loaded from ~/.config/routatic-proxy/config.json.
 // It defines the server settings (host, port), provider connections (OpenCode Go,
-// OpenCode Zen, AWS Bedrock), model definitions, and fallback chains. The config
+// OpenCode Zen, AWS Bedrock, OpenRouter, CommandCode), models, and fallback chains. The config
 // supports environment variable interpolation via ${VAR} syntax and hot-reloading
 // when hot_reload is enabled.
 type Config struct {
@@ -26,6 +29,7 @@ type Config struct {
 	OpenCodeGo                     OpenCodeGoConfig         `json:"opencode_go"`
 	OpenCodeZen                    OpenCodeZenConfig        `json:"opencode_zen"`
 	OpenRouter                     OpenRouterConfig         `json:"openrouter"`
+	CommandCode                    CommandCodeConfig        `json:"commandcode"`
 	AnthropicFirst                 AnthropicFirstConfig     `json:"anthropic_first"`
 	Logging                        LoggingConfig            `json:"logging"`
 	Catalog                        CatalogConfig            `json:"catalog"`
@@ -159,6 +163,7 @@ func (c *AWSBedrockConfig) EffectiveAPIKeys() []string {
 type OpenCodeGoConfig struct {
 	BaseURL            string   `json:"base_url"`
 	AnthropicBaseURL   string   `json:"anthropic_base_url"`
+	ResponsesBaseURL   string   `json:"responses_base_url"`
 	APIKey             string   `json:"api_key,omitempty"`
 	APIKeys            []string `json:"api_keys,omitempty"`
 	TimeoutMs          int      `json:"timeout_ms"`
@@ -185,6 +190,7 @@ type OpenRouterConfig struct {
 	BaseURL            string   `json:"base_url"`
 	APIKey             string   `json:"api_key,omitempty"`
 	APIKeys            []string `json:"api_keys,omitempty"`
+	ManagementAPIKey   string   `json:"management_api_key,omitempty"` // Account credits only; never used for inference.
 	TimeoutMs          int      `json:"timeout_ms"`
 	StreamTimeoutMs    int      `json:"stream_timeout_ms"`
 	StreamingTimeoutMs int      `json:"streaming_timeout_ms,omitempty"`
@@ -193,6 +199,29 @@ type OpenRouterConfig struct {
 // EffectiveAPIKeys returns the pool of API keys for OpenRouter.
 // APIKeys takes precedence; falls back to the single APIKey field.
 func (c *OpenRouterConfig) EffectiveAPIKeys() []string {
+	if len(c.APIKeys) > 0 {
+		return c.APIKeys
+	}
+	if c.APIKey != "" {
+		return []string{c.APIKey}
+	}
+	return nil
+}
+
+// CommandCodeConfig uses the official Provider API, with its own credentials.
+// BaseURL and AnthropicBaseURL are complete endpoint URLs, like OpenCode Go.
+type CommandCodeConfig struct {
+	BaseURL            string   `json:"base_url"`
+	AnthropicBaseURL   string   `json:"anthropic_base_url"`
+	APIKey             string   `json:"api_key,omitempty"`
+	APIKeys            []string `json:"api_keys,omitempty"`
+	TimeoutMs          int      `json:"timeout_ms"`
+	StreamTimeoutMs    int      `json:"stream_timeout_ms"`
+	StreamingTimeoutMs int      `json:"streaming_timeout_ms,omitempty"`
+	ZeroDataRetention  bool     `json:"zero_data_retention"`
+}
+
+func (c *CommandCodeConfig) EffectiveAPIKeys() []string {
 	if len(c.APIKeys) > 0 {
 		return c.APIKeys
 	}
@@ -279,4 +308,52 @@ func (c *Config) EffectiveAPIKeys() []string {
 		return []string{c.APIKey}
 	}
 	return nil
+}
+
+// NormalizeProvider preserves the legacy empty-provider default and spelling.
+func NormalizeProvider(provider string) string {
+	if provider == "" {
+		return "opencode-go"
+	}
+	return strings.ReplaceAll(provider, "_", "-")
+}
+
+// ModelKey identifies a routing target, including its provider.
+func ModelKey(model ModelConfig) string {
+	return NormalizeProvider(model.Provider) + "/" + model.ModelID
+}
+
+// SupportedProvider reports whether the runtime has an adapter for this name.
+func SupportedProvider(provider string) bool {
+	switch NormalizeProvider(provider) {
+	case "opencode-go", "opencode-zen", "aws-bedrock", "openrouter", "commandcode":
+		return true
+	default:
+		return false
+	}
+}
+
+// ProviderAPIKeys is the credential source shared by sending and fallback logic.
+// The original providers retain their global-key fallback; unknown providers
+// must never receive another platform's credentials.
+func (c *Config) ProviderAPIKeys(provider string) []string {
+	var keys []string
+	switch NormalizeProvider(provider) {
+	case "opencode-go":
+		keys = c.OpenCodeGo.EffectiveAPIKeys()
+	case "opencode-zen":
+		keys = c.OpenCodeZen.EffectiveAPIKeys()
+	case "aws-bedrock":
+		keys = c.AWSBedrock.EffectiveAPIKeys()
+	case "openrouter":
+		keys = c.OpenRouter.EffectiveAPIKeys()
+	case "commandcode":
+		return c.CommandCode.EffectiveAPIKeys()
+	default:
+		return nil
+	}
+	if len(keys) > 0 {
+		return keys
+	}
+	return c.EffectiveAPIKeys()
 }

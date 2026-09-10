@@ -12,6 +12,7 @@ type AtomicConfig struct {
 	ptr      atomic.Pointer[Config]
 	path     string
 	mu       sync.Mutex
+	writeMu  sync.Mutex
 	onReload []func(*Config)
 }
 
@@ -32,12 +33,30 @@ func (a *AtomicConfig) Get() *Config {
 // If the reload fails, the old configuration is preserved and an error is returned.
 // On successful reload, all registered callbacks are invoked.
 func (a *AtomicConfig) Reload() error {
-	old := a.Get()
+	a.writeMu.Lock()
+	defer a.writeMu.Unlock()
+
 	cfg, err := LoadFromPath(a.path)
 	if err != nil {
 		return err
 	}
+	a.applyLoaded(cfg)
+	return nil
+}
 
+// ApplyLoaded publishes a config previously validated by LoadJSON or
+// LoadFromPath. Callers must not mutate it after publishing. GUI saves use this
+// after the atomic disk write so a second load cannot fail after persistence.
+func (a *AtomicConfig) ApplyLoaded(cfg *Config) {
+	a.writeMu.Lock()
+	defer a.writeMu.Unlock()
+	a.applyLoaded(cfg)
+}
+
+// applyLoaded runs under writeMu so a watcher cannot publish a stale disk read
+// after a GUI save, and reload callbacks never run concurrently.
+func (a *AtomicConfig) applyLoaded(cfg *Config) {
+	old := a.Get()
 	// Warn about settings that take effect differently on reload.
 	if old != nil {
 		if old.Host != cfg.Host || old.Port != cfg.Port {
@@ -78,11 +97,10 @@ func (a *AtomicConfig) Reload() error {
 
 	// Now cfg is fully prepared — safe for concurrent readers.
 	a.ptr.Store(cfg)
-
-	return nil
 }
 
-// OnReload registers a callback that will be invoked after each successful reload.
+// OnReload registers a preparation callback invoked before publishing each
+// successfully loaded config. Callbacks must not call Reload or ApplyLoaded.
 func (a *AtomicConfig) OnReload(fn func(*Config)) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

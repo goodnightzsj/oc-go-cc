@@ -49,6 +49,7 @@ type Server struct {
 	atomicCfg         *config.AtomicConfig
 	cfg               Config
 	cfgMu             sync.RWMutex
+	proxyConfigMu     sync.Mutex
 	proxyRunning      atomic.Bool
 	connectedExisting atomic.Bool
 	proxyPort         int
@@ -61,10 +62,9 @@ type Server struct {
 	logger            *slog.Logger
 	catalogMu         sync.Mutex
 
-	// Cached plan-quota response; see quotaCacheTTL.
-	quotaMu       sync.Mutex
-	quotaCache    *quotaResponse
-	quotaCacheFor string
+	// One cached quota response per platform; see quotaCacheTTL.
+	quotaMu    sync.Mutex
+	quotaCache map[string]quotaCacheEntry
 
 	// Per-model allowance table synced daily from the Go docs; see
 	// limitsRefreshTTL. modelLimitsURL overrides the docs URLs (tests).
@@ -659,7 +659,7 @@ const keyMask = "••••••••••••••••"
 // the keyMask placeholder, recursively. This is a server-side guard against the
 // masked GET response being replayed: if the client never edited a key field,
 // its mask must not overwrite the real key on disk.
-func stripMaskedKeys(patch map[string]json.RawMessage) {
+func stripMaskedKeys(patch map[string]json.RawMessage) error {
 	for field, raw := range patch {
 		// A bare masked string at this level: drop the whole field.
 		var asString string
@@ -675,6 +675,12 @@ func stripMaskedKeys(patch map[string]json.RawMessage) {
 		if json.Unmarshal(raw, &asArray) == nil {
 			if len(asArray) > 0 && allMasked(asArray) {
 				delete(patch, field)
+			} else {
+				for _, value := range asArray {
+					if value == keyMask {
+						return fmt.Errorf("%s mixes redacted and new values; replace the complete list", field)
+					}
+				}
 			}
 			continue
 		}
@@ -685,7 +691,12 @@ func stripMaskedKeys(patch map[string]json.RawMessage) {
 		if json.Unmarshal(raw, &nested) != nil {
 			continue // scalar or shape we don't need to touch
 		}
-		stripMaskedKeys(nested)
+		if len(nested) == 0 {
+			continue // An explicit empty object resets that section.
+		}
+		if err := stripMaskedKeys(nested); err != nil {
+			return fmt.Errorf("%s.%w", field, err)
+		}
 		if len(nested) == 0 {
 			delete(patch, field)
 			continue
@@ -694,6 +705,7 @@ func stripMaskedKeys(patch map[string]json.RawMessage) {
 			patch[field] = reencoded
 		}
 	}
+	return nil
 }
 
 func allMasked(values []string) bool {
@@ -760,6 +772,7 @@ func (s *Server) handleProxyConfig(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "failed to redact config", http.StatusInternalServerError)
 			return
 		}
+		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, redacted)
 
 	case http.MethodPost:
@@ -770,20 +783,8 @@ func (s *Server) handleProxyConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Drop any key field whose value is still the mask sent by GET. The
-		// frontend normally omits untouched fields, but a browser autofill or a
-		// client replaying a GET response would otherwise overwrite the real key
-		// on disk with bullet characters.
-		stripMaskedKeys(patch)
-
-		if err := applyConfigPatch(s.atomicCfg.Path(), patch); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		// Reload configuration atomically so the running proxy picks up changes.
-		if err := s.atomicCfg.Reload(); err != nil {
-			http.Error(w, fmt.Sprintf("failed to reload config: %v", err), http.StatusInternalServerError)
+		if _, err := s.updateProxyConfig(patch, true); err != nil {
+			writeConfigError(w, err)
 			return
 		}
 
@@ -792,70 +793,6 @@ func (s *Server) handleProxyConfig(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
-}
-
-// applyConfigPatch merges a partial update into the config file on disk.
-//
-// The merge happens on the file's *raw* JSON, never on a parsed config.Config.
-// config.LoadFromPath expands ${VAR} references, applies environment overrides
-// and fills in defaults; round-tripping through it would rewrite the file with
-// every secret resolved to plaintext and every default materialised, silently
-// destroying the user's ${VAR} indirection.
-func applyConfigPatch(configPath string, patch map[string]json.RawMessage) error {
-	raw, err := os.ReadFile(configPath)
-	if err != nil {
-		return fmt.Errorf("failed to read current config: %w", err)
-	}
-
-	var merged map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &merged); err != nil {
-		return fmt.Errorf("failed to parse current config: %w", err)
-	}
-	if merged == nil {
-		merged = map[string]json.RawMessage{}
-	}
-	for field, value := range patch {
-		merged[field] = value
-	}
-
-	// Validate the result by loading it the way the proxy will, without letting
-	// that normalised form reach the file.
-	if err := validateMergedConfig(merged); err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(merged, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to serialize config: %w", err)
-	}
-	data = append(data, '\n')
-	if err := os.WriteFile(configPath, data, 0600); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
-	}
-	return nil
-}
-
-// validateMergedConfig checks the essential fields the proxy cannot start
-// without. It works on the raw merged JSON so that unset fields stay unset.
-func validateMergedConfig(merged map[string]json.RawMessage) error {
-	var probe struct {
-		Host string `json:"host"`
-		Port int    `json:"port"`
-	}
-	blob, err := json.Marshal(merged)
-	if err != nil {
-		return fmt.Errorf("failed to re-encode config: %w", err)
-	}
-	if err := json.Unmarshal(blob, &probe); err != nil {
-		return fmt.Errorf("invalid config format: %w", err)
-	}
-	if probe.Host == "" {
-		return errors.New("host is required")
-	}
-	if probe.Port < 1 || probe.Port > 65535 {
-		return errors.New("port must be between 1 and 65535")
-	}
-	return nil
 }
 
 type catalogLockResponse struct {

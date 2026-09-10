@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -15,6 +16,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
@@ -58,6 +61,11 @@ type responseWriter struct {
 	wroteHeader       bool
 	ssePayloadWritten bool
 	contentWritten    bool
+	sseBuffer         []byte
+	sseData           []byte
+	sseEvent          string
+	messageStopped    bool
+	streamErr         error
 	usage             struct {
 		inputTokens              int
 		outputTokens             int
@@ -84,88 +92,118 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 	}
 	if len(b) > 0 {
 		w.ssePayloadWritten = true
-		w.extractUsageFromSSE(b)
-		w.detectContentInSSE(b)
+		if err := w.observeSSE(b); err != nil {
+			w.streamErr = err
+			return 0, err
+		}
 	}
 	return w.ResponseWriter.Write(b)
 }
 
-// extractUsageFromSSE parses SSE data and extracts usage information from message_delta events.
-// This is done asynchronously to not block the write path.
-func (w *responseWriter) extractUsageFromSSE(b []byte) {
-	// Look for message_delta event with usage data
-	// SSE format: event: message_delta\ndata: {...}\n\n
-	data := string(b)
-	if !strings.Contains(data, "message_delta") {
-		return
-	}
-	if !strings.Contains(data, "usage") {
-		return
-	}
-
-	// Try to extract usage fields using simple string parsing for performance
-	// Full JSON parsing is done only when we have a potential match
-	if idx := strings.Index(data, `"input_tokens":`); idx != -1 {
-		if val, err := parseIntAfter(data, idx+len(`"input_tokens":`)); err == nil {
-			w.usage.inputTokens = val
+// observeSSE reads complete events without changing forwarded bytes. Native
+// streams may split any JSON token between writes and report input/cache usage
+// only in message_start; message_delta updates only fields actually present.
+// Write holds mu while calling this method.
+func (w *responseWriter) observeSSE(b []byte) error {
+	w.sseBuffer = append(w.sseBuffer, b...)
+	for {
+		i := bytes.IndexByte(w.sseBuffer, '\n')
+		if i < 0 {
+			return nil
 		}
-	}
-	if idx := strings.Index(data, `"output_tokens":`); idx != -1 {
-		if val, err := parseIntAfter(data, idx+len(`"output_tokens":`)); err == nil {
-			w.usage.outputTokens = val
-		}
-	}
-	if idx := strings.Index(data, `"cache_read_input_tokens":`); idx != -1 {
-		if val, err := parseIntAfter(data, idx+len(`"cache_read_input_tokens":`)); err == nil {
-			w.usage.cacheReadInputTokens = val
-		}
-	}
-	if idx := strings.Index(data, `"cache_creation_input_tokens":`); idx != -1 {
-		if val, err := parseIntAfter(data, idx+len(`"cache_creation_input_tokens":`)); err == nil {
-			w.usage.cacheCreationInputTokens = val
-		}
-	}
-
-	// OpenAI-compatible usage keys (used by Bedrock Mantle and direct OpenAI streams)
-	if idx := strings.Index(data, `"prompt_tokens":`); idx != -1 {
-		if val, err := parseIntAfter(data, idx+len(`"prompt_tokens":`)); err == nil {
-			// Only set if not already set by Anthropic keys to avoid overwriting
-			if w.usage.inputTokens == 0 {
-				w.usage.inputTokens = val
+		line := strings.TrimSuffix(string(w.sseBuffer[:i]), "\r")
+		w.sseBuffer = w.sseBuffer[i+1:]
+		switch {
+		case strings.HasPrefix(line, "event:"):
+			w.sseEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		case strings.HasPrefix(line, "data:"):
+			w.sseData = append(w.sseData, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")...)
+			w.sseData = append(w.sseData, '\n')
+		case line == "":
+			if len(w.sseData) > 0 {
+				if err := w.observeSSEEvent(); err != nil {
+					return err
+				}
 			}
+			w.sseData = w.sseData[:0]
+			w.sseEvent = ""
 		}
 	}
-	if idx := strings.Index(data, `"completion_tokens":`); idx != -1 {
-		if val, err := parseIntAfter(data, idx+len(`"completion_tokens":`)); err == nil {
-			if w.usage.outputTokens == 0 {
-				w.usage.outputTokens = val
-			}
+}
+
+func (w *responseWriter) observeSSEEvent() error {
+	var event struct {
+		Type    string         `json:"type"`
+		Usage   map[string]int `json:"usage"`
+		Message struct {
+			Usage map[string]int `json:"usage"`
+		} `json:"message"`
+	}
+	data := w.sseData
+	w.sseData = nil
+	if err := json.Unmarshal(data, &event); err != nil {
+		return fmt.Errorf("invalid upstream SSE event: %w", err)
+	}
+	if event.Type == "" {
+		event.Type = w.sseEvent
+	}
+	switch event.Type {
+	case "message_stop":
+		w.messageStopped = true
+	case "error":
+		w.streamErr = errors.New("upstream reported an SSE error")
+	}
+	if event.Type == "content_block_start" || event.Type == "content_block_delta" {
+		w.contentWritten = true
+	}
+	usage := event.Usage
+	if event.Type == "message_start" {
+		usage = event.Message.Usage
+	}
+	for field, value := range usage {
+		switch field {
+		case "input_tokens":
+			w.usage.inputTokens = value
+		case "output_tokens":
+			w.usage.outputTokens = value
+		case "cache_read_input_tokens":
+			w.usage.cacheReadInputTokens = value
+		case "cache_creation_input_tokens":
+			w.usage.cacheCreationInputTokens = value
 		}
 	}
+	return nil
+}
+
+// finish checks the observed protocol terminal event before accounting. An
+// output adapter may still fail while serializing its own terminal response.
+func (w *responseWriter) finish() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.streamErr != nil {
+		return w.streamErr
+	}
+	if !w.messageStopped || len(bytes.TrimSpace(w.sseBuffer)) > 0 || len(w.sseData) > 0 {
+		return fmt.Errorf("upstream stream ended before a complete message_stop: %w", io.ErrUnexpectedEOF)
+	}
+	if finisher, ok := w.ResponseWriter.(interface{ Finish() error }); ok {
+		return finisher.Finish()
+	}
+	return nil
 }
 
 // SetPartialUsage records usage surfaced by the transformer from a
 // mid-stream OpenAI chunk (every chunk carries cumulative usage, so the last
 // value seen before an upstream failure is the exact count the platform
 // bills for a partially produced stream). Called from the transform
-// goroutine, the same one that calls extractUsageFromSSE via Write.
+// goroutine, the same one that calls observeSSE via Write.
 func (w *responseWriter) SetPartialUsage(in, out, cacheRead, cacheCreate int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.usage.inputTokens = in
 	w.usage.outputTokens = out
 	w.usage.cacheReadInputTokens = cacheRead
 	w.usage.cacheCreationInputTokens = cacheCreate
-}
-
-func (w *responseWriter) detectContentInSSE(b []byte) {
-	data := string(b)
-	if strings.Contains(data, `"content_block_start"`) ||
-		strings.Contains(data, `"content_block_delta"`) ||
-		strings.Contains(data, `"text_delta"`) ||
-		strings.Contains(data, `"content":"`) ||
-		strings.Contains(data, `"tool_use"`) ||
-		strings.Contains(data, `"thinking_delta"`) {
-		w.contentWritten = true
-	}
 }
 
 func (w *responseWriter) hasContent() bool {
@@ -178,41 +216,6 @@ func (w *responseWriter) getOutputTokens() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.usage.outputTokens
-}
-
-// parseIntAfter parses an integer value starting at the given position in the string.
-func parseIntAfter(s string, start int) (int, error) {
-	if start >= len(s) {
-		return 0, fmt.Errorf("start position beyond string length")
-	}
-	// Skip whitespace
-	for start < len(s) && (s[start] == ' ' || s[start] == '\t') {
-		start++
-	}
-	if start >= len(s) {
-		return 0, fmt.Errorf("only whitespace found")
-	}
-	// Parse optional minus sign
-	sign := 1
-	if s[start] == '-' {
-		sign = -1
-		start++
-		if start >= len(s) {
-			return 0, fmt.Errorf("minus sign at end of string")
-		}
-	}
-	// Parse digits
-	val := 0
-	hasDigits := false
-	for start < len(s) && s[start] >= '0' && s[start] <= '9' {
-		val = val*10 + int(s[start]-'0')
-		start++
-		hasDigits = true
-	}
-	if !hasDigits {
-		return 0, fmt.Errorf("no digits found")
-	}
-	return sign * val, nil
 }
 
 // isLowValueResponse decides whether a completed stream should be treated as a
@@ -359,11 +362,14 @@ func NewMessagesHandler(
 	}
 }
 
-// HandleMessages handles POST /v1/messages.
-func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+type admittedRequestKey struct{}
+
+// admitRequest is shared by protocol entry points. Only the internal adapter
+// can carry this marker, so a Responses request consumes the same bucket once.
+func (h *MessagesHandler) admitRequest(w http.ResponseWriter, r *http.Request) (*http.Request, bool) {
+	if requestID, ok := r.Context().Value(admittedRequestKey{}).(string); ok {
+		w.Header().Set("X-Request-ID", requestID)
+		return r, true
 	}
 
 	// Generate or get request ID for correlation.
@@ -382,9 +388,24 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 	if !h.rateLimiter.Allow(clientIP) {
 		h.metrics.RecordRateLimited()
 		h.logger.Warn("rate limited", "client", clientIP, "request_id", requestID)
+		return r, false
+	}
+	return r.WithContext(context.WithValue(r.Context(), admittedRequestKey{}, requestID)), true
+}
+
+// HandleMessages handles POST /v1/messages.
+func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	admitted, allowed := h.admitRequest(w, r)
+	if !allowed {
 		http.Error(w, "rate limited", http.StatusTooManyRequests)
 		return
 	}
+	r = admitted
+	requestID := w.Header().Get("X-Request-ID")
 
 	// Read the raw request body with a size limit to prevent memory exhaustion.
 	const maxBodySize = 104857600 // 100 MB
@@ -416,6 +437,15 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 		h.sendError(w, http.StatusBadRequest, err.Error(), nil)
 		return
 	}
+	sessionID := r.Header.Get("x-claude-code-session-id")
+	if sessionID == "" {
+		sessionID = uuid.NewString()
+	}
+	r = r.WithContext(core.WithRequestMetadata(r.Context(), core.RequestMetadata{
+		RequestID: requestID, SessionID: sessionID, Body: rawBody,
+		AnthropicVersion: r.Header.Get("anthropic-version"),
+		AnthropicBeta:    strings.Join(r.Header.Values("anthropic-beta"), ","),
+	}))
 
 	// Record metrics
 	isStreaming := anthropicReq.Stream != nil && *anthropicReq.Stream
@@ -567,23 +597,22 @@ func (h *MessagesHandler) routeOnce(
 	return h.modelRouter.Route(routerMessages, tokenCount, requestedModel)
 }
 
-// appendUniqueModels appends models from extra to base, skipping any model_id
-// already present in base. The first occurrence of a ModelID is kept; later
-// duplicates are dropped. Order of the base chain is preserved.
+// appendUniqueModels keeps the first target per provider/model pair. Models
+// with the same ID on different providers remain independent fallbacks.
 func appendUniqueModels(base, extra []config.ModelConfig) []config.ModelConfig {
 	if len(extra) == 0 {
 		return base
 	}
 	seen := make(map[string]struct{}, len(base))
 	for _, m := range base {
-		seen[m.ModelID] = struct{}{}
+		seen[config.ModelKey(m)] = struct{}{}
 	}
 	for _, m := range extra {
-		if _, ok := seen[m.ModelID]; ok {
+		if _, ok := seen[config.ModelKey(m)]; ok {
 			continue
 		}
 		base = append(base, m)
-		seen[m.ModelID] = struct{}{}
+		seen[config.ModelKey(m)] = struct{}{}
 	}
 	return base
 }
@@ -619,7 +648,7 @@ func (h *MessagesHandler) handleStreaming(
 	streamStart := time.Now()
 	blockedProviders := make(map[string]bool)
 
-	for _, model := range modelChain {
+	for attempt, model := range modelChain {
 		select {
 		case <-clientCtx.Done():
 			h.logger.Debug("client disconnected, stopping streaming fallbacks")
@@ -656,7 +685,7 @@ func (h *MessagesHandler) handleStreaming(
 			rec := history.RequestRecord{
 				ID:                  requestID,
 				Model:               model.ModelID,
-				Provider:            model.Provider,
+				Provider:            providerName,
 				Scenario:            string(scenario),
 				StartTime:           streamStart,
 				Duration:            latency,
@@ -666,8 +695,8 @@ func (h *MessagesHandler) handleStreaming(
 				CacheCreationTokens: rw.usage.cacheCreationInputTokens,
 				Streaming:           true,
 				Success:             true,
-				Attempt:             1, // streaming fallback attempts not yet tracked in record; treat as primary
-				PeakMultiplier:      history.PeakMultiplier(model.ModelID, streamStart),
+				Attempt:             attempt + 1,
+				PeakMultiplier:      history.ProviderPeakMultiplier(providerName, model.ModelID, streamStart),
 			}
 			if h.storage != nil {
 				if err := h.storage.InsertRequest(rec); err != nil {
@@ -680,8 +709,7 @@ func (h *MessagesHandler) handleStreaming(
 		// usage. The platform bills partially produced streams by the tokens
 		// actually consumed, so a failure after SSE payload started leaves a
 		// permanent one-sided gap unless the proxy records it too. Streams
-		// that died before any chunk carried usage are not billed by the
-		// platform either, so they are not recorded.
+		// without reported usage cannot be assigned synthetic token counts.
 		recordStreamFailure := func(model config.ModelConfig, err error, action string) {
 			cancelAttempt()
 			if rw.usage.inputTokens == 0 && rw.usage.outputTokens == 0 &&
@@ -696,7 +724,7 @@ func (h *MessagesHandler) handleStreaming(
 			rec := history.RequestRecord{
 				ID:                  requestID,
 				Model:               model.ModelID,
-				Provider:            model.Provider,
+				Provider:            providerName,
 				Scenario:            string(scenario),
 				StartTime:           streamStart,
 				Duration:            time.Since(streamStart),
@@ -706,8 +734,8 @@ func (h *MessagesHandler) handleStreaming(
 				CacheCreationTokens: rw.usage.cacheCreationInputTokens,
 				Streaming:           true,
 				Success:             false,
-				Attempt:             1,
-				PeakMultiplier:      history.PeakMultiplier(model.ModelID, streamStart),
+				Attempt:             attempt + 1,
+				PeakMultiplier:      history.ProviderPeakMultiplier(providerName, model.ModelID, streamStart),
 			}
 			if err := h.storage.InsertRequest(rec); err != nil {
 				h.logger.Warn("failed to insert failed request into storage", "error", err)
@@ -722,6 +750,7 @@ func (h *MessagesHandler) handleStreaming(
 			cancelAttempt()
 			if clientCtx.Err() != nil {
 				h.logger.Debug("client disconnected during " + action + " stream")
+				recordStreamFailure(model, err, action)
 				return false // abort
 			}
 			if err == transformer.ErrStreamIdle {
@@ -752,6 +781,13 @@ func (h *MessagesHandler) handleStreaming(
 			}
 			return true // continue to next model
 		}
+		finishStream := func(model config.ModelConfig, action string) bool {
+			if err := rw.finish(); err != nil {
+				return handleStreamError(err, model, action)
+			}
+			recordStreamSuccess(model)
+			return false
+		}
 
 		// Try new provider-based dispatch first.
 		if h.providerRegistry != nil {
@@ -773,7 +809,7 @@ func (h *MessagesHandler) handleStreaming(
 				// Bind body read to attemptCtx so streaming_timeout_ms aborts mid-stream.
 				streamReader := transformer.NewCtxReadCloser(attemptCtx, streamBody)
 
-				wireFormat := prov.WireFormat(model.ModelID)
+				wireFormat := core.ModelWireFormat(prov, model)
 				if wireFormat == core.WireFormatAnthropic {
 					atomic.StoreInt32(&heartbeatPaused, 1)
 				}
@@ -785,6 +821,7 @@ func (h *MessagesHandler) handleStreaming(
 					if errProxy == transformer.ErrClientDisconnected {
 						if clientCtx.Err() != nil {
 							h.logger.Debug("client disconnected during stream")
+							recordStreamFailure(model, errProxy, wireFormat.String())
 							return
 						}
 						errProxy = fmt.Errorf("streaming timeout (%v) exceeded", timeout)
@@ -805,7 +842,9 @@ func (h *MessagesHandler) handleStreaming(
 					continue
 				}
 
-				recordStreamSuccess(model)
+				if finishStream(model, wireFormat.String()) {
+					continue
+				}
 				return
 			}
 		}
@@ -840,6 +879,7 @@ func (h *MessagesHandler) handleStreaming(
 			if err == transformer.ErrClientDisconnected {
 				if clientCtx.Err() != nil {
 					h.logger.Debug("client disconnected during stream")
+					recordStreamFailure(model, err, "openai")
 					return
 				}
 				err = fmt.Errorf("streaming timeout (%v) exceeded", timeout)
@@ -850,7 +890,9 @@ func (h *MessagesHandler) handleStreaming(
 			continue
 		}
 
-		recordStreamSuccess(model)
+		if finishStream(model, "openai") {
+			continue
+		}
 		return
 	}
 
@@ -948,29 +990,31 @@ func (h *MessagesHandler) handleNonStreaming(
 		return
 	}
 
-	latency := time.Since(startTime)
-	h.metrics.RecordSuccess(result.ModelID, latency)
-
-	h.logger.Info("request completed",
-		"model", result.ModelID,
-		"attempts", result.Attempted,
-		"latency", latency,
-	)
-
-	var provider string
-	for _, m := range modelChain {
-		if m.ModelID == result.ModelID {
-			provider = m.Provider
-			break
+	usage := decodeMessageUsage(responseBody)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	n, writeErr := w.Write(responseBody)
+	if writeErr == nil && n != len(responseBody) {
+		writeErr = io.ErrShortWrite
+	}
+	if writeErr == nil {
+		if finisher, ok := w.(interface{ Finish() error }); ok {
+			writeErr = finisher.Finish()
 		}
 	}
-
-	usage := decodeMessageUsage(responseBody)
+	latency := time.Since(startTime)
+	if writeErr != nil {
+		h.metrics.RecordFailureForModel(result.ModelID)
+		h.logger.Warn("response delivery failed", "model", result.ModelID, "request_id", requestID, "error", writeErr)
+	} else {
+		h.metrics.RecordSuccess(result.ModelID, latency)
+		h.logger.Info("request completed", "model", result.ModelID, "attempts", result.Attempted, "latency", latency)
+	}
 
 	rec := history.RequestRecord{
 		ID:                  requestID,
 		Model:               result.ModelID,
-		Provider:            provider,
+		Provider:            result.Provider,
 		Scenario:            string(scenario),
 		StartTime:           startTime,
 		Duration:            latency,
@@ -979,19 +1023,15 @@ func (h *MessagesHandler) handleNonStreaming(
 		CacheReadTokens:     usage.CacheReadInputTokens,
 		CacheCreationTokens: usage.CacheCreationInputTokens,
 		Streaming:           false,
-		Success:             true,
+		Success:             writeErr == nil,
 		Attempt:             result.Attempted,
-		PeakMultiplier:      history.PeakMultiplier(result.ModelID, startTime),
+		PeakMultiplier:      history.ProviderPeakMultiplier(result.Provider, result.ModelID, startTime),
 	}
 	if h.storage != nil {
 		if err := h.storage.InsertRequest(rec); err != nil {
 			h.logger.Warn("failed to insert request into storage", "error", err)
 		}
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(responseBody)
 }
 
 // executeOpenAIRequest executes a request to the OpenAI endpoint with transformation.

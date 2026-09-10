@@ -136,6 +136,11 @@ func TestModelBreakdownSumsToSummary(t *testing.T) {
 // must agree with the model breakdown for the same window.
 func TestGetProviderBreakdown_CostIsRealAndMatchesModels(t *testing.T) {
 	db := newCostTestDB(t)
+	// Zen pricing comes from its exact catalog entry, not Go's seed rates.
+	if _, err := db.DB().Exec(`INSERT INTO models (id, provider, name, cost_input_per_m, cost_output_per_m)
+		VALUES ('opencode-zen/qwen3.7-plus', 'opencode-zen', 'qwen3.7-plus', 0.4, 1.6)`); err != nil {
+		t.Fatal(err)
+	}
 
 	// Two models under one provider, one model under another.
 	insertCostRecord(t, db, history.RequestRecord{

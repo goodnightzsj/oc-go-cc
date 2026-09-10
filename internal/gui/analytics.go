@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/storage"
 )
 
@@ -67,8 +68,27 @@ func analyticsRange(r *http.Request) (time.Time, time.Time, bool, error) {
 	return from, to, true, nil
 }
 
+// requestedProvider treats an absent filter as all platforms, unlike routing's
+// legacy empty-provider default. Validate before any query can widen the scope.
+func requestedProvider(r *http.Request) (string, error) {
+	provider := strings.TrimSpace(r.URL.Query().Get("provider"))
+	if provider == "" {
+		return "", nil
+	}
+	provider = config.NormalizeProvider(provider)
+	if !config.SupportedProvider(provider) {
+		return "", errors.New("unsupported provider filter")
+	}
+	return provider, nil
+}
+
 // Summary returns high-level KPIs and breakdowns.
 func (h *AnalyticsHandler) Summary(w http.ResponseWriter, r *http.Request) {
+	provider, err := requestedProvider(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	days := h.getDays(r)
 	from, to, explicitRange, rangeErr := analyticsRange(r)
 	if rangeErr != nil {
@@ -80,6 +100,7 @@ func (h *AnalyticsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	window = window.ForProvider(provider)
 
 	summary, err := h.store.TokenSummary(window)
 	if err != nil {
@@ -104,6 +125,7 @@ func (h *AnalyticsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := map[string]any{
+		"provider":     provider,
 		"summary":      summary,
 		"models":       models,
 		"providers":    providers,
@@ -111,21 +133,21 @@ func (h *AnalyticsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		"generated_at": time.Now().Format(time.RFC3339),
 	}
 	if r.URL.Query().Get("compare") == "1" && !explicitRange {
-		now := time.Now()
-		lastMinute, err := h.summaryBetween(now.Add(-time.Minute), now.Add(time.Second))
+		now := time.Now().UTC()
+		lastMinute, err := h.summaryBetween(now.Add(-time.Minute), now.Add(time.Second), provider)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		today, err := h.summaryBetween(todayStart, now.Add(time.Second))
+		today, err := h.summaryBetween(todayStart, now.Add(time.Second), provider)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		// The storage baseline still governs this wide window, so retained means
 		// every trustworthy row rather than an arbitrary client-side date limit.
-		retained, err := h.store.TokenSummary(h.store.Window(36500))
+		retained, err := h.store.TokenSummary(h.store.Window(36500).ForProvider(provider))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -148,16 +170,21 @@ func (h *AnalyticsHandler) window(days int, from, to time.Time, explicitRange bo
 	return h.store.Window(days), nil
 }
 
-func (h *AnalyticsHandler) summaryBetween(from, to time.Time) (*storage.TokenSummary, error) {
+func (h *AnalyticsHandler) summaryBetween(from, to time.Time, provider string) (*storage.TokenSummary, error) {
 	window, err := h.store.WindowBetween(from, to)
 	if err != nil {
 		return nil, err
 	}
-	return h.store.TokenSummary(window)
+	return h.store.TokenSummary(window.ForProvider(provider))
 }
 
 // TokenTrend returns daily token/request aggregates.
 func (h *AnalyticsHandler) TokenTrend(w http.ResponseWriter, r *http.Request) {
+	provider, err := requestedProvider(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	days := h.getDays(r)
 	from, to, explicitRange, rangeErr := analyticsRange(r)
 	if rangeErr != nil {
@@ -177,12 +204,13 @@ func (h *AnalyticsHandler) TokenTrend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	trend, err := h.store.TokenTrend(window, granularity)
+	trend, err := h.store.TokenTrend(window.ForProvider(provider), granularity)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	h.writeJSON(w, map[string]any{
+		"provider":    provider,
 		"days":        days,
 		"granularity": granularity,
 		"trend":       trend,

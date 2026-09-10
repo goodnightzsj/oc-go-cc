@@ -50,7 +50,7 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 		rec.Model,
 		rec.Provider,
 		rec.Scenario,
-		rec.StartTime.Format(time.RFC3339Nano),
+		rec.StartTime.UTC().Format(time.RFC3339Nano),
 		rec.Duration.Milliseconds(),
 		rec.InputTokens,
 		rec.OutputTokens,
@@ -91,6 +91,7 @@ type RequestSummary struct {
 	CacheCreationTokens int64              `json:"cache_creation_tokens"`
 	CostUSD             float64            `json:"cost_usd"`
 	CostRows            int64              `json:"cost_rows"`
+	UnknownCostRequests int64              `json:"unknown_cost_requests"`
 	Models              []RequestBreakdown `json:"models"`
 	Providers           []RequestBreakdown `json:"providers"`
 	Scenarios           []RequestBreakdown `json:"scenarios"`
@@ -98,17 +99,20 @@ type RequestSummary struct {
 }
 
 type RequestBreakdown struct {
-	Name     string  `json:"name"`
-	Requests int64   `json:"requests"`
-	Tokens   int64   `json:"tokens"`
-	CostUSD  float64 `json:"cost_usd"`
+	Name                string  `json:"name"`
+	Provider            string  `json:"provider,omitempty"` // model breakdowns only
+	Requests            int64   `json:"requests"`
+	Tokens              int64   `json:"tokens"`
+	CostUSD             float64 `json:"cost_usd"`
+	UnknownCostRequests int64   `json:"unknown_cost_requests"`
 }
 
 type RequestTrend struct {
-	Date     string  `json:"date"`
-	Requests int64   `json:"requests"`
-	Tokens   int64   `json:"tokens"`
-	CostUSD  float64 `json:"cost_usd"`
+	Date                string  `json:"date"` // UTC calendar date
+	Requests            int64   `json:"requests"`
+	Tokens              int64   `json:"tokens"`
+	CostUSD             float64 `json:"cost_usd"`
+	UnknownCostRequests int64   `json:"unknown_cost_requests"`
 }
 
 // Summary aggregates the exact same population as Query, without pagination.
@@ -119,8 +123,8 @@ func (r *Requests) Summary(q RequestQuery) (*RequestSummary, error) {
 	out := &RequestSummary{}
 	var successes int64
 	if err := r.db.DB().QueryRowContext(ctx, `
-		SELECT COUNT(*), COALESCE(SUM(CASE WHEN details_known = 1 THEN success ELSE 0 END), 0),
-		       COALESCE(SUM(CASE WHEN details_known = 1 THEN 1 ELSE 0 END), 0),
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN details_known = 1 AND success = 1 THEN 1 ELSE 0 END), 0),
+		       COUNT(CASE WHEN details_known = 1 AND success IN (0, 1) THEN 1 END),
 		       COALESCE(SUM(COALESCE(input_tokens, 0)), 0),
 		       COALESCE(SUM(COALESCE(output_tokens, 0)), 0),
 		       COALESCE(SUM(COALESCE(cache_read_tokens, 0)), 0),
@@ -136,6 +140,7 @@ func (r *Requests) Summary(q RequestQuery) (*RequestSummary, error) {
 	if out.SuccessRows > 0 {
 		out.SuccessRate = float64(successes) / float64(out.SuccessRows)
 	}
+	out.UnknownCostRequests = out.TotalRequests - out.CostRows
 	for _, spec := range []struct {
 		column string
 		into   *[]RequestBreakdown
@@ -145,19 +150,27 @@ func (r *Requests) Summary(q RequestQuery) (*RequestSummary, error) {
 		dimension := spec.column
 		if spec.column == "scenario" {
 			dimension = "CASE WHEN LOWER(TRIM(COALESCE(scenario, ''))) IN ('', 'unknown') THEN 'override' ELSE scenario END"
+		} else if spec.column == "provider" {
+			dimension = "COALESCE(provider, '')"
+		}
+		providerColumn := "''"
+		groupBy := dimension
+		if spec.column == "model" {
+			providerColumn = "COALESCE(provider, '')"
+			groupBy += ", " + providerColumn
 		}
 		rows, err := r.db.DB().QueryContext(ctx, `
-			SELECT `+dimension+`, COUNT(*),
+			SELECT `+dimension+`, `+providerColumn+`, COUNT(*),
 			       COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) +
 			                    COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0)), 0),
-			       COALESCE(SUM(cost_usd), 0)
-			FROM requests`+where+` GROUP BY `+dimension+` ORDER BY COUNT(*) DESC, `+dimension, args...)
+			       COALESCE(SUM(cost_usd), 0), COUNT(*) - COUNT(cost_usd)
+			FROM requests`+where+` GROUP BY `+groupBy+` ORDER BY COUNT(*) DESC, `+groupBy, args...)
 		if err != nil {
 			return nil, err
 		}
 		for rows.Next() {
 			var item RequestBreakdown
-			if err := rows.Scan(&item.Name, &item.Requests, &item.Tokens, &item.CostUSD); err != nil {
+			if err := rows.Scan(&item.Name, &item.Provider, &item.Requests, &item.Tokens, &item.CostUSD, &item.UnknownCostRequests); err != nil {
 				_ = rows.Close()
 				return nil, err
 			}
@@ -175,14 +188,14 @@ func (r *Requests) Summary(q RequestQuery) (*RequestSummary, error) {
 		SELECT DATE(start_time), COUNT(*),
 		       COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) +
 		                    COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0)), 0),
-		       COALESCE(SUM(cost_usd), 0)
+		       COALESCE(SUM(cost_usd), 0), COUNT(*) - COUNT(cost_usd)
 		FROM requests`+where+` GROUP BY DATE(start_time) ORDER BY DATE(start_time)`, args...)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var point RequestTrend
-		if err := rows.Scan(&point.Date, &point.Requests, &point.Tokens, &point.CostUSD); err != nil {
+		if err := rows.Scan(&point.Date, &point.Requests, &point.Tokens, &point.CostUSD, &point.UnknownCostRequests); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -220,9 +233,10 @@ func (r *Requests) Query(q RequestQuery) ([]history.RequestRecord, int64, error)
 	}
 	sortColumn := requestSortColumn(q.SortBy)
 	orderBy := sortColumn + " " + order
-	if sortColumn != "start_time" {
-		orderBy += ", start_time DESC"
+	if sortColumn != "julianday(start_time)" {
+		orderBy += ", julianday(start_time) DESC"
 	}
+	orderBy += ", id ASC"
 
 	selectArgs := append(append([]any{}, args...), q.PageSize, offset)
 	rows, err := r.db.DB().QueryContext(ctx, `
@@ -316,7 +330,7 @@ func requestSortColumn(field string) string {
 	case "streaming":
 		return "COALESCE(streaming, 0)"
 	default:
-		return "start_time"
+		return "julianday(start_time)"
 	}
 }
 
@@ -426,9 +440,12 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		}
 
 		rec.StartTime, _ = time.Parse(time.RFC3339Nano, startTimeStr)
+		rec.StartTime = rec.StartTime.UTC()
 		rec.Streaming = streaming.Valid && streaming.Int64 == 1
 		rec.Success = success.Valid && success.Int64 == 1
-		rec.DetailsKnown = detailsKnown.Valid && detailsKnown.Int64 == 1
+		// DetailsKnown gates the observed status/metadata group, not token or cost data.
+		rec.DetailsKnown = detailsKnown.Valid && detailsKnown.Int64 == 1 &&
+			success.Valid && (success.Int64 == 0 || success.Int64 == 1)
 		rec.Duration = time.Duration(rec.Duration) * time.Millisecond
 
 		records = append(records, rec)
@@ -437,35 +454,43 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 	return records, rows.Err()
 }
 
-func (r *Requests) costForRecord(ctx context.Context, rec history.RequestRecord) (float64, string, error) {
+func (r *Requests) costForRecord(ctx context.Context, rec history.RequestRecord) (sql.NullFloat64, string, error) {
 	if rec.CostKnown || rec.CostUSD != 0 {
 		source := rec.CostSource
 		if source != CostSourceProvider {
 			source = CostSourceEstimated
 		}
-		return rec.CostUSD, source, nil
+		return sql.NullFloat64{Float64: rec.CostUSD, Valid: true}, source, nil
 	}
-	var modelsInputPerM, modelsOutputPerM float64
+	provider := rec.Provider
+	if provider == "" {
+		provider = "opencode-go"
+	}
+	var modelsInputPerM, modelsOutputPerM sql.NullFloat64
 	err := r.db.DB().QueryRowContext(ctx, `
-		SELECT COALESCE(cost_input_per_m, 0), COALESCE(cost_output_per_m, 0)
+		SELECT cost_input_per_m, cost_output_per_m
 		FROM models
-		WHERE id = ?
-	`, rec.Model).Scan(&modelsInputPerM, &modelsOutputPerM)
+		WHERE provider = ? AND name = ?
+	`, provider, rec.Model).Scan(&modelsInputPerM, &modelsOutputPerM)
 	if err != nil && err != sql.ErrNoRows {
-		return 0, "", err
+		return sql.NullFloat64{}, "", err
 	}
 	reqTime := rec.StartTime
 	if reqTime.IsZero() {
 		reqTime = time.Now()
 	}
-	return costForTokensAt(rec.Model,
+	cost, known := costForProviderTokensAt(rec.Provider, rec.Model,
 		int64(rec.InputTokens),
 		int64(rec.OutputTokens),
 		int64(rec.CacheReadTokens),
 		int64(rec.CacheCreationTokens),
 		modelsInputPerM,
 		modelsOutputPerM,
-		reqTime), CostSourceEstimated, nil
+		reqTime)
+	if !known {
+		return sql.NullFloat64{}, "", nil
+	}
+	return sql.NullFloat64{Float64: cost, Valid: true}, CostSourceEstimated, nil
 }
 
 func boolToInt(b bool) int {
@@ -478,11 +503,14 @@ func boolToInt(b bool) int {
 // peakMultiplierForRecord returns the billing multiplier to persist for a
 // record: the caller-set value when present, else computed from start time.
 func peakMultiplierForRecord(rec history.RequestRecord) float64 {
+	if rec.Provider != "" && rec.Provider != "opencode-go" {
+		return 1
+	}
 	if rec.PeakMultiplier > 0 {
 		return rec.PeakMultiplier
 	}
 	if rec.StartTime.IsZero() {
 		return 1
 	}
-	return history.PeakMultiplier(rec.Model, rec.StartTime)
+	return history.ProviderPeakMultiplier(rec.Provider, rec.Model, rec.StartTime)
 }

@@ -516,6 +516,7 @@
   "opencode_go": {
     "base_url": "https://opencode.ai/zen/go/v1/chat/completions",
     "anthropic_base_url": "https://opencode.ai/zen/go/v1/messages",
+    "responses_base_url": "https://opencode.ai/zen/go/v1/responses",
     "api_key": "",
     "api_keys": [],
     "timeout_ms": 300000,
@@ -530,6 +531,25 @@
     "api_keys": [],
     "timeout_ms": 300000,
     "streaming_timeout_ms": 600000
+  },
+  "openrouter": {
+    "base_url": "https://openrouter.ai/api/v1/chat/completions",
+    "api_key": "",
+    "api_keys": [],
+    "management_api_key": "",
+    "timeout_ms": 300000,
+    "stream_timeout_ms": 60000,
+    "streaming_timeout_ms": 600000
+  },
+  "commandcode": {
+    "base_url": "https://api.commandcode.ai/provider/v1/chat/completions",
+    "anthropic_base_url": "https://api.commandcode.ai/provider/v1/messages",
+    "api_key": "",
+    "api_keys": [],
+    "timeout_ms": 300000,
+    "stream_timeout_ms": 60000,
+    "streaming_timeout_ms": 600000,
+    "zero_data_retention": false
   },
   "logging": {
     "level": "info",

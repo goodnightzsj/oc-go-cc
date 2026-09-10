@@ -126,16 +126,18 @@ func providerToStorageRecord(name string, p Provider) storage.ProviderRecord {
 }
 
 func modelToStorageRecord(key string, m Model) storage.ModelRecord {
-	return storage.ModelRecord{
+	record := storage.ModelRecord{
 		ID:            key,
 		Name:          m.Name,
 		Reasoning:     m.Reasoning,
 		ToolCall:      m.ToolCall,
 		Vision:        m.SupportsVision(),
 		ContextWindow: m.ContextWindow(),
-		CostInput:     m.CostInputPerM(),
-		CostOutput:    m.CostOutputPerM(),
 	}
+	if m.Rates != nil {
+		record.Rates = &storage.Rates{Input: m.Rates.Input, Output: m.Rates.Output}
+	}
+	return record
 }
 
 func storageModelToCatalogModel(m storage.Model) Model {

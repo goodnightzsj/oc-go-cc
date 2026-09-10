@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 const (
@@ -79,10 +80,23 @@ func resolveExecutablePath(execPath string) string {
 		return execPath
 	}
 
+	// Homebrew removes versioned Cellar paths on upgrade. Keep its stable
+	// symlinks in launchd plists and background-process commands on macOS.
+	if runtime.GOOS == "darwin" && isHomebrewStablePath(execPath) {
+		return filepath.Clean(execPath)
+	}
+
 	resolved, err := filepath.EvalSymlinks(execPath)
 	if err != nil {
 		slog.Warn("symlink resolution failed, using raw path", "path", execPath, "err", err)
 		return execPath
 	}
 	return resolved
+}
+
+func isHomebrewStablePath(path string) bool {
+	return strings.HasPrefix(path, "/opt/homebrew/opt/") ||
+		strings.HasPrefix(path, "/opt/homebrew/bin/") ||
+		strings.HasPrefix(path, "/usr/local/opt/") ||
+		strings.HasPrefix(path, "/usr/local/bin/")
 }

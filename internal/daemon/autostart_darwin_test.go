@@ -5,6 +5,7 @@ package daemon
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -13,6 +14,21 @@ func TestEnableDisableAutostart_Darwin(t *testing.T) {
 	// Setup temporary home directory
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)
+	// HOME alone does not isolate launchctl's real gui/<uid> service domain.
+	binDir := t.TempDir()
+	launchctlLog := filepath.Join(tempHome, "launchctl.log")
+	stub := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TEST_LAUNCHCTL_LOG\"\n"
+	if err := os.WriteFile(filepath.Join(binDir, "launchctl"), []byte(stub), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+	t.Setenv("TEST_LAUNCHCTL_LOG", launchctlLog)
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(key, "ROUTATIC_PROXY_") {
+			t.Setenv(key, "")
+		}
+	}
 	// Set a ROUTATIC_PROXY_* var with characters that need XML escaping.
 	t.Setenv("ROUTATIC_PROXY_API_KEY", "sk-test&key<value>")
 
@@ -61,7 +77,7 @@ func TestEnableDisableAutostart_Darwin(t *testing.T) {
 	}
 	// The value should be XML-escaped: & -> &amp;, < -> &lt;, > -> &gt;
 	if !strings.Contains(content, "<string>sk-test&amp;key&lt;value&gt;</string>") {
-		t.Errorf("Plist missing XML-escaped API key value. Content:\n%s", content)
+		t.Error("Plist missing XML-escaped synthetic API key value")
 	}
 
 	// Disable autostart
@@ -73,5 +89,15 @@ func TestEnableDisableAutostart_Darwin(t *testing.T) {
 	// Verify plist file was removed
 	if _, err := os.Stat(plistPath); !os.IsNotExist(err) {
 		t.Errorf("Expected plist file to be deleted, but it still exists")
+	}
+	commands, err := os.ReadFile(launchctlLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	domain := "gui/" + strconv.Itoa(os.Getuid())
+	target := domain + "/" + LaunchAgent
+	wantCommands := "bootout " + target + "\nbootstrap " + domain + " " + plistPath + "\nbootout " + target + "\n"
+	if string(commands) != wantCommands {
+		t.Errorf("stub launchctl calls = %q, want %q", commands, wantCommands)
 	}
 }

@@ -231,3 +231,53 @@ func TestAtomicConfig_ConcurrentGetAndReload(t *testing.T) {
 	close(done)
 	wg.Wait()
 }
+
+func TestAtomicConfig_ReloadAndApplyLoadedAreSerialized(t *testing.T) {
+	t.Setenv("ROUTATIC_PROXY_API_KEY", "")
+	t.Setenv("OC_GO_CC_API_KEY", "")
+	t.Setenv("ROUTATIC_PROXY_API_KEYS", "")
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"api_key":"disk-old"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	at := NewAtomicConfig(&Config{APIKey: "initial"}, path)
+	oldStarted := make(chan struct{})
+	releaseOld := make(chan struct{})
+	at.OnReload(func(cfg *Config) {
+		if cfg.APIKey == "disk-old" {
+			close(oldStarted)
+			<-releaseOld
+		}
+	})
+	reloadDone := make(chan error, 1)
+	go func() { reloadDone <- at.Reload() }()
+	<-oldStarted
+
+	newCfg, err := LoadJSON([]byte(`{"api_key":"saved-new"}`))
+	if err != nil {
+		close(releaseOld)
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"api_key":"saved-new"}`), 0600); err != nil {
+		close(releaseOld)
+		t.Fatal(err)
+	}
+	saveDone := make(chan struct{})
+	go func() {
+		at.ApplyLoaded(newCfg)
+		close(saveDone)
+	}()
+	select {
+	case <-saveDone:
+		t.Error("saved config published while an older reload was still in progress")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseOld)
+	if err := <-reloadDone; err != nil {
+		t.Fatal(err)
+	}
+	<-saveDone
+	if got := at.Get().APIKey; got != "saved-new" {
+		t.Errorf("final config = %q, want saved-new", got)
+	}
+}

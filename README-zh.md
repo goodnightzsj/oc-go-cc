@@ -5,9 +5,9 @@
 
 [English](./README.md) | **中文**
 
-一个 Go CLI 代理，让你可以将 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 请求路由到多个上游提供商 —— [OpenCode Go](https://opencode.ai/docs/go/)、[OpenCode Zen](https://opencode.ai/docs/zen/) 和 [AWS Bedrock](https://aws.amazon.com/bedrock/) —— 并自动进行模型选择和格式转换。
+一个 Go CLI 代理，将 [Claude Code](https://code.claude.com/docs/en/llm-gateway-connect) Messages 和 [Codex](https://developers.openai.com/codex/config-advanced) Responses 请求路由到 OpenCode Go、OpenCode Zen、AWS Bedrock、OpenRouter 和 CommandCode，提供模型路由、日志和用量统计。
 
-`routatic-proxy` 位于 Claude Code 和你选择的提供商之间，拦截 Anthropic API 请求，将其转换为适当的格式（OpenAI、Anthropic、Responses 或 Gemini），然后转发到上游。Claude Code 认为它在与 Anthropic 对话 —— 但你的请求会发送到你配置的模型和提供商。
+上游支持原生 Anthropic 时直接转发；其他链路按配置转换协议。Codex 入口支持有明确边界的无状态 Responses 子集，配置方式与限制见 [CommandCode 接入指南](docs/commandcode.md)。
 
 ---
 
@@ -26,17 +26,25 @@
 您可以直接在此仓库的 **Releases** 页面下载编译好的 `.dmg` 安装包，或者在终端运行以下命令启动：
 
 ```bash
-# 启动 macOS GUI 版本
-routatic-proxy ui
+# 启动代理和浏览器面板
+routatic-proxy start
+# 后台运行
+routatic-proxy start -b
 ```
+
+浏览器访问 `http://127.0.0.1:3445`。Web 面板不依赖 CGO；原生托盘仅在 macOS + CGO 构建中提供。仅需要代理时使用 `serve`。
 
 ### 控制台预览
 
 **仪表盘标签页：** 概览、历史请求、性能、降级策略、用量分析、套餐额度、设置。
 
-**套餐额度** 标签页使用已配置的 OpenCode Go 密钥实时读取套餐三个限额窗口（5 小时滚动 / 本周 / 本月），展示剩余额度、已用金额与重置倒计时。密钥不会下发到浏览器，前端只拿到形如 `••••a1b2` 的掩码提示。上游用量端点未公开，响应结构可能变化；结果在服务端缓存 30 秒。
+概览、历史、性能和用量分析均可独立筛选五个平台；趋势、模型明细、汇总和比较使用相同平台范围。历史 CSV 导出固定开始时的筛选条件，不受分页期间切换平台影响。
 
-各模型每月使用额度每天从 [Go 文档](https://opencode.ai/docs/zh-cn/go) 同步（中文页优先，英文页兜底；Peak/Off-Peak 等定价变体合并为一行）。用量表格只列出本实例确实用过的模型，展示本月用量（按官方价格口径计价，可与文档中的每月配额直接比较）、每月配额与占比；总计行将各行换算回共享 $60 池等效（用量 × 60/额度 —— 与 opencode 记账的模型倍率一致），使其与官方月度窗口总进度对照。
+**套餐额度** 为五个平台分别展示本实例的请求、Token、费用已知小计和缺价记录。账户数据另行查询：OpenCode Go 保留三个限额窗口（5 小时滚动 / 本周 / 本月）；OpenRouter 查询每个推理 Key 的额度与 UTC 用量，并使用独立的 `openrouter.management_api_key` 查询账户 Credits，BYOK 用量单独显示。密钥仅以掩码展示；账户结果按平台缓存 30 秒。
+
+Go 模型额度来自 [Go 文档](https://opencode.ai/docs/zh-cn/go)，分模型用量是本实例估算，不是官方账户账单；仅在配置单个 Go 密钥且月度窗口已知时展示，多密钥无法从本地记录可靠归属到账户。Go 用量端点未公开，可能变化；Zen／CommandCode 暂无已核实的公开账户查询合同，AWS 账单需要独立 IAM 权限且尚未接入。这些平台仍有独立本地用量与官方入口，但不会套用 Go 配额，也不把“未获取”显示成零余额。详情见[五平台能力矩阵](docs/platform-integration-review.md#五平台页面与账户能力)。
+
+未知价格显示 `—`，部分已知费用显示小计加 `+ ?`，不当作免费。用量分析的日期/时间桶和概览“今日”边界使用 UTC；历史日期筛选和单条时间使用浏览器本地时区。
 
 以下截图使用固定的合成演示数据，不包含生产请求、账户数据或凭证。
 
@@ -67,11 +75,11 @@ routatic-proxy ui
 
 ## 为什么选择 routatic-proxy？
 
-OpenCode Go 让你以 **$5/月**（之后 $10/月）的价格使用强大的开源编码模型。OpenCode Zen 提供精选的、经过测试的模型，按使用量付费。AWS Bedrock 让你在自己的 AWS 基础设施上运行模型。本代理让这三者都能与 Claude Code 的界面无缝配合 —— 无需补丁、无需分支，只需设置两个环境变量即可。
+多个平台可以共用客户端入口、路由和本地观测。平台凭证分别配置；实际模型权限、套餐与费用以相应平台为准，原生支持和协议适配不代表客户端的所有高级功能都可用。
 
 ## 功能特性
 
-- **多提供商支持** — 从单一配置路由到 OpenCode Go、OpenCode Zen 或 AWS Bedrock
+- **多提供商支持** — 从单一配置路由到 OpenCode Go、OpenCode Zen、AWS Bedrock、OpenRouter 或 CommandCode
 - **透明代理** — Claude Code 发送 Anthropic 格式请求，代理转换为目标提供商格式并返回
 - **模型路由** — 根据上下文自动路由到不同模型（默认、思考、长上下文、后台）
 - **流式场景路由** — 可配置的流式请求路由；为 Claude Code 多代理和审查工作流启用正确的场景选择
@@ -149,6 +157,8 @@ routatic-proxy init
 export ROUTATIC_PROXY_API_KEY=sk-opencode-your-key-here
 ```
 
+CommandCode 新配置可使用 `routatic-proxy init --provider commandcode`；已有配置请在设置页增加独立平台字段与模型映射，`init` 不会覆盖现有文件。完整步骤与 Codex 配置见 [接入指南](docs/commandcode.md)。
+
 ### 3. 启动代理
 
 ```bash
@@ -178,13 +188,15 @@ claude
 
 ```
 routatic-proxy serve              启动代理服务器
+routatic-proxy start              启动代理和面板（http://127.0.0.1:3445）
+routatic-proxy start -b           后台启动代理和面板
 routatic-proxy serve -b           后台启动（与终端分离）
 routatic-proxy serve --port 8080  在自定义端口启动
 routatic-proxy stop               停止运行中的代理服务器
 routatic-proxy status             检查代理是否运行
 routatic-proxy init               创建默认配置文件
 routatic-proxy validate           验证配置文件
-routatic-proxy models             列出所有可用模型（Go, Zen, Bedrock）
+routatic-proxy models             列出模型目录中的模型
 routatic-proxy autostart enable   启用登录自启动
 routatic-proxy autostart disable  禁用登录自启动
 routatic-proxy autostart status   检查自启动状态
@@ -200,6 +212,8 @@ routatic-proxy --version          显示版本
 |------|------|
 | [docs/zh/INSTALLATION.md](docs/zh/INSTALLATION.md) | 安装指南 - Homebrew、Scoop、从源码构建、发布二进制 |
 | [docs/zh/CONFIGURATION.md](docs/zh/CONFIGURATION.md) | 配置指南 - 配置文件参考、环境变量、模型路由、降级链 |
+| [docs/commandcode.md](docs/commandcode.md) | CommandCode 独立配置、Claude Code/Codex 接入与兼容边界 |
+| [docs/platform-integration-review.md](docs/platform-integration-review.md) | 功能修复、上游采纳记录与验证范围 |
 | [docs/zh/MODELS.md](docs/zh/MODELS.md) | 模型指南 - 模型能力、成本和路由建议 |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 贡献指南 - 开发环境、架构概览和如何提交 PR |
 | [docs/zh/TROUBLESHOOTING.md](docs/zh/TROUBLESHOOTING.md) | 故障排除 - 常见问题和调试模式 |

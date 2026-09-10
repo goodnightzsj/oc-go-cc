@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/routatic/proxy/internal/config"
 )
 
 const maxProviderCostIssueExamples = 50
@@ -20,7 +22,7 @@ var ErrAmbiguousProviderCosts = errors.New("provider cost reconciliation contain
 type ProviderCostRecord struct {
 	Time               time.Time `json:"time"`
 	Model              string    `json:"model"`
-	Provider           string    `json:"provider,omitempty"`
+	Provider           string    `json:"provider,omitempty"` // Physical billing backend, not a routing platform identity.
 	Plan               string    `json:"plan,omitempty"`
 	InputTokens        int64     `json:"input_tokens"`
 	OutputTokens       int64     `json:"output_tokens"`
@@ -52,6 +54,7 @@ type ProviderCostIssue struct {
 // ProviderCostReport describes a dry run or apply operation. Missing provider
 // rows are expected when the provider account is shared with other clients.
 type ProviderCostReport struct {
+	TargetProvider  string              `json:"target_provider"`
 	ProviderRows    int                 `json:"provider_rows"`
 	Exact           int                 `json:"exact"`
 	Ambiguous       int                 `json:"ambiguous"`
@@ -83,11 +86,21 @@ type providerCostMatch struct {
 // sides. Provider completion timestamps are second-granular; the proxy may
 // finish local response handling in that second or the following second.
 // When apply is true, all updates are rejected if any identity is ambiguous.
-func (d *Database) ReconcileProviderCosts(ctx context.Context, providerRows []ProviderCostRecord, apply bool) (ProviderCostReport, error) {
+func (d *Database) ReconcileProviderCosts(ctx context.Context, targetProvider string, providerRows []ProviderCostRecord, apply bool) (ProviderCostReport, error) {
 	report := ProviderCostReport{ProviderRows: len(providerRows)}
+	targetProvider, err := providerCostTarget(targetProvider)
+	if err != nil {
+		return report, err
+	}
+	report.TargetProvider = targetProvider
 	if len(providerRows) == 0 {
 		return report, nil
 	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return report, err
+	}
+	defer func() { _ = tx.Rollback() }()
 
 	minTime, maxTime := providerRows[0].Time, providerRows[0].Time
 	for i, row := range providerRows {
@@ -102,7 +115,7 @@ func (d *Database) ReconcileProviderCosts(ctx context.Context, providerRows []Pr
 		}
 	}
 
-	candidates, err := d.providerCostCandidates(ctx, minTime, maxTime)
+	candidates, err := providerCostCandidates(ctx, tx, targetProvider, minTime, maxTime)
 	if err != nil {
 		return report, err
 	}
@@ -150,15 +163,14 @@ func (d *Database) ReconcileProviderCosts(ctx context.Context, providerRows []Pr
 				continue
 			}
 			cost := providerRow.costUSD()
-			if candidate.costSource.Valid && candidate.costSource.String == CostSourceProvider &&
-				candidate.cost.Valid && math.Abs(candidate.cost.Float64-cost) > 1e-12 {
+			if providerCostConflicts(candidate.cost, candidate.costSource, cost) {
 				report.Conflicting++
 				report.addIssue("provider_cost_conflict", providerRow, 1)
 				continue
 			}
 			report.Exact++
 			report.ExactCostUSD += cost
-			if !candidate.costSource.Valid || candidate.costSource.String != CostSourceProvider {
+			if !candidate.cost.Valid || !candidate.costSource.Valid || candidate.costSource.String != CostSourceProvider {
 				report.WouldUpdate++
 				matches = append(matches, providerCostMatch{requestID: candidate.id, costUSD: cost})
 			}
@@ -187,33 +199,43 @@ func (d *Database) ReconcileProviderCosts(ctx context.Context, providerRows []Pr
 		return report, nil
 	}
 
-	tx, err := d.db.BeginTx(ctx, nil)
+	stmt, err := tx.PrepareContext(ctx, `UPDATE requests SET cost_usd = ?, cost_source = ? WHERE id = ? AND REPLACE(provider, '_', '-') = ?`)
 	if err != nil {
-		return report, err
-	}
-	stmt, err := tx.PrepareContext(ctx, `UPDATE requests SET cost_usd = ?, cost_source = ? WHERE id = ?`)
-	if err != nil {
-		_ = tx.Rollback()
 		return report, err
 	}
 	defer func() { _ = stmt.Close() }()
+	var updatedCount int
 	for _, match := range matches {
-		result, err := stmt.ExecContext(ctx, match.costUSD, CostSourceProvider, match.requestID)
+		result, err := stmt.ExecContext(ctx, match.costUSD, CostSourceProvider, match.requestID, targetProvider)
 		if err != nil {
-			_ = tx.Rollback()
 			return report, err
 		}
 		updated, err := result.RowsAffected()
 		if err != nil {
-			_ = tx.Rollback()
 			return report, err
 		}
-		report.Updated += int(updated)
+		updatedCount += int(updated)
 	}
 	if err := tx.Commit(); err != nil {
 		return report, err
 	}
+	report.Updated = updatedCount
 	return report, nil
+}
+
+func providerCostTarget(provider string) (string, error) {
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		return "", errors.New("target provider is required")
+	}
+	if !config.SupportedProvider(provider) {
+		return "", fmt.Errorf("unsupported target provider %q", provider)
+	}
+	return config.NormalizeProvider(provider), nil
+}
+
+func providerCostConflicts(cost sql.NullFloat64, source sql.NullString, reported float64) bool {
+	return source.Valid && source.String == CostSourceProvider && cost.Valid && math.Abs(cost.Float64-reported) > 1e-12
 }
 
 func validateProviderCostRecord(row ProviderCostRecord) error {
@@ -239,16 +261,17 @@ func validateProviderCostRecord(row ProviderCostRecord) error {
 	return nil
 }
 
-func (d *Database) providerCostCandidates(ctx context.Context, minTime, maxTime time.Time) ([]providerCostCandidate, error) {
-	rows, err := d.db.QueryContext(ctx, `
-		SELECT id, start_time, duration_ms, model,
+func providerCostCandidates(ctx context.Context, tx *sql.Tx, targetProvider string, minTime, maxTime time.Time) ([]providerCostCandidate, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, start_time, COALESCE(duration_ms, 0), model,
 		       COALESCE(input_tokens, 0), COALESCE(output_tokens, 0),
 		       COALESCE(cache_read_tokens, 0), COALESCE(cache_creation_tokens, 0),
 		       cost_usd, cost_source
 		FROM requests
-		WHERE julianday(start_time) + (COALESCE(duration_ms, 0) / 86400000.0) >= julianday(?)
+		WHERE REPLACE(provider, '_', '-') = ?
+		  AND julianday(start_time) + (COALESCE(duration_ms, 0) / 86400000.0) >= julianday(?)
 		  AND julianday(start_time) + (COALESCE(duration_ms, 0) / 86400000.0) < julianday(?)
-	`, minTime.UTC().Truncate(time.Second).Format(time.RFC3339Nano),
+	`, targetProvider, minTime.UTC().Truncate(time.Second).Format(time.RFC3339Nano),
 		maxTime.UTC().Truncate(time.Second).Add(2*time.Second).Format(time.RFC3339Nano))
 	if err != nil {
 		return nil, err

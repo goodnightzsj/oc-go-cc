@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/routatic/proxy/internal/config"
 )
 
 // ProviderPreset contains provider-specific configuration defaults
@@ -65,7 +67,7 @@ func getProviderConfig(provider string) (string, error) {
 		for p := range providerPresets {
 			supported = append(supported, p)
 		}
-		slices.Sort(supported)
+		slices.SortFunc(supported, config.CompareProviderDisplay)
 		return "", fmt.Errorf("unknown provider %q; supported: %s", provider, strings.Join(supported, ", "))
 	}
 	return preset.Generator(), nil

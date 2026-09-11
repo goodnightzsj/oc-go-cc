@@ -3,13 +3,13 @@
 ## Context Recovery Block
 
 - 任务：修复全部已报告问题，独立接入 CommandCode，融合有价值的上游更新，分析 Codex/Claude Code 对接。
-- 形态：epic；11/12 子任务完成；#11 Go历史诊断和#12七页重设计完成，#8真实账户缺口仍保留。
+- 形态：epic；11/15 子任务完成；#11/#12已完成；新增#13恢复历史、#14真实客户端测试、#15平台排序；#8账户缺口仍保留。
 - 当前：b3c947d已部署，UIe12b7231828e经原Edge563项检查与逐页视觉复核；CommandCode三块真实账户可用。最新两项用户请求已交付，没有恢复Go旧记录或调整retention。
-- 真源：SUBTASKS.csv；#12的tasks/12-console-redesign/TODO.csv已5/5；未完成项为tasks/08-account-validation/TODO.csv。
+- 真源：SUBTASKS.csv；当前tasks/13-history-restore/TODO.csv；#12已5/5，#8账户缺口另存。
 - 起点：main，HEAD 684235d，初始工作区干净。origin=goodnightzsj/oc-go-cc；upstream=samueltuyizere/oc-go-cc（GitHub）。
 - 已知：上轮 /tmp/oc-go-cc-review.WPJFmt/ 与 /tmp/oc-go-cc-routing-review.yHSDWm/ 有合成复现；本轮不依赖缓存成功。全量基线有 tokenizer 外网 EOF、日期过期测试失败；init 测试未隔离 HOME。
 - 不读取或输出真实凭证，不读取本地真实 DB；部署已获授权但须在实现与验证完成后进行，部署前读 SSH 运行手册。
-- 下一步：交付诊断及新版验收结果后停止；#8须账户授权/配置或公开合同才能继续。7天retention机制能解释展示表空，删除时刻不可追溯；未经授权不恢复或更改策略。Edge已恢复状态并正常断开，浏览器调试开关需用户关闭。
+- 下一步：按2026-09-12新授权关闭自动清理并恢复，先核实Claude最终同步与官方全部可见数据/备份，演练后部署及事务恢复，再指定模型真实测试。Edge仍有现成调试口；不重启浏览器。
 - 最新要求已落实：先核实 CommandCode 官网；Claude 模型走原生 Messages，Codex 公开合同缺口使用本项目 Responses 适配，并参考 MAXeaglet 的公开协议行为。日志、套餐入口、统计与独立配置保留并通过验收。
 
 ## 2026-09-10 启动
@@ -177,3 +177,9 @@
 - 发布前660顶层/1094含子测试race、vet、六目标构建、显式Codex工具往返通过；本次源码散列核对一致，不重跑无变化源码。
 - 只读远端健康与计数仍为active/running、NRestarts0、requests0/provider_usage1390；Go原始账单和旧备份仍在。未恢复/调整保留策略，未冒充真实非空请求表的线上验证。
 - #12完成，Epic11/12；#8的Go账户失败、Zen合同缺口、AWS账单未启用与OpenRouter未配置继续保留。CommandCode三块账户available不代表其余平台已获得账户权限。
+
+## 用户授权恢复与真实请求（2026-09-12）
+
+- 关闭远端自动清理、恢复备份并获取官方全部可见历史对账；来源仅本项目Claude session，不接触其它项目日志。新增#13/#14/#15，不重开已完成的UI重设计。
+- 使用deepseek/deepseek-v4.1-flash进行CommandCode的Codex/Claude最小真实测试；展示顺序暂定Go、CommandCode、Zen、AWS、OpenRouter，路由/密钥顺序不变。
+- provider_order_map与retention_disable_map均因服务工具输出解码失败，无有效结论；主线程接手，不重复调用失败路径。

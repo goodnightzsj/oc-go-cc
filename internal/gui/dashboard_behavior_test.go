@@ -204,11 +204,12 @@ vm.runInContext(` + "`" + `
   }
 
   AnalyticsModule.renderDistribution('provider-distribution', [{provider:'commandcode',requests:1,unknown_cost_requests:0,cost_usd:2},{provider:'opencode-go',requests:2,unknown_cost_requests:0,cost_usd:1}], 'cost_usd', 'provider');
-  const colors = [...document.getElementById('provider-distribution').innerHTML.matchAll(/--distribution-color:([^";]+)/g)].map(match => match[1]);
+  const distributionColors = () => Object.fromEntries([...document.getElementById('provider-distribution').innerHTML.matchAll(/data-provider="([^"]+)"[^]*?--distribution-color:([^";]+)/g)].map(match => [match[1], match[2]]));
+  const colors = distributionColors();
   AnalyticsModule.renderDistribution('provider-distribution', [{provider:'commandcode',requests:1,unknown_cost_requests:0,cost_usd:1},{provider:'opencode-go',requests:2,unknown_cost_requests:0,cost_usd:2}], 'cost_usd', 'provider');
-  const reversedColors = [...document.getElementById('provider-distribution').innerHTML.matchAll(/--distribution-color:([^";]+)/g)].map(match => match[1]);
-  assert.equal(colors[0], reversedColors[1], 'provider color must not depend on rank');
-  assert.equal(colors[1], reversedColors[0]);
+  assert.deepEqual(Object.keys(colors), ['opencode-go', 'commandcode'], 'provider display order stays fixed when costs change');
+  assert.deepEqual(colors, distributionColors(), 'provider colors must not change with costs');
+  assert.notEqual(colors['opencode-go'], colors.commandcode, 'providers keep distinct colors');
   AnalyticsModule.renderDistribution('provider-distribution', [{provider:'commandcode',requests:1,cost_usd:0.10},{provider:'opencode-go',requests:1,cost_usd:0.20}], 'cost_usd', 'provider');
   const smallCostsHTML = document.getElementById('provider-distribution').innerHTML;
   assert.ok(smallCostsHTML.includes(' · 66.7%</small>') && smallCostsHTML.includes(' · 33.3%</small>'), 'fractional-dollar shares must use the actual total');

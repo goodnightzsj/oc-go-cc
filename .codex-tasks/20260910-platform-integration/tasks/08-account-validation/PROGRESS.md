@@ -3,8 +3,8 @@
 ## Context Recovery Block
 
 - 当前：0/2，BLOCKED_EXTERNAL；TODO.csv 两项均未完成。
-- 原因：部署实测Go额度403；OpenRouter/CommandCode未配置；Zen/CommandCode未公开账户查询合同；Bedrock缺IAM账单授权。
-- 下一步：用户在服务端自行确认/配置合法凭证并明确账户数据来源；Zen/CommandCode的登录态只读采集属于尚未授权的新数据源，不擅自执行。不得通过伪造余额或默认使用全局Key来结项。
+- 原因：部署实测Go额度403；OpenRouter未配置；Zen未公开账户查询合同；Bedrock缺IAM账单授权。CommandCode已由用户配置并授权Edge核实，三个Alpha接口接入在#9/#10发布验收。
+- 下一步：在现有Edge远端面板验收CommandCode；其余缺口仍需用户自行提供合法配置/权限。Zen登录态采集尚未授权，不擅自执行。不得通过伪造余额或默认使用全局Key来结项。
 - 真源：TODO.csv、../06-deploy/PROGRESS.md、../04-dashboard/raw/platform-quota-capabilities.md。
 - 本条是原验收缺口的显式记录，不是新增授权，不阻止对已部署软件进行UI/UX只读分析。
 

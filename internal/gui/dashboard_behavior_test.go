@@ -86,7 +86,7 @@ vm.runInContext(` + "`" + `
   }
   assert.ok(document.getElementById('provider-filter').listeners.change?.includes(scheduleHistoryRefresh), 'the themed platform picker must refresh history on change');
   assert.equal(fmtAggregateCost({requests: 2, unknown_cost_requests: 2, cost_usd: 0}), '—');
-  assert.equal(fmtAggregateCost({requests: 2, unknown_cost_requests: 1, cost_usd: 0.25}), '$0.250 + ?');
+  assert.equal(fmtAggregateCost({requests: 2, unknown_cost_requests: 1, cost_usd: 0.25}), 'Known $0.250');
   assert.equal(fmtAggregateCost({requests: 1, unknown_cost_requests: 0, cost_usd: 0}), '$0.00');
   assert.ok(costCoverageNote({unknown_cost_requests: 3}).includes('3'));
   assert.equal(utcDateInputValue(new Date('2026-09-10T00:30:00+08:00')), '2026-09-09');
@@ -191,12 +191,13 @@ vm.runInContext(` + "`" + `
     assert.equal(document.getElementById('quota-next-reset').dataset.deadline, String(Date.parse(unknownQuotaWindow.resets_at)), 'mixed windows must retain an unknown window reset');
   }
   QuotaModule.provider = 'commandcode';
-  const commandcodeQuota = {provider:'commandcode',status:'unavailable',source:'none',reason:'no_public_account_api',accounts:[],links:[{kind:'usage',url:'https://commandcode.ai/usage'},{kind:'billing',url:'https://commandcode.ai/billing'},{kind:'keys',url:'https://commandcode.ai/settings/keys'}]};
+  const commandcodeQuota = {provider:'commandcode',status:'not_configured',source:'official_alpha_api',accounts:[],links:[{kind:'usage',url:'https://commandcode.ai/usage'},{kind:'billing',url:'https://commandcode.ai/billing'},{kind:'keys',url:'https://commandcode.ai/settings/keys'}]};
   QuotaModule.view = commandcodeQuota;
   QuotaModule.render();
   assert.equal(document.getElementById('quota-go').hidden, true, 'CommandCode must not display Go plan data');
-  assert.equal(document.getElementById('quota-unavailable').hidden, false);
-  assert.ok(document.getElementById('quota-unavailable-title').textContent.includes('CommandCode'));
+  assert.equal(document.getElementById('quota-unavailable').hidden, true);
+  assert.equal(document.getElementById('quota-commandcode').hidden, false);
+  assert.ok(document.getElementById('quota-commandcode-accounts').innerHTML.includes('CommandCode'));
   assert.equal(document.getElementById('quota-links').hidden, false);
   for (const path of ['usage', 'billing', 'settings/keys']) {
     assert.ok(document.getElementById('quota-links').innerHTML.includes('href="https://commandcode.ai/' + path + '"'), 'missing official CommandCode link: ' + path);

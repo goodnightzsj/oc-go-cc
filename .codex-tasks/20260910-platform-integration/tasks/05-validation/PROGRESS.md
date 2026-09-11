@@ -2,10 +2,10 @@
 
 ## Context Recovery Block
 
-- 当前：6/6；AWS增量的全量与浏览器发布验证完成，进入已授权的重新部署阶段。
+- 当前：7/7；AWS表头增量的全量与浏览器验证完成，0b28ab2亦已部署并通过生产复验。
 - 真源：TODO.csv。
-- 最新验证：AWS增量650个顶层Go测试、1073个含子测试pass，race/vet成功；六目标无CGO构建和隔离Codex CLI双轮工具调用成功，Chrome有数据459/31布局、空数据210/21布局通过。证据 `/tmp/oc-go-cc-multiplatform-final.FHESMh/`。
-- 下一步：#6提交推送并按既有脚本部署；保留公开合同/授权不足的账户能力缺口，不读取凭证或更改全局客户端配置。
+- 最新发布验证：表头增量650个顶层Go测试、1073个含子测试pass，race/vet、六目标无CGO构建、隔离Codex CLI双轮成功；有数据460/31布局和生产210/21布局通过。证据 `/tmp/oc-go-cc-header-final.PYhcpx/`。当前仅新增报告/任务记录，未重复全量构建。
+- 下一步：#7分析已完成，#8仍待账户配置/授权；不读取凭证或更改全局客户端配置。
 - 风险边界：真实CommandCode生成/套餐与Windows/Linux运行/原生托盘尚未实测。
 
 ## 最终结果
@@ -51,3 +51,10 @@
 - 5份相关文档35本地链接、22个JSON块/示例、4份完整配置经实际新二进制validate通过。JS语法、gofmt -l和git diff --check无错误。最新官方合同与upstream HEAD再核对一致。
 - 全部自动证据 `/tmp/oc-go-cc-multiplatform-final.FHESMh/`；只读独立代理工具失败没有计为审查通过，主线程已完整追踪增量实现、调用方与测试。
 - `go mod verify`通过。首轮有数据fixture延后清理超时的流程问题由合成运行器在成功后立即停止自身服务解决；459矩阵复验通过，Go宿主53.23s正常PASS。未修改产品代码，构建/全量源码校验和不变。
+
+## AWS表头增量验证
+
+- 表头DOM新增断言在旧代码失败，改用th.status后中英文通过；JS语法与git diff --check通过。
+- 当前源码隔离全量race：650顶层、1073含子测试、18个有测试包通过，0失败；vet退出0。Codex双轮工具调用另行显式通过（2.91s），六个CGO=0构建均成功且文件架构核验正确。
+- 五平台实际Go/SQLite合成浏览器矩阵：460检查、43平台/页面选择、31布局、6次独立配置保存、1次合成AWS手动POST、264请求，0脚本异常/越界请求；含新增AWS表头Status断言。fixture自行停止并退出PASS（106.01s），未发生遗留超时。
+- 证据 `/tmp/oc-go-cc-header-final.PYhcpx/`：race.jsonl、vet.log、codex-smoke.jsonl、browser-result.json及bin/。真实账户未调用；以前的空数据浏览器证据保留，本轮没有将其描述为重跑。

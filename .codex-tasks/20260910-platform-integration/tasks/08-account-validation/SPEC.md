@@ -16,7 +16,7 @@ single-full；从原五平台真实账户验收要求显式拆出，避免将软
 
 ## Environment / Evidence
 
-项目 `/Users/zsj/code/program/oc-go-cc`，运行代码 `7c2d07c`；软件和合成合同已验证，见 `../06-deploy/PROGRESS.md` 与 `../04-dashboard/raw/platform-quota-capabilities.md`。
+项目 `/Users/zsj/code/program/oc-go-cc`，运行代码 `0b28ab2`（2026-09-11部署验收）；软件和合成合同已验证，见 `../06-deploy/PROGRESS.md` 与 `../04-dashboard/raw/platform-quota-capabilities.md`。
 
 ## Done-When
 

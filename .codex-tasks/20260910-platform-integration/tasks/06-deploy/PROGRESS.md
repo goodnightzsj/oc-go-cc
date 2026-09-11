@@ -2,10 +2,10 @@
 
 ## Context Recovery Block
 
-- 当前：4/6；AWS增量已完成本地验证及生产预检/私有备份，准备提交推送与发布；真实账户状态/权限另保留 #8 未完成。
+- 当前：7/7；AWS表头增量0b28ab2已推送部署并通过生产复验；真实账户状态/权限另保留 #8 未完成。
 - 真源：TODO.csv。
 - 来源：本项目 Claude 2026-09-04 session、llmdoc/startup.md 与 scripts/prod-deploy.sh。
-- 下一步：AWS增量私有备份 → 提交推送与部署 → 生产只读复验 → #7UI/UX分析；#8需要用户补足账户权限/配置或明确未公开接口的验收边界。
+- 下一步：#7UI/UX只读分析已完成；#8需要用户补足账户权限/配置或明确未公开接口的验收边界。仅文档收尾不重启已验收服务。
 
 ## 只读远端基线（2026-09-11）
 
@@ -51,3 +51,19 @@
 - 当前release20260911055621-3fad77f342fc、PID8365、active/running、NRestarts0、health=ok。sqlite3存在，既有配置和SQLite路径存在，未读取凭证或私有记录。
 - 本地AWS增量最新全量650/1073、六目标、Codex及有数据/空数据浏览器通过；下一步创建私有备份，不改变账户配置或开启收费查询。
 - 已完成服务端私有备份 `/root/oc-go-cc/.tmp/predeploy-20260911-aws-SV1xWrJc`，目录0700，保留配置、两个存在的catalog、原提交/release及SQLite一致性快照。quick_check=ok；requests=0，provider_usage=1390，原服务仍active。
+
+## AWS增量发布恢复与生产复验
+
+- 恢复时本地main、origin/main、远端HEAD均为 `464c64f5a4d56619831186f68548fd82853d5ca7`，且远端实际二进制来自release `20260911074726-dc89acaaa9b9`；不重复部署。服务PID62339、active/running、NRestarts0，health=ok，版本v0.1.4-beta.53-49-g464c64f。
+- 以原生可信SSH创建临时loopback隧道，运行原有只读production-smoke.cjs：210检查、29平台页面组合、21布局全部通过，196只读请求，0pageerror/0blocked，Chrome152，UI build88ddce0410bd。
+- AWS独立账单区和三个配置字段均存在；账单disabled且收费按钮禁用。Go error、Zen no_public_account_api、OpenRouter及CommandCode not_configured均明确呈现；未调用真实推理或AWS收费接口。
+- 配置与发布前备份cmp一致；SQLite quick_check=ok，原requests/provider_usage主键缺失数均0，平台记录1390条。私有备份0700与无关.ace-tool保留。
+- 证据目录 `/tmp/oc-go-cc-release-resume.cBjqie/production-smoke/` 包含result.json及七页1440/390截图；同目录上层source-check.log证明当前产品源码与650/1073全量验证快照一致。JS语法和git diff --check通过。
+
+## 表头增量发布与生产复验
+
+- 本次先核对当前main/工作区、SSH主机信任、旧release和健康；创建0700备份 `/root/oc-go-cc/.tmp/predeploy-20260911-header-6vid7xWH`，含配置、SQLite一致性快照、catalog和原release/commit。
+- `0b28ab2bc6294a018421d2bcdb97347a1dfb2329` 已推送并通过ff-only拉取；既有prod-deploy脚本发布至release `20260911083542-8bef17b7ea86`。运行版本v0.1.4-beta.53-50-g0b28ab2、PID11558、active/running、NRestarts0、health=ok。catalog同步的未知provider警告和重启轮询的一次短暂连接拒绝已保留，不当作最终失败。
+- 生产只读浏览器210检查、29平台/页面组合、21布局、197请求通过；0pageerror/0blocked，UI build95403ba4a0a5，Chrome152。未调用真实推理、配置保存或AWS收费接口。
+- 配置与备份cmp相同；SQLite quick_check=ok，原requests缺失0，provider_usage改变或缺失0（1390行）；备份权限700、无关.ace-tool保持原样。
+- 证据 `/tmp/oc-go-cc-header-final.PYhcpx/production-smoke/`；Go额度实际仍403，其它平台权限/合同状态保留#8。本轮可以进入UIUX分析，但不代表真实账户能力全部验收。

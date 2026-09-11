@@ -1,3 +1,3 @@
 id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,notes
-1,由用户补足账户权限配置和未公开接口边界,TODO,Go403原因处理;各平台独立凭证与账单授权明确;缺合同能力不虚构,echo SKIP,,0,需要用户或官方外部条件;不读取明文Key;不进行未授权私有接口抓取
+1,由用户补足账户权限配置和未公开接口边界,TODO,Go403原因处理;各平台独立凭证与账单授权明确;缺合同能力不虚构,echo SKIP,,0,BLOCKED_EXTERNAL;本轮官方文档及生产只读状态复核未改变条件;需要用户配置权限或授权合法数据源;不读取明文Key
 2,在授权账户上完成额度与数据归属验收,TODO,实际可查询账户通过且独立日志统计与页面状态一致;明确未支持能力,echo SKIP,,0,前项完成后由应用做只读查询;余额不能由合成测试或本地估算替代

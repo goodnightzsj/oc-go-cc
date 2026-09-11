@@ -5,3 +5,4 @@ id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,n
 4,同步五平台接口能力与使用说明,DONE,平台筛选和套餐能力说明与实现一致,git diff --check,2026-09-11,0,4份文档30本地链接20JSON块通过;CommandCode和OpenRouter完整配置经新二进制validate通过;官方接口缺口明确
 5,重新全量回归并审查部署门槛,DONE,新源码race与vet六目标构建及逐平台浏览器通过;所有缺口明确,go test -race -p 2 ./... -count=1,2026-09-11,0,边界修复后641顶层1039含子测试race与vet通过;六目标无CGO构建和Codex双轮通过;Chrome447断言31布局重新通过
 6,验证AWS官方账单增量及最终发布版本,DONE,最新race/vet六目标及有数据空数据浏览器通过;官方合同和示例一致,go test -race -p 2 ./... -count=1,2026-09-11,0,650顶层1073含子测试通过;vet六目标CGO0及Codex工具双轮通过;有数据459与空数据210检查通过;5文档35链接22JSON和4完整配置validate通过
+7,验证AWS表头增量修复,DONE,当前源码回归和五平台浏览器通过且译文已核实,go test -race -p 2 ./... -count=1,2026-09-11,0,当前650顶层1073含子测试race和vet通过;六目标CGO0及Codex双轮通过;五平台460检查31布局通过;证据/tmp/oc-go-cc-header-final.PYhcpx

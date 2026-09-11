@@ -13,7 +13,7 @@ const providers = ['opencode-go','opencode-zen','aws-bedrock','openrouter','comm
 const tabs = ['overview','history','performance','fallback','analytics','quota','settings'];
 const report = {startedAt:new Date().toISOString(),checks:0,failures:[],scopes:[],layouts:[],accounts:[],screenshots:[]};
 const check = (ok,label,detail) => { report.checks++; if (!ok) report.failures.push({label,detail}); };
-const page = (fn,arg=null) => evaluate('(' + fn.toString() + ')(' + JSON.stringify(arg) + ')');
+const page = (fn,arg=null) => evaluate('(() => { const result = (' + fn.toString() + ')(' + JSON.stringify(arg) + '); return result === undefined ? null : result; })()');
 
 async function waitFor(expr,label) {
   const deadline = Date.now()+35000;
@@ -238,6 +238,8 @@ try {
     },{lang,theme});
     for(const tab of tabs) {
       await openTab(tab);
+      if(tab==='settings') await page(()=>document.querySelectorAll('.config-section').forEach(element=>element.open=true));
+      if(tab==='history') await page(()=>document.getElementById('history-advanced-filters').open=true);
       const layout=await page(tab=>{
         const panel=document.getElementById('tab-'+tab);
         panel.scrollTop=0;

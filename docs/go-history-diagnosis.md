@@ -10,7 +10,7 @@
 
 | 对象 | 观察结果 |
 | --- | --- |
-| 当前版本 | 远端仓库 `e29e79f`；运行release `20260911161610-0fac00358316`；Edge UI `01d300b9dadf` |
+| 诊断时版本 | 远端仓库 `e29e79f`；运行release `20260911161610-0fac00358316`；Edge UI `01d300b9dadf` |
 | 进程实际数据库 | `/root/.local/share/routatic-proxy/data.db`；`quick_check=ok` |
 | 当前展示表 | `requests=0` |
 | 当前原始账单 | `provider_usage=1390`；上游物理标识 `inf-go.oa-compat`，不是配置平台ID |
@@ -29,7 +29,7 @@
 1. [默认配置](../internal/storage/database.go:51)为7天；[服务启动](../internal/server/server.go:79)合并配置并启动清理器。
 2. [清理器](../internal/storage/retention.go:44)启动即执行，之后每小时运行；[删除条件](../internal/storage/retention.go:67)为 `created_at < cutoff`，没有区分账单导入与本地请求。成功删除仅输出Debug日志。
 3. [历史接口](../internal/gui/server.go:454)和[分析汇总](../internal/storage/analytics.go:105)只查询 `requests`。页面拉长时间范围不能恢复已经物理删除的行。
-4. [Go账单同步](../internal/storage/provider_request_sync.go:303)可以重建缺失记录，但使用原快照时间作为 `created_at`；仅回填、仍保留7天规则，会再次被清理。
+4. [Go账单同步](../internal/storage/provider_request_sync.go:308)可以重建缺失记录，但使用原快照时间作为 `created_at`；仅回填、仍保留7天规则，会再次被清理。
 5. 当前“最近90天”等选项并不表示后台保存了90天记录，旧UI没有说明这一限制。这次重设计应改善空态与统计范围说明，但不修改事实数据来美化界面。
 
 保留清理逻辑早于本次接入已存在；8月10日代码已有相同删除条件。不能把全量测试/服务健康通过当作历史数据非空或保留策略符合用户预期的证据。
@@ -48,3 +48,5 @@
 ## 验证限制
 
 SQLite均以`-readonly`运行；仅读取结构、计数、时间范围及所需聚合。没有触发迁移、VACUUM、账单同步、付费生成、AWS账单查询或服务重启。`journalctl`查询没有清理日志（退出1、No entries），因此删除的具体时间/操作者不可追溯。
+
+2026-09-12新版UI部署后的独立只读复核：运行提交`b3c947d`、UI `e12b7231828e`，服务健康；`quick_check=ok`、`requests=0`、`provider_usage=1390`，与诊断时一致。新版明确提示“本地记录为空不代表平台账户没有用量”；没有以界面改造为由恢复数据或调整保留策略。

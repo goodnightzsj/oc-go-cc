@@ -3,13 +3,13 @@
 ## Context Recovery Block
 
 - 任务：修复全部已报告问题，独立接入 CommandCode，融合有价值的上游更新，分析 Codex/Claude Code 对接。
-- 形态：epic；7/8 子任务完成；软件部署及UI/UX报告均完成，真实账户验收BLOCKED_EXTERNAL。
-- 当前：0b28ab2已推送部署，生产210检查/29组合/21布局通过，配置与账本保留；七页UIUX报告已完成，未实施美化。
-- 真源：SUBTASKS.csv；当前 tasks/08-account-validation/TODO.csv；真实账户权限/未公开合同仍未解决。
+- 形态：epic；7/10 子任务完成；新增 Edge 套餐接口核实和 UI/UX 实施，其他账户缺口仍保留。
+- 当前：#9 Alpha接入与#10七页美化本地完成，656顶层/1090含子测试race、vet和六目标构建通过；用户指定用现有Edge调试远端，正在发布前复核。
+- 真源：SUBTASKS.csv；当前 tasks/09-commandcode-account/TODO.csv；随后 tasks/10-uiux-implementation/TODO.csv。
 - 起点：main，HEAD 684235d，初始工作区干净。origin=goodnightzsj/oc-go-cc；upstream=samueltuyizere/oc-go-cc（GitHub）。
 - 已知：上轮 /tmp/oc-go-cc-review.WPJFmt/ 与 /tmp/oc-go-cc-routing-review.yHSDWm/ 有合成复现；本轮不依赖缓存成功。全量基线有 tokenizer 外网 EOF、日期过期测试失败；init 测试未隔离 HOME。
 - 不读取或输出真实凭证，不读取本地真实 DB；部署已获授权但须在实现与验证完成后进行，部署前读 SSH 运行手册。
-- 下一步：等待用户在服务端补足账户配置/权限，并明确Zen/CommandCode账户数据的合法来源或接受能力边界。UI/UX只读分析已完成，后续实施需用户确认；既有llmdoc同步仍待用户决定。
+- 下一步：提交推送、私有备份后按既有流程部署；保持现有Edge单连接，在远端验收CommandCode真实账户和五平台七页。当前Edge driver为/tmp/oc-go-cc-edge-remote.Peo95y/driver.mjs，任务完成再断开。其他账户缺口继续保留。
 - 最新要求已落实：先核实 CommandCode 官网；Claude 模型走原生 Messages，Codex 公开合同缺口使用本项目 Responses 适配，并参考 MAXeaglet 的公开协议行为。日志、套餐入口、统计与独立配置保留并通过验收。
 
 ## 2026-09-10 启动
@@ -140,3 +140,25 @@
 - 生产五平台账户状态仅输出白名单字段；Go error、Zen unavailable、AWS disabled、OpenRouter/CommandCode not_configured。官方域检索仍未找到Zen/CommandCode公开余额合同，保留原始摘录及缓存时间到#8 raw。
 - #7已DONE，#8保留0/2且BLOCKED_EXTERNAL，Epic7/8。缺真实授权/配置不能用合成数据、入口链接、本地估算或越权采集替代；本轮不声称所有平台真实账户全量接入。
 - 收尾CSV结构校验：9份/51行通过，父任务严格7/8。暂存新证据JSON后差异检查发现EOF多余空行，已删除并在提交前复查；这不是产品或账户测试失败。
+
+## 用户授权 Edge 套餐调查与 UI/UX 实施（2026-09-11）
+
+- 用户确认远端已手动添加 CommandCode API Key；这仅解除该平台未配置条件，不能推断账户余额接口已可用。
+- 使用 edge-debug-attach 复用既有 Edge 调试端点；不重启、不重登录、不读取 Cookie 或 Key。任务 #9 核实真实只读协议，#10 开始实施此前 #7 报告。
+- 设计沿用 .impeccable.md 的冷静、精确、可信的运维面板；ui-ux-pro-max / frontend-design / adapt 指导层级、键盘、可读性和跨视口，karpathy-guidelines / ponytail 约束最小实现。
+- 尚未运行本轮功能回归；此前部署与全量测试仅作基线，不冒充当前验收。
+
+## 2026-09-11 继续实施恢复
+
+- HEAD 为 6a4252a，保留上一轮 app.js、两个新增 GUI 测试及任务改动。重新读取 #9/#10 与协议实证，不重复 Edge 登录态采集；前三块 Alpha 数据没有月度总额度，不推算月百分比。
+- 定向 `go test ./internal/gui -run 'TestCommandCodeQuotaScopeAndCache|TestUIUXEditingBehavior|TestPlatformQuotaBehavior' -count=1 -json`：编辑/保存行为 PASS；账户接入测试在旧占位分支失败；平台显示回归因旧费用文案 `$… + ?` 与新 `Known …` 不同失败。证据 `/tmp/oc-go-cc-uiux-resume.xi9Muc/initial-targeted.jsonl`，测试 HOME 隔离。
+- 当前 upstream HEAD 新增 1f15a76（actions/setup-go v5→v7）；已 fetch，仅此一个相对 b214eeb 新提交。独立上游审查因服务 high demand 失败，不计通过，主线程接手核实。
+- FastCtx 读取输出池耗尽后返回 Guarded burst，按规则改用原生 sed/rg 读取；未读取真实 Key、Cookie、私钥或本地真实账本。
+
+## 2026-09-11 Edge远端调试与发布准备
+
+- 用户明确否决新浏览器/合成服务作为调试路径；合成服务已正常结束，Firefox/WebKit下载已取消（退出130），未再启动浏览器。保留已完成单测记录但不冒充远端验收。
+- 重新完整读取edge-debug-attach及SSH手册；复用现有Edge单一CDP连接，仅附加用户已打开的远端面板。当前CommandCode仍显示旧占位，UI95403ba4a0a5；SSH核实0b28ab2、PID11558、active/running、NRestarts0、health=ok。没有修改生产配置或发起付费推理。
+- 全量go test -race -p 2 ./... -count=1 -json退出0：656顶层/1090含子测试pass，0fail；vet退出0，darwin/linux/windows×amd64/arm64六目标CGO=0构建全部通过。证据/tmp/oc-go-cc-uiux-verify.NqKMYt/。
+- 未收到两项只读代理的有效结论，已中断，不计作独立审查通过；主线程完整核对账户实现、调用方及成功/局部失败/认证/重定向/缓存测试。
+- upstream HEAD再核实1f15a76c4dcb18db938714a28ae93047cbcc4f3e，实际还含nfpm回退和开发机Trunk绝对路径；本轮不改变CI工具链，详见公开适配记录。

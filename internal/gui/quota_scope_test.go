@@ -86,7 +86,7 @@ func TestQuotaLocalUsageKeepsUnknownCostsAndAccountScope(t *testing.T) {
 	}
 }
 
-func TestQuotaUnsupportedAccountAPIWithoutSendingGoKeys(t *testing.T) {
+func TestQuotaUnconfiguredCommandCodeDoesNotSendGoKeys(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		t.Error("unsupported platform quota must not send a key to OpenCode Go")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -98,12 +98,12 @@ func TestQuotaUnsupportedAccountAPIWithoutSendingGoKeys(t *testing.T) {
 	var response struct {
 		Provider string `json:"provider"`
 		Source   string `json:"source"`
-		Reason   string `json:"reason"`
+		Status   string `json:"status"`
 	}
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &response) != nil {
 		t.Fatalf("platform capability status = %d: %s", rec.Code, rec.Body.String())
 	}
-	if response.Provider != "commandcode" || response.Source != "none" || response.Reason != "no_public_account_api" {
+	if response.Provider != "commandcode" || response.Source != "official_alpha_api" || response.Status != "not_configured" {
 		t.Fatal("CommandCode was misrepresented as a Go quota response")
 	}
 }

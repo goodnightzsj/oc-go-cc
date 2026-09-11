@@ -18,9 +18,11 @@ const TRANSLATIONS = {
     'tab.performance': 'Performance',
     'tab.fallback': 'Fallback',
     'tab.analytics': 'Analytics',
-    'tab.quota': 'Quota',
+    'tab.quota': 'Usage & Billing',
     'tab.settings': 'Settings',
-    'quota.title': 'Plan Quota',
+    'quota.title': 'Usage & Billing',
+    'quota.openSettings': 'Platform settings',
+    'quota.sourceDetails': 'Source details',
     'quota.refresh': 'Refresh',
     'quota.bottleneck': 'Tightest window',
     'quota.remaining': 'Remaining',
@@ -72,6 +74,7 @@ const TRANSLATIONS = {
     'quota.status.error': 'Account data lookup failed',
     'quota.source.upstream_api': 'Source: upstream quota API',
     'quota.source.official_api': 'Source: official account API',
+    'quota.source.official_alpha_api': 'Source: CommandCode Alpha account API',
     'quota.source.none': 'Official account data not retrieved',
     'quota.reason.no_public_account_api': 'No public account quota API is documented for this platform. Use its official console for billing; the local ledger is shown below.',
     'quota.reason.aws_billing_disabled': 'AWS billing queries are disabled. Enable them in Settings with an explicit account ID and a separate AWS SDK identity.',
@@ -112,7 +115,7 @@ const TRANSLATIONS = {
     'openrouter.includeByok': 'BYOK counts toward the key cap',
     'openrouter.freeTier': 'Free-tier key',
     'openrouter.expires': 'Key expiry',
-    'cmd.gotoQuota': 'Go to Quota',
+    'cmd.gotoQuota': 'Go to Usage & Billing',
     'overview.title': 'Dashboard',
     'analytics.title': 'Usage Analytics',
     'analytics.refresh': 'Refresh',
@@ -127,11 +130,27 @@ const TRANSLATIONS = {
     'analytics.cost': 'Cost',
     'analytics.currencyUSD': 'USD',
     'analytics.unknownCosts': '{n} requests with unknown cost; totals include known costs only',
+    'analytics.knownSubtotal': 'Known {value}',
     'analytics.utc': 'Analytics dates and time buckets use UTC',
     'label.apiKeys': 'API keys (comma-separated, takes precedence over the single key)',
     'label.apiKeysHint': 'Replace the entire list to edit masked keys, or clear it to use the single key. Environment overrides still take precedence.',
     'commandcode.keyHint': 'Uses its own API key; global keys are never sent to CommandCode.',
-    'commandcode.quotaHint': 'No public plan or balance API is documented. This dashboard does not fetch private billing pages; use CommandCode for official usage and billing.',
+    'commandcode.quotaHint': 'Queries the official Alpha account endpoints with this platform’s API key. No browser session is required. Alpha response fields may change.',
+    'commandcode.accountScope': 'Official Alpha account data · USD-denominated usage credits, not cash or this instance’s ledger. Each key is shown separately; balances are not added together.',
+    'commandcode.credits': 'Usage credits remaining',
+    'commandcode.freeCredits': 'Free credits',
+    'commandcode.monthlyCredits': 'Monthly credits remaining',
+    'commandcode.purchasedCredits': 'Purchased credits',
+    'commandcode.monthlyLimitUnknown': 'The Alpha API does not report the monthly grant. No monthly utilization percentage is inferred.',
+    'commandcode.windowLimits': 'Rolling usage limits',
+    'commandcode.noWindowLimits': 'No rolling limits reported for this account',
+    'commandcode.noSubscription': 'No subscription returned by the account API',
+    'commandcode.billingPeriod': 'Official billing period (UTC)',
+    'commandcode.cancelAtEnd': 'Cancels at period end',
+    'commandcode.usageSummary': 'Official usage summary',
+    'commandcode.usageCredits': 'Usage credits consumed',
+    'commandcode.usagePeriod': 'Usage scope',
+    'commandcode.billingPeriodScope': 'Current billing period',
     'commandcode.usage': 'Official usage',
     'commandcode.billing': 'Official billing',
     'commandcode.keys': 'Manage API keys',
@@ -287,6 +306,11 @@ const TRANSLATIONS = {
     'setting.catalogNotSynced': 'Catalog not synced',
     'setting.catalogAge': 'Last synced: {age}',
     'section.proxyConfig': 'Proxy Configuration',
+    'setting.platformJump': 'Jump to platform',
+    'setting.runtime': 'Runtime & tools',
+    'setting.changeCount': '{n} unsaved fields',
+    'setting.noChanges': 'All changes saved',
+    'setting.invalidChanges': 'Some fields need attention before saving',
     'placeholder.envOrEmpty': 'Use env var or leave empty',
     'placeholder.notSet': 'Not configured',
     'label.globalKey': 'Global API Key (optional)',
@@ -319,12 +343,19 @@ const TRANSLATIONS = {
     'fallback.saved': 'Fallback chain saved successfully!',
     'fallback.saveFailed': 'Failed to save fallback chain',
     'fallback.noChanges': 'No changes to save',
+    'fallback.unsaved': 'Unsaved chain changes',
+    'fallback.moveUp': 'Move {model} up',
+    'fallback.moveDown': 'Move {model} down',
+    'fallback.remove': 'Remove {model}',
+    'fallback.primary': 'Primary model',
     'perf.lastHour': 'Last Hour',
     'perf.last24h': 'Last 24 Hours',
     'perf.last7d': 'Last 7 Days',
     'perf.allTime': 'All Time',
     'perf.th.model': 'Model',
-    'perf.th.count': 'Count',
+    'perf.th.count': 'Samples',
+    'perf.sampleHint': 'Samples count requests with measured latency. Success % uses known outcomes. P50 / P90 / P99 show the latency at each percentile; small samples can be misleading.',
+    'perf.knownSamples': '{n} requests with known outcomes',
     'perf.th.successRate': 'Success %',
     'perf.th.avg': 'Avg (ms)',
     'perf.th.p50': 'P50',
@@ -391,8 +422,10 @@ const TRANSLATIONS = {
     'tab.fallback': '降级策略',
     'tab.settings': '设置',
     'tab.analytics': '用量分析',
-    'tab.quota': '套餐额度',
-    'quota.title': '套餐额度',
+    'tab.quota': '用量与账单',
+    'quota.title': '用量与账单',
+    'quota.openSettings': '平台设置',
+    'quota.sourceDetails': '数据源详情',
     'quota.refresh': '刷新',
     'quota.bottleneck': '最紧窗口',
     'quota.remaining': '剩余额度',
@@ -444,6 +477,7 @@ const TRANSLATIONS = {
     'quota.status.error': '账户数据查询失败',
     'quota.source.upstream_api': '来源：上游额度接口',
     'quota.source.official_api': '来源：官方账户接口',
+    'quota.source.official_alpha_api': '来源：CommandCode Alpha 账户接口',
     'quota.source.none': '尚未获取官方账户数据',
     'quota.reason.no_public_account_api': '此平台尚未公开账户额度 API。请在官方控制台查看账单；下方仍提供本实例账本。',
     'quota.reason.aws_billing_disabled': 'AWS 账单查询默认关闭。请在设置中启用，并指定账单账户 ID 和独立 AWS SDK 身份。',
@@ -484,7 +518,7 @@ const TRANSLATIONS = {
     'openrouter.includeByok': 'BYOK 计入密钥限额',
     'openrouter.freeTier': '免费层级密钥',
     'openrouter.expires': '密钥到期时间',
-    'cmd.gotoQuota': '前往套餐额度',
+    'cmd.gotoQuota': '前往用量与账单',
     'overview.title': '仪表盘',
     'analytics.title': '用量分析',
     'analytics.refresh': '刷新',
@@ -499,11 +533,27 @@ const TRANSLATIONS = {
     'analytics.cost': '费用',
     'analytics.currencyUSD': '美元（USD）',
     'analytics.unknownCosts': '{n} 条请求费用未知；合计只包含已知费用',
+    'analytics.knownSubtotal': '已知 {value}',
     'analytics.utc': '用量分析的日期与时间桶统一使用 UTC',
     'label.apiKeys': 'API Keys（逗号分隔，优先于单个密钥）',
     'label.apiKeysHint': '修改已脱敏的密钥时请替换完整列表；清空列表后使用单个密钥。环境变量覆盖仍然优先。',
     'commandcode.keyHint': '使用独立 API 密钥；不会向 CommandCode 发送全局密钥。',
-    'commandcode.quotaHint': '官方未公开套餐或余额 API。面板不抓取私有账单页面；请前往 CommandCode 查看官方用量和账单。',
+    'commandcode.quotaHint': '使用本平台 API 密钥查询官方 Alpha 账户接口，无需浏览器登录态；Alpha 响应字段可能变化。',
+    'commandcode.accountScope': '官方 Alpha 账户数据 · 美元计价用量点数，不是现金余额或本实例账本。每个密钥分别展示，不合计余额。',
+    'commandcode.credits': '剩余用量点数',
+    'commandcode.freeCredits': '免费点数',
+    'commandcode.monthlyCredits': '月度剩余点数',
+    'commandcode.purchasedCredits': '购买点数',
+    'commandcode.monthlyLimitUnknown': 'Alpha 接口未返回月度发放总额，因此不推算月度使用百分比。',
+    'commandcode.windowLimits': '滚动用量限制',
+    'commandcode.noWindowLimits': '此账户未报告滚动窗口限制',
+    'commandcode.noSubscription': '账户接口未返回订阅',
+    'commandcode.billingPeriod': '官方账单周期（UTC）',
+    'commandcode.cancelAtEnd': '周期结束时取消',
+    'commandcode.usageSummary': '官方用量汇总',
+    'commandcode.usageCredits': '已消耗用量点数',
+    'commandcode.usagePeriod': '用量范围',
+    'commandcode.billingPeriodScope': '当前账单周期',
     'commandcode.usage': '官方用量',
     'commandcode.billing': '官方账单',
     'commandcode.keys': '管理 API 密钥',
@@ -660,6 +710,11 @@ const TRANSLATIONS = {
     'setting.catalogNotSynced': '模型目录未同步',
     'setting.catalogAge': '上次同步：{age}',
     'section.proxyConfig': '服务代理配置',
+    'setting.platformJump': '定位平台',
+    'setting.runtime': '运行状态与其他操作',
+    'setting.changeCount': '{n} 个字段尚未保存',
+    'setting.noChanges': '所有修改已保存',
+    'setting.invalidChanges': '部分字段需修正后才能保存',
     'placeholder.envOrEmpty': '使用环境变量或留空',
     'placeholder.notSet': '未配置',
     'label.globalKey': 'Global API Key (可选)',
@@ -715,12 +770,19 @@ const TRANSLATIONS = {
     'fallback.saved': '降级链保存成功！',
     'fallback.saveFailed': '保存失败',
     'fallback.noChanges': '无更改',
+    'fallback.unsaved': '降级链有未保存的修改',
+    'fallback.moveUp': '上移 {model}',
+    'fallback.moveDown': '下移 {model}',
+    'fallback.remove': '移除 {model}',
+    'fallback.primary': '主模型',
     'perf.lastHour': '最近 1 小时',
     'perf.last24h': '最近 24 小时',
     'perf.last7d': '最近 7 天',
     'perf.allTime': '全部时间',
     'perf.th.model': '模型',
-    'perf.th.count': '请求数',
+    'perf.th.count': '耗时样本',
+    'perf.sampleHint': '样本数仅计入有耗时记录的请求；成功率按已知结果计算。P50 / P90 / P99 表示相应分位的耗时，样本较少时不宜据此判断稳定性能。',
+    'perf.knownSamples': '{n} 条已知结果的请求',
     'perf.th.successRate': '成功率',
     'perf.th.avg': '平均延迟',
     'perf.th.p50': 'P50',
@@ -799,6 +861,8 @@ function toggleLanguage() {
   if (activeTab === 'analytics') AnalyticsModule.load(true);
   QuotaModule.render();
   QuotaModule.renderLocalUsage();
+  FallbackModule.renderChain();
+  updateConfigChangeCount();
   if (lastOverviewView) renderOverviewUsage(lastOverviewView.data, lastOverviewView.trend, lastOverviewView.latency);
 }
 
@@ -1182,7 +1246,7 @@ const PerfModule = {
         <tr>
           <td class="perf-model">${escapeHtml(row.model)}<br><small>${escapeHtml(row.provider || t('detail.unknown'))}</small></td>
           <td>${fmt(row.count)}</td>
-          <td class="${successClass}">${successRate == null ? '—' : successRate + '%'}</td>
+          <td class="${successClass}" title="${escapeHtml(t('perf.knownSamples').replace('{n}', known.toLocaleString()))}">${successRate == null ? '—' : successRate + '%'}</td>
           <td class="${this.getLatencyClass(row.avg_ms)}">${latency(row.avg_ms)}</td>
           <td class="${this.getLatencyClass(row.p50_ms)}">${latency(row.p50_ms)}</td>
           <td class="${this.getLatencyClass(row.p90_ms)}">${latency(row.p90_ms)}</td>
@@ -1210,7 +1274,10 @@ function activateTab(name) {
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
   const tabEl = document.querySelector('.tab[data-tab="' + name + '"]');
   const panel = document.getElementById('tab-' + name);
-  if (tabEl) tabEl.classList.add('active');
+  if (tabEl) {
+    tabEl.classList.add('active');
+    tabEl.scrollIntoView?.({block: 'nearest', inline: 'nearest'});
+  }
   if (panel) panel.classList.add('active');
   activeTab = name;
   if (name === 'overview') refreshOverviewUsage();
@@ -2110,7 +2177,7 @@ function fmtAggregateCost(item) {
   const requests = Number(item?.total_requests ?? item?.requests ?? 0);
   if (unknown > 0 && unknown >= requests) return '—';
   const value = fmtCost(item?.cost_usd ?? item?.est_cost_usd);
-  return unknown > 0 ? `${value} + ?` : value;
+  return unknown > 0 ? t('analytics.knownSubtotal').replace('{value}', value) : value;
 }
 
 function costCoverageNote(item) {
@@ -2196,7 +2263,7 @@ function bindPlotTooltip(root, tip, options) {
     cursor.classList.add('is-visible');
     tip.innerHTML = options.contentForIndex(currentIndex);
     target.setAttribute('aria-valuenow', String(currentIndex + 1));
-    target.setAttribute('aria-valuetext', options.labelForIndex(currentIndex));
+    target.setAttribute('aria-valuetext', tip.textContent.replace(/\s+/g, ' ').trim());
     place(currentIndex, event);
   };
 
@@ -2418,11 +2485,58 @@ async function loadProxyConfig() {
         el.value = val || '';
       }
     }
+    updateConfigChangeCount();
   } catch (e) {
     console.error('Failed to load proxy config:', e);
     showSaveStatus(t('save.unloaded') + ': ' + e.message, 'error');
   }
 }
+
+function updateConfigChangeCount() {
+  const label = document.getElementById('config-change-count');
+  if (!label) return;
+  if (!currentProxyConfig) {
+    label.textContent = t('save.unloaded');
+    return;
+  }
+  let changed = 0;
+  let invalid = false;
+  for (const field of CONFIG_FIELDS) {
+    try {
+      if (readFieldValue(field) !== undefined) changed++;
+    } catch (_) {
+      invalid = true;
+    }
+  }
+  label.textContent = invalid ? t('setting.invalidChanges')
+    : changed ? t('setting.changeCount').replace('{n}', changed) : t('setting.noChanges');
+}
+
+function openProviderSettings(provider) {
+  if (!PROVIDERS[provider]) return;
+  const section = document.querySelector(`[data-settings-provider="${provider}"]`);
+  if (!section) return;
+  location.hash = 'settings';
+  activateTab('settings');
+  section.open = true;
+  const picker = document.getElementById('settings-provider-jump');
+  if (picker) picker.value = provider;
+  window.CustomSelect?.syncAll();
+  section.scrollIntoView({block: 'start'});
+  section.querySelector('summary')?.focus();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  for (const [, id] of CONFIG_FIELDS) {
+    const field = document.getElementById(id);
+    field?.addEventListener('input', updateConfigChangeCount);
+    field?.addEventListener('change', updateConfigChangeCount);
+  }
+  document.getElementById('settings-provider-jump')?.addEventListener('change', event => {
+    const provider = event.target.value;
+    queueMicrotask(() => openProviderSettings(provider));
+  });
+});
 
 async function saveProxyConfig() {
   if (!currentProxyConfig) {
@@ -3026,6 +3140,11 @@ const FallbackModule = {
   renderChain() {
     const list = document.getElementById('fallback-chain');
     const chain = this.chains[this.currentScenario];
+    const primary = currentProxyConfig?.models?.[this.currentScenario];
+    const primaryEl = document.getElementById('fallback-primary');
+    if (primaryEl) primaryEl.textContent = `${t('fallback.primary')}: ${primary ? configModelKey(primary) : '—'}`;
+    this.setStatus(t(this.originalChains && JSON.stringify(this.chains) !== JSON.stringify(this.originalChains)
+      ? 'fallback.unsaved' : 'fallback.noChanges'));
 
     if (!chain || chain.length === 0) {
       list.innerHTML = '<li class="empty-state">' + t('fallback.empty') + '</li>';
@@ -3039,12 +3158,19 @@ const FallbackModule = {
       const modelId = entry.model_id || entry;
       const displayName = modelId;
       const provider = entry.provider || 'opencode-go';
+      const identity = `${displayName} (${PROVIDERS[provider.replace(/_/g, '-')]?.name || provider})`;
+      const label = key => escapeHtml(t(key).replace('{model}', identity));
       return `
-        <li class="fallback-item" draggable="true" data-index="${index}" role="option">
-          <span class="handle">⋮⋮</span>
+        <li class="fallback-item" draggable="true" data-index="${index}">
+          <span class="handle" aria-hidden="true">⋮⋮</span>
+          <span class="chain-order" aria-hidden="true">${index + 1}</span>
           <span class="model-name">${escapeHtml(displayName)}</span>
           ${provider ? '<span class="model-meta">' + escapeHtml(provider) + '</span>' : ''}
-          <button class="remove-btn" onclick="FallbackModule.removeModel(${index})" title="Remove model" aria-label="Remove ${escapeHtml(displayName)}">×</button>
+          <span class="chain-actions">
+            <button type="button" class="chain-move" data-direction="up" onclick="FallbackModule.moveModel(${index}, ${index - 1}, 'up')" aria-label="${label('fallback.moveUp')}" title="${label('fallback.moveUp')}" ${index === 0 ? 'disabled' : ''}>↑</button>
+            <button type="button" class="chain-move" data-direction="down" onclick="FallbackModule.moveModel(${index}, ${index + 1}, 'down')" aria-label="${label('fallback.moveDown')}" title="${label('fallback.moveDown')}" ${index === chain.length - 1 ? 'disabled' : ''}>↓</button>
+            <button type="button" class="chain-remove" onclick="FallbackModule.removeModel(${index})" aria-label="${label('fallback.remove')}" title="${label('fallback.remove')}">×</button>
+          </span>
         </li>
       `;
     }).join('');
@@ -3086,16 +3212,26 @@ const FallbackModule = {
 
   onDrop(e) {
     e.preventDefault();
-    const fromIndex = parseInt(e.dataTransfer.getData('text/plain'), 10);
-    const toIndex = parseInt(e.currentTarget.dataset.index, 10);
+    const source = e.dataTransfer.getData('text/plain');
+    const fromIndex = source.trim() ? Number(source) : NaN;
+    const toIndex = Number(e.currentTarget.dataset.index);
 
     e.currentTarget.classList.remove('drag-over');
 
-    if (fromIndex !== toIndex) {
-      const chain = this.chains[this.currentScenario];
-      const [removed] = chain.splice(fromIndex, 1);
-      chain.splice(toIndex, 0, removed);
-      this.renderChain();
+    this.moveModel(fromIndex, toIndex);
+  },
+
+  moveModel(fromIndex, toIndex, direction) {
+    const chain = this.chains[this.currentScenario];
+    if (!chain || !Number.isInteger(fromIndex) || !Number.isInteger(toIndex)
+      || fromIndex < 0 || toIndex < 0 || fromIndex >= chain.length || toIndex >= chain.length || fromIndex === toIndex) return;
+    const [entry] = chain.splice(fromIndex, 1);
+    chain.splice(toIndex, 0, entry);
+    this.renderChain();
+    if (direction) {
+      const row = document.querySelector(`.fallback-item[data-index="${toIndex}"]`);
+      const moved = row?.querySelector(`[data-direction="${direction}"]`);
+      (moved && !moved.disabled ? moved : row?.querySelector('.chain-move:not(:disabled), .chain-remove'))?.focus();
     }
   },
 
@@ -3119,7 +3255,17 @@ const FallbackModule = {
     if (chain) {
       chain.splice(index, 1);
       this.renderChain();
+      const next = document.querySelector(`.fallback-item[data-index="${Math.min(index, chain.length - 1)}"] .chain-remove`);
+      const picker = document.getElementById('fallback-add-model');
+      (next || window.CustomSelect?.instances.get(picker)?.button || picker)?.focus();
     }
+  },
+
+  setStatus(message, type = '') {
+    const status = document.getElementById('fallback-status');
+    if (!status) return;
+    status.textContent = message;
+    status.className = 'page-meta ' + (type === 'error' ? 'is-error' : '');
   },
 
   preview() {
@@ -3151,7 +3297,7 @@ const FallbackModule = {
     );
 
     if (!hasChanges) {
-      showSaveStatus(t('fallback.noChanges'), 'success');
+      this.setStatus(t('fallback.noChanges'));
       return;
     }
 
@@ -3170,15 +3316,15 @@ const FallbackModule = {
       });
 
       if (r.ok) {
-        showSaveStatus(t('fallback.saved'), 'success');
+        this.setStatus(t('fallback.saved'), 'success');
         this.originalChains = JSON.parse(JSON.stringify(this.chains));
-        await loadProxyConfig();
+        if (currentProxyConfig) currentProxyConfig.fallbacks = JSON.parse(JSON.stringify(this.chains));
       } else {
         const txt = await r.text();
-        showSaveStatus(t('fallback.saveFailed') + ': ' + txt, 'error');
+        this.setStatus(t('fallback.saveFailed') + ': ' + txt, 'error');
       }
     } catch (e) {
-      showSaveStatus(t('fallback.saveFailed'), 'error');
+      this.setStatus(t('fallback.saveFailed') + ': ' + e.message, 'error');
     } finally {
       if (saveBtn) {
         saveBtn.disabled = false;
@@ -3807,7 +3953,6 @@ const AnalyticsModule = {
       plotTop: inset.top,
       plotWidth: chart.plotW,
       xForIndex: chart.x,
-      labelForIndex: index => this.trendLabel(points[index].date),
       markersForIndex: index => visible.map(item => ({x:chart.x(index),y:chart.y(points[index][item.key])})),
       contentForIndex: index => {
       const point=points[index];
@@ -3853,7 +3998,6 @@ const AnalyticsModule = {
       plotTop: inset.top,
       plotWidth: chart.plotW,
       xForIndex: chart.x,
-      labelForIndex: index => this.trendLabel(points[index].date),
       markersForIndex: index => visible.map(item => ({x:chart.x(index),y:item.rate ? rateY(rate(points[index])) : chart.y(points[index][item.key])})),
       contentForIndex: index => {
       const point=points[index];
@@ -3941,6 +4085,7 @@ const QuotaModule = {
     });
     document.getElementById('quota-local-days')?.addEventListener('change', () => this.loadLocalUsage(true));
     document.getElementById('quota-view-local')?.addEventListener('click', () => viewProviderHistory(this.provider));
+    document.getElementById('quota-open-settings')?.addEventListener('click', () => openProviderSettings(this.provider));
     // A single ticker drives every countdown on the page and idles while the
     // Quota tab is hidden.
     setInterval(() => { if (activeTab === 'quota') this.tickCountdowns(); }, 1000);
@@ -4054,14 +4199,17 @@ const QuotaModule = {
     const isGo = this.provider === 'opencode-go';
     const isOpenRouter = this.provider === 'openrouter';
     const isBedrock = this.provider === 'aws-bedrock';
+    const isCommandCode = this.provider === 'commandcode';
     const go = document.getElementById('quota-go');
     const openrouter = document.getElementById('quota-openrouter');
     const bedrock = document.getElementById('quota-bedrock');
+    const commandcode = document.getElementById('quota-commandcode');
     const unavailable = document.getElementById('quota-unavailable');
     if (go) go.hidden = !isGo;
     if (openrouter) openrouter.hidden = !isOpenRouter;
     if (bedrock) bedrock.hidden = !isBedrock;
-    if (unavailable) unavailable.hidden = isGo || isOpenRouter || isBedrock;
+    if (commandcode) commandcode.hidden = !isCommandCode;
+    if (unavailable) unavailable.hidden = isGo || isOpenRouter || isBedrock || isCommandCode;
     this.syncRefreshButton();
     const view = this.view?.provider && this.view.provider !== this.provider ? null : this.view;
     const meta = [];
@@ -4093,6 +4241,11 @@ const QuotaModule = {
       }
       if (isBedrock) {
         this.renderBedrockBilling(view);
+        return;
+      }
+      if (isCommandCode) {
+        this.renderCommandCode(view);
+        this.tickCountdowns();
         return;
       }
       this.setText('quota-unavailable-title', t('quota.notRetrieved').replace('{provider}', PROVIDERS[this.provider]?.name || this.provider));
@@ -4234,6 +4387,72 @@ const QuotaModule = {
         <tbody>${periods.map(([label, usage, byok]) => `<tr><td>${t(label)}</td><td>${fmtCost(data[usage])}</td><td>${fmtCost(data[byok])}</td></tr>`).join('')}</tbody>
       </table></div>
     </section>`;
+  },
+
+  renderCommandCode(view) {
+    const root = document.getElementById('quota-commandcode-accounts');
+    if (!root) return;
+    if (!view) {
+      root.innerHTML = `<div class="quota-notice">${t(this.loading ? 'data.loading' : 'detail.unavailable')}</div>`;
+    } else if (view.error) {
+      root.innerHTML = `<div class="quota-notice is-error" role="alert">${escapeHtml(view.error)}</div>`;
+    } else if (!view.accounts?.length) {
+      root.innerHTML = `<div class="quota-notice"><strong>${t('quota.noProviderKey').replace('{provider}', 'CommandCode')}</strong><span>${t('quota.noProviderKeyHint')}</span></div>`;
+    } else {
+      root.innerHTML = view.accounts.map(account => this.renderCommandCodeAccount(account)).join('');
+    }
+  },
+
+  renderCommandCodeAccount(account) {
+    const head = `<div class="quota-account-head"><span class="quota-key">${t('quota.keyLabel')} <code>${escapeHtml(account.key_hint || '—')}</code></span></div>`;
+    const data = account.commandcode;
+    const error = message => `<div class="quota-notice is-error" role="alert">${escapeHtml(message)}</div>`;
+    if (account.error || !data) return `<section class="quota-account analytics-section">${head}${error(account.error || t('data.invalid'))}</section>`;
+    const figures = rows => `<dl class="quota-figures">${rows.map(([label, value]) => `<div><dt>${t(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl>`;
+    const section = (title, content) => `<section class="commandcode-block"><h3 class="section-heading">${t(title)}</h3>${content}</section>`;
+    const utc = value => {
+      const date = value ? new Date(value) : null;
+      return date && Number.isFinite(date.getTime()) ? date.toISOString().replace('T', ' ').replace('.000Z', ' UTC') : '—';
+    };
+    let credits = error(data.credits_error || t('detail.unavailable'));
+    if (data.credits) {
+      const balance = data.credits.credits;
+      credits = figures([
+        ['commandcode.monthlyCredits', fmtCost(balance?.monthlyCredits)],
+        ['commandcode.freeCredits', fmtCost(balance?.freeCredits)],
+        ['commandcode.purchasedCredits', fmtCost(balance?.purchasedCredits)],
+      ]) + `<p class="page-meta">${t('commandcode.monthlyLimitUnknown')}</p>`;
+      const limits = data.credits.windowLimits;
+      const windows = [['quota.rolling5h', limits?.fiveHour], ['quota.weekly', limits?.weekly]].filter(([, window]) => window);
+      credits += `<h4 class="section-heading">${t('commandcode.windowLimits')}</h4>`;
+      if (windows.length) {
+        credits += `<div class="commandcode-windows">${windows.map(([label, window]) => {
+          const percent = Number.isFinite(window.used) && Number.isFinite(window.cap) && window.cap > 0 ? window.used / window.cap * 100 : null;
+          const level = window.exceeded ? 'crit' : percent == null ? 'ok' : this.levelOf(percent);
+          const reset = Number.isFinite(window.resetAt) && window.resetAt > 0 ? window.resetAt : null;
+          return `<div class="commandcode-window level-${level}"><div class="commandcode-window-heading"><strong>${t(label)}</strong><span>${fmtCost(window.used)} / ${fmtCost(window.cap)}${percent == null ? '' : ` · ${percent.toFixed(1)}%`}</span></div>
+            ${percent == null ? '' : `<progress max="100" value="${Math.min(100, Math.max(0, percent))}" aria-label="${t(label)}"></progress>`}
+            ${window.exceeded ? `<span class="quota-badge is-crit">${t('quota.exhausted')}</span>` : ''}
+            <span class="quota-reset"${reset == null ? '' : ` data-deadline="${reset}"`}>${t('quota.resetUnknown')}</span></div>`;
+        }).join('')}</div>`;
+      } else {
+        credits += `<p class="page-meta">${t(limits?.limited === false ? 'commandcode.noWindowLimits' : 'detail.unavailable')}</p>`;
+      }
+    }
+    const sub = data.subscription;
+    const subscription = data.subscription_error ? error(data.subscription_error) : sub ? figures([
+      ['quota.plan', sub.planId], ['th.status', sub.status],
+      ['commandcode.billingPeriod', `${utc(sub.currentPeriodStart)} → ${utc(sub.currentPeriodEnd)}`],
+      ['commandcode.cancelAtEnd', sub.cancelAtPeriodEnd === true ? t('quota.yes') : sub.cancelAtPeriodEnd === false ? t('quota.no') : '—'],
+    ]) : `<p class="page-meta">${t('commandcode.noSubscription')}</p>`;
+    const usage = data.usage;
+    const summary = data.usage_error ? error(data.usage_error) : usage ? figures([
+      ['commandcode.usagePeriod', usage.periodBasis === 'billing-period' ? t('commandcode.billingPeriodScope') : usage.periodBasis || '—'],
+      ['analytics.requests', fmt(usage.totalCount)], ['metric.success', fmt(usage.completedCount)], ['metric.failed', fmt(usage.failedCount)],
+      ['analytics.inputTokens', fmt(usage.totalTokensIn)], ['analytics.outputTokens', fmt(usage.totalTokensOut)],
+      ['analytics.totalTokens', fmt(usage.totalTokens)], ['commandcode.usageCredits', fmtCost(usage.totalCredits)],
+    ]) : `<p class="page-meta">${t('detail.unavailable')}</p>`;
+    return `<section class="quota-account analytics-section commandcode-account">${head}${section('commandcode.credits', credits)}${section('quota.plan', subscription)}${section('commandcode.usageSummary', summary)}</section>`;
   },
 
   renderAccount(account) {

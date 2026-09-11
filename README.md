@@ -63,17 +63,17 @@ See [docs/architecture.md](docs/architecture.md) for system design and request f
 
 `routatic-proxy start` runs the proxy and the browser dashboard at `http://127.0.0.1:3445`. The browser dashboard does not require CGO. Native tray integration is available only on macOS builds with CGO; it is distinct from the web dashboard.
 
-**Dashboard tabs:** Overview, History, Performance, Fallback, Usage Analytics, Quota, and Settings.
+**Dashboard tabs:** Overview, History, Performance, Fallback, Usage Analytics, Usage & Billing, and Settings.
 
 Overview, History, Performance, and Usage Analytics have independent five-provider filters. Totals, trends, comparisons, and model rows use the selected scope. History CSV exports retain their initial filters even if the selection changes between pages.
 
-The **Quota** tab separates each provider's local request/token/cost ledger from account data. OpenCode Go retains its 5-hour, weekly, and monthly windows. OpenRouter shows each inference key's cap and UTC usage, with BYOK usage separate; account Credits require the independent `openrouter.management_api_key`. Only masked key hints reach the browser; Go/OpenRouter account results are cached per provider for 30 seconds.
+The **Usage & Billing** tab separates each provider's local request/token/cost ledger from account data. OpenCode Go retains its 5-hour, weekly, and monthly windows. OpenRouter shows each inference key's cap and UTC usage, with BYOK usage separate; account Credits require the independent `openrouter.management_api_key`. CommandCode uses its own key to query official Alpha credits, subscriptions and usage summary, without browser cookies. Only masked key hints reach the browser; these account results are cached per provider for 30 seconds.
 
 AWS Bedrock has a separate [Cost Explorer billing integration](docs/aws-bedrock-billing.md), disabled by default. It requires an explicit account ID and the service's AWS SDK identity. Only the manual billing button initiates paid queries; ordinary refresh reads the same-account, same-UTC-day snapshot. Reported costs cover the listed services over 30 complete UTC days, with currency and estimate flags, not remaining credit.
 
-Go per-model allowances come from the [Go docs](https://opencode.ai/docs/go). Per-model spend is this instance's local estimate, not an official account bill; it is shown only when one configured Go key has a known monthly window. Multiple keys cannot be attributed to accounts from the local ledger. Go's usage endpoint is undocumented and may change. No public account-query contract has been verified for Zen or CommandCode. These providers still have scoped local usage and official links, without borrowing Go quotas or presenting unavailable balances as zero. See the [capability matrix](docs/platform-integration-review.md#五平台页面与账户能力).
+Go per-model allowances come from the [Go docs](https://opencode.ai/docs/go). Per-model spend is this instance's local estimate, not an official account bill; it is shown only when one configured Go key has a known monthly window. Multiple keys cannot be attributed to accounts from the local ledger. Go's undocumented endpoint and CommandCode's Alpha endpoints may change. No public account-query contract has been verified for Zen. CommandCode credits are not cash, and its absent monthly grant is never inferred from the remaining amount. See the [capability matrix](docs/platform-integration-review.md#五平台页面与账户能力).
 
-Unknown costs are displayed as `—`, or a known subtotal followed by `+ ?`, instead of being presented as free usage. Analytics date buckets and the overview's today boundary use UTC; history date filters and individual timestamps use browser-local time.
+Unknown costs are displayed as `—`, or a labeled known subtotal with the unknown-record count, instead of being presented as free usage. Analytics date buckets and the overview's today boundary use UTC; history date filters and individual timestamps use browser-local time. Settings are grouped by platform; sorting and fallback reordering support keyboard controls, with light/dark and mobile layouts.
 
 ```bash
 routatic-proxy start

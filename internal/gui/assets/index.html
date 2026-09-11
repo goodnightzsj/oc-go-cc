@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="compiled-tailwind.css">
 <link rel="stylesheet" href="style.css">
 </head>
-<body class="app-body text-[13px] antialiased select-none overflow-hidden">
+<body class="app-body text-[13px] antialiased overflow-hidden">
 <svg style="display: none;">
   <symbol id="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
@@ -80,12 +80,12 @@
         <div class="text-[26px] font-bold tabular-nums" id="m-tokens">--</div>
         <div class="metric-note" id="m-tokens-note"></div>
       </div>
-      <div class="metric-cell overview-metric">
+      <div class="metric-cell overview-metric metric-secondary">
         <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="analytics.cacheHitShort">Cache hit</div>
         <div class="text-[26px] font-bold tabular-nums" id="m-cache-hit">--</div>
         <div class="metric-note" id="m-cache-hit-note"></div>
       </div>
-      <div class="metric-cell overview-metric">
+      <div class="metric-cell overview-metric metric-secondary">
         <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="analytics.throughput">Average throughput</div>
         <div class="text-[26px] font-bold tabular-nums" id="m-throughput">--</div>
         <div class="metric-note" id="m-throughput-note"></div>
@@ -133,27 +133,6 @@
       </div>
       <p class="page-meta" data-i18n="history.localScope">Statistics use records kept by this instance, including synced bills and local estimates. Direct-to-platform traffic may not be recorded here.</p>
       <p id="history-error" hidden role="alert" style="color:var(--ui-red)"></p>
-      <div class="history-summary-band" aria-label="Filtered history summary">
-        <div class="history-summary-metrics">
-          <div><span data-i18n="history.filteredRequests">Filtered requests</span><strong id="history-summary-requests">--</strong></div>
-          <div><span data-i18n="history.successRate">Success rate</span><strong id="history-summary-success">--</strong></div>
-          <div><span data-i18n="history.filteredTokens">Tokens</span><strong id="history-summary-tokens">--</strong><small class="history-summary-note" id="history-summary-token-note"></small></div>
-          <div><span data-i18n="history.filteredCost">Recorded cost</span><strong id="history-summary-cost">--</strong><small class="history-summary-note" id="history-summary-cost-note"></small></div>
-        </div>
-        <div class="insight-toolbar">
-          <span data-i18n="history.distribution">Distribution details</span>
-          <div class="metric-segment" id="history-breakdown-metric" role="group" aria-label="History distribution metric">
-            <button type="button" data-metric="tokens" class="active" data-i18n="analytics.totalTokens">Tokens</button>
-            <button type="button" data-metric="cost" data-i18n="analytics.cost">Cost</button>
-            <button type="button" data-metric="requests" data-i18n="analytics.requests">Requests</button>
-          </div>
-        </div>
-        <div class="history-breakdown-grid">
-          <section><h2 data-i18n="history.modelDistribution">Models</h2><div id="history-model-breakdown" class="compact-breakdown"></div></section>
-          <section><h2 data-i18n="history.providerDistribution">Platforms</h2><div id="history-provider-breakdown" class="compact-breakdown"></div></section>
-          <section><h2 data-i18n="history.scenarioDistribution">Scenarios</h2><div id="history-scenario-breakdown" class="compact-breakdown"></div></section>
-        </div>
-      </div>
       <div class="history-filter-band" aria-label="History filters">
         <div class="history-search-wrap">
           <input type="search" id="history-search" placeholder="Search requests..." data-i18n-placeholder="history.searchPlaceholder" aria-label="Search history" class="history-filter-input">
@@ -206,17 +185,25 @@
         </select>
         <button class="btn btn-small" id="history-reset" data-i18n="filter.reset">Reset</button>
       </div>
+      <div class="history-summary-band" aria-label="Filtered history summary">
+        <div class="history-summary-metrics">
+          <div><span data-i18n="history.filteredRequests">Filtered requests</span><strong id="history-summary-requests">--</strong></div>
+          <div><span data-i18n="history.successRate">Success rate</span><strong id="history-summary-success">--</strong></div>
+          <div><span data-i18n="history.filteredTokens">Tokens</span><strong id="history-summary-tokens">--</strong><small class="history-summary-note" id="history-summary-token-note"></small></div>
+          <div><span data-i18n="history.filteredCost">Recorded cost</span><strong id="history-summary-cost">--</strong><small class="history-summary-note" id="history-summary-cost-note"></small></div>
+        </div>
+      </div>
       <div class="history-table-wrap overflow-x-auto">
-        <table class="history-table w-full text-xs border-collapse" role="grid">
+        <table class="history-table w-full text-xs border-collapse">
           <thead>
             <tr>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="start_time" data-i18n="th.time" aria-sort="none">Time <span class="sort-icon opacity-40 ml-1">↕</span></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="success" data-i18n="th.status" aria-sort="none">Status <span class="sort-icon opacity-40 ml-1">↕</span></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="model" data-i18n="th.modelPlatform" aria-sort="none">Model / Platform <span class="sort-icon opacity-40 ml-1">↕</span></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="scenario" data-i18n="th.scenario" aria-sort="none">Scenario <span class="sort-icon opacity-40 ml-1">↕</span></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="prompt_tokens" data-i18n="th.tokens" aria-sort="none">Tokens <span class="sort-icon opacity-40 ml-1">↕</span></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="cost_usd" data-i18n="th.cost" aria-sort="none">Cost <span class="sort-icon opacity-40 ml-1">↕</span></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="duration_ms" data-i18n="th.duration" aria-sort="none">Duration <span class="sort-icon opacity-40 ml-1">↕</span></th>
+              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="start_time" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.time">Time</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="success" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.status">Status</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="model" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.modelPlatform">Model / Platform</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="scenario" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.scenario">Scenario</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="prompt_tokens" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.tokens">Tokens</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="cost_usd" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.cost">Cost</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="duration_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.duration">Duration</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
             </tr>
           </thead>
           <tbody id="history-tbody">
@@ -233,6 +220,21 @@
         </div>
         <label class="history-page-size"><span data-i18n="history.perPage">Rows per page</span><select class="filter-select" id="history-page-size" aria-label="Rows per page"><option value="25">25</option><option value="50" selected>50</option><option value="100">100</option></select></label>
       </div>
+      <details class="history-distribution">
+        <summary data-i18n="history.distribution">Distribution details</summary>
+        <div class="insight-toolbar">
+          <div class="metric-segment" id="history-breakdown-metric" role="group" aria-label="History distribution metric">
+            <button type="button" data-metric="tokens" class="active" data-i18n="analytics.totalTokens">Tokens</button>
+            <button type="button" data-metric="cost" data-i18n="analytics.cost">Cost</button>
+            <button type="button" data-metric="requests" data-i18n="analytics.requests">Requests</button>
+          </div>
+        </div>
+        <div class="history-breakdown-grid">
+          <section><h2 data-i18n="history.modelDistribution">Models</h2><div id="history-model-breakdown" class="compact-breakdown"></div></section>
+          <section><h2 data-i18n="history.providerDistribution">Platforms</h2><div id="history-provider-breakdown" class="compact-breakdown"></div></section>
+          <section><h2 data-i18n="history.scenarioDistribution">Scenarios</h2><div id="history-scenario-breakdown" class="compact-breakdown"></div></section>
+        </div>
+      </details>
     </div>
   </div>
 
@@ -345,7 +347,9 @@
   </div>
 
   <!-- Performance Tab -->
-  <div class="tab-content flex-1 overflow-y-auto p-4" id="tab-performance">
+  <div class="tab-content flex-1 overflow-y-auto" id="tab-performance">
+    <div class="page-shell performance-page">
+    <div class="page-heading"><div><h1 data-i18n="tab.performance">Performance</h1><p class="page-meta" data-i18n="perf.sampleHint">Measured latency samples and known outcomes; percentiles are less reliable with small samples.</p></div></div>
     <div class="analytics-controls mb-3">
       <label for="perf-provider" data-i18n="filter.provider">Provider</label>
       <select class="filter-select" id="perf-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
@@ -363,16 +367,16 @@
     <p class="page-meta" data-i18n="history.localScope">Statistics use records kept by this instance, including synced bills and local estimates. Direct-to-platform traffic may not be recorded here.</p>
     <p id="perf-error" hidden role="alert" style="color:var(--ui-red)"></p>
     <div class="overflow-x-auto">
-      <table class="perf-table w-full text-xs border-collapse" role="grid">
+      <table class="perf-table w-full text-xs border-collapse">
         <thead>
           <tr>
-            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="model" data-i18n="perf.th.model" aria-sort="none">Model <span class="sort-icon opacity-40 ml-1">↕</span></th>
-            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="count" data-i18n="perf.th.count" aria-sort="none">Count <span class="sort-icon opacity-40 ml-1">↕</span></th>
-            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="success_rate" data-i18n="perf.th.successRate" aria-sort="none">Success % <span class="sort-icon opacity-40 ml-1">↕</span></th>
-            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="avg_ms" data-i18n="perf.th.avg" aria-sort="none">Avg (ms) <span class="sort-icon opacity-40 ml-1">↕</span></th>
-            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="p50_ms" data-i18n="perf.th.p50" aria-sort="none">P50 <span class="sort-icon opacity-40 ml-1">↕</span></th>
-            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="p90_ms" data-i18n="perf.th.p90" aria-sort="none">P90 <span class="sort-icon opacity-40 ml-1">↕</span></th>
-            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="p99_ms" data-i18n="perf.th.p99" aria-sort="none">P99 <span class="sort-icon opacity-40 ml-1">↕</span></th>
+            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="model" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.model">Model</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="count" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.count">Count</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="success_rate" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.successRate">Success %</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="avg_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.avg">Avg (ms)</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="p50_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.p50">P50</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="p90_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.p90">P90</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="p99_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.p99">P99</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
           </tr>
         </thead>
         <tbody id="perf-tbody">
@@ -380,36 +384,36 @@
         </tbody>
       </table>
     </div>
+    </div>
   </div>
 
   <!-- Fallback Tab -->
-  <div class="tab-content flex-1 overflow-y-auto p-4" id="tab-fallback">
-    <div class="bg-[#2c2c2e] border border-[#48484a] rounded-lg p-4 shadow-lg shadow-black/20">
-      <div class="flex items-end justify-between gap-3 mb-4">
-        <div class="mb-0">
-          <label for="fallback-scenario" class="block text-xs font-medium mb-1 text-[#f5f5f7]" data-i18n="fallback.scenario">Scenario</label>
-          <select id="fallback-scenario" onchange="FallbackModule.onScenarioChange()" class="px-3 py-2 border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] text-xs min-w-[180px] cursor-pointer"></select>
+  <div class="tab-content flex-1 overflow-y-auto" id="tab-fallback">
+    <div class="page-shell fallback-page">
+      <div class="page-heading"><div><h1 data-i18n="tab.fallback">Fallback</h1><p class="page-meta" id="fallback-primary"></p></div></div>
+      <div class="fallback-toolbar">
+        <div>
+          <label for="fallback-scenario" data-i18n="fallback.scenario">Scenario</label>
+          <select id="fallback-scenario" onchange="FallbackModule.onScenarioChange()" class="filter-select"></select>
         </div>
-        <div class="fallback-actions flex gap-2">
-          <button class="btn btn-small" onclick="FallbackModule.preview()" data-i18n="fallback.preview">Preview</button>
-          <button class="btn btn-primary btn-small" onclick="FallbackModule.save()" data-i18n="fallback.save">Save</button>
+        <div class="fallback-actions">
+          <button type="button" class="btn btn-small" onclick="FallbackModule.preview()" data-i18n="fallback.preview">Preview</button>
+          <button type="button" class="btn btn-primary btn-small" onclick="FallbackModule.save()" data-i18n="fallback.save">Save</button>
         </div>
       </div>
-
-      <div class="mt-3">
-        <div class="flex items-center justify-between mb-2 text-sm font-semibold text-[#98989d]">
-          <span data-i18n="fallback.chainOrder">Fallback Chain Order</span>
-          <select id="fallback-add-model" onchange="FallbackModule.onAddSelectChange()" class="px-3 py-2 border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] text-xs min-w-[180px] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"><option value=""><span data-i18n="fallback.addModel">+ Add Model</span></option></select>
-        </div>
-        <ul class="fallback-chain" id="fallback-chain" role="listbox" aria-label="Fallback chain models">
-          <li class="empty-state text-center text-[#98989d] py-6 text-[13px]" data-i18n="fallback.empty">No models configured</li>
-        </ul>
+      <div class="fallback-chain-heading">
+        <h2 class="section-heading" data-i18n="fallback.chainOrder">Fallback Chain Order</h2>
+        <label class="sr-only" for="fallback-add-model" data-i18n="fallback.addModel">Add model</label>
+        <select id="fallback-add-model" onchange="FallbackModule.onAddSelectChange()" class="filter-select"><option value="" data-i18n-option="fallback.addModel">+ Add Model</option></select>
       </div>
-    </div>
-
-    <div class="fallback-preview mt-4 bg-[#2c2c2e] border border-[#48484a] rounded-lg p-4 shadow-lg shadow-black/20" id="fallback-preview" style="display: none;">
-      <div class="fallback-preview-header text-sm font-semibold mb-3 pb-2 border-b border-[#48484a]" data-i18n="fallback.previewTitle">Fallback Chain Preview</div>
-      <div id="fallback-preview-content"></div>
+      <ul class="fallback-chain" id="fallback-chain" aria-label="Fallback chain models">
+        <li class="empty-state" data-i18n="fallback.empty">No models configured</li>
+      </ul>
+      <p class="page-meta" id="fallback-status" role="status" aria-live="polite"></p>
+      <div class="fallback-preview" id="fallback-preview" style="display: none;">
+        <div class="fallback-preview-header" data-i18n="fallback.previewTitle">Fallback Chain Preview</div>
+        <div id="fallback-preview-content"></div>
+      </div>
     </div>
   </div>
 
@@ -479,13 +483,13 @@
           <div class="metric-value" id="kpi-cost">--</div>
           <div class="metric-note" id="kpi-cost-note">USD</div>
         </div>
-        <div class="metric-cell">
+        <div class="metric-cell metric-secondary">
           <div class="metric-label" data-i18n="analytics.inputTokens">Input tokens</div><div class="metric-value" id="kpi-input">--</div><div class="metric-note" data-i18n="analytics.freshInput">Fresh input</div>
         </div>
         <div class="metric-cell"><div class="metric-label" data-i18n="analytics.cacheHitShort">Cache hit</div><div class="metric-value" id="kpi-cache-rate">--</div><div class="metric-note" id="kpi-cache-rate-note"></div></div>
-        <div class="metric-cell"><div class="metric-label" data-i18n="analytics.outputTokens">Output tokens</div><div class="metric-value" id="kpi-output">--</div><div class="metric-note" data-i18n="analytics.generatedOutput">Generated output</div></div>
-        <div class="metric-cell"><div class="metric-label" data-i18n="detail.cacheRead">Cache read</div><div class="metric-value" id="kpi-cache-read">--</div><div class="metric-note" data-i18n="analytics.reusedInput">Reused input</div></div>
-        <div class="metric-cell"><div class="metric-label" data-i18n="detail.cacheCreation">Cache write</div><div class="metric-value" id="kpi-cache-write">--</div><div class="metric-note" data-i18n="analytics.newCacheInput">New cached input</div></div>
+        <div class="metric-cell metric-secondary"><div class="metric-label" data-i18n="analytics.outputTokens">Output tokens</div><div class="metric-value" id="kpi-output">--</div><div class="metric-note" data-i18n="analytics.generatedOutput">Generated output</div></div>
+        <div class="metric-cell metric-secondary"><div class="metric-label" data-i18n="detail.cacheRead">Cache read</div><div class="metric-value" id="kpi-cache-read">--</div><div class="metric-note" data-i18n="analytics.reusedInput">Reused input</div></div>
+        <div class="metric-cell metric-secondary"><div class="metric-label" data-i18n="detail.cacheCreation">Cache write</div><div class="metric-value" id="kpi-cache-write">--</div><div class="metric-note" data-i18n="analytics.newCacheInput">New cached input</div></div>
       </div>
 
       <section class="analytics-section">
@@ -522,16 +526,17 @@
     <div class="page-shell quota-page">
       <div class="page-heading">
         <div>
-          <h1 data-i18n="quota.title">Plan Quota</h1>
+          <h1 data-i18n="quota.title">Usage &amp; Billing</h1>
           <span class="page-meta" id="quota-meta"></span>
           <span class="page-meta" id="quota-source"></span>
-          <span class="page-meta quota-endpoint" id="quota-endpoint"></span>
+          <details class="quota-source-details"><summary data-i18n="quota.sourceDetails">Source details</summary><span class="page-meta quota-endpoint" id="quota-endpoint"></span></details>
         </div>
         <div class="analytics-controls">
           <label class="sr-only" for="quota-provider" data-i18n="filter.provider">Provider</label>
           <select class="filter-select" id="quota-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
             <option value="opencode-go">OpenCode Go</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option><option value="commandcode">CommandCode</option>
           </select>
+          <button type="button" class="btn btn-small" id="quota-open-settings" data-i18n="quota.openSettings">Platform settings</button>
           <button class="btn btn-small btn-icon" id="btn-refresh-quota"><svg width="14" height="14"><use href="#icon-refresh"/></svg><span class="sr-only" data-i18n="quota.refresh">Refresh</span></button>
         </div>
       </div>
@@ -578,6 +583,11 @@
         <div id="quota-openrouter-accounts" class="quota-accounts"></div>
       </section>
 
+      <section id="quota-commandcode" hidden aria-live="polite">
+        <p class="quota-disclaimer" data-i18n="commandcode.accountScope">Official Alpha account data · USD-denominated usage credits, not cash or this instance’s ledger. Each key is shown separately; balances are not added together.</p>
+        <div id="quota-commandcode-accounts" class="quota-accounts"></div>
+      </section>
+
       <section id="quota-bedrock" hidden class="analytics-section" aria-live="polite">
         <h2 data-i18n="aws.billingTitle">AWS official service costs</h2>
         <p class="quota-disclaimer" data-i18n="aws.billingScope">Last 30 complete UTC days · UnblendedCost for the services listed below. Not an account balance or this proxy’s ledger; AWS data can be delayed or revised.</p>
@@ -613,51 +623,45 @@
   </div>
 
   <!-- Settings Tab -->
-  <div class="tab-content flex-1 overflow-y-auto p-4" id="tab-settings">
-    <div>
-      <div class="bg-[#2c2c2e] border border-[#48484a] rounded-lg overflow-hidden shadow-lg shadow-black/20">
+  <div class="tab-content flex-1 overflow-y-auto" id="tab-settings">
+    <div class="page-shell settings-page">
+    <div class="page-heading"><h1 data-i18n="tab.settings">Settings</h1><button class="btn btn-small" id="btn-lang-toggle" onclick="toggleLanguage()"><span data-i18n="lang.toggle">中文</span></button></div>
+    <details class="settings-runtime">
+      <summary data-i18n="setting.runtime">Runtime &amp; tools</summary>
+      <div class="runtime-controls">
         <div class="flex items-center justify-between px-4 py-3.5 border-b border-[#48484a]">
           <div>
-            <div class="text-sm font-medium mb-0.5" data-i18n="setting.proxy">Proxy Service</div>
+            <div class="text-sm font-medium mb-0.5" id="setting-proxy-label" data-i18n="setting.proxy">Proxy Service</div>
             <div class="text-xs text-[#98989d]" data-i18n="setting.proxyDesc">Start or stop the proxy HTTP service</div>
           </div>
           <label class="toggle">
-            <input type="checkbox" id="toggle-proxy" onchange="toggleProxy(this)">
+            <input type="checkbox" id="toggle-proxy" aria-labelledby="setting-proxy-label" onchange="toggleProxy(this)">
             <span class="toggle-slider"></span>
           </label>
         </div>
 
         <div class="flex items-center justify-between px-4 py-3.5 border-b border-[#48484a]">
           <div>
-            <div class="text-sm font-medium mb-0.5" data-i18n="setting.autostart">Start on Boot</div>
+            <div class="text-sm font-medium mb-0.5" id="setting-autostart-label" data-i18n="setting.autostart">Start on Boot</div>
             <div class="text-xs text-[#98989d]" data-i18n="setting.autostartDesc">Auto-start routatic-proxy at login (launchd)</div>
           </div>
           <label class="toggle">
-            <input type="checkbox" id="toggle-autostart" onchange="toggleAutostart(this)">
+            <input type="checkbox" id="toggle-autostart" aria-labelledby="setting-autostart-label" onchange="toggleAutostart(this)">
             <span class="toggle-slider"></span>
           </label>
         </div>
 
         <div class="flex items-center justify-between px-4 py-3.5 border-b border-[#48484a]">
           <div>
-            <div class="text-sm font-medium mb-0.5" data-i18n="setting.notify">Desktop Notifications</div>
+            <div class="text-sm font-medium mb-0.5" id="setting-notify-label" data-i18n="setting.notify">Desktop Notifications</div>
             <div class="text-xs text-[#98989d]" data-i18n="setting.notifyDesc">Notify on failures or model switches</div>
           </div>
           <label class="toggle">
-            <input type="checkbox" id="toggle-notify" onchange="toggleNotify(this)">
+            <input type="checkbox" id="toggle-notify" aria-labelledby="setting-notify-label" onchange="toggleNotify(this)">
             <span class="toggle-slider"></span>
           </label>
         </div>
 
-        <div class="flex items-center justify-between px-4 py-3.5 border-b border-[#48484a]">
-          <div>
-            <div class="text-sm font-medium mb-0.5" data-i18n="setting.language">Language</div>
-            <div class="text-xs text-[#98989d]" data-i18n="setting.languageDesc">Switch interface language</div>
-          </div>
-          <button class="btn btn-small" id="btn-lang-toggle" onclick="toggleLanguage()">
-            <span data-i18n="lang.toggle">中文</span>
-          </button>
-        </div>
 
         <div class="flex items-center justify-between px-4 py-3.5 border-b border-[#48484a]">
           <div>
@@ -698,13 +702,17 @@
           <button class="btn btn-small" id="btn-import-config" data-i18n="btn.import">Import</button>
         </div>
       </div>
-    </div>
+    </details>
 
-    <div class="mt-5 mb-2 text-[13px] font-semibold text-[#f5f5f7]" data-i18n="section.proxyConfig">Proxy Configuration</div>
-    <div class="bg-[#2c2c2e] border border-[#48484a] rounded-lg p-4 mt-3 shadow-lg shadow-black/20">
+    <div class="settings-config-heading"><h2 class="section-heading" data-i18n="section.proxyConfig">Proxy Configuration</h2>
+      <label class="sr-only" for="settings-provider-jump" data-i18n="setting.platformJump">Jump to platform</label>
+      <select id="settings-provider-jump" class="filter-select"><option value="" data-i18n-option="setting.platformJump">Jump to platform</option><option value="opencode-go">OpenCode Go</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option><option value="commandcode">CommandCode</option></select>
+    </div>
+    <div class="settings-config">
       <p class="page-meta" id="provider-timeout-hint" data-i18n="label.timeoutHint">0 uses the provider default. Idle timeout limits gaps between streamed data; attempt timeout limits the entire streaming request.</p>
-      <fieldset class="border border-[#48484a] rounded p-3 mb-3 bg-[#2c2c2e]">
-        <legend class="text-sm font-semibold px-1.5 text-[#f5f5f7]">OpenCode Go</legend>
+      <details class="config-section" data-settings-provider="opencode-go">
+        <summary>OpenCode Go</summary>
+        <div class="config-fields">
         <div class="mb-2">
           <label for="cfg-go-base-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Base URL</label>
           <input type="text" id="cfg-go-base-url" placeholder="https://opencode.ai/zen/go/v1/chat/completions" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
@@ -732,11 +740,11 @@
         </div>
         <div class="flex gap-2.5">
           <div class="flex-1 mb-2">
-            <label for="cfg-go-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Timeout (ms)</label>
+            <label for="cfg-go-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.requestTimeout">Request timeout (ms)</label>
             <input type="number" id="cfg-go-timeout" placeholder="300000" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
           </div>
           <div class="flex-1 mb-2">
-            <label for="cfg-go-stream-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Stream Timeout (ms)</label>
+            <label for="cfg-go-stream-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamIdleTimeout">Stream idle timeout (ms)</label>
             <input type="number" id="cfg-go-stream-timeout" placeholder="" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
           </div>
         </div>
@@ -744,10 +752,12 @@
           <label for="cfg-go-streaming-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamingTimeout">Streaming attempt timeout (ms)</label>
           <input type="number" id="cfg-go-streaming-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
         </div>
-      </fieldset>
+        </div>
+      </details>
 
-      <fieldset class="border border-[#48484a] rounded p-3 mb-3 bg-[#2c2c2e]">
-        <legend class="text-sm font-semibold px-1.5 text-[#f5f5f7]">OpenCode Zen</legend>
+      <details class="config-section" data-settings-provider="opencode-zen">
+        <summary>OpenCode Zen</summary>
+        <div class="config-fields">
         <div class="mb-2">
           <label for="cfg-zen-base-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Base URL</label>
           <input type="text" id="cfg-zen-base-url" placeholder="https://opencode.ai/zen/v1/chat/completions" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
@@ -782,11 +792,11 @@
         </div>
         <div class="flex gap-2.5">
           <div class="flex-1 mb-2">
-            <label for="cfg-zen-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Timeout (ms)</label>
+            <label for="cfg-zen-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.requestTimeout">Request timeout (ms)</label>
             <input type="number" id="cfg-zen-timeout" placeholder="300000" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
           </div>
           <div class="flex-1 mb-2">
-            <label for="cfg-zen-stream-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Stream Timeout (ms)</label>
+            <label for="cfg-zen-stream-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamIdleTimeout">Stream idle timeout (ms)</label>
             <input type="number" id="cfg-zen-stream-timeout" placeholder="" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
           </div>
         </div>
@@ -794,10 +804,12 @@
           <label for="cfg-zen-streaming-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamingTimeout">Streaming attempt timeout (ms)</label>
           <input type="number" id="cfg-zen-streaming-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
         </div>
-      </fieldset>
+        </div>
+      </details>
 
-      <fieldset class="border border-[#48484a] rounded p-3 mb-3 bg-[#2c2c2e]">
-        <legend class="text-sm font-semibold px-1.5 text-[#f5f5f7]">AWS Bedrock</legend>
+      <details class="config-section" data-settings-provider="aws-bedrock">
+        <summary>AWS Bedrock</summary>
+        <div class="config-fields">
         <div class="mb-2">
           <label for="cfg-bedrock-base-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Base URL</label>
           <input type="text" id="cfg-bedrock-base-url" placeholder="" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
@@ -828,11 +840,11 @@
         </div>
         <div class="flex gap-2.5">
           <div class="flex-1 mb-2">
-            <label for="cfg-bedrock-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Timeout (ms)</label>
+            <label for="cfg-bedrock-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.requestTimeout">Request timeout (ms)</label>
             <input type="number" id="cfg-bedrock-timeout" placeholder="300000" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
           </div>
           <div class="flex-1 mb-2">
-            <label for="cfg-bedrock-stream-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Stream Timeout (ms)</label>
+            <label for="cfg-bedrock-stream-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamIdleTimeout">Stream idle timeout (ms)</label>
             <input type="number" id="cfg-bedrock-stream-timeout" placeholder="" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
           </div>
         </div>
@@ -852,10 +864,12 @@
           <label for="cfg-bedrock-billing-account" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="aws.billingAccount">Billing account ID</label>
           <input type="text" id="cfg-bedrock-billing-account" inputmode="numeric" pattern="[0-9]{12}" maxlength="12" aria-describedby="bedrock-billing-config-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
         </div>
-      </fieldset>
+        </div>
+      </details>
 
-      <fieldset class="border border-[#48484a] rounded p-3 mb-3 bg-[#2c2c2e]">
-        <legend class="text-sm font-semibold px-1.5 text-[#f5f5f7]">OpenRouter</legend>
+      <details class="config-section" data-settings-provider="openrouter">
+        <summary>OpenRouter</summary>
+        <div class="config-fields">
         <div class="mb-2">
           <label for="cfg-openrouter-base-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Base URL</label>
           <input type="text" id="cfg-openrouter-base-url" placeholder="https://openrouter.ai/api/v1/chat/completions" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
@@ -874,21 +888,23 @@
           <p class="page-meta" id="openrouter-management-hint" data-i18n="openrouter.managementHint">Optional management key used only to query account balance, never for inference.</p>
         </div>
         <div class="mb-2">
-          <label for="cfg-openrouter-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Timeout (ms)</label>
+          <label for="cfg-openrouter-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.requestTimeout">Request timeout (ms)</label>
           <input type="number" id="cfg-openrouter-timeout" placeholder="300000" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
         </div>
         <div class="mb-2">
-          <label for="cfg-openrouter-stream-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Stream Timeout (ms)</label>
+          <label for="cfg-openrouter-stream-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamIdleTimeout">Stream idle timeout (ms)</label>
           <input type="number" id="cfg-openrouter-stream-timeout" placeholder="" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
         </div>
         <div class="mb-2">
           <label for="cfg-openrouter-streaming-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamingTimeout">Streaming attempt timeout (ms)</label>
           <input type="number" id="cfg-openrouter-streaming-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
         </div>
-      </fieldset>
+        </div>
+      </details>
 
-      <fieldset class="border border-[#48484a] rounded p-3 mb-3 bg-[#2c2c2e]">
-        <legend class="text-sm font-semibold px-1.5 text-[#f5f5f7]">CommandCode</legend>
+      <details class="config-section" data-settings-provider="commandcode">
+        <summary>CommandCode</summary>
+        <div class="config-fields">
         <p class="text-xs text-[#98989d] mb-2" data-i18n="commandcode.keyHint">Uses its own API key; global keys are never sent to CommandCode.</p>
         <div class="mb-2">
           <label for="cfg-commandcode-base-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.chatURL">Chat Completions URL</label>
@@ -919,13 +935,15 @@
           <input type="number" id="cfg-commandcode-streaming-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
         </div>
         <label class="flex items-center gap-1.5 text-xs mb-2"><input type="checkbox" id="cfg-commandcode-zdr"><span data-i18n="commandcode.zdr">Zero Data Retention (ZDR)</span></label>
-        <p class="text-xs text-[#98989d]" data-i18n="commandcode.quotaHint">No public plan or balance API is documented. This dashboard does not fetch private billing pages; use CommandCode for official usage and billing.</p>
+        <p class="text-xs text-[#98989d]" data-i18n="commandcode.quotaHint">Queries the official Alpha account endpoints with this platform’s API key. No browser session is required. Alpha response fields may change.</p>
         <a class="btn btn-small" href="https://commandcode.ai/docs/provider" target="_blank" rel="noopener noreferrer" data-i18n="commandcode.docs">Provider API docs</a>
         <a class="btn btn-small" href="https://commandcode.ai/settings/keys" target="_blank" rel="noopener noreferrer" data-i18n="commandcode.keys">Manage API keys</a>
-      </fieldset>
+        </div>
+      </details>
 
-      <fieldset class="border border-[#48484a] rounded p-3 mb-3 bg-[#2c2c2e]">
-        <legend class="text-sm font-semibold px-1.5 text-[#f5f5f7]">Server</legend>
+      <details class="config-section">
+        <summary>Server</summary>
+        <div class="config-fields">
         <div class="flex gap-2.5">
           <div class="flex-1 mb-2">
             <label for="cfg-host" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Listen Host</label>
@@ -958,10 +976,12 @@
             <input type="checkbox" id="cfg-hot-reload"> Hot Reload
           </label>
         </div>
-      </fieldset>
+        </div>
+      </details>
 
-      <fieldset class="border border-[#48484a] rounded p-3 mb-3 bg-[#2c2c2e]">
-        <legend class="text-sm font-semibold px-1.5 text-[#f5f5f7]">Logging</legend>
+      <details class="config-section">
+        <summary>Logging</summary>
+        <div class="config-fields">
         <div class="mb-0">
           <label for="cfg-log-level" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Log Level</label>
           <select id="cfg-log-level" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
@@ -971,14 +991,19 @@
             <option value="error">error</option>
           </select>
         </div>
-      </fieldset>
+        </div>
+      </details>
 
-      <button class="btn btn-primary w-full mt-4" id="btn-save-cfg" onclick="saveProxyConfig()" style="margin-top: 16px;" data-i18n="btn.save">Save &amp; Apply Config</button>
-      <div id="save-status" class="save-status mt-2.5 text-xs text-center" role="status" aria-live="polite"></div>
+      <div class="settings-save-bar">
+        <span id="config-change-count" class="page-meta" role="status" aria-live="polite"></span>
+        <button type="button" class="btn btn-primary" id="btn-save-cfg" onclick="saveProxyConfig()" data-i18n="btn.save">Save &amp; Apply Config</button>
+        <div id="save-status" class="save-status" role="status" aria-live="polite"></div>
+      </div>
     </div>
 
     <div class="mt-4 text-xs text-[#98989d]">
       <div class="px-3.5 py-2.5 bg-[#2c2c2e] border border-[#48484a] rounded text-xs" id="port-info">Listening port: --</div>
+    </div>
     </div>
   </div>
 </div>

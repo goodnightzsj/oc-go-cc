@@ -347,6 +347,7 @@ async (page) => {
     check(official.bedrock_billing.linked_account_id === billing.linked_account_id && official.bedrock_billing.daily.length === 2 && official.bedrock_billing.estimated, 'AWS account, daily rows or estimate metadata');
     await tab.waitForFunction(() => document.getElementById('quota-bedrock-body').textContent.includes('-€1.25'));
     check((await tab.locator('#quota-bedrock-body').innerText()).includes('Amazon Bedrock Mantle'), 'AWS service scope not shown');
+    check((await tab.locator('#quota-bedrock-body th').allTextContents())[2] === 'Status', 'AWS status heading must be translated');
     check((await tab.locator('#quota-bedrock').innerText()).includes('Not an account balance'), 'AWS bill must not claim remaining balance');
     await tab.waitForFunction(() => !document.getElementById('btn-refresh-quota').disabled);
     const cachedBill = waitResponse('/api/quota', 'aws-bedrock');

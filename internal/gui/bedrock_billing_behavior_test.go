@@ -77,6 +77,8 @@ async function checks() {
   for (const lang of ['en','zh']) {
     currentLang=lang;
     for (const key of ['aws.billingTitle','aws.billingQuery','aws.billingHint','aws.billingScope','aws.billingEnable','aws.billingProfile','aws.billingConfigHint','aws.billingAccount','aws.billingEstimated','aws.billingReported','quota.reason.aws_billing_disabled','quota.reason.aws_billing_no_data','quota.reason.aws_billing_refresh_required']) assert.notEqual(t(key),key);
+    QuotaModule.renderBedrockBilling({provider:'aws-bedrock',status:'available',bedrock_billing:bill});
+    assert.ok(get('quota-bedrock-body').innerHTML.includes('<th>'+t('th.status')+'</th>'),'AWS state heading must be translated in '+lang);
   }
   currentLang='en';
   let config={aws_bedrock:{api_key:'••••••••••••••••',billing:{enabled:false,profile:'',linked_account_id:''}},commandcode:{api_key:'••••••••••••••••'}};

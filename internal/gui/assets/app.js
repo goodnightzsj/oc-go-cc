@@ -4171,7 +4171,7 @@ const QuotaModule = {
       <div><dt>${t('aws.billingPeriod')}</dt><dd>${escapeHtml(data.start_date)} → ${escapeHtml(data.end_date)}</dd></div>
     </dl><p class="page-meta">${escapeHtml(status(data.estimated))} · ${escapeHtml(data.currency)}</p>
     <p class="page-meta">${t('aws.billingServices')}: ${data.services.map(escapeHtml).join(' · ')}</p>
-    <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th>${t('analytics.day')} (UTC)</th><th>${t('analytics.cost')} (${escapeHtml(data.currency)})</th><th>${t('filter.status')}</th></tr></thead><tbody>
+    <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th>${t('analytics.day')} (UTC)</th><th>${t('analytics.cost')} (${escapeHtml(data.currency)})</th><th>${t('th.status')}</th></tr></thead><tbody>
       ${data.daily.map(row => `<tr><td>${escapeHtml(row.date)}</td><td>${formatCost(row.cost)}</td><td>${escapeHtml(status(row.estimated))}</td></tr>`).join('')}
     </tbody></table></div>`;
   },

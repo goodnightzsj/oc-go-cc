@@ -11,3 +11,6 @@ id,task,task_type,status,depends_on,task_dir,acceptance_criteria,validation_comm
 10,实施多平台UIUX美化并发布验收,single-full,DONE,7,tasks/10-uiux-implementation,七页层级和键盘移动端改进;五平台数据配置合同不变;Edge远端验收通过,go test -race -p 2 ./... -count=1,2026-09-11,1,上一轮实现已部署;Edge29组合70布局通过;7项脚本误判经真实按键和AX复核通过;用户要求进一步重设计见#12
 11,分析远端Go历史数据消失,single-full,DONE,6,tasks/11-go-history-diagnosis,运行DB与备份计数有证据;查询和删除链路明确;不修改远端账本,echo SKIP,2026-09-11,0,实际默认7天retention;1390条原始数据/8月备份仍在;本次发布前已requests0;报告7链接/JSON/diff检查通过;未恢复
 12,参考sub2api与new-api重设计七页,single-full,DONE,10;11,tasks/12-console-redesign,七页导航与数据层级重设计;五平台与计费语义不变;全量回归和Edge远端验收,go test -race -p 2 ./... -count=1,2026-09-12,2,b3c947d已部署;660/1094 race与vet六目标通过;原Edge563检查29组合70布局通过;保留两次脚本失败;未恢复Go历史或改变保留策略
+13,关闭自动清理并对账恢复Go历史,single-full,IN_PROGRESS,11,tasks/13-history-restore,官方分页完整性与备份有证据;清理确实禁用;隔离演练通过后事务恢复;不重复计费或伪造字段,go test -race ./internal/storage ./internal/config -count=1,,0,用户2026-09-12明确授权真实恢复;先查本项目Claude最终同步流程
+14,CommandCode指定模型真实双客户端测试,single-full,TODO,13,tasks/14-commandcode-live,deepseek/deepseek-v4.1-flash经Codex和Claude协议成功且日志Token归属正确;隔离CLI配置,echo SKIP,,0,仅最小测试;不改变全局客户端模型或账户配置
+15,统一平台顺序并发布验收,single-full,IN_PROGRESS,12,tasks/15-provider-order,所有可见平台清单一致且不改变路由顺序;全量回归及Edge生产验收通过,go test -race -p 2 ./... -count=1,,0,默认Go→CommandCode→Zen→Bedrock→OpenRouter;与清理开关同次部署;GUI受限委托;原Edge握手受阻不冒充线上视觉验收

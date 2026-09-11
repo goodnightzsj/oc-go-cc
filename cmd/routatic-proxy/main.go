@@ -39,7 +39,7 @@ func main() {
 		Aliases: []string{"oc-go-cc"},
 		Short:   "Route Claude Code and Codex requests to configured model providers",
 		Long: `routatic-proxy routes Claude Code Messages and Codex Responses requests to
-OpenCode Go, OpenCode Zen, AWS Bedrock, OpenRouter, and CommandCode.
+OpenCode Go, CommandCode, OpenCode Zen, AWS Bedrock, and OpenRouter.
 Native protocols are forwarded directly; other protocols use the matching adapter.
 
 Configuration is stored at ~/.config/routatic-proxy/config.json.
@@ -379,10 +379,10 @@ func initCmd() *cobra.Command {
 
 The --provider flag pre-configures the config with provider-specific defaults:
   - opencode-go: OpenCode Go subscription ($5/month, powerful coding models)
+  - commandcode: CommandCode official Provider API (Messages and Chat Completions)
   - opencode-zen: OpenCode Zen (pay-as-you-go, Claude/GPT/Gemini)
   - aws-bedrock: AWS Bedrock Mantle (run models on your AWS infrastructure)
   - openrouter: OpenRouter (unified API for 100+ models)
-  - commandcode: CommandCode official Provider API (Messages and Chat Completions)
 
 Without --provider, a default config optimized for OpenCode Go is created.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -441,7 +441,7 @@ Without --provider, a default config optimized for OpenCode Go is created.`,
 	}
 
 	cmd.Flags().StringVar(&provider, "provider", "",
-		"Provider preset: opencode-go, opencode-zen, aws-bedrock, openrouter, commandcode")
+		"Provider preset: opencode-go, commandcode, opencode-zen, aws-bedrock, openrouter")
 
 	return cmd
 }
@@ -476,7 +476,7 @@ func validateCmd() *cobra.Command {
 			} else if len(keys) == 1 {
 				fmt.Println("  Global API key: configured")
 			}
-			for _, name := range []string{"opencode-go", "opencode-zen", "aws-bedrock", "openrouter", "commandcode"} {
+			for _, name := range []string{"opencode-go", "commandcode", "opencode-zen", "aws-bedrock", "openrouter"} {
 				if keys := cfg.ProviderAPIKeys(name); len(keys) > 0 {
 					fmt.Printf("  %s: %d key(s) available\n", name, len(keys))
 				}
@@ -724,7 +724,7 @@ func storageConfig(cfg *config.Config) storage.Config {
 }
 
 // catalogProviders returns all provider names from the catalog that have at
-// least one model, sorted.
+// least one model, in display order.
 func catalogProviders(cat *catalog.IndexedCatalog) []string {
 	providers := make([]string, 0, len(cat.ProviderModels))
 	for p := range cat.ProviderModels {
@@ -732,7 +732,7 @@ func catalogProviders(cat *catalog.IndexedCatalog) []string {
 			providers = append(providers, p)
 		}
 	}
-	slices.Sort(providers)
+	slices.SortFunc(providers, config.CompareProviderDisplay)
 	return providers
 }
 

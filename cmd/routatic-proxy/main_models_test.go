@@ -186,3 +186,31 @@ func TestRunModelsList_MissingCatalog(t *testing.T) {
 		t.Fatalf("expected output containing %q, got: %s", "catalog not found", output)
 	}
 }
+
+func TestRunModelsList_ProviderDisplayOrder(t *testing.T) {
+	dir := t.TempDir()
+	writeTestCatalog(t, dir, `{"providers": {
+		"aws-bedrock":{"name":"aws-bedrock","enabled":true},
+		"commandcode":{"name":"commandcode","enabled":true},
+		"opencode-go":{"name":"opencode-go","enabled":true},
+		"opencode-zen":{"name":"opencode-zen","enabled":true},
+		"openrouter":{"name":"openrouter","enabled":true}
+	}, "models": {
+		"aws-bedrock/model":{"id":"aws-bedrock/model","name":"model"},
+		"commandcode/model":{"id":"commandcode/model","name":"model"},
+		"opencode-go/model":{"id":"opencode-go/model","name":"model"},
+		"opencode-zen/model":{"id":"opencode-zen/model","name":"model"},
+		"openrouter/model":{"id":"openrouter/model","name":"model"}
+	}}`)
+	migrateTestCatalogToSQLite(t, dir)
+	path := writeTestConfigWithDB(t, dir, filepath.Join(dir, "data.db"))
+	t.Setenv("ROUTATIC_PROXY_CONFIG", path)
+	cmd, out := newCaptureCommand(t)
+	if err := runModelsList(cmd, path, ""); err != nil {
+		t.Fatal(err)
+	}
+	want := "opencode-go/model\ncommandcode/model\nopencode-zen/model\naws-bedrock/model\nopenrouter/model\n"
+	if !strings.HasPrefix(out.String(), want) {
+		t.Fatalf("provider order mismatch: %s", out.String())
+	}
+}

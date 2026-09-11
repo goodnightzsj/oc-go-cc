@@ -2,10 +2,10 @@
 
 ## Context Recovery Block
 
-- 当前：#3 IN_PROGRESS，2/3；三个Alpha只读接口及GUI接入本地race通过，正在部署后用现有Edge核对真实数据。
+- 当前：3/3 DONE；线上 Alpha 三块数据及 UI 已用原 Edge 长连接验证。
 - 真源：TODO.csv；用户新增授权取代此前“浏览器数据源尚未授权”条件。
 - 已知：Edge 9222 已监听，DevToolsActivePort 已现读；产品工作区初始干净。
-- 下一步：保持/tmp/oc-go-cc-edge-remote.Peo95y/driver.mjs的单一CDP连接，更新已部署服务后验证账户字段与未知状态；所有子代理写入授权已失效。
+- 下一步：账户接入已完成；同一 Edge 连接继续供新增 #11 数据诊断和 #12 重设计验收使用，不重复部署此阶段。
 - 验证：远端应用探针三项200并与网页一致；CDP已断开，没有浏览器凭证导出、真实推理、购买或服务重启。
 
 ## 协议确认
@@ -23,3 +23,9 @@
 
 - 当前全量race656顶层/1090含子测试通过；账户成功、部分失败、无订阅、错误数据、重定向、缓存身份与Key移除均有合成回归。
 - Edge已附加用户现有远端标签页，看到0b28ab2旧占位；新增代码尚未部署，不能把旧页状态当作新接口失败。
+
+## Edge 线上验收完成
+
+- 当前已部署 e29e79f，UI 01d300b9dadf；app/style/compiled-tailwind 三项散列与本地一致。现有 Edge 标签 https://opencode.9962510.xyz/，未新开或重启浏览器。
+- CommandCode available / official_alpha_api / USD；月度剩余70、免费0、购买0；5h 0/14、weekly 0/35；套餐 individual-goat / active，周期2026-09-10至2026-10-10 UTC，官方账期用量0。没有推算月百分比，resetAt=0没有显示1970。
+- /tmp/oc-go-cc-edge-remote.Peo95y/account-current.json 与 remote-verification.json 为白名单证据，无真实密钥、Cookie、支付和账户身份字段。未发起生成、套餐变更或收费AWS查询。

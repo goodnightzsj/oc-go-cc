@@ -50,7 +50,8 @@ async function checks() {
     assert.equal(get('quota-local-tokens').textContent,'17');
     assert.equal(get('quota-local-cost').textContent,'Known $0.250');
     assert.equal(get('quota-local-unknown').textContent,'1');
-    assert.ok(get('quota-local-model-tbody').innerHTML.includes('<small>' + provider + '</small>'));
+    assert.ok(get('quota-local-model-tbody').innerHTML.includes('<small>' + PROVIDERS[provider].name + '</small>'),'model rows show a readable platform name');
+    assert.ok(get('quota-local-model-tbody').innerHTML.includes('data-provider="' + provider + '"'),'readable names must retain the underlying platform identity');
     assert.ok(get('quota-local-note').textContent.includes(PROVIDERS[provider].name));
     assert.ok(get('quota-local-note').textContent.includes('not an account bill or balance'));
     assert.equal(get('quota-local-error').hidden,true);

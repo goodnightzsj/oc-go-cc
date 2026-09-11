@@ -51,6 +51,12 @@ func TestMultiPlatformBrowserServer(t *testing.T) {
 			fmt.Fprint(w, `{"data":{"limit":10,"limit_remaining":8,"limit_reset":"monthly","usage":2,"usage_daily":0,"usage_monthly":1,"byok_usage":3,"include_byok_in_limit":false,"is_free_tier":false}}`)
 		case "/router/v1/credits":
 			fmt.Fprint(w, `{"data":{"total_credits":1,"total_usage":2}}`)
+		case "/command/alpha/billing/credits":
+			fmt.Fprint(w, `{"credits":{"freeCredits":0,"monthlyCredits":60,"purchasedCredits":2},"windowLimits":{"limited":true,"fiveHour":{"used":3,"cap":14,"exceeded":false,"resetAt":0},"weekly":{"used":10,"cap":35,"exceeded":false,"resetAt":1910000000000}}}`)
+		case "/command/alpha/billing/subscriptions":
+			fmt.Fprint(w, `{"success":true,"data":{"planId":"individual-goat","status":"active","currentPeriodStart":"2026-09-10T07:35:57.000Z","currentPeriodEnd":"2026-10-10T07:35:57.000Z","cancelAtPeriodEnd":false}}`)
+		case "/command/alpha/usage/summary":
+			fmt.Fprint(w, `{"totalCount":2,"completedCount":1,"failedCount":1,"totalTokensIn":100,"totalTokensOut":20,"totalTokens":120,"totalCredits":10,"periodBasis":"billing-period"}`)
 		case "/v1/messages":
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{"id":"synthetic-message","type":"message","role":"assistant","content":[{"type":"text","text":"synthetic browser fixture"}],"model":"shared-model","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
@@ -82,7 +88,7 @@ func TestMultiPlatformBrowserServer(t *testing.T) {
 		"opencode_zen": map[string]any{"base_url": upstream.URL + "/zen/chat/completions", "api_key": "synthetic-zen-key", "stream_timeout_ms": 310000},
 		"aws_bedrock":  map[string]any{"base_url": upstream.URL + "/bedrock/chat/completions", "api_key": "synthetic-bedrock-key"},
 		"openrouter":   map[string]any{"base_url": upstream.URL + "/router/v1/chat/completions", "api_keys": []string{"synthetic-router-good", "synthetic-router-bad"}, "management_api_key": "synthetic-management-key"},
-		"commandcode":  map[string]any{"base_url": upstream.URL + "/command/chat/completions", "anthropic_base_url": upstream.URL + "/command/messages", "api_key": "synthetic-command-key", "stream_timeout_ms": 310000, "streaming_timeout_ms": 320000},
+		"commandcode":  map[string]any{"base_url": upstream.URL + "/command/provider/v1/chat/completions", "anthropic_base_url": upstream.URL + "/command/provider/v1/messages", "api_key": "synthetic-command-key", "stream_timeout_ms": 310000, "streaming_timeout_ms": 320000},
 	})
 	if err != nil {
 		t.Fatal(err)

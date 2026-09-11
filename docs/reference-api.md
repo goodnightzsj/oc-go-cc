@@ -175,7 +175,7 @@ Empty analytics collections (`models`, `providers`, `scenarios`, and `trend`) an
 
 ### `GET /api/quota`
 
-Here `provider` selects one of the same five providers; omission retains the legacy **OpenCode Go** default. `refresh=1` bypasses the 30-second Go/OpenRouter cache. AWS GET requests only read the cached billing snapshot, even with `refresh=1`; they never initiate paid queries. Responses carry `provider`, `status`, `source`, `reason` when applicable, `fetched_at`, `ttl_seconds`, `cached`, official `links`, and separate account results. They are sent with `Cache-Control: no-store`.
+Here `provider` selects one of the same five providers; omission retains the legacy **OpenCode Go** default. `refresh=1` bypasses the 30-second Go/OpenRouter/CommandCode cache. AWS GET requests only read the cached billing snapshot, even with `refresh=1`; they never initiate paid queries. Responses carry `provider`, `status`, `source`, `reason` when applicable, `fetched_at`, `ttl_seconds`, `cached`, official `links`, and separate account results. They are sent with `Cache-Control: no-store`.
 
 | Status | Meaning |
 | --- | --- |
@@ -189,7 +189,9 @@ Go `accounts[].report` contains the existing quota windows. OpenRouter `accounts
 
 OpenRouter quota queries require explicit `openrouter.api_key` / `api_keys` (or their provider-specific environment overrides). Merely viewing this platform never probes its endpoint with the legacy global key pool. Go quota retains its legacy global-key compatibility; inference routing's existing key precedence is unchanged.
 
-Zen and CommandCode return `reason=no_public_account_api`. Bedrock returns `aws_billing_disabled` until explicitly enabled, `aws_billing_refresh_required` without a current snapshot, or `aws_billing_no_data` when AWS returns no matching costs. All five providers' local usage remains independently available through the analytics endpoint. See the [capability matrix](platform-integration-review.md#五平台页面与账户能力).
+CommandCode returns `source=official_alpha_api`, `currency=USD`, and one `accounts[].commandcode` report per distinct configured key. Each report has `credits`, `subscription`, and `usage`, with independent `credits_error`, `subscription_error`, and `usage_error` for partial failures. If all three requests fail, the account has `error` instead. A successful null subscription remains absent without an error. Credits are USD-denominated usage credits, not cash; monthly grant is unknown and no monthly percentage is inferred. Window `resetAt` values are Unix milliseconds, with zero meaning unknown. Only provider-specific keys are used; no browser cookie, global key fallback, identity or payment fields. See [account fields and scope](commandcode.md#commandcode-账户查询).
+
+Zen returns `reason=no_public_account_api`. Bedrock returns `aws_billing_disabled` until explicitly enabled, `aws_billing_refresh_required` without a current snapshot, or `aws_billing_no_data` when AWS returns no matching costs. All five providers' local usage remains independently available through the analytics endpoint. See the [capability matrix](platform-integration-review.md#五平台页面与账户能力).
 
 ### `POST /api/quota?provider=aws-bedrock&billing_refresh=1`
 

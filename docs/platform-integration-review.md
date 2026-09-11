@@ -20,7 +20,7 @@
 | P1 | 额度请求跟随重定向，错误响应体可能回显 Key | 拒绝重定向及含凭证/查询参数的额度地址；只返回脱敏错误。OpenRouter 管理 Key 与推理池隔离，逐 Key 保留失败。[openrouter_test.go](../internal/quota/openrouter_test.go)、[platform_quota_test.go](../internal/gui/platform_quota_test.go) |
 | P1 | AWS 账单缺少可执行接入；收费查询若用 GET 会被预取或跨站触发 | 独立 IAM 配置和账户过滤，复用官方 SDK 签名/分页；手动 POST 与来源检查，自动刷新不查 AWS，缺币种或分页失败不展示部分合计。[bedrock_billing_test.go](../internal/gui/bedrock_billing_test.go)、[bedrock_test.go](../internal/quota/bedrock_test.go) |
 
-普通日志不等于原始流量捕获：`debug_capture` 含完整对话内容，仍只应显式用于调试。CommandCode 套餐未获取时显示明确的未知状态与官方 Usage/Billing/API Keys 入口，不抓取私有账单，也不借用 Go 额度。
+普通日志不等于原始流量捕获：`debug_capture` 含完整对话内容，仍只应显式用于调试。CommandCode 已实现官方 Alpha 账户只读查询；数据源来自获授权的 Edge 协议核实，不导出网页 Cookie，不借用 Go 额度。各账户块的失败与未知值仍显式展示。
 
 ## 五平台页面与账户能力
 
@@ -30,7 +30,7 @@
 | OpenCode Zen | 同上 | 同上 | 未找到公开账户查询合同；仍未接入余额，保留官方控制台入口 |
 | AWS Bedrock | 同上 | 同上 | 已实现 Cost Explorer 官方服务费用；独立 IAM 身份、显式账户、默认关闭、手动收费查询。保留币种/日期/Estimated，不冒充余额；真实 IAM 授权待验收。[配置与范围](aws-bedrock-billing.md) |
 | OpenRouter | 同上 | 同上 | 已实现 `/key` 每 Key 限额/UTC 用量与独立 Management Key `/credits`；BYOK、Key 限额和账户余额分开，不合计多 Key |
-| CommandCode | 同上 | 同上 | 未找到公开账户余额 REST 合同；仍未接入余额，保留 Usage/Billing/Keys 入口 |
+| CommandCode | 同上 | 同上 | 官方 Alpha 额度、订阅、周期汇总，独立 API Key；美元计价点数不是现金，缺月度总额不推算百分比；Alpha 字段尚非稳定公开合同。[端点与边界](commandcode.md#commandcode-账户查询) |
 
 平台状态明确区分已获取、部分失败、未配置、未提供能力和错误；官方数据与本地账本独立加载。只有经过本实例的请求才进入本地统计，不代表账户的全部消费。OpenRouter 管理 Key 必须单独设置 `openrouter.management_api_key` 或 `ROUTATIC_PROXY_OPENROUTER_MANAGEMENT_API_KEY`，不会使用推理 Key 代替，也不推断其与其它 Key 属于同一账户。
 
@@ -38,7 +38,7 @@
 
 ## 上游提交筛选
 
-上游为 [samueltuyizere/oc-go-cc](https://github.com/samueltuyizere/oc-go-cc)，远端 HEAD 为 `b214eeb279d9a397872bbc0795c2486e3a0dd969`；相对基线有 27 项未融合提交。本轮按行为移植，不整树 merge。提交、推送与部署状态见[当前任务记录](../.codex-tasks/20260910-platform-integration/PROGRESS.md)。
+上游为 [samueltuyizere/oc-go-cc](https://github.com/samueltuyizere/oc-go-cc)，第一轮筛选截至 `b214eeb279d9a397872bbc0795c2486e3a0dd969` 的 27 项提交。2026-09-11 再核实 HEAD 为 `1f15a76c4dcb18db938714a28ae93047cbcc4f3e`；本轮按行为移植，不整树 merge。提交、推送与部署状态见[当前任务记录](../.codex-tasks/20260910-platform-integration/PROGRESS.md)。
 
 | 提交 | 本轮处理 |
 | --- | --- |
@@ -55,6 +55,8 @@
 | `b64f155` | 仅采纳 P95/P99 正确性修复，不引入可能丢失账目的异步队列和未测性能重构 |
 
 未采纳 `56d1f43` 的 RPM/流水线/多模块迁移、5 项 Go 依赖升级和 10 项 CI 依赖升级；它们不是当前缺陷的必要修复，需要各自验证，不能覆盖 fork 的发布流程。原有依赖版本未升级，`github.com/google/uuid` 仅从间接依赖改为直接依赖；AWS 账单增量新增官方 Go SDK config/costexplorer 及其依赖，不自行实现凭证链或 SigV4。
+
+新增 [1f15a76](https://github.com/samueltuyizere/oc-go-cc/commit/1f15a76c4dcb18db938714a28ae93047cbcc4f3e) 不仅升级 setup-go v5→v7，还包含固定工具链后的 nfpm 版本回退及上游开发机的 Trunk 绝对路径。当前分支没有该 RPM 包装流程；不移植开发机路径，也不在未单独验证发布 CI 的情况下升级 action 的工具链语义。此增量不含本次账户或页面逻辑修复，留作独立 CI 升级，前述已采纳的功能修复保留。
 
 用户指定的 [MAXeaglet/commandcode-proxy](https://github.com/MAXeaglet/commandcode-proxy/tree/487f219f9586b2a4ba7f7435eed7ee19dabc53ec)（MIT，固定 `487f219`）作为协议行为审阅参考；未复制源码或 CLI 设备指纹/生命周期调用。它没有 Responses 入口，本项目复用 Go 转换器实现必要的 Codex 适配。
 

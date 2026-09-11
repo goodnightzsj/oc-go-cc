@@ -23,10 +23,9 @@ func TestQuotaPlatformCapabilitiesDoNotSendGoKeys(t *testing.T) {
 	cfg := *srv.atomicCfg.Get()
 	cfg.OpenCodeZen.APIKey = "synthetic-zen-key"
 	cfg.AWSBedrock.APIKey = "synthetic-bedrock-key"
-	cfg.CommandCode.APIKey = "synthetic-commandcode-key"
 	srv.atomicCfg.ApplyLoaded(&cfg)
 	for provider, reason := range map[string]string{
-		"opencode-zen": "no_public_account_api", "commandcode": "no_public_account_api",
+		"opencode-zen": "no_public_account_api",
 		"aws-bedrock": "aws_billing_disabled",
 	} {
 		t.Run(provider, func(t *testing.T) {

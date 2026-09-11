@@ -30,12 +30,14 @@ const limitsRefreshTTL = 24 * time.Hour
 const limitsFetchTimeout = 20 * time.Second
 
 // quotaAccount reports one key's quota, never an aggregate account balance.
-// Report/OpenRouter and Error are mutually exclusive.
+// Reports and Error are mutually exclusive; CommandCode retains block errors
+// inside a partially successful report.
 type quotaAccount struct {
-	KeyHint    string               `json:"key_hint"`
-	Report     *quota.Report        `json:"report,omitempty"`
-	OpenRouter *quota.OpenRouterKey `json:"openrouter,omitempty"`
-	Error      string               `json:"error,omitempty"`
+	KeyHint     string                   `json:"key_hint"`
+	Report      *quota.Report            `json:"report,omitempty"`
+	OpenRouter  *quota.OpenRouterKey     `json:"openrouter,omitempty"`
+	CommandCode *quota.CommandCodeReport `json:"commandcode,omitempty"`
+	Error       string                   `json:"error,omitempty"`
 }
 
 type quotaLink struct {
@@ -162,8 +164,10 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 		resp.Reason = "no_public_account_api"
 		resp.Links = []quotaLink{{Kind: "billing", URL: "https://opencode.ai/auth"}, {Kind: "docs", URL: "https://opencode.ai/docs/zen/"}}
 	case "commandcode":
-		resp.Reason = "no_public_account_api"
+		resp.Source, resp.Currency = "official_alpha_api", "USD"
 		resp.Links = []quotaLink{{Kind: "usage", URL: "https://commandcode.ai/usage"}, {Kind: "billing", URL: "https://commandcode.ai/billing"}, {Kind: "keys", URL: "https://commandcode.ai/settings/keys"}}
+		s.handleCommandCodeQuota(w, r, cfg, resp)
+		return
 	case "aws-bedrock":
 		resp.Links = []quotaLink{{Kind: "billing", URL: "https://console.aws.amazon.com/billing/home"}, {Kind: "docs", URL: "https://docs.aws.amazon.com/cost-management/latest/userguide/ce-api.html"}}
 		s.handleBedrockBilling(w, r, cfg, resp)
@@ -309,6 +313,31 @@ func (s *Server) handleBedrockBilling(w http.ResponseWriter, r *http.Request, cf
 	writeJSON(w, resp)
 }
 
+func (s *Server) handleCommandCodeQuota(w http.ResponseWriter, r *http.Request, cfg *config.Config, resp quotaResponse) {
+	keys := goQuotaKeys(cfg.CommandCode.EffectiveAPIKeys(), nil)
+	if len(keys) == 0 {
+		resp.Status = "not_configured"
+		writeJSON(w, resp)
+		return
+	}
+	endpoint, err := quota.CommandCodeBaseURL(cfg.CommandCode.BaseURL)
+	if err != nil {
+		resp.Status, resp.Error = "error", err.Error()
+		writeJSON(w, resp)
+		return
+	}
+	resp.Endpoint = endpoint
+	if cached := s.cachedQuota(resp.Provider, endpoint, keys, r.URL.Query().Get("refresh") == "1"); cached != nil {
+		writeJSON(w, *cached)
+		return
+	}
+	resp.Accounts = fetchQuotaAccounts(r.Context(), resp.Provider, endpoint, keys)
+	resp.Status = quotaStatus(resp)
+	resp.FetchedAt = time.Now().UTC()
+	s.storeQuota(endpoint, keys, resp)
+	writeJSON(w, resp)
+}
+
 func quotaStatus(resp quotaResponse) string {
 	available, failed := 0, 0
 	for _, account := range resp.Accounts {
@@ -316,6 +345,11 @@ func quotaStatus(resp quotaResponse) string {
 			failed++
 		} else if account.Report != nil || account.OpenRouter != nil {
 			available++
+		} else if report := account.CommandCode; report != nil {
+			available++
+			if report.CreditsError != "" || report.SubscriptionError != "" || report.UsageError != "" {
+				failed++
+			}
 		}
 	}
 	if resp.Credits != nil {
@@ -355,9 +389,12 @@ func fetchQuotaAccounts(parent context.Context, provider, endpoint string, keys 
 			defer wg.Done()
 			accounts[i] = quotaAccount{KeyHint: maskKeyHint(key)}
 			var err error
-			if provider == "openrouter" {
+			switch provider {
+			case "openrouter":
 				accounts[i].OpenRouter, err = quota.FetchOpenRouterKey(ctx, client, endpoint, key)
-			} else {
+			case "commandcode":
+				accounts[i].CommandCode, err = quota.FetchCommandCode(ctx, client, endpoint, key)
+			default:
 				accounts[i].Report, err = quota.Fetch(ctx, client, endpoint, key)
 			}
 			if err != nil {

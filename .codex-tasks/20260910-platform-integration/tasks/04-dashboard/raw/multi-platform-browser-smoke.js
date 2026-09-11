@@ -81,7 +81,7 @@ async (page) => {
       requests: indices.length * 2, known: indices.length,
       tokens: indices.reduce((sum, index) => sum + 2 * (index * 10 + 6), 0),
       cost: indices.reduce((sum, index) => sum + index / 10, 0),
-      displayCost: provider ? '$' + (indices[0] / 10).toFixed(3) + ' + ?' : '$1.50 + ?',
+      displayCost: provider ? 'Known $' + (indices[0] / 10).toFixed(3) : 'Known $1.50',
     };
   };
   const expectProviders = (rows, provider, label) => check(
@@ -274,6 +274,15 @@ async (page) => {
         check(await tab.locator('#quota-bedrock').isVisible() && await tab.locator('#quota-go').isHidden(), 'AWS account view reused Go quota');
         check(await tab.locator('#btn-fetch-bedrock-billing').isDisabled(), 'disabled AWS query button');
         check((await tab.locator('#quota-bedrock-body').innerText()).includes('AWS billing queries are disabled'), 'AWS setup state absent');
+      } else if (provider === 'commandcode') {
+        check(account.status === 'available' && account.source === 'official_alpha_api', 'CommandCode account provenance');
+        const report = account.accounts[0]?.commandcode;
+        check(report?.credits.credits.monthlyCredits === 60 && report?.usage.totalTokens === 120, 'CommandCode official credits and usage');
+        check(report?.subscription.planId === 'individual-goat', 'CommandCode plan');
+        check(await tab.locator('#quota-commandcode').isVisible() && await tab.locator('#quota-go').isHidden(), 'CommandCode displayed Go quota');
+        const text = await tab.locator('#quota-commandcode-accounts').innerText();
+        check(text.includes('$60.00') && text.includes('28.6%') && text.includes('2026-10-10'), 'CommandCode fields not rendered');
+        check(text.includes('No monthly utilization percentage is inferred') && !text.includes('1970'), 'CommandCode unknown grant/reset semantics');
       } else {
         check(account.status === 'unavailable' && account.source === 'none', 'unavailable account status');
         check(account.reason === 'no_public_account_api', 'account capability reason');
@@ -298,6 +307,7 @@ async (page) => {
     const fieldPrefixes = ['go', 'zen', 'bedrock', 'openrouter', 'commandcode'];
     for (let index = 0; index < providers.length; index++) {
       phase = 'settings/' + providers[index];
+      await choose('settings-provider-jump', providers[index]);
       const before = await api('/api/proxy/config');
       const section = sections[index];
       const timeout = (before[section].timeout_ms || 0) + 101;
@@ -320,6 +330,7 @@ async (page) => {
     }
 
     phase = 'settings/aws-billing';
+    await choose('settings-provider-jump', 'aws-bedrock');
     const beforeBilling = await api('/api/proxy/config');
     const billing = {enabled: true, profile: 'browser-synthetic', linked_account_id: '123456789012'};
     await tab.locator('#cfg-bedrock-billing-enabled').check();

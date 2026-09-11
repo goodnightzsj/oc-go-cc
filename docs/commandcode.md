@@ -120,11 +120,27 @@ supports_websockets = false
 ## 日志、套餐和统计
 
 - 五个平台的配置、路由健康、历史、性能和模型费用按平台归属；概览、历史、性能、分析可分别筛选平台，相同模型 ID 不再跨平台串账。套餐页另有平台独立的本实例请求、Token、费用及缺价统计，详见[五平台能力矩阵](platform-integration-review.md#五平台页面与账户能力)。
-- 价格缺失时显示 `—`，混合已知/未知金额显示小计 `+ ?`。平台账单、代理估算和未知费用不能互相替代；峰谷倍率只作用于其所属平台。
-- CommandCode 的 [Usage](https://commandcode.ai/usage)、[Billing](https://commandcode.ai/billing) 和 [API Keys](https://commandcode.ai/settings/keys) 入口保留。已核实的 [Usage Limits 文档](https://commandcode.ai/docs/resources/usage-limits)没有公开账户余额查询合同，本项目不抓取私有账单页面，不套用 OpenCode Go 配额。
+- 价格缺失时显示 `—`，混合已知/未知金额显示“已知”小计及未知记录数。平台账单、代理估算和未知费用不能互相替代；峰谷倍率只作用于其所属平台。
+- CommandCode 账户数据使用经 Edge 页面和真实 API Key 核实的官方 Alpha 只读接口，不需要浏览器 Cookie。保留 [Usage](https://commandcode.ai/usage)、[Billing](https://commandcode.ai/billing) 和 [API Keys](https://commandcode.ai/settings/keys) 入口；Alpha 不是稳定公开合同，字段可能变化，不能套用 Go 配额。
 - 官方 Provider API 文档当前说明除 Go 外的方案有 API 访问能力；账户的实际授权仍以上游为准。`401`/`403`/ZDR `422` 应检查密钥、套餐和模型能力，不通过私有 CLI 仿装规避。
 - Analytics 日期/桶和概览“今日”是 UTC；历史日期筛选与单条时间是浏览器本地时区。日志刷新失败会显示错误，不能把未获取当作没有请求。
 - `debug_capture` 仍是显式调试功能，包含完整对话内容；默认不要开启，不能把它当成脱敏的普通日志。
+
+### CommandCode 账户查询
+
+`GET /api/quota?provider=commandcode` 只使用独立 CommandCode Key，查询同一配置网关的三个端点：
+
+| Alpha GET 端点 | 展示内容 |
+| --- | --- |
+| `/alpha/billing/credits` | 免费、月度剩余、购买点数；5 小时与每周窗口的已用/上限 |
+| `/alpha/billing/subscriptions` | 套餐、状态、完整 UTC 周期与期末取消状态 |
+| `/alpha/usage/summary` | 官方周期请求数、Token 与已消耗点数 |
+
+使用 `Authorization: Bearer`；从 `commandcode.base_url` 的 `/provider/v1` 路径推导同源 Alpha 路径，保留网关前缀。不识别的自定义路径明确报错，不把密钥转发到猜测的官方域名。重定向不跟随，身份和支付字段不返回面板。
+
+美元计价的点数不是现金余额，也不是本地费用；多 Key 分别展示、不合计。Alpha 没有 `monthlyCreditsGranted`，不由剩余值推算月度百分比；仅滚动窗口自身的 `used/cap` 可计算比例。`resetAt` 是 Unix 毫秒，0 显示未知，不显示 1970。
+
+账户响应按端点和 Key 集合缓存 30 秒，`refresh=1` 手动刷新。额度、订阅、汇总各自保留错误；一个失败不会清空其他已成功数据。详细证据见[协议核实记录](../.codex-tasks/20260910-platform-integration/tasks/09-commandcode-account/raw/browser-contract.md)。
 
 ## 指定参考项目与验证范围
 

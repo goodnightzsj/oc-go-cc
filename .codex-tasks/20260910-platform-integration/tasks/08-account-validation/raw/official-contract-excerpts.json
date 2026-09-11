@@ -1,0 +1,114 @@
+{
+  "checked_at": "2026-09-11",
+  "scope": "Selected official contract excerpts only; cache timestamps retained. No authenticated pages or credentials read.",
+  "documents": [
+    {
+      "url": "https://commandcode.ai/docs/provider",
+      "status_code": 200,
+      "source_cached_at": "2026-09-10T23:04:24.728Z",
+      "excerpts": [
+        {
+          "start_line": 123,
+          "end_line": 129,
+          "text": "## [Endpoints](https://commandcode.ai/docs/provider\\#endpoints)\n\n| Endpoint | Method | Format |\n| --- | --- | --- |\n| `https://api.commandcode.ai/provider/v1/chat/completions`Copy | POST | OpenAI Chat Completions |\n| `https://api.commandcode.ai/provider/v1/messages`Copy | POST | Anthropic Messages |\n| `https://api.commandcode.ai/provider/v1/models`Copy | GET | Models list |"
+        },
+        {
+          "start_line": 268,
+          "end_line": 268,
+          "text": "| `400` | `unsupported_model` | Model isn't in the catalog (OpenAI shape only - `code` is on the OpenAI envelope; the Anthropic envelope has `type: invalid_request_error` instead). |"
+        },
+        {
+          "start_line": 329,
+          "end_line": 329,
+          "text": "Anthropic, OpenAI, Google, and the strongest open-source, listed in the [Models](https://commandcode.ai/docs/provider#models) section. Each endpoint takes its native shape.`/chat/completions` for OpenAI and open-source.`/messages` for Anthropic. Send a Claude model to`/chat/completions` and you get a 400 pointing you to `/messages`, and the reverse."
+        }
+      ]
+    },
+    {
+      "url": "https://commandcode.ai/docs/resources/usage-limits",
+      "status_code": 200,
+      "source_cached_at": "2026-09-10T20:13:25.340Z",
+      "excerpts": [
+        {
+          "start_line": 158,
+          "end_line": 160,
+          "text": "## [See your usage.](https://commandcode.ai/docs/resources/usage-limits\\#see-your-usage)\n\nRun **`/usage`** in the CLI for live meters on both windows: how much of each cap you've used and when it resets, right next to your credit balance."
+        },
+        {
+          "start_line": 181,
+          "end_line": 181,
+          "text": "The Studio [Usage](https://commandcode.ai/usage) page tracks the cost of every request. More in the [usage docs](https://commandcode.ai/docs/studio/usage)."
+        }
+      ]
+    },
+    {
+      "url": "https://opencode.ai/docs/zen/",
+      "status_code": 200,
+      "source_cached_at": "2026-09-10T23:09:46.789Z",
+      "excerpts": [
+        {
+          "start_line": 316,
+          "end_line": 323,
+          "text": "### [Roles](https://opencode.ai/docs/zen/\\#roles)\n\nYou can invite teammates to your workspace and assign roles:\n\n- **Admin**: Manage models, members, API keys, and billing\n- **Member**: Manage only their own API keys\n\nAdmins can also set monthly spending limits for each member to keep costs under control."
+        }
+      ]
+    },
+    {
+      "url": "https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits",
+      "status_code": 200,
+      "source_cached_at": "2026-09-09T23:54:33.645Z",
+      "excerpts": [
+        {
+          "start_line": 129,
+          "end_line": 133,
+          "text": "  \"data\": {\n    \"total_credits\": 100.5,\n    \"total_usage\": 25.75\n  }\n}"
+        },
+        {
+          "start_line": 146,
+          "end_line": 152,
+          "text": "{\n  \"error\": {\n    \"code\": 403,\n    \"message\": \"Only management keys can perform this operation\"\n  }\n}\n```"
+        }
+      ]
+    }
+  ],
+  "searches": [
+    {
+      "query": "CommandCode official account balance usage REST API endpoint",
+      "provider": "tavily",
+      "results": [
+        {
+          "title": "Provider API | Command Code - Command Code Docs",
+          "url": "https://commandcode.ai/docs/provider"
+        },
+        {
+          "title": "Go Plan",
+          "url": "https://commandcode.ai/docs/plans/go"
+        },
+        {
+          "title": "Settings & Config | Command Code - Command Code Docs",
+          "url": "https://commandcode.ai/docs/settings"
+        }
+      ],
+      "limitation": "Official-domain search did not identify a new documented account-balance API; not proof that no private API exists."
+    },
+    {
+      "query": "OpenCode Zen official account balance usage billing API endpoint",
+      "provider": "tavily",
+      "results": [
+        {
+          "title": "Zen | OpenCode",
+          "url": "https://opencode.ai/docs/zen"
+        },
+        {
+          "title": "Go | OpenCode",
+          "url": "https://opencode.ai/v2/docs/console/go"
+        },
+        {
+          "title": "Go - OpenCode",
+          "url": "https://opencode.ai/docs/go"
+        }
+      ],
+      "limitation": "Official-domain search did not identify a new documented account-balance API; not proof that no private API exists."
+    }
+  ]
+}

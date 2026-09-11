@@ -3,13 +3,13 @@
 ## Context Recovery Block
 
 - 任务：修复全部已报告问题，独立接入 CommandCode，融合有价值的上游更新，分析 Codex/Claude Code 对接。
-- 形态：epic；5/8 子任务完成；AWS新增软件缺口已实现并验证，旧验收证据全部保留。
-- 当前：AWS增量全量/六目标/Codex与五平台浏览器通过；7c2d07c既有生产健康，开始备份和重新部署，再完成UIUX报告。
-- 真源：SUBTASKS.csv；当前 tasks/06-deploy/TODO.csv 第4项；#8只保留真实账户权限/未公开合同阻塞。
+- 形态：epic；7/8 子任务完成；软件部署及UI/UX报告均完成，真实账户验收BLOCKED_EXTERNAL。
+- 当前：0b28ab2已推送部署，生产210检查/29组合/21布局通过，配置与账本保留；七页UIUX报告已完成，未实施美化。
+- 真源：SUBTASKS.csv；当前 tasks/08-account-validation/TODO.csv；真实账户权限/未公开合同仍未解决。
 - 起点：main，HEAD 684235d，初始工作区干净。origin=goodnightzsj/oc-go-cc；upstream=samueltuyizere/oc-go-cc（GitHub）。
 - 已知：上轮 /tmp/oc-go-cc-review.WPJFmt/ 与 /tmp/oc-go-cc-routing-review.yHSDWm/ 有合成复现；本轮不依赖缓存成功。全量基线有 tokenizer 外网 EOF、日期过期测试失败；init 测试未隔离 HOME。
 - 不读取或输出真实凭证，不读取本地真实 DB；部署已获授权但须在实现与验证完成后进行，部署前读 SSH 运行手册。
-- 下一步：AWS增量五平台浏览器验收 → 全量回归/六目标构建 → 提交推送和部署 → UI/UX分析。真实账户凭证/授权不由代理擅自提供或修改；既有llmdoc同步须由用户决定。
+- 下一步：等待用户在服务端补足账户配置/权限，并明确Zen/CommandCode账户数据的合法来源或接受能力边界。UI/UX只读分析已完成，后续实施需用户确认；既有llmdoc同步仍待用户决定。
 - 最新要求已落实：先核实 CommandCode 官网；Claude 模型走原生 Messages，Codex 公开合同缺口使用本项目 Responses 适配，并参考 MAXeaglet 的公开协议行为。日志、套餐入口、统计与独立配置保留并通过验收。
 
 ## 2026-09-10 启动
@@ -114,3 +114,29 @@
 - 为避免未配置平台被浏览时误发凭证，已切回旧 release `20260904193909-9182566bb4a6`，服务健康；只切换二进制，不恢复或覆盖配置/账本。
 - 修复保持原推理的凭证优先级，仅新 OpenRouter 额度查询要求显式平台 Key；模型/趋势空集合与其它分析列表统一。新增两项测试（含8个子用例）先失败，修后 gui/storage/quota race 全通过。
 - 本次恢复的只读独立代理未回传有效结论，已停止；不计为审查通过，由主线程负责源码追踪、复现、修改及最终验收。
+
+## AWS增量部署后恢复验收（2026-09-11）
+
+- 恢复时工作区干净，HEAD与origin/main均为464c64f；远端已运行同提交及release `20260911074726-dc89acaaa9b9`，不重复提交或重启。服务PID62339、active/running、NRestarts=0、health=ok；上游HEAD仍b214eeb。
+- 再次仅从本项目Claude session白名单提取部署命令，与部署脚本一致；没有读取凭证或其它项目会话。备份 `predeploy-20260911-aws-SV1xWrJc` 保留0700权限。
+- 当前全部产品源码与上一轮sources.after.sha256核验一致（退出0）；重新核对race原始记录650顶层/1073含子测试pass、0fail及显式Codex双轮通过。JS语法和提交差异检查通过；不将历史验证声称为本轮重跑。
+- SSH隧道上的最新生产只读浏览器验收210检查、29平台/页面组合、21布局，196请求、0pageerror、0意外写请求；UI build `88ddce0410bd`。原始证据 `/tmp/oc-go-cc-release-resume.cBjqie/production-smoke/`。
+- 配置与发布前备份逐字节一致；SQLite quick_check=ok，原requests/provider_usage主键均无缺失，provider_usage1390条。未改变账户配置或发起真实推理/AWS收费查询。
+- 新只读审查代理因encrypted output解码错误退出，不计为审查通过；主线程复核AWS取数、身份、分页、缓存/收费POST边界与测试。没有发现需追加的发布阻断改动。
+- #8仍未完成：Go查询error；Zen无公开账户合同；AWS账单disabled；OpenRouter及CommandCode未配置。以上状态被正确显示不等于真实账户接入成功。
+
+## 表头回归与最终收尾恢复（2026-09-11）
+
+- 恢复时保留任务记录、UIUX观察脚本和未提交DOM回归，HEAD为464c64f。没有重做五平台已有实现或读取真实凭证。
+- `TestBedrockBillingPageBehavior` 首次退出1：AWS state heading must be translated in en。完整核对页面翻译、账单渲染和调用方后，将不存在的filter.status改为现有th.status；同测试中英文通过（0.449s）。JS语法与git diff --check通过。
+- 真实浏览器矩阵增加AWS表头Status断言；全量race/vet和合成fixture在隔离环境运行，证据目录 `/tmp/oc-go-cc-header-final.PYhcpx/`。
+- `git ls-remote upstream HEAD` 再次为b214eeb279d9a397872bbc0795c2486e3a0dd969，没有新增上游差异。
+
+## UI/UX报告完成与真实账户阻塞收尾（2026-09-11）
+
+- 当前远端仍运行0b28ab2与release20260911083542-8bef17b7ea86，active/running、NRestarts0、health=ok；upstream仍b214eeb。本次没有重复部署和重启，未修改产品源码。
+- 七页桌面/手机与五平台套餐的新合成观察完成（14页视图、5套餐视图、0脚本异常/越界请求），Go fixture正常PASS并关闭。证据/tmp/oc-go-cc-uiux-current.axtgQT/；报告docs/uiux-multiplatform-review.md包含P1/P2、24/40人工评分、逐页方案与验收边界。
+- 报告4个相对链接、7页覆盖检查、观察脚本与app.js语法、git diff --check通过；未将旧650/1073全量测试称为本轮重跑。
+- 生产五平台账户状态仅输出白名单字段；Go error、Zen unavailable、AWS disabled、OpenRouter/CommandCode not_configured。官方域检索仍未找到Zen/CommandCode公开余额合同，保留原始摘录及缓存时间到#8 raw。
+- #7已DONE，#8保留0/2且BLOCKED_EXTERNAL，Epic7/8。缺真实授权/配置不能用合成数据、入口链接、本地估算或越权采集替代；本轮不声称所有平台真实账户全量接入。
+- 收尾CSV结构校验：9份/51行通过，父任务严格7/8。暂存新证据JSON后差异检查发现EOF多余空行，已删除并在提交前复查；这不是产品或账户测试失败。

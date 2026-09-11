@@ -7,16 +7,16 @@
 - Support CLI: Claude 的本项目历史 session 仅作为部署流程证据。
 
 ## Status
-- Current phase: Epic 5/8；AWS增量实现及全量验证完成，旧版本验证证据保留，详细状态以CSV为准。
-- Current step: 06-deploy 4/6；远端7c2d07c健康，私有备份predeploy-20260911-aws-SV1xWrJc完成，准备提交推送部署。
-- Done: 上游语义融合、路由/记账修复、CommandCode双客户端、五平台独立查询、OpenRouter额度接口；7c2d07c已部署并有生产只读验收。
-- Next: 提交推送和SSH部署 → 生产五平台只读冒烟 → UI/UX只读分析。650/1073 race、vet、六目标、Codex双轮、有数据459与空账本210检查通过；证据 /tmp/oc-go-cc-multiplatform-final.FHESMh/。
+- Current phase: Epic 7/8；软件0b28ab2已推送部署验收，七页UI/UX分析完成；真实账户联调BLOCKED_EXTERNAL。
+- Current step: 08-account-validation第1项，等待用户配置权限及明确未公开余额接口的合法数据来源。
+- Done: 上游语义融合、路由/记账修复、CommandCode双客户端、五平台独立页面、OpenRouter额度、AWS独立SDK账单；当前源码650顶层/1073含子测试race与vet、六目标、Codex双轮、有数据460/31布局、生产210/21布局通过。UI/UX新增14页/5套餐视图观察与七页报告完成，未改视觉。
+- Next: 用户自行在服务端补足配置/权限后，再通过应用验证真实账户；Zen/CommandCode账户只读登录态采集需要另获授权，不能擅自读取。UI美化仅在确认后实施；不要重做已完成的适配、全量验证或重复部署。
 - Blockers: #8仍未完成：Go账户403；Zen/CommandCode缺公开账户合同；Bedrock需独立IAM授权；OpenRouter/CommandCode真实账户未配置。软件和合成测试不能替代真实账户验收。
 
 ## Sources of Truth
 - llmdoc: `llmdoc/startup.md`、`llmdoc/must/accounting-baseline.md`；此次扩展的llmdoc同步待用户确认。
-- task files: `.codex-tasks/20260910-platform-integration/SUBTASKS.csv`、`tasks/06-deploy/TODO.csv`。
-- key paths: `internal/gui/`、`internal/quota/`、`internal/storage/`、`docs/commandcode.md`、`tasks/06-deploy/deployment-flow.md`、`scripts/prod-deploy.sh`。
+- task files: `.codex-tasks/20260910-platform-integration/SUBTASKS.csv`、`tasks/08-account-validation/TODO.csv`。
+- key paths: `internal/gui/`、`internal/quota/`、`internal/storage/`、`docs/commandcode.md`、`docs/uiux-multiplatform-review.md`、`tasks/06-deploy/deployment-flow.md`、`scripts/prod-deploy.sh`。最新部署证据 `/tmp/oc-go-cc-header-final.PYhcpx/`，UI观察 `/tmp/oc-go-cc-uiux-current.axtgQT/`。
 
 ## Why Handoff
 - Reason: 保留跨会话执行上下文；旧20260808任务已完成，不再作为当前任务真源。

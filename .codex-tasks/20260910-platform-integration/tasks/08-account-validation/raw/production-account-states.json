@@ -1,0 +1,12 @@
+{
+  "checked_at": "2026-09-11",
+  "source_commit": "0b28ab2",
+  "method": "Read-only application quota GETs over existing trusted SSH; output fields allowlisted; no paid queries or config writes.",
+  "states": [
+    {"provider": "opencode-go", "status": "error", "source": "upstream_api", "reason": null, "credits_status": null},
+    {"provider": "opencode-zen", "status": "unavailable", "source": "none", "reason": "no_public_account_api", "credits_status": null},
+    {"provider": "aws-bedrock", "status": "not_configured", "source": "official_api", "reason": "aws_billing_disabled", "credits_status": null},
+    {"provider": "openrouter", "status": "not_configured", "source": "official_api", "reason": null, "credits_status": "not_configured"},
+    {"provider": "commandcode", "status": "not_configured", "source": "none", "reason": "no_public_account_api", "credits_status": null}
+  ]
+}

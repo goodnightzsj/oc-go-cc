@@ -3,5 +3,6 @@ id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,n
 2,提交推送并部署目标版本,DONE,远端HEAD与本次提交一致且健康通过,bash scripts/prod-deploy.sh,2026-09-11,2,最终7c2d07c已推送并运行release20260911055621-3fad77f342fc;服务健康配置不变;三份备份及旧release保留
 3,执行远端页面与接口验收,DONE,实际服务行为与新多平台功能一致且没有明显回归,node raw/production-smoke.cjs,2026-09-11,2,最终生产204检查29平台页面组合21布局通过;非法provider五接口400;Go403及未配置账户状态如实显示并保留到#8
 4,AWS增量发布前保护远端状态,DONE,预检目标无冲突且配置账本及catalog有私有备份,ssh root@23.80.89.173 systemctl is-active oc-go-cc.service,2026-09-11,0,main7c2d07c健康NRestarts0;仅.ace-tool未跟踪;私有备份predeploy-20260911-aws-SV1xWrJc;SQLite quick_check=ok及1390条平台记录
-5,提交推送并重新部署AWS增量,IN_PROGRESS,运行目标提交且不改变配置及原账本;保留回滚release,bash scripts/prod-deploy.sh,,0,只发布已验证的软件功能;不启用收费查询或修改账户权限
-6,生产五平台页面及接口复验,TODO,实际部署页面通过且AWS独立配置显示默认关闭;无写入或扣费测试,node raw/production-smoke.cjs,,0,真实账户权限状态仍保留#8;验证后才能进行UIUX分析
+5,提交推送并重新部署AWS增量,DONE,运行目标提交且不改变配置及原账本;保留回滚release,bash scripts/prod-deploy.sh,2026-09-11,0,恢复核实464c64f已运行release20260911074726-dc89acaaa9b9;无需重复发布;配置与备份一致且原账本无缺失
+6,生产五平台页面及接口复验,DONE,实际部署页面通过且AWS独立配置显示默认关闭;无写入或扣费测试,node raw/production-smoke.cjs,2026-09-11,0,最新生产210检查29平台页面21布局;0脚本异常0意外写请求;账户权限状态仍保留#8;允许开始UIUX分析
+7,发布AWS表头修复并复验,DONE,远端目标提交健康且最新UI通过五平台只读检查;数据配置保留,bash scripts/prod-deploy.sh,2026-09-11,0,0b28ab2已推送部署;active/running且NRestarts0;生产210检查29组合21布局通过;配置相同和原1390平台记录无缺失;备份predeploy-20260911-header-6vid7xWH

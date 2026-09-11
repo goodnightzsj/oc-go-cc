@@ -1,4 +1,4 @@
 id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,notes
 1,使用edge-debug-attach核实真实套餐请求,DONE,端点方法字段与认证边界有脱敏证据;单连接不重启,test -s .codex-tasks/20260910-platform-integration/tasks/09-commandcode-account/raw/browser-contract.md,2026-09-11,1,网页Cookie200/omit401;alpha三接口通过远端已配置Key实际200;首次探针配置路径失败已明确修正
 2,实现可安全调用的账户查询及UI接入,DONE,真实合同映射且失败显式;不导出会话凭证,go test -race -p 2 ./internal/quota ./internal/gui -count=1,2026-09-11,0,三个账户块及错误独立保留;gui/quota race与全量1090含子测试通过;月度总额缺失不推断百分比
-3,核对远端配置状态与真实只读结果,IN_PROGRESS,只输出白名单状态;真实能力与未支持边界清楚,echo SKIP,,0,现有Edge单连接已附加远端;0b28ab2仍旧占位;与#10部署后验证实际Alpha数据
+3,核对远端配置状态与真实只读结果,DONE,只输出白名单状态;真实能力与未支持边界清楚,node /tmp/oc-go-cc-edge-remote.Peo95y/account-check.mjs,2026-09-11,0,复用原Edge验证线上official_alpha_api/available;套餐individual-goat/active;月度剩余70;5h14/weekly35;三块无错误

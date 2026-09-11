@@ -3,13 +3,13 @@
 ## Context Recovery Block
 
 - 任务：修复全部已报告问题，独立接入 CommandCode，融合有价值的上游更新，分析 Codex/Claude Code 对接。
-- 形态：epic；7/10 子任务完成；新增 Edge 套餐接口核实和 UI/UX 实施，其他账户缺口仍保留。
-- 当前：#9 Alpha接入与#10七页美化本地完成，656顶层/1090含子测试race、vet和六目标构建通过；用户指定用现有Edge调试远端，正在发布前复核。
-- 真源：SUBTASKS.csv；当前 tasks/09-commandcode-account/TODO.csv；随后 tasks/10-uiux-implementation/TODO.csv。
+- 形态：epic；10/12 子任务完成；#8真实账户缺口保留，#11 Go历史消失诊断完成，当前#12七页重新设计。
+- 当前：e29e79f已部署并经原Edge验收；CommandCode三块真实账户可用。用户要求先解释Go旧数据消失，再参考sub2api/new-api重做所有页面。
+- 真源：SUBTASKS.csv；当前 tasks/12-console-redesign/TODO.csv。
 - 起点：main，HEAD 684235d，初始工作区干净。origin=goodnightzsj/oc-go-cc；upstream=samueltuyizere/oc-go-cc（GitHub）。
 - 已知：上轮 /tmp/oc-go-cc-review.WPJFmt/ 与 /tmp/oc-go-cc-routing-review.yHSDWm/ 有合成复现；本轮不依赖缓存成功。全量基线有 tokenizer 外网 EOF、日期过期测试失败；init 测试未隔离 HOME。
 - 不读取或输出真实凭证，不读取本地真实 DB；部署已获授权但须在实现与验证完成后进行，部署前读 SSH 运行手册。
-- 下一步：提交推送、私有备份后按既有流程部署；保持现有Edge单连接，在远端验收CommandCode真实账户和五平台七页。当前Edge driver为/tmp/oc-go-cc-edge-remote.Peo95y/driver.mjs，任务完成再断开。其他账户缺口继续保留。
+- 下一步：#12七页实现与全量门禁已通过，已备份配置和DB；提交推送部署后以原Edge验收。数据缺失为7天retention机制能解释的展示表空，删除时刻无法追溯；不恢复或更改策略。Edge单连接/tmp/oc-go-cc-edge-remote.Peo95y/driver.mjs继续复用，任务完成才断开。
 - 最新要求已落实：先核实 CommandCode 官网；Claude 模型走原生 Messages，Codex 公开合同缺口使用本项目 Responses 适配，并参考 MAXeaglet 的公开协议行为。日志、套餐入口、统计与独立配置保留并通过验收。
 
 ## 2026-09-10 启动
@@ -162,3 +162,10 @@
 - 全量go test -race -p 2 ./... -count=1 -json退出0：656顶层/1090含子测试pass，0fail；vet退出0，darwin/linux/windows×amd64/arm64六目标CGO=0构建全部通过。证据/tmp/oc-go-cc-uiux-verify.NqKMYt/。
 - 未收到两项只读代理的有效结论，已中断，不计作独立审查通过；主线程完整核对账户实现、调用方及成功/局部失败/认证/重定向/缓存测试。
 - upstream HEAD再核实1f15a76c4dcb18db938714a28ae93047cbcc4f3e，实际还含nfpm回退和开发机Trunk绝对路径；本轮不改变CI工具链，详见公开适配记录。
+
+## Edge实测完成与用户新增整页重设计
+
+- 远端e29e79f、release20260911161610-0fac00358316，服务active/running且NRestarts0；原Edge验证29平台/页面组合、70布局。7项脚本误判有保留记录及真实按键/AX树更正证据；没有修改产品代码来迎合错误测试。
+- CommandCode三块账户available，月度剩余70、窗口0/14和0/35、individual-goat/active；未触发付费生成或AWS查询。#9/#10第一轮实施完成，但不是用户最终视觉验收。
+- 用户新增两个交付：分析Go旧数据消失；参考sub2api/new-api重设计全部七页。新增#11/#12，不能用旧美化结项替代新要求。
+- 只读SSH确认服务使用原data.db，quick_check=ok，requests0/provider_usage1390；疑似默认7天保留，正在核实配置和备份。未经授权不执行恢复/回填/更改保留天数。

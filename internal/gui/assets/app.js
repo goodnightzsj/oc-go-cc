@@ -2,6 +2,41 @@
 const TRANSLATIONS = {
   en: {
     'lang.toggle': '中文',
+    'shell.console': 'Console',
+    'shell.workspace': 'Workspace',
+    'shell.management': 'Management',
+    'shell.navigation': 'Primary navigation',
+    'shell.platforms': 'Five platforms. One workspace.',
+    'shell.skip': 'Skip to content',
+    'theme.light': 'Switch to light theme',
+    'theme.dark': 'Switch to dark theme',
+    'overview.description': 'Traffic, recorded cost and service health at a glance.',
+    'analytics.description': 'Explore token composition, recorded costs and activity over time.',
+    'quota.description': 'Account limits and subscriptions, with the local ledger kept separate.',
+    'data.retained': 'Retained',
+    'data.localEmpty': 'No retained requests in this view',
+    'data.localEmptyHint': 'Check the platform, filters and retention policy. An empty local ledger does not mean no platform usage.',
+    'history.advanced': 'Advanced filters',
+    'history.previous': 'Previous',
+    'history.next': 'Next',
+    'history.noMatches': 'No requests match these filters',
+    'history.emptyFiltersHint': 'Adjust the platform or date range, or reset the filters. Only records still kept by this instance can be searched.',
+    'perf.description': 'Compare measured latency and known outcomes across models.',
+    'perf.p50Hint': 'Typical request latency',
+    'perf.p90Hint': '90% of samples finish within this time',
+    'perf.p99Hint': 'Tail latency of the slowest requests',
+    'perf.emptyHint': 'No measured samples in this view. Imported bills can have usage without latency or outcome details.',
+    'fallback.description': 'Set the model order for each routing scenario.',
+    'fallback.guideTitle': 'Routing order',
+    'fallback.orderHint': 'The primary model comes from the scenario configuration. Drag or use the arrow buttons to arrange the fallback models below it.',
+    'fallback.saveTitle': 'Review, then apply',
+    'fallback.saveHint': 'Preview the chain before saving. Save applies your pending fallback changes; platform credentials stay unchanged.',
+    'setting.platformsHint': 'Configure each platform independently. Only changed fields are saved; masked credentials stay untouched.',
+    'setting.bedrockHint': 'Inference & billing identity',
+    'setting.openrouterHint': 'Inference & account credits',
+    'setting.commandcodeHint': 'Native Messages & Alpha account',
+    'setting.server': 'Server',
+    'setting.logging': 'Logging',
     'status.checking': 'Checking…',
     'export.csv': 'Export CSV',
     'export.working': 'Exporting…',
@@ -196,7 +231,7 @@ const TRANSLATIONS = {
     'analytics.knownErrors': 'Known errors',
     'analytics.modelDetails': 'Model details',
     'analytics.knownRecords': '{n} records with details',
-    'analytics.retainedRange': 'Request records {from} - {to}',
+    'analytics.retainedRange': 'Query range {from} - {to} (UTC) · limited to retained records',
     'analytics.last7d': 'Last 7 days',
     'analytics.last30d': 'Last 30 days',
     'analytics.last90d': 'Last 90 days',
@@ -406,6 +441,41 @@ const TRANSLATIONS = {
   },
   zh: {
     'lang.toggle': 'English',
+    'shell.console': '控制台',
+    'shell.workspace': '工作空间',
+    'shell.management': '平台管理',
+    'shell.navigation': '主要导航',
+    'shell.platforms': '五个平台，一个工作空间。',
+    'shell.skip': '跳转到主要内容',
+    'theme.light': '切换为浅色主题',
+    'theme.dark': '切换为深色主题',
+    'overview.description': '快速了解请求流量、已记录费用与服务状态。',
+    'analytics.description': '按时段查看 Token 组成、已记录费用与调用趋势。',
+    'quota.description': '账户额度与订阅集中展示，本实例账本独立核对。',
+    'data.retained': '保留累计',
+    'data.localEmpty': '当前视图没有保留的请求记录',
+    'data.localEmptyHint': '请核对平台、筛选条件与保留策略。本地记录为空，不代表平台账户没有用量。',
+    'history.advanced': '高级筛选',
+    'history.previous': '上一页',
+    'history.next': '下一页',
+    'history.noMatches': '没有符合筛选条件的请求',
+    'history.emptyFiltersHint': '可调整平台、日期范围或重置筛选；这里只能检索本实例仍保留的记录。',
+    'perf.description': '按模型比较实测耗时与已知请求结果。',
+    'perf.p50Hint': '典型请求耗时',
+    'perf.p90Hint': '90% 的样本在此耗时内完成',
+    'perf.p99Hint': '观察长尾慢请求',
+    'perf.emptyHint': '当前视图没有实测样本。同步账单可能有用量，但没有耗时与执行结果。',
+    'fallback.description': '为不同路由场景设置清晰的模型优先顺序。',
+    'fallback.guideTitle': '路由顺序',
+    'fallback.orderHint': '主模型来自场景配置。可拖拽或使用上下箭头，调整后续降级模型的优先顺序。',
+    'fallback.saveTitle': '预览后应用',
+    'fallback.saveHint': '保存前可预览模型链。保存会应用尚未保存的降级修改，不改变平台凭证。',
+    'setting.platformsHint': '每个平台独立配置，仅保存修改过的字段，未修改的脱敏凭证保持不变。',
+    'setting.bedrockHint': '推理接口与账单身份',
+    'setting.openrouterHint': '推理接口与账户点数',
+    'setting.commandcodeHint': '原生 Messages 与 Alpha 账户',
+    'setting.server': '服务端',
+    'setting.logging': '日志',
     'status.checking': '检查中…',
     'export.csv': '导出 CSV',
     'export.working': '导出中…',
@@ -599,7 +669,7 @@ const TRANSLATIONS = {
     'analytics.knownErrors': '已知错误',
     'analytics.modelDetails': '模型明细',
     'analytics.knownRecords': '{n} 条有详情记录',
-    'analytics.retainedRange': '请求记录 {from} - {to}',
+    'analytics.retainedRange': '查询范围 {from} - {to}（UTC）· 仅含仍保留的记录',
     'analytics.last7d': '最近 7 天',
     'analytics.last30d': '最近 30 天',
     'analytics.last90d': '最近 90 天',
@@ -855,6 +925,7 @@ function toggleLanguage() {
   // Re-render dynamic content
   renderModelList(lastModelCounts);
   renderHistory();
+  renderHistoryPager();
   PerfModule.render();
   // Analytics charts and distributions carry inline strings; reload them
   // so they pick up the new language instead of keeping stale ones.
@@ -872,6 +943,31 @@ document.addEventListener('DOMContentLoaded', () => {
   applyTranslations();
   const exportBtn = document.getElementById('history-export');
   if (exportBtn) exportBtn.addEventListener('click', exportHistoryCSV);
+});
+
+function syncThemeControl() {
+  const key = getComputedStyle(document.documentElement).colorScheme === 'light' ? 'theme.dark' : 'theme.light';
+  const button = document.getElementById('btn-theme-toggle');
+  button.setAttribute('data-i18n-aria-label', key);
+  button.setAttribute('aria-label', t(key));
+  const label = document.getElementById('theme-action');
+  label.dataset.i18n = key;
+  label.textContent = t(key);
+}
+
+function toggleTheme() {
+  const theme = getComputedStyle(document.documentElement).colorScheme === 'light' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem('routatic-proxy-theme', theme);
+  syncThemeControl();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const saved = localStorage.getItem('routatic-proxy-theme');
+  if (saved === 'light' || saved === 'dark') document.documentElement.dataset.theme = saved;
+  syncThemeControl();
+  document.getElementById('btn-theme-toggle').addEventListener('click', toggleTheme);
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', syncThemeControl);
 });
 
 /* ── Themed form controls ─────────────────────────────────────── */
@@ -1218,7 +1314,7 @@ const PerfModule = {
 
     if (!this.data || this.data.length === 0) {
       const key = this.data ? 'empty.noData' : this.error ? 'detail.unavailable' : 'data.loading';
-      tbody.innerHTML = '<tr><td colspan="7" class="empty-state">' + t(key) + '</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="empty-state">' + (this.data ? emptyStateContent(key, 'perf.emptyHint') : t(key)) + '</td></tr>';
       return;
     }
 
@@ -1243,8 +1339,8 @@ const PerfModule = {
       const successClass = successRate == null ? '' : successRate >= 99 ? 'success-rate' : (successRate >= 95 ? '' : 'error-rate');
       const latency = value => row.count > 0 ? fmt(value) : '—';
       return `
-        <tr>
-          <td class="perf-model">${escapeHtml(row.model)}<br><small>${escapeHtml(row.provider || t('detail.unknown'))}</small></td>
+        <tr data-provider="${escapeHtml(row.provider || '')}">
+          <td class="perf-model">${escapeHtml(row.model)}<br><small>${escapeHtml(providerLabel(row.provider))}</small></td>
           <td>${fmt(row.count)}</td>
           <td class="${successClass}" title="${escapeHtml(t('perf.knownSamples').replace('{n}', known.toLocaleString()))}">${successRate == null ? '—' : successRate + '%'}</td>
           <td class="${this.getLatencyClass(row.avg_ms)}">${latency(row.avg_ms)}</td>
@@ -1268,17 +1364,21 @@ const PerfModule = {
 // activateTab shows the named tab and keeps the URL hash in sync so each
 // panel is deep-linkable / resumable (#overview, #analytics, #history, ...).
 function activateTab(name) {
-  if (!name) return;
-  document.querySelectorAll('.chart-tip').forEach(tip => { tip.style.display = 'none'; });
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-  const tabEl = document.querySelector('.tab[data-tab="' + name + '"]');
+  const tabs = [...document.querySelectorAll('.tab')];
+  const tabEl = tabs.find(tab => tab.dataset.tab === name);
   const panel = document.getElementById('tab-' + name);
-  if (tabEl) {
-    tabEl.classList.add('active');
-    tabEl.scrollIntoView?.({block: 'nearest', inline: 'nearest'});
-  }
-  if (panel) panel.classList.add('active');
+  if (!tabEl || !panel) return;
+  document.querySelectorAll('.chart-tip').forEach(tip => { tip.style.display = 'none'; });
+  tabs.forEach(tab => {
+    tab.classList.toggle('active', tab === tabEl);
+    tab.setAttribute('aria-current', tab === tabEl ? 'page' : 'false');
+  });
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  tabEl.scrollIntoView?.({block: 'nearest', inline: 'nearest'});
+  panel.classList.add('active');
+  const heading = document.getElementById('active-page-title');
+  heading.dataset.i18n = 'tab.' + name;
+  heading.textContent = t('tab.' + name);
   activeTab = name;
   if (name === 'overview') refreshOverviewUsage();
   if (name === 'performance') PerfModule.refresh();
@@ -1291,19 +1391,29 @@ function activateTab(name) {
 
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
-    // Update the hash (also fires hashchange -> activateTab), but avoid a
-    // duplicate activation by calling directly with the desired name.
+    // Activate immediately; hashchange skips the already active page.
     if (location.hash !== '#' + tab.dataset.tab) {
       location.hash = tab.dataset.tab;
     }
     activateTab(tab.dataset.tab);
+  });
+  tab.addEventListener('keydown', event => {
+    const tabs = [...document.querySelectorAll('.tab')];
+    const index = tabs.indexOf(tab);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+      : ['ArrowRight', 'ArrowDown'].includes(event.key) ? (index + 1) % tabs.length
+      : ['ArrowLeft', 'ArrowUp'].includes(event.key) ? (index + tabs.length - 1) % tabs.length : -1;
+    if (next < 0) return;
+    event.preventDefault();
+    tabs[next].focus();
+    tabs[next].click();
   });
 });
 
 // Respond to back/forward and manual hash edits.
 window.addEventListener('hashchange', () => {
   const name = (location.hash || '').replace(/^#/, '') || 'overview';
-  activateTab(name);
+  if (name !== activeTab) activateTab(name);
 });
 
 /* ── Polling ───────────────────────────────────────────────────── */
@@ -1454,6 +1564,8 @@ async function refreshOverviewUsage() {
 
 function clearOverviewUsage(loading = false) {
   lastOverviewView = null;
+  document.getElementById('overview-empty').hidden = true;
+  document.getElementById('overview-insights').hidden = false;
   ['m-total', 'm-tokens', 'm-cache-hit', 'm-throughput', 'm-success', 'm-cost'].forEach(id => {
     document.getElementById(id).textContent = loading ? '…' : '—';
     document.getElementById(id + '-note').textContent = '';
@@ -1466,6 +1578,8 @@ function clearOverviewUsage(loading = false) {
 
 function renderOverviewUsage(data, trend, latency) {
   const summary = data.summary || {};
+  document.getElementById('overview-empty').hidden = summary.total_requests !== 0;
+  document.getElementById('overview-insights').hidden = summary.total_requests === 0;
   const input = Number(summary.input_tokens || 0);
   const output = Number(summary.output_tokens || 0);
   const cacheRead = Number(summary.cache_read_tokens || 0);
@@ -1485,14 +1599,14 @@ function renderOverviewUsage(data, trend, latency) {
   set('m-tokens', hasUsageTokens(summary) ? fmtTok(total) : '—');
   set('m-cache-hit', hasUsageTokens(summary) && prompt > 0 ? `${(cacheRead / prompt * 100).toFixed(1)}%` : '—');
   set('m-total-note', today.total_requests != null
-    ? `${currentLang === 'zh' ? '今日' : 'Today'} ${fmt(today.total_requests)} · ${currentLang === 'zh' ? '累计' : 'All-time'} ${fmt(retained.total_requests)}`
+    ? `${currentLang === 'zh' ? '今日' : 'Today'} (UTC) ${fmt(today.total_requests)} · ${t('data.retained')} ${fmt(retained.total_requests)}`
     : `${overviewDays} ${currentLang === 'zh' ? '天' : 'days'}`);
   set('m-tokens-note', today.input_tokens != null
-    ? `${currentLang === 'zh' ? '今日' : 'Today'} ${compactTotal(today)} · ${currentLang === 'zh' ? '累计' : 'All-time'} ${compactTotal(retained)}`
+    ? `${currentLang === 'zh' ? '今日' : 'Today'} (UTC) ${compactTotal(today)} · ${t('data.retained')} ${compactTotal(retained)}`
     : '');
   set('m-cache-hit-note', summary.cache_read_tokens != null ? `${fmtTok(cacheRead)} ${currentLang === 'zh' ? '读取' : 'read'}` : '');
   set('m-cost-note', Number(summary.unknown_cost_requests || 0) > 0 ? costCoverageNote(summary) : today.est_cost_usd != null
-    ? `${currentLang === 'zh' ? '今日' : 'Today'} (UTC) ${fmtAggregateCost(today)} · ${currentLang === 'zh' ? '累计' : 'All-time'} ${fmtAggregateCost(retained)}`
+    ? `${currentLang === 'zh' ? '今日' : 'Today'} (UTC) ${fmtAggregateCost(today)} · ${t('data.retained')} ${fmtAggregateCost(retained)}`
     : t('analytics.currencyUSD'));
   set('m-throughput', lastMinute.total_requests != null ? `${fmt(lastMinute.total_requests)} RPM` : '—');
   set('m-throughput-note', hasUsageTokens(lastMinute) ? `${compactTotal(lastMinute)} TPM` : '');
@@ -1603,11 +1717,20 @@ function resetHistoryFilters(refresh = true) {
   });
   window.CustomSelect?.syncAll();
   window.HistoryDateRange?.syncFromHidden();
+  syncAdvancedFilters(false);
   historyPage = 1;
   if (refresh) refreshHistory();
 }
 
+function syncAdvancedFilters(reveal = true) {
+  const count = ['model-filter', 'scenario-filter', 'streaming-filter', 'cost-source-filter']
+    .filter(id => document.getElementById(id)?.value.trim()).length;
+  document.getElementById('history-advanced-count').textContent = count ? String(count) : '';
+  if (reveal && count) document.getElementById('history-advanced-filters').open = true;
+}
+
 async function refreshHistory() {
+  syncAdvancedFilters(false);
   const seq = ++historyLoadSeq;
   const errorEl = document.getElementById('history-error');
   try {
@@ -1775,7 +1898,9 @@ function renderHistory() {
     historyTotal + t('status.count') + (historyHasFilters() ? t('status.filtered') : '');
 
   if (allHistory.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">' + t('empty.noHistory') + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">' + (historyHasFilters()
+      ? emptyStateContent('history.noMatches', 'history.emptyFiltersHint')
+      : emptyStateContent('empty.noHistory', 'data.localEmptyHint')) + '</td></tr>';
     return;
   }
 
@@ -1800,10 +1925,10 @@ function renderHistory() {
       ? ' <span class="badge badge-peak" title="' + t('history.peakWindow') + '">Peak ×' + pm + '</span>'
       : '';
     return `
-    <tr data-id="${escapeHtml(rowId)}" tabindex="0" aria-haspopup="dialog" style="cursor: pointer;">
-      <td>${fmtTime(h.start_time)}${peakMark}</td>
+    <tr data-id="${escapeHtml(rowId)}" tabindex="0" aria-haspopup="dialog" data-provider="${escapeHtml(h.provider || '')}" style="cursor: pointer;">
+      <td><time class="history-timestamp" datetime="${escapeHtml(h.start_time || '')}">${fmtTime(h.start_time)}<small>${fmtDate(h.start_time)}</small></time>${peakMark}</td>
       <td><div class="history-status-stack">${detailsKnown ? `<span class="badge ${h.success ? 'badge-success' : 'badge-error'}" title="${h.success ? t('badge.success') : t('badge.fail')}">${h.success ? t('badge.success') : t('badge.fail')}</span>` : `<span class="badge badge-unknown" title="${t('detail.unknown')}">${t('detail.unknown')}</span>`}<small class="history-stream-state">${streamLabel}</small></div></td>
-      <td><div class="history-model-cell"><strong>${escapeHtml(h.model) || '—'}</strong><small>${escapeHtml(h.provider) || '—'}</small></div></td>
+      <td><div class="history-model-cell"><strong title="${escapeHtml(h.model)}">${escapeHtml(h.model) || '—'}</strong><small>${escapeHtml(providerLabel(h.provider))}</small></div></td>
       <td><span class="badge badge-scene" title="${t('detail.scenario')}: ${escapeHtml(h.scenario) || '—'}">${escapeHtml(h.scenario) || '—'}</span></td>
       <td><button type="button" class="history-token-trigger" data-token-id="${escapeHtml(rowId)}" aria-label="${t('detail.title')}">${totalTokens.toLocaleString()}</button></td>
       <td>${cost}<br><small>${costSourceLabel(h.cost_source)}</small></td>
@@ -2106,6 +2231,14 @@ function providerColor(provider) {
   return PROVIDERS[String(provider || '').replace(/_/g, '-')]?.color || '#98989d';
 }
 
+function providerLabel(provider) {
+  return PROVIDERS[String(provider || '').replace(/_/g, '-')]?.name || provider || t('detail.unknown');
+}
+
+function emptyStateContent(titleKey, hintKey) {
+  return `<strong>${escapeHtml(t(titleKey))}</strong><p class="empty-state-note">${escapeHtml(t(hintKey))}</p>`;
+}
+
 function historyHasDetails(record) {
   return record.details_known !== false && typeof record.success === 'boolean';
 }
@@ -2330,6 +2463,12 @@ function fmtTime(iso) {
   const mm = d.getMinutes().toString().padStart(2,'0');
   const ss = d.getSeconds().toString().padStart(2,'0');
   return hh + ':' + mm + ':' + ss;
+}
+
+function fmtDate(iso) {
+  const date = new Date(iso);
+  if (!iso || !Number.isFinite(date.getTime())) return '—';
+  return date.toLocaleDateString(currentLang === 'zh' ? 'zh-CN' : 'en-US', {year: 'numeric', month: 'short', day: 'numeric'});
 }
 
 function fmtDuration(ms) {
@@ -2630,6 +2769,7 @@ function togglePasswordVisibility(id) {
 let historyRefreshTimer = null;
 
 function scheduleHistoryRefresh() {
+  syncAdvancedFilters(false);
   historyLoadSeq++;
   historyPage = 1;
   clearHistoryView(true);
@@ -2700,7 +2840,7 @@ function showHistoryDetail(record) {
         <div class="detail-context">
           <span>${escapeHtml(record.provider || '—')}</span>
           <span>${escapeHtml(record.scenario || '—')}</span>
-          <span>${fmtTime(record.start_time)}</span>
+          <span>${fmtDate(record.start_time)} ${fmtTime(record.start_time)}</span>
         </div>
       </div>
       <div class="detail-outcome">
@@ -3142,7 +3282,7 @@ const FallbackModule = {
     const chain = this.chains[this.currentScenario];
     const primary = currentProxyConfig?.models?.[this.currentScenario];
     const primaryEl = document.getElementById('fallback-primary');
-    if (primaryEl) primaryEl.textContent = `${t('fallback.primary')}: ${primary ? configModelKey(primary) : '—'}`;
+    if (primaryEl) primaryEl.textContent = primary ? configModelKey(primary) : '—';
     this.setStatus(t(this.originalChains && JSON.stringify(this.chains) !== JSON.stringify(this.originalChains)
       ? 'fallback.unsaved' : 'fallback.noChanges'));
 
@@ -3737,8 +3877,12 @@ const AnalyticsModule = {
       }
       this.currentView = summary;
       this.currentTrend = this.fillTrend(trend.trend || []);
+      document.getElementById('analytics-empty').hidden = summary.summary.total_requests !== 0;
+      document.getElementById('analytics-insights').hidden = summary.summary.total_requests === 0;
       this.renderKPIs(summary);
       this.renderDistributions(summary);
+      this.renderRequestTrend(this.currentTrend, 'analytics-request-trend');
+      this.renderTokenLines(this.currentTrend, 'analytics-token-trend');
       this.renderPeriodTable(this.currentTrend);
       this.renderModelTable(summary.models || []);
       this.renderRetainedRange(summary.summary || {});
@@ -3762,6 +3906,8 @@ const AnalyticsModule = {
     this.ready = false;
     this.currentView = null;
     this.currentTrend = [];
+    document.getElementById('analytics-empty').hidden = true;
+    document.getElementById('analytics-insights').hidden = false;
     ['kpi-requests','kpi-tokens','kpi-cost','kpi-input','kpi-cache-rate','kpi-output','kpi-cache-read','kpi-cache-write'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.textContent = loading ? '…' : '—';
@@ -3771,7 +3917,9 @@ const AnalyticsModule = {
       if (el) el.textContent = '';
     });
     const message = t(loading ? 'data.loading' : 'detail.unavailable');
-    document.getElementById('provider-distribution').innerHTML = `<div class="empty-state">${message}</div>`;
+    ['provider-distribution', 'analytics-request-trend', 'analytics-token-trend'].forEach(id => {
+      document.getElementById(id).innerHTML = `<div class="empty-state">${message}</div>`;
+    });
     document.getElementById('analytics-period-tbody').innerHTML = `<tr><td colspan="9" class="empty-state">${message}</td></tr>`;
     document.getElementById('analytics-model-tbody').innerHTML = `<tr><td colspan="5" class="empty-state">${message}</td></tr>`;
   },
@@ -3835,11 +3983,12 @@ const AnalyticsModule = {
     root.innerHTML = normalized.slice(0, 12).map(item => {
       const rawLabel = dimension === 'model' ? item.model : item.provider;
       const name = !rawLabel || rawLabel === 'unknown' ? t('detail.unknown') : rawLabel;
-      const label = dimension === 'model' && item.provider ? `${name} (${item.provider})` : name;
+      const label = dimension === 'provider' ? providerLabel(rawLabel)
+        : item.provider ? `${name} (${providerLabel(item.provider)})` : name;
       const value = Number(item[valueKey] || 0);
       const share = value / total * 100;
       const meta = `${Number(item.requests || 0).toLocaleString()} ${t('analytics.requests')} · ${fmtTok(item.total_tokens)} Token · ${fmtAggregateCost(item)}`;
-      return `<div class="analytics-distribution-row">
+      return `<div class="analytics-distribution-row" data-provider="${this.escapeHtml(item.provider || '')}">
         <div class="analytics-distribution-label"><span title="${this.escapeHtml(label)}">${this.escapeHtml(label)}</span><strong>${valueKey === 'cost_usd' ? fmtAggregateCost(item) : formatValue(value)}</strong></div>
         <div class="analytics-distribution-track"><span style="width:${Math.max(value > 0 ? 2 : 0, value / max * 100).toFixed(1)}%;--distribution-color:${providerColor(item.provider)}"></span></div>
         <small title="${this.escapeHtml(costCoverageNote(item))}">${meta}${incompleteCost ? '' : ` · ${share.toFixed(1)}%`}</small>
@@ -4025,7 +4174,7 @@ const AnalyticsModule = {
     body.innerHTML=(models||[]).map(item=>{
       const prompt=Number(item.input_tokens||0)+Number(item.cache_read_tokens||0)+Number(item.cache_creation_tokens||0);
       const rate=prompt>0?Number(item.cache_read_tokens||0)/prompt*100:0;
-      return `<tr><td><code>${this.escapeHtml(item.model||t('detail.unknown'))}</code><br><small>${this.escapeHtml(item.provider || t('detail.unknown'))}</small></td><td>${Number(item.requests||0).toLocaleString()}</td><td>${prompt>0?rate.toFixed(1)+'%':'—'}</td><td>${totalUsageTokens(item).toLocaleString()}</td><td title="${this.escapeHtml(costCoverageNote(item))}">${fmtAggregateCost(item)}</td></tr>`;
+      return `<tr data-provider="${this.escapeHtml(item.provider || '')}"><td><code title="${this.escapeHtml(item.model || '')}">${this.escapeHtml(item.model||t('detail.unknown'))}</code><br><small>${this.escapeHtml(providerLabel(item.provider))}</small></td><td>${Number(item.requests||0).toLocaleString()}</td><td>${prompt>0?rate.toFixed(1)+'%':'—'}</td><td>${totalUsageTokens(item).toLocaleString()}</td><td title="${this.escapeHtml(costCoverageNote(item))}">${fmtAggregateCost(item)}</td></tr>`;
     }).join('') || `<tr><td colspan="5" class="empty-state">${t('analytics.noData')}</td></tr>`;
   },
 
@@ -4212,6 +4361,9 @@ const QuotaModule = {
     if (unavailable) unavailable.hidden = isGo || isOpenRouter || isBedrock || isCommandCode;
     this.syncRefreshButton();
     const view = this.view?.provider && this.view.provider !== this.provider ? null : this.view;
+    const goSummary = document.getElementById('quota-go-summary');
+    if (goSummary) goSummary.hidden = !isGo || view?.accounts?.length !== 1
+      || !this.windowsOf(view.accounts[0]).some(item => item.window.has_percent);
     const meta = [];
     if (view?.status) meta.push(t('quota.status.' + view.status));
     if (view?.currency) meta.push(view.currency);
@@ -4409,7 +4561,7 @@ const QuotaModule = {
     const error = message => `<div class="quota-notice is-error" role="alert">${escapeHtml(message)}</div>`;
     if (account.error || !data) return `<section class="quota-account analytics-section">${head}${error(account.error || t('data.invalid'))}</section>`;
     const figures = rows => `<dl class="quota-figures">${rows.map(([label, value]) => `<div><dt>${t(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl>`;
-    const section = (title, content) => `<section class="commandcode-block"><h3 class="section-heading">${t(title)}</h3>${content}</section>`;
+    const section = (title, content, className = '') => `<section class="commandcode-block ${className}"><h3 class="section-heading">${t(title)}</h3>${content}</section>`;
     const utc = value => {
       const date = value ? new Date(value) : null;
       return date && Number.isFinite(date.getTime()) ? date.toISOString().replace('T', ' ').replace('.000Z', ' UTC') : '—';
@@ -4417,11 +4569,11 @@ const QuotaModule = {
     let credits = error(data.credits_error || t('detail.unavailable'));
     if (data.credits) {
       const balance = data.credits.credits;
-      credits = figures([
+      credits = '<div class="commandcode-credit-values">' + figures([
         ['commandcode.monthlyCredits', fmtCost(balance?.monthlyCredits)],
         ['commandcode.freeCredits', fmtCost(balance?.freeCredits)],
         ['commandcode.purchasedCredits', fmtCost(balance?.purchasedCredits)],
-      ]) + `<p class="page-meta">${t('commandcode.monthlyLimitUnknown')}</p>`;
+      ]) + `</div><p class="page-meta">${t('commandcode.monthlyLimitUnknown')}</p>`;
       const limits = data.credits.windowLimits;
       const windows = [['quota.rolling5h', limits?.fiveHour], ['quota.weekly', limits?.weekly]].filter(([, window]) => window);
       credits += `<h4 class="section-heading">${t('commandcode.windowLimits')}</h4>`;
@@ -4452,13 +4604,11 @@ const QuotaModule = {
       ['analytics.inputTokens', fmt(usage.totalTokensIn)], ['analytics.outputTokens', fmt(usage.totalTokensOut)],
       ['analytics.totalTokens', fmt(usage.totalTokens)], ['commandcode.usageCredits', fmtCost(usage.totalCredits)],
     ]) : `<p class="page-meta">${t('detail.unavailable')}</p>`;
-    return `<section class="quota-account analytics-section commandcode-account">${head}${section('commandcode.credits', credits)}${section('quota.plan', subscription)}${section('commandcode.usageSummary', summary)}</section>`;
+    return `<section class="quota-account commandcode-account">${head}<div class="commandcode-panels">${section('commandcode.credits', credits, 'commandcode-credits')}${section('quota.plan', subscription)}${section('commandcode.usageSummary', summary)}</div></section>`;
   },
 
   renderAccount(account) {
-    const head = account.key_hint
-      ? `<div class="quota-account-head"><span class="quota-key">${t('quota.keyLabel')} <code>${escapeHtml(account.key_hint)}</code></span></div>`
-      : '';
+    const head = `<div class="quota-account-head">${account.key_hint ? `<span class="quota-key">${t('quota.keyLabel')} <code>${escapeHtml(account.key_hint)}</code></span>` : ''}${account.report?.plan ? `<span class="quota-account-plan">${escapeHtml(account.report.plan)}</span>` : ''}</div>`;
     if (account.error) {
       return `<section class="quota-account">${head}
         <div class="quota-notice is-error" role="alert"><strong>${t('quota.loadFail')}</strong><span>${escapeHtml(account.error)}</span></div>

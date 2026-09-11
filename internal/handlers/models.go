@@ -3,7 +3,9 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 
+	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/router"
 )
 
@@ -51,6 +53,9 @@ func (h *ModelsHandler) HandleListModels(w http.ResponseWriter, r *http.Request)
 	}
 
 	infos := h.modelRouter.ListModels(r.Context())
+	slices.SortStableFunc(infos, func(a, b router.ModelInfo) int {
+		return config.CompareProviderDisplay(a.Provider, b.Provider)
+	})
 	data := make([]openAIModel, 0, len(infos))
 	for _, info := range infos {
 		data = append(data, openAIModel{

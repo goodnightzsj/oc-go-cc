@@ -35,7 +35,7 @@ func (d *Database) AnalyticsBaseline() time.Time {
 
 type Config struct {
 	DatabasePath    string `json:"database_path"`
-	RetentionDays   int    `json:"retention_days"`
+	RetentionDays   int    `json:"retention_days"` // Negative disables cleanup; zero uses the default.
 	VacuumOnStartup bool   `json:"vacuum_on_startup"`
 	WALEnabled      bool   `json:"wal_enabled"`
 	// AnalyticsBaseline optionally drops requests recorded before this instant

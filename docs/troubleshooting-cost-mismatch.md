@@ -2,6 +2,8 @@
 
 When the remote dashboard's cost statistics don't match OpenCode's official usage page, investigate these factors in order.
 
+For recovery, use the [current recovery procedure](history-recovery.md). The historical SQL and sync scripts below are not an unattended production restore procedure.
+
 ## 1. Data Integrity Issues
 
 ### Corrupted Records (Zero-Token Entries)
@@ -37,7 +39,7 @@ WHERE id IN (
 **Prevention:** 
 - Always validate sync data before import
 - Ensure `oc_sync.py` parses all token fields (input, output, cache_read)
-- **Split cache tokens when importing**: OpenCode reports `cacheReadTokens` as part of input in their ledger, but the proxy DB stores them separately. When importing, extract cache tokens from the input count to avoid double-counting.
+- **Use the raw token fields**: `usage.list.inputTokens` is non-cache-read input; store it as `input_tokens` and store `cacheReadTokens` separately. The visible input total combines these fields. Do not import that display total or subtract cache reads from the raw `inputTokens` again.
 
 ### Duplicate Records
 
@@ -246,4 +248,3 @@ ps aux | grep routatic-proxy | grep -v grep
 - `internal/storage/requests.go` — Cost calculation (`EstCostUSD`)
 - `/tmp/oc_sync.py` — Incremental sync from OpenCode usage.list to local TSV + remote DB
 - `docs/architecture.md` — Overall request flow and cost tracking
-

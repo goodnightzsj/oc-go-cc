@@ -1818,15 +1818,18 @@ function renderHistorySummary(summary) {
   set('history-summary-cost', fmtAggregateCost(summary));
   set('history-summary-cost-note', costCoverageNote(summary));
   renderCompactBreakdown('history-model-breakdown', summary.models || []);
-  renderCompactBreakdown('history-provider-breakdown', summary.providers || []);
+  renderCompactBreakdown('history-provider-breakdown', summary.providers || [], 'provider');
   renderCompactBreakdown('history-scenario-breakdown', summary.scenarios || []);
 }
 
-function renderCompactBreakdown(id, items) {
+function renderCompactBreakdown(id, items, dimension) {
   const root = document.getElementById(id);
   if (!root) return;
   const metricKey = historyBreakdownMetric === 'cost' ? 'cost_usd' : historyBreakdownMetric;
-  const top = [...items].sort((a, b) => Number(b[metricKey] || 0) - Number(a[metricKey] || 0)).slice(0, 5);
+  const sorted = [...items].sort((a, b) => dimension === 'provider'
+    ? compareProviderDisplay(a.name, b.name)
+    : Number(b[metricKey] || 0) - Number(a[metricKey] || 0));
+  const top = dimension === 'provider' ? sorted : sorted.slice(0, 5);
   if (!top.length) {
     root.innerHTML = `<span class="compact-breakdown-value">${t('analytics.noData')}</span>`;
     return;
@@ -2215,11 +2218,21 @@ function markPollFail() {
 /* ── Helpers ───────────────────────────────────────────────────── */
 const PROVIDERS = {
   'opencode-go': {name: 'OpenCode Go', color: '#818cf8'},
+  'commandcode': {name: 'CommandCode', color: '#22d3ee'},
   'opencode-zen': {name: 'OpenCode Zen', color: '#34d399'},
   'aws-bedrock': {name: 'AWS Bedrock', color: '#fbbf24'},
   'openrouter': {name: 'OpenRouter', color: '#fb7185'},
-  'commandcode': {name: 'CommandCode', color: '#22d3ee'},
 };
+
+// Display only: configured routing and fallback chains keep their own order.
+function compareProviderDisplay(a, b) {
+  const providers = Object.keys(PROVIDERS);
+  const rank = provider => {
+    const index = providers.indexOf(String(provider || '').replace(/_/g, '-'));
+    return index < 0 ? providers.length : index;
+  };
+  return rank(a) - rank(b) || String(a || '').localeCompare(String(b || ''));
+}
 
 async function fetchJSON(url, options) {
   const response = await fetch(url, options);
@@ -3255,7 +3268,9 @@ const FallbackModule = {
     if (!addSel) return;
     const chain = this.chains[this.currentScenario] || [];
     const available = this.availableModels
-      .filter(m => !chain.some(e => configModelKey(e) === configModelKey(m)));
+      .filter(m => !chain.some(e => configModelKey(e) === configModelKey(m)))
+      .sort((a, b) => compareProviderDisplay(a.provider || 'opencode-go', b.provider || 'opencode-go')
+        || a.model_id.localeCompare(b.model_id));
     addSel.innerHTML = '<option value="">' + t('fallback.selectModel') + '</option>' +
       available.map(m =>
         `<option value="${escapeHtml(configModelKey(m))}">${escapeHtml(m.model_id)} (${escapeHtml(m.provider || 'opencode-go')})</option>`
@@ -3564,7 +3579,8 @@ const TestModule = {
       // top-level "models" keys are routing scenarios (fast, default,
       // long_context, etc.), not real model IDs.
       const targets = {...data.model_family_overrides, ...data.model_overrides};
-      Object.keys(targets).sort().forEach(id => {
+      Object.keys(targets).sort((a, b) => compareProviderDisplay(targets[a].provider || 'opencode-go', targets[b].provider || 'opencode-go')
+        || a.localeCompare(b)).forEach(id => {
         const opt = document.createElement('option');
         opt.value = id;
         opt.textContent = `${id} · ${configModelKey(targets[id])}`;
@@ -3969,7 +3985,9 @@ const AnalyticsModule = {
       ...item,
       total_tokens: item.total_tokens ?? totalUsageTokens(item),
       cost_usd: item.cost_usd ?? item.est_cost_usd ?? 0,
-    })).sort((a, b) => Number(b[valueKey] || 0) - Number(a[valueKey] || 0));
+    })).sort((a, b) => dimension === 'provider'
+      ? compareProviderDisplay(a.provider, b.provider)
+      : Number(b[valueKey] || 0) - Number(a[valueKey] || 0));
     root.classList.toggle('is-single', normalized.length === 1);
     if (!normalized.length) {
       root.innerHTML = `<div class="empty-state">${t('analytics.noData')}</div>`;
@@ -3980,7 +3998,8 @@ const AnalyticsModule = {
     const incompleteCost = valueKey === 'cost_usd' && normalized.some(item => Number(item.unknown_cost_requests || 0) > 0);
     const formatValue = value => valueKey === 'cost_usd' ? fmtCost(value)
       : valueKey === 'requests' ? Number(value || 0).toLocaleString() : fmtTok(value);
-    root.innerHTML = normalized.slice(0, 12).map(item => {
+    const visible = dimension === 'provider' ? normalized : normalized.slice(0, 12);
+    root.innerHTML = visible.map(item => {
       const rawLabel = dimension === 'model' ? item.model : item.provider;
       const name = !rawLabel || rawLabel === 'unknown' ? t('detail.unknown') : rawLabel;
       const label = dimension === 'provider' ? providerLabel(rawLabel)

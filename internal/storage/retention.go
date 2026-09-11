@@ -15,7 +15,7 @@ type Retention struct {
 }
 
 func NewRetention(db *Database, days int) *Retention {
-	if days <= 0 {
+	if days == 0 {
 		days = 7
 	}
 	return &Retention{
@@ -38,6 +38,10 @@ func (r *Retention) Stop() {
 
 func (r *Retention) run() {
 	defer close(r.doneCh)
+	if r.days < 0 {
+		slog.Info("request retention cleanup disabled")
+		return
+	}
 
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()

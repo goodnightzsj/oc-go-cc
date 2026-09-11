@@ -29,7 +29,7 @@ async function checks() {
   fetch = normalFetch;
 
   const quotaSelect = page.match(/<select[^>]*id="quota-provider"[^>]*>([\s\S]*?)<\/select>/);
-  assert.equal(JSON.stringify([...quotaSelect[1].matchAll(/value="([^"]*)"/g)].map(match=>match[1])),JSON.stringify(providers));
+  assert.equal(JSON.stringify([...quotaSelect[1].matchAll(/value="([^"]*)"/g)].map(match=>match[1])),JSON.stringify(['opencode-go','commandcode','opencode-zen','aws-bedrock','openrouter']));
   assert.ok(page.includes('id="quota-local-error" hidden role="alert"'));
   assert.ok(page.includes('type="password" id="cfg-openrouter-management-key"'));
   assert.ok(CONFIG_FIELDS.some(field=>field[0] === 'openrouter.management_api_key' && field[1] === 'cfg-openrouter-management-key'));

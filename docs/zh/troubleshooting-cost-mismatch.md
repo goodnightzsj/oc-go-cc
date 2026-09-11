@@ -2,6 +2,8 @@
 
 当远端 Dashboard 的费用统计与 OpenCode 官方用量页面不一致时，按以下顺序排查。
 
+恢复数据应以[当前恢复流程](../history-recovery.md)为准。下文的历史 SQL 和旧同步脚本用于复盘，不应直接作为无人值守的生产恢复命令。
+
 ## 1. 数据完整性问题
 
 ### 脏数据（零 Token 记录）
@@ -37,7 +39,7 @@ WHERE id IN (
 **预防**：
 - 导入前验证同步数据
 - 确保 `oc_sync.py` 解析所有 token 字段（input、output、cache_read）
-- **导入时拆分缓存 token**：OpenCode 账本中 `cacheReadTokens` 计入 input，但代理 DB 单独存储。导入时需从 input 中提取缓存 token，避免重复计数
+- **使用原始 Token 字段**：`usage.list.inputTokens` 是不含缓存读取的输入，写入 `input_tokens`；`cacheReadTokens` 单独写入缓存列。页面可见输入合计才是两者相加，不能导入该显示合计，也不能从原始 `inputTokens` 再减一次缓存读取。
 
 ### 重复记录
 
@@ -220,4 +222,3 @@ ps aux | grep routatic-proxy | grep -v grep
 - `internal/storage/requests.go` — 费用计算（`EstCostUSD`）
 - `/tmp/oc_sync.py` — 从 OpenCode usage.list 增量同步到本地 TSV + 远端 DB
 - `docs/architecture.md` — 整体请求流程和费用追踪
-

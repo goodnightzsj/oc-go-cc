@@ -290,7 +290,7 @@ type LoggingConfig struct {
 // StorageConfig controls persistent storage settings.
 type StorageConfig struct {
 	DatabasePath    string `json:"database_path"`
-	RetentionDays   int    `json:"retention_days"`
+	RetentionDays   int    `json:"retention_days"` // Negative disables cleanup; zero or omitted keeps 7 days.
 	VacuumOnStartup bool   `json:"vacuum_on_startup"`
 
 	// WALEnabled is a pointer so an explicit false stays distinguishable from

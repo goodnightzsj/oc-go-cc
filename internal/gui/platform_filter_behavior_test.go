@@ -79,7 +79,7 @@ async function checks() {
     const select = page.match(new RegExp('<select[^>]*id="' + id + '"[^>]*>([\\s\\S]*?)</select>'));
     assert.ok(select, 'missing platform filter: ' + id);
     const choices = [...select[1].matchAll(/value="([^"]*)"/g)].map(match => match[1]);
-    assert.equal(JSON.stringify(choices), JSON.stringify(['', ...providers]), 'all five choices plus reset: ' + id);
+    assert.equal(JSON.stringify(choices), JSON.stringify(['', 'opencode-go','commandcode','opencode-zen','aws-bedrock','openrouter']), 'all five choices plus reset: ' + id);
     assert.ok(get(id).listeners.change?.length, 'filter must actually refresh: ' + id);
   }
   for (const id of ['overview-error','perf-error','analytics-error']) {

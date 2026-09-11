@@ -1,0 +1,6 @@
+id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,notes
+1,追溯最终同步流程并取得官方和备份证据,FAILED,来源只限本项目session;官方分页完整性与备份范围明确,echo SKIP,,3,仅白名单再次提取3062及4450最终记录;生产requests0及原始账单1390未变;Edge9222本轮30秒握手未获回应;已请用户允许调试;旧6561条不是当前全量
+2,实现真正关闭清理并回归,DONE,禁用不删除旧记录;缺省仍7天;全部调用方一致,go test -race ./internal/storage ./internal/config -count=1,2026-09-12,0,TestRetentionPolicy.disabled先失败后修复;负值在调度前退出;0和缺省继续7天;storage/config race通过;待部署
+3,隔离演练官方与备份对账恢复,IN_PROGRESS,模型平台时间Token费用正确;不重复或删除无关记录;二次演练零新增,echo SKIP,,0,现存1390原始账单子集演练通过;Token费用逐项一致且二次零新增;全量仍待Edge官方导出
+4,备份并部署关闭清理后事务恢复,IN_PROGRESS,独立备份有效;清理已禁用;事务成功且其他表与平台不受影响,echo SKIP,,0,本地发布门禁通过;先备份和禁用清理再恢复已验证1390条子集;全量验收仍保留
+5,核对线上历史与持续保留结果,TODO,计数Token费用与演练一致;原Edge能显示真实恢复记录,echo SKIP,,0,

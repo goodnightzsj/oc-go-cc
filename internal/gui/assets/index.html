@@ -64,7 +64,7 @@
         <label for="overview-provider" data-i18n="filter.provider">Provider</label>
         <select class="filter-select" id="overview-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
           <option value="" data-i18n-option="filter.allProviders">All platforms</option>
-          <option value="opencode-go">OpenCode Go</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option><option value="commandcode">CommandCode</option>
+          <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option>
         </select>
         <div class="metric-segment range-segment" id="overview-range" role="group" aria-label="Dashboard range">
           <button type="button" data-days="7" class="active" data-i18n="analytics.last7d">Last 7 days</button>
@@ -167,7 +167,7 @@
         </div>
         <select class="filter-select" id="provider-filter" aria-label="Provider" data-i18n-aria-label="filter.provider">
           <option value="" data-i18n-option="filter.allProviders">All platforms</option>
-          <option value="opencode-go">OpenCode Go</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option><option value="commandcode">CommandCode</option>
+          <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option>
         </select>
         <select class="filter-select" id="status-filter" aria-label="Filter by status">
           <option value="" data-i18n-option="filter.allStatuses">All statuses</option>
@@ -362,7 +362,7 @@
       <label for="perf-provider" data-i18n="filter.provider">Provider</label>
       <select class="filter-select" id="perf-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
         <option value="" data-i18n-option="filter.allProviders">All platforms</option>
-        <option value="opencode-go">OpenCode Go</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option><option value="commandcode">CommandCode</option>
+        <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option>
       </select>
       <select class="filter-select" id="perf-time-range" aria-label="Time range filter">
         <option value="1h" data-i18n="perf.lastHour">Last Hour</option>
@@ -448,7 +448,7 @@
           <label for="analytics-provider" data-i18n="filter.provider">Provider</label>
           <select class="filter-select" id="analytics-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
             <option value="" data-i18n-option="filter.allProviders">All platforms</option>
-            <option value="opencode-go">OpenCode Go</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option><option value="commandcode">CommandCode</option>
+            <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option>
           </select>
           <button class="btn btn-small" id="btn-refresh-analytics" data-i18n="analytics.refresh">Refresh</button>
         </div>
@@ -557,7 +557,7 @@
         <div class="page-toolbar analytics-controls">
           <label class="sr-only" for="quota-provider" data-i18n="filter.provider">Provider</label>
           <select class="filter-select" id="quota-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
-            <option value="opencode-go">OpenCode Go</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option><option value="commandcode">CommandCode</option>
+            <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option>
           </select>
           <button type="button" class="btn btn-small" id="quota-open-settings" data-i18n="quota.openSettings">Platform settings</button>
           <button class="btn btn-small btn-icon" id="btn-refresh-quota"><svg width="14" height="14"><use href="#icon-refresh"/></svg><span class="sr-only" data-i18n="quota.refresh">Refresh</span></button>
@@ -729,7 +729,7 @@
 
     <div class="settings-config-heading"><h2 class="section-heading" data-i18n="section.proxyConfig">Proxy Configuration</h2>
       <label class="sr-only" for="settings-provider-jump" data-i18n="setting.platformJump">Jump to platform</label>
-      <select id="settings-provider-jump" class="filter-select"><option value="" data-i18n-option="setting.platformJump">Jump to platform</option><option value="opencode-go">OpenCode Go</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option><option value="commandcode">CommandCode</option></select>
+      <select id="settings-provider-jump" class="filter-select"><option value="" data-i18n-option="setting.platformJump">Jump to platform</option><option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option></select>
     </div>
     <div class="settings-config">
       <p class="page-meta" id="provider-timeout-hint" data-i18n="label.timeoutHint">0 uses the provider default. Idle timeout limits gaps between streamed data; attempt timeout limits the entire streaming request.</p>
@@ -775,6 +775,45 @@
           <label for="cfg-go-streaming-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamingTimeout">Streaming attempt timeout (ms)</label>
           <input type="number" id="cfg-go-streaming-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
         </div>
+        </div>
+      </details>
+
+      <details class="config-section" data-settings-provider="commandcode">
+        <summary><span class="provider-mark" aria-hidden="true">Cc</span><span class="provider-name">CommandCode</span><span class="provider-capability" data-i18n="setting.commandcodeHint">Native Messages &amp; Alpha account</span></summary>
+        <div class="config-fields">
+        <p class="text-xs text-[#98989d] mb-2" data-i18n="commandcode.keyHint">Uses its own API key; global keys are never sent to CommandCode.</p>
+        <div class="mb-2">
+          <label for="cfg-commandcode-base-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.chatURL">Chat Completions URL</label>
+          <input type="url" id="cfg-commandcode-base-url" placeholder="https://api.commandcode.ai/provider/v1/chat/completions" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-commandcode-anthropic-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.messagesURL">Anthropic Messages URL</label>
+          <input type="url" id="cfg-commandcode-anthropic-url" placeholder="https://api.commandcode.ai/provider/v1/messages" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-commandcode-api-key" class="block text-[11px] font-medium text-[#98989d] mb-0.5">API Key</label>
+          <input type="password" id="cfg-commandcode-api-key" placeholder="" autocomplete="new-password" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-commandcode-api-keys" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.apiKeys">API keys (comma-separated, takes precedence over the single key)</label>
+          <input type="password" id="cfg-commandcode-api-keys" autocomplete="new-password" aria-describedby="api-keys-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-commandcode-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.requestTimeout">Request timeout (ms)</label>
+          <input type="number" id="cfg-commandcode-timeout" placeholder="300000" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-commandcode-stream-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamIdleTimeout">Stream idle timeout (ms)</label>
+          <input type="number" id="cfg-commandcode-stream-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-commandcode-streaming-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamingTimeout">Streaming attempt timeout (ms)</label>
+          <input type="number" id="cfg-commandcode-streaming-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <label class="flex items-center gap-1.5 text-xs mb-2"><input type="checkbox" id="cfg-commandcode-zdr"><span data-i18n="commandcode.zdr">Zero Data Retention (ZDR)</span></label>
+        <p class="text-xs text-[#98989d]" data-i18n="commandcode.quotaHint">Queries the official Alpha account endpoints with this platform’s API key. No browser session is required. Alpha response fields may change.</p>
+        <a class="btn btn-small" href="https://commandcode.ai/docs/provider" target="_blank" rel="noopener noreferrer" data-i18n="commandcode.docs">Provider API docs</a>
+        <a class="btn btn-small" href="https://commandcode.ai/settings/keys" target="_blank" rel="noopener noreferrer" data-i18n="commandcode.keys">Manage API keys</a>
         </div>
       </details>
 
@@ -922,45 +961,6 @@
           <label for="cfg-openrouter-streaming-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamingTimeout">Streaming attempt timeout (ms)</label>
           <input type="number" id="cfg-openrouter-streaming-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
         </div>
-        </div>
-      </details>
-
-      <details class="config-section" data-settings-provider="commandcode">
-        <summary><span class="provider-mark" aria-hidden="true">Cc</span><span class="provider-name">CommandCode</span><span class="provider-capability" data-i18n="setting.commandcodeHint">Native Messages &amp; Alpha account</span></summary>
-        <div class="config-fields">
-        <p class="text-xs text-[#98989d] mb-2" data-i18n="commandcode.keyHint">Uses its own API key; global keys are never sent to CommandCode.</p>
-        <div class="mb-2">
-          <label for="cfg-commandcode-base-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.chatURL">Chat Completions URL</label>
-          <input type="url" id="cfg-commandcode-base-url" placeholder="https://api.commandcode.ai/provider/v1/chat/completions" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-commandcode-anthropic-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.messagesURL">Anthropic Messages URL</label>
-          <input type="url" id="cfg-commandcode-anthropic-url" placeholder="https://api.commandcode.ai/provider/v1/messages" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-commandcode-api-key" class="block text-[11px] font-medium text-[#98989d] mb-0.5">API Key</label>
-          <input type="password" id="cfg-commandcode-api-key" placeholder="" autocomplete="new-password" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-commandcode-api-keys" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.apiKeys">API keys (comma-separated, takes precedence over the single key)</label>
-          <input type="password" id="cfg-commandcode-api-keys" autocomplete="new-password" aria-describedby="api-keys-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-commandcode-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.requestTimeout">Request timeout (ms)</label>
-          <input type="number" id="cfg-commandcode-timeout" placeholder="300000" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-commandcode-stream-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamIdleTimeout">Stream idle timeout (ms)</label>
-          <input type="number" id="cfg-commandcode-stream-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-commandcode-streaming-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamingTimeout">Streaming attempt timeout (ms)</label>
-          <input type="number" id="cfg-commandcode-streaming-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <label class="flex items-center gap-1.5 text-xs mb-2"><input type="checkbox" id="cfg-commandcode-zdr"><span data-i18n="commandcode.zdr">Zero Data Retention (ZDR)</span></label>
-        <p class="text-xs text-[#98989d]" data-i18n="commandcode.quotaHint">Queries the official Alpha account endpoints with this platform’s API key. No browser session is required. Alpha response fields may change.</p>
-        <a class="btn btn-small" href="https://commandcode.ai/docs/provider" target="_blank" rel="noopener noreferrer" data-i18n="commandcode.docs">Provider API docs</a>
-        <a class="btn btn-small" href="https://commandcode.ai/settings/keys" target="_blank" rel="noopener noreferrer" data-i18n="commandcode.keys">Manage API keys</a>
         </div>
       </details>
 

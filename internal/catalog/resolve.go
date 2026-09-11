@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/routatic/proxy/internal/config"
 )
 
 // ParseModelRef parses a model reference string into a Selector.
@@ -146,7 +148,8 @@ func (ic *IndexedCatalog) resolveFromMatches(short string, matches []string) (Re
 	for _, key := range enabled {
 		providers = append(providers, ProviderFromModelKey(key))
 	}
-	slices.Sort(providers)
+	slices.SortFunc(providers, config.CompareProviderDisplay)
+	providers = slices.Compact(providers)
 	return ResolvedModel{}, fmt.Errorf("ambiguous model %q: available on multiple providers [%s] - use provider/model-id format", short, strings.Join(providers, ", "))
 }
 

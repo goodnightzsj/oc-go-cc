@@ -70,3 +70,29 @@ func TestHandleListModels_RejectsNonGET(t *testing.T) {
 		t.Fatalf("status = %d, want %d", got, want)
 	}
 }
+
+func TestHandleListModels_ProviderDisplayOrder(t *testing.T) {
+	cfg := &config.Config{Models: map[string]config.ModelConfig{
+		"a-bedrock": {Provider: "aws-bedrock", ModelID: "model"},
+		"b-router":  {Provider: "openrouter", ModelID: "model"},
+		"c-zen":     {Provider: "opencode-zen", ModelID: "model"},
+		"d-command": {Provider: "commandcode", ModelID: "model"},
+		"z-go":      {Provider: "opencode-go", ModelID: "model"},
+	}}
+	handler := NewModelsHandler(router.NewModelRouter(config.NewAtomicConfig(cfg, "")))
+	recorder := httptest.NewRecorder()
+	handler.HandleListModels(recorder, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	var result openAIModelList
+	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"opencode-go", "commandcode", "opencode-zen", "aws-bedrock", "openrouter"}
+	if len(result.Data) != len(want) {
+		t.Fatalf("models = %d, want %d", len(result.Data), len(want))
+	}
+	for i, provider := range want {
+		if result.Data[i].OwnedBy != provider {
+			t.Fatalf("model %d provider = %q, want %q", i, result.Data[i].OwnedBy, provider)
+		}
+	}
+}

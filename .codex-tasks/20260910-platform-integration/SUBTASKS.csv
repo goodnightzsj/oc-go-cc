@@ -10,4 +10,4 @@ id,task,task_type,status,depends_on,task_dir,acceptance_criteria,validation_comm
 9,Edge核实并接入CommandCode套餐数据,single-full,DONE,6,tasks/09-commandcode-account,真实页面接口和认证有证据;可用接口实现与失败路径验证;不导出凭证,go test ./internal/quota ./internal/gui -count=1,2026-09-11,0,线上e29e79f与UI01d300b9dadf实测available;三块账户均成功;仅保存白名单数据
 10,实施多平台UIUX美化并发布验收,single-full,DONE,7,tasks/10-uiux-implementation,七页层级和键盘移动端改进;五平台数据配置合同不变;Edge远端验收通过,go test -race -p 2 ./... -count=1,2026-09-11,1,上一轮实现已部署;Edge29组合70布局通过;7项脚本误判经真实按键和AX复核通过;用户要求进一步重设计见#12
 11,分析远端Go历史数据消失,single-full,DONE,6,tasks/11-go-history-diagnosis,运行DB与备份计数有证据;查询和删除链路明确;不修改远端账本,echo SKIP,2026-09-11,0,实际默认7天retention;1390条原始数据/8月备份仍在;本次发布前已requests0;报告7链接/JSON/diff检查通过;未恢复
-12,参考sub2api与new-api重设计七页,single-full,IN_PROGRESS,10;11,tasks/12-console-redesign,七页导航与数据层级重设计;五平台与计费语义不变;全量回归和Edge远端验收,go test -race -p 2 ./... -count=1,,0,已核实参考组件;侧栏/统一工作台/套餐层级方向;保留原生前端和全部计费接口
+12,参考sub2api与new-api重设计七页,single-full,DONE,10;11,tasks/12-console-redesign,七页导航与数据层级重设计;五平台与计费语义不变;全量回归和Edge远端验收,go test -race -p 2 ./... -count=1,2026-09-12,2,b3c947d已部署;660/1094 race与vet六目标通过;原Edge563检查29组合70布局通过;保留两次脚本失败;未恢复Go历史或改变保留策略

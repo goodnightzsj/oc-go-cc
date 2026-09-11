@@ -3,13 +3,13 @@
 ## Context Recovery Block
 
 - 任务：修复全部已报告问题，独立接入 CommandCode，融合有价值的上游更新，分析 Codex/Claude Code 对接。
-- 形态：epic；10/12 子任务完成；#8真实账户缺口保留，#11 Go历史消失诊断完成，当前#12七页重新设计。
-- 当前：e29e79f已部署并经原Edge验收；CommandCode三块真实账户可用。用户要求先解释Go旧数据消失，再参考sub2api/new-api重做所有页面。
-- 真源：SUBTASKS.csv；当前 tasks/12-console-redesign/TODO.csv。
+- 形态：epic；11/12 子任务完成；#11 Go历史诊断和#12七页重设计完成，#8真实账户缺口仍保留。
+- 当前：b3c947d已部署，UIe12b7231828e经原Edge563项检查与逐页视觉复核；CommandCode三块真实账户可用。最新两项用户请求已交付，没有恢复Go旧记录或调整retention。
+- 真源：SUBTASKS.csv；#12的tasks/12-console-redesign/TODO.csv已5/5；未完成项为tasks/08-account-validation/TODO.csv。
 - 起点：main，HEAD 684235d，初始工作区干净。origin=goodnightzsj/oc-go-cc；upstream=samueltuyizere/oc-go-cc（GitHub）。
 - 已知：上轮 /tmp/oc-go-cc-review.WPJFmt/ 与 /tmp/oc-go-cc-routing-review.yHSDWm/ 有合成复现；本轮不依赖缓存成功。全量基线有 tokenizer 外网 EOF、日期过期测试失败；init 测试未隔离 HOME。
 - 不读取或输出真实凭证，不读取本地真实 DB；部署已获授权但须在实现与验证完成后进行，部署前读 SSH 运行手册。
-- 下一步：#12七页实现与全量门禁已通过，已备份配置和DB；提交推送部署后以原Edge验收。数据缺失为7天retention机制能解释的展示表空，删除时刻无法追溯；不恢复或更改策略。Edge单连接/tmp/oc-go-cc-edge-remote.Peo95y/driver.mjs继续复用，任务完成才断开。
+- 下一步：交付诊断及新版验收结果后停止；#8须账户授权/配置或公开合同才能继续。7天retention机制能解释展示表空，删除时刻不可追溯；未经授权不恢复或更改策略。Edge已恢复状态并正常断开，浏览器调试开关需用户关闭。
 - 最新要求已落实：先核实 CommandCode 官网；Claude 模型走原生 Messages，Codex 公开合同缺口使用本项目 Responses 适配，并参考 MAXeaglet 的公开协议行为。日志、套餐入口、统计与独立配置保留并通过验收。
 
 ## 2026-09-10 启动
@@ -169,3 +169,11 @@
 - CommandCode三块账户available，月度剩余70、窗口0/14和0/35、individual-goat/active；未触发付费生成或AWS查询。#9/#10第一轮实施完成，但不是用户最终视觉验收。
 - 用户新增两个交付：分析Go旧数据消失；参考sub2api/new-api重设计全部七页。新增#11/#12，不能用旧美化结项替代新要求。
 - 只读SSH确认服务使用原data.db，quick_check=ok，requests0/provider_usage1390；疑似默认7天保留，正在核实配置和备份。未经授权不执行恢复/回填/更改保留天数。
+
+## 七页新版最终交付（2026-09-12）
+
+- b3c947d与UIe12b7231828e已上线；原Edge563检查、29平台/页面组合、70布局通过，468只读请求、0页面异常或意外写请求，已逐页检查桌面/手机截图。
+- 原driver退出导致的两次脚本失败均保留；重新附加同一已打开Edge后全程保持连接完成验收，最后恢复页面状态并关闭连接，没有重启浏览器。
+- 发布前660顶层/1094含子测试race、vet、六目标构建、显式Codex工具往返通过；本次源码散列核对一致，不重跑无变化源码。
+- 只读远端健康与计数仍为active/running、NRestarts0、requests0/provider_usage1390；Go原始账单和旧备份仍在。未恢复/调整保留策略，未冒充真实非空请求表的线上验证。
+- #12完成，Epic11/12；#8的Go账户失败、Zen合同缺口、AWS账单未启用与OpenRouter未配置继续保留。CommandCode三块账户available不代表其余平台已获得账户权限。

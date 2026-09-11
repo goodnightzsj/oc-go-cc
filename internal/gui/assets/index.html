@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>routatic-proxy Console</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="stylesheet" href="compiled-tailwind.css">
@@ -19,41 +19,48 @@
     <path d="M21 3v6h-6"></path>
   </symbol>
 </svg>
-<div class="flex flex-col h-screen">
-  <header class="app-header" style="-webkit-app-region: drag">
-    <div class="flex items-center gap-2">
-      <div class="flex items-center gap-2 font-semibold text-sm">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-        </svg>
-        <span>routatic-proxy</span>
-      </div>
+<a class="skip-link" href="#main-content" data-i18n="shell.skip">Skip to content</a>
+<div class="app-layout">
+  <aside class="app-sidebar">
+    <div class="sidebar-brand">
+      <svg class="brand-mark" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+      <div class="brand-copy"><strong>routatic-proxy</strong><span class="brand-caption">API Console</span></div>
     </div>
-    <div class="flex items-center gap-1.5 text-xs text-[#98989d]" style="-webkit-app-region: no-drag">
+    <nav class="app-nav" id="app-navigation" aria-label="Primary navigation" data-i18n-aria-label="shell.navigation">
+      <span class="nav-section-label" data-i18n="shell.workspace">Workspace</span>
+      <button type="button" class="tab active" data-tab="overview" id="nav-overview" aria-controls="tab-overview" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span data-i18n="tab.overview">Overview</span></button>
+      <button type="button" class="tab" data-tab="history" id="nav-history" aria-controls="tab-history"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span data-i18n="tab.history">History</span></button>
+      <button type="button" class="tab" data-tab="performance" id="nav-performance" aria-controls="tab-performance"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span data-i18n="tab.performance">Performance</span></button>
+      <button type="button" class="tab" data-tab="fallback" id="nav-fallback" aria-controls="tab-fallback"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/><path d="M6 7v10M6 10h7a5 5 0 0 1 5 5v2"/></svg><span data-i18n="tab.fallback">Fallback</span></button>
+      <button type="button" class="tab" data-tab="analytics" id="nav-analytics" aria-controls="tab-analytics"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3v17h17M9 15v-4M14 15V6M19 15v-7"/></svg><span data-i18n="tab.analytics">Analytics</span></button>
+      <span class="nav-section-label" data-i18n="shell.management">Management</span>
+      <button type="button" class="tab" data-tab="quota" id="nav-quota" aria-controls="tab-quota"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h3"/></svg><span data-i18n="tab.quota">Usage &amp; Billing</span></button>
+      <button type="button" class="tab" data-tab="settings" id="nav-settings" aria-controls="tab-settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h6m4 0h6M4 17h10m4 0h2"/><circle cx="12" cy="7" r="2"/><circle cx="16" cy="17" r="2"/></svg><span data-i18n="tab.settings">Settings</span></button>
+    </nav>
+    <div class="sidebar-footer"><span data-i18n="shell.platforms">Five platforms. One workspace.</span><div id="ui-build" class="ui-build" title=""></div></div>
+  </aside>
+  <header class="app-header" style="-webkit-app-region: drag">
+    <div class="header-context"><span class="header-eyebrow" data-i18n="shell.console">Console</span><span aria-hidden="true">/</span><strong id="active-page-title" data-i18n="tab.overview">Overview</strong></div>
+    <div class="header-actions" style="-webkit-app-region: no-drag">
       <div class="status-badge flex items-center gap-1.5" id="status-badge" role="status" aria-live="polite">
         <span class="status-dot" id="status-dot" aria-hidden="true"></span>
         <span id="status-text" data-i18n="status.checking">Checking...</span>
       </div>
       <span class="px-1.5 py-0.5 rounded bg-[#ff453a]/20 text-[#ff6b5e] font-medium" id="conn-stale" hidden role="alert"></span>
+      <button type="button" class="btn btn-small" id="btn-lang-toggle" onclick="toggleLanguage()"><span data-i18n="lang.toggle">中文</span></button>
+      <button type="button" class="btn btn-small btn-icon" id="btn-theme-toggle" aria-label="Switch color theme"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/></svg><span class="sr-only" id="theme-action"></span></button>
     </div>
   </header>
-
-  <nav class="app-nav" aria-label="Primary navigation">
-    <button class="tab px-4 py-1.5 border-none bg-transparent text-[#98989d] hover:text-[#f5f5f7] hover:bg-[#3a3a3c] cursor-pointer text-[13px] rounded-t transition-colors active" data-tab="overview" data-i18n="tab.overview">Overview</button>
-    <button class="tab px-4 py-1.5 border-none bg-transparent text-[#98989d] hover:text-[#f5f5f7] hover:bg-[#3a3a3c] cursor-pointer text-[13px] rounded-t transition-colors" data-tab="history" data-i18n="tab.history">History</button>
-    <button class="tab px-4 py-1.5 border-none bg-transparent text-[#98989d] hover:text-[#f5f5f7] hover:bg-[#3a3a3c] cursor-pointer text-[13px] rounded-t transition-colors" data-tab="performance" data-i18n="tab.performance">Performance</button>
-    <button class="tab px-4 py-1.5 border-none bg-transparent text-[#98989d] hover:text-[#f5f5f7] hover:bg-[#3a3a3c] cursor-pointer text-[13px] rounded-t transition-colors" data-tab="fallback" data-i18n="tab.fallback">Fallback</button>
-    <button class="tab px-4 py-1.5 border-none bg-transparent text-[#98989d] hover:text-[#f5f5f7] hover:bg-[#3a3a3c] cursor-pointer text-[13px] rounded-t transition-colors" data-tab="analytics" data-i18n="tab.analytics">Analytics</button>
-    <button class="tab px-4 py-1.5 border-none bg-transparent text-[#98989d] hover:text-[#f5f5f7] hover:bg-[#3a3a3c] cursor-pointer text-[13px] rounded-t transition-colors" data-tab="quota" data-i18n="tab.quota">Quota</button>
-    <button class="tab px-4 py-1.5 border-none bg-transparent text-[#98989d] hover:text-[#f5f5f7] hover:bg-[#3a3a3c] cursor-pointer text-[13px] rounded-t transition-colors" data-tab="settings" data-i18n="tab.settings">Settings</button>
-  </nav>
+  <main class="app-main" id="main-content" tabindex="-1">
 
   <!-- Overview Tab -->
   <div class="tab-content flex-1 overflow-y-auto active" id="tab-overview">
     <div class="page-shell overview-page">
     <div class="page-heading analytics-heading">
-      <div><h1 data-i18n="overview.title">Dashboard</h1><span class="page-meta" id="overview-generated"></span><span class="page-meta" id="overview-latency"></span></div>
-      <div class="analytics-controls">
+      <div><h1 data-i18n="overview.title">Dashboard</h1><p class="page-meta" data-i18n="overview.description">A clear view of traffic, cost and service health.</p></div>
+      <div class="page-updated"><span class="page-meta" id="overview-generated"></span><span class="page-meta" id="overview-latency"></span></div>
+    </div>
+      <div class="page-toolbar analytics-controls">
         <label for="overview-provider" data-i18n="filter.provider">Provider</label>
         <select class="filter-select" id="overview-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
           <option value="" data-i18n-option="filter.allProviders">All platforms</option>
@@ -66,8 +73,7 @@
         </div>
         <button type="button" class="btn btn-small" id="btn-refresh-overview" data-i18n="analytics.refresh">Refresh</button>
       </div>
-    </div>
-    <p class="page-meta" data-i18n="history.localScope">Statistics use records kept by this instance, including synced bills and local estimates. Direct-to-platform traffic may not be recorded here.</p>
+    <p class="page-meta scope-note" data-i18n="history.localScope">Statistics use records kept by this instance, including synced bills and local estimates. Direct-to-platform traffic may not be recorded here.</p>
     <p id="overview-error" hidden role="alert" style="color:var(--ui-red)"></p>
     <div class="metric-band metric-grid overview-metrics reference-metrics">
       <div class="metric-cell overview-metric">
@@ -80,16 +86,6 @@
         <div class="text-[26px] font-bold tabular-nums" id="m-tokens">--</div>
         <div class="metric-note" id="m-tokens-note"></div>
       </div>
-      <div class="metric-cell overview-metric metric-secondary">
-        <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="analytics.cacheHitShort">Cache hit</div>
-        <div class="text-[26px] font-bold tabular-nums" id="m-cache-hit">--</div>
-        <div class="metric-note" id="m-cache-hit-note"></div>
-      </div>
-      <div class="metric-cell overview-metric metric-secondary">
-        <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="analytics.throughput">Average throughput</div>
-        <div class="text-[26px] font-bold tabular-nums" id="m-throughput">--</div>
-        <div class="metric-note" id="m-throughput-note"></div>
-      </div>
       <div class="metric-cell overview-metric">
         <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="history.successRate">Success rate</div>
         <div class="text-[26px] font-bold tabular-nums" id="m-success">--</div>
@@ -101,6 +97,12 @@
         <div class="metric-note" id="m-cost-note" data-i18n="analytics.currencyUSD">USD</div>
       </div>
     </div>
+    <div class="overview-health-strip">
+      <div class="metric-cell"><span class="metric-label" data-i18n="analytics.cacheHitShort">Cache hit</span><strong id="m-cache-hit">--</strong><span class="metric-note" id="m-cache-hit-note"></span></div>
+      <div class="metric-cell"><span class="metric-label" data-i18n="analytics.throughput">Last-minute throughput</span><strong id="m-throughput">--</strong><span class="metric-note" id="m-throughput-note"></span></div>
+    </div>
+    <div class="empty-state ledger-empty" id="overview-empty" hidden><strong data-i18n="data.localEmpty">No retained requests in this view</strong><p data-i18n="data.localEmptyHint">Check the filters and retention policy. An empty local ledger does not mean no platform usage.</p></div>
+    <div id="overview-insights">
     <div class="analytics-chart-grid">
       <section class="analytics-section analytics-trend-section"><div class="section-heading" data-i18n="analytics.requestTrend">Request trend</div><div class="analytics-chart analytics-trend" id="overview-request-trend"></div></section>
       <section class="analytics-section analytics-trend-section"><div class="section-heading" data-i18n="analytics.tokenTrend">Token trend</div><div class="analytics-chart analytics-trend" id="overview-token-trend"></div></section>
@@ -117,6 +119,7 @@
       <section class="analytics-section"><div class="section-heading" data-i18n="analytics.byProvider">Platform distribution</div><div class="analytics-distribution" id="overview-provider-distribution"></div></section>
       <section class="analytics-section"><div class="section-heading" data-i18n="analytics.byModel">Model distribution</div><div class="analytics-distribution" id="overview-model-distribution"></div></section>
     </div>
+    </div>
     <div id="model-list" hidden></div>
       </div>
   </div>
@@ -131,7 +134,7 @@
         </div>
         <button class="btn btn-small command-button" id="history-export" data-i18n="export.csv">Export CSV</button>
       </div>
-      <p class="page-meta" data-i18n="history.localScope">Statistics use records kept by this instance, including synced bills and local estimates. Direct-to-platform traffic may not be recorded here.</p>
+      <p class="page-meta scope-note" data-i18n="history.localScope">Statistics use records kept by this instance, including synced bills and local estimates. Direct-to-platform traffic may not be recorded here.</p>
       <p id="history-error" hidden role="alert" style="color:var(--ui-red)"></p>
       <div class="history-filter-band" aria-label="History filters">
         <div class="history-search-wrap">
@@ -162,29 +165,34 @@
             </div>
           </div>
         </div>
-        <input type="text" id="model-filter" class="history-filter-input" placeholder="Model" data-i18n-placeholder="filter.model" aria-label="Filter by model">
         <select class="filter-select" id="provider-filter" aria-label="Provider" data-i18n-aria-label="filter.provider">
           <option value="" data-i18n-option="filter.allProviders">All platforms</option>
           <option value="opencode-go">OpenCode Go</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option><option value="commandcode">CommandCode</option>
         </select>
-        <input type="text" id="scenario-filter" class="history-filter-input" placeholder="Scenario" data-i18n-placeholder="filter.scenario" aria-label="Filter by scenario">
         <select class="filter-select" id="status-filter" aria-label="Filter by status">
           <option value="" data-i18n-option="filter.allStatuses">All statuses</option>
           <option value="true" data-i18n-option="filter.success">Success only</option>
           <option value="false" data-i18n-option="filter.failed">Failed only</option>
         </select>
-        <select class="filter-select" id="streaming-filter" aria-label="Filter by request type">
+        <button class="btn btn-small" id="history-reset" data-i18n="filter.reset">Reset</button>
+      </div>
+      <details class="history-advanced-filters" id="history-advanced-filters">
+        <summary><span data-i18n="history.advanced">Advanced filters</span><span id="history-advanced-count" class="filter-count" aria-live="polite"></span></summary>
+        <div class="history-advanced-grid">
+        <label><span data-i18n="filter.model">Model</span><input type="text" id="model-filter" class="history-filter-input" placeholder="Model" data-i18n-placeholder="filter.model" aria-label="Filter by model"></label>
+        <label><span data-i18n="filter.scenario">Scenario</span><input type="text" id="scenario-filter" class="history-filter-input" placeholder="Scenario" data-i18n-placeholder="filter.scenario" aria-label="Filter by scenario"></label>
+        <div><label for="streaming-filter" data-i18n="detail.requestType">Request type</label><select class="filter-select" id="streaming-filter" aria-label="Filter by request type">
           <option value="" data-i18n-option="filter.allStreams">All request types</option>
           <option value="true" data-i18n-option="filter.streaming">Streaming only</option>
           <option value="false" data-i18n-option="filter.nonStreaming">Non-streaming only</option>
-        </select>
-        <select class="filter-select" id="cost-source-filter" aria-label="Cost source" data-i18n-aria-label="history.costSource">
+        </select></div>
+        <div><label for="cost-source-filter" data-i18n="history.costSource">Cost source</label><select class="filter-select" id="cost-source-filter" aria-label="Cost source" data-i18n-aria-label="history.costSource">
           <option value="" data-i18n-option="history.allCostSources">All cost sources</option>
           <option value="estimated" data-i18n-option="history.costEstimated">Local estimate</option>
           <option value="provider" data-i18n-option="history.costProvider">Synced platform bill</option>
-        </select>
-        <button class="btn btn-small" id="history-reset" data-i18n="filter.reset">Reset</button>
-      </div>
+        </select></div>
+        </div>
+      </details>
       <div class="history-summary-band" aria-label="Filtered history summary">
         <div class="history-summary-metrics">
           <div><span data-i18n="history.filteredRequests">Filtered requests</span><strong id="history-summary-requests">--</strong></div>
@@ -214,9 +222,9 @@
       <div class="history-pager">
         <span id="history-pageinfo"></span>
         <div class="history-pager-nav">
-          <button type="button" id="btn-history-prev" class="btn btn-small">Prev</button>
+          <button type="button" id="btn-history-prev" class="btn btn-small" data-i18n="history.previous">Previous</button>
           <span id="history-pagetotal"></span>
-          <button type="button" id="btn-history-next" class="btn btn-small">Next</button>
+          <button type="button" id="btn-history-next" class="btn btn-small" data-i18n="history.next">Next</button>
         </div>
         <label class="history-page-size"><span data-i18n="history.perPage">Rows per page</span><select class="filter-select" id="history-page-size" aria-label="Rows per page"><option value="25">25</option><option value="50" selected>50</option><option value="100">100</option></select></label>
       </div>
@@ -321,7 +329,7 @@
         </div>
         <div class="command-item" data-action="goto-performance" role="option" id="cmd-goto-performance">
           <span class="command-item-label" data-i18n="cmd.gotoPerformance">Go to Performance</span>
-          <span class="command-item-shortcut"><kbd aria-keyshortcuts="Meta+4">⌘4</kbd></span>
+          <span class="command-item-shortcut"><kbd aria-keyshortcuts="Meta+3">⌘3</kbd></span>
         </div>
         <div class="command-item" data-action="goto-fallback" role="option" id="cmd-goto-fallback">
           <span class="command-item-label" data-i18n="cmd.gotoFallback">Go to Fallback</span>
@@ -349,8 +357,8 @@
   <!-- Performance Tab -->
   <div class="tab-content flex-1 overflow-y-auto" id="tab-performance">
     <div class="page-shell performance-page">
-    <div class="page-heading"><div><h1 data-i18n="tab.performance">Performance</h1><p class="page-meta" data-i18n="perf.sampleHint">Measured latency samples and known outcomes; percentiles are less reliable with small samples.</p></div></div>
-    <div class="analytics-controls mb-3">
+    <div class="page-heading"><div><h1 data-i18n="tab.performance">Performance</h1><p class="page-meta" data-i18n="perf.description">Compare measured latency and known outcomes across models.</p></div></div>
+    <div class="page-toolbar analytics-controls">
       <label for="perf-provider" data-i18n="filter.provider">Provider</label>
       <select class="filter-select" id="perf-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
         <option value="" data-i18n-option="filter.allProviders">All platforms</option>
@@ -364,9 +372,10 @@
       </select>
       <button type="button" class="btn btn-small" id="btn-refresh-perf" data-i18n="analytics.refresh">Refresh</button>
     </div>
-    <p class="page-meta" data-i18n="history.localScope">Statistics use records kept by this instance, including synced bills and local estimates. Direct-to-platform traffic may not be recorded here.</p>
+    <p class="page-meta scope-note" data-i18n="history.localScope">Statistics use records kept by this instance, including synced bills and local estimates. Direct-to-platform traffic may not be recorded here.</p>
     <p id="perf-error" hidden role="alert" style="color:var(--ui-red)"></p>
-    <div class="overflow-x-auto">
+    <div class="performance-guide"><div><strong>P50</strong><span data-i18n="perf.p50Hint">Typical request latency</span></div><div><strong>P90</strong><span data-i18n="perf.p90Hint">90% of samples finish within this time</span></div><div><strong>P99</strong><span data-i18n="perf.p99Hint">Tail latency of the slowest requests</span></div></div>
+    <div class="performance-table-wrap overflow-x-auto">
       <table class="perf-table w-full text-xs border-collapse">
         <thead>
           <tr>
@@ -384,13 +393,14 @@
         </tbody>
       </table>
     </div>
+    <p class="page-meta" data-i18n="perf.sampleHint">Only measured requests contribute latency samples. Small samples can be misleading.</p>
     </div>
   </div>
 
   <!-- Fallback Tab -->
   <div class="tab-content flex-1 overflow-y-auto" id="tab-fallback">
     <div class="page-shell fallback-page">
-      <div class="page-heading"><div><h1 data-i18n="tab.fallback">Fallback</h1><p class="page-meta" id="fallback-primary"></p></div></div>
+      <div class="page-heading"><div><h1 data-i18n="tab.fallback">Fallback</h1><p class="page-meta" data-i18n="fallback.description">Set the model order for each routing scenario.</p></div></div>
       <div class="fallback-toolbar">
         <div>
           <label for="fallback-scenario" data-i18n="fallback.scenario">Scenario</label>
@@ -401,6 +411,9 @@
           <button type="button" class="btn btn-primary btn-small" onclick="FallbackModule.save()" data-i18n="fallback.save">Save</button>
         </div>
       </div>
+      <div class="routing-layout">
+      <section class="routing-workspace">
+      <div class="fallback-primary-card"><span class="metric-label" data-i18n="fallback.primary">Primary model</span><strong id="fallback-primary"></strong></div>
       <div class="fallback-chain-heading">
         <h2 class="section-heading" data-i18n="fallback.chainOrder">Fallback Chain Order</h2>
         <label class="sr-only" for="fallback-add-model" data-i18n="fallback.addModel">Add model</label>
@@ -414,6 +427,9 @@
         <div class="fallback-preview-header" data-i18n="fallback.previewTitle">Fallback Chain Preview</div>
         <div id="fallback-preview-content"></div>
       </div>
+      </section>
+      <aside class="routing-notes"><h2 class="section-heading" data-i18n="fallback.guideTitle">Routing order</h2><p data-i18n="fallback.orderHint">The primary model comes from the scenario configuration. Drag or use the arrow buttons to arrange the fallback models below it.</p><h3 data-i18n="fallback.saveTitle">Review, then apply</h3><p data-i18n="fallback.saveHint">Preview the chain before saving. Save applies your pending fallback changes; platform credentials stay unchanged.</p></aside>
+      </div>
     </div>
   </div>
 
@@ -423,8 +439,11 @@
       <div class="page-heading analytics-heading">
         <div>
           <h1 data-i18n="analytics.title">Usage Analytics</h1>
+          <p class="page-meta" data-i18n="analytics.description">Explore token composition, costs and activity over time.</p>
           <span class="page-meta" id="analytics-generated"></span>
         </div>
+      </div>
+      <div class="page-toolbar">
         <div class="analytics-controls">
           <label for="analytics-provider" data-i18n="filter.provider">Provider</label>
           <select class="filter-select" id="analytics-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
@@ -433,8 +452,6 @@
           </select>
           <button class="btn btn-small" id="btn-refresh-analytics" data-i18n="analytics.refresh">Refresh</button>
         </div>
-      </div>
-
       <div class="usage-filter-bar">
         <span class="page-meta" data-i18n="analytics.utc">Analytics dates and time buckets use UTC</span>
         <div class="history-date-range" id="analytics-date-range">
@@ -466,7 +483,8 @@
           </div>
         </div>
       </div>
-      <p class="page-meta" data-i18n="history.localScope">Statistics use records kept by this instance, including synced bills and local estimates. Direct-to-platform traffic may not be recorded here.</p>
+      </div>
+      <p class="page-meta scope-note" data-i18n="history.localScope">Statistics use records kept by this instance, including synced bills and local estimates. Direct-to-platform traffic may not be recorded here.</p>
       <p id="analytics-error" hidden role="alert" style="color:var(--ui-red)"></p>
 
       <div class="metric-band metric-grid analytics-metrics usage-metrics">
@@ -483,15 +501,20 @@
           <div class="metric-value" id="kpi-cost">--</div>
           <div class="metric-note" id="kpi-cost-note">USD</div>
         </div>
-        <div class="metric-cell metric-secondary">
-          <div class="metric-label" data-i18n="analytics.inputTokens">Input tokens</div><div class="metric-value" id="kpi-input">--</div><div class="metric-note" data-i18n="analytics.freshInput">Fresh input</div>
-        </div>
         <div class="metric-cell"><div class="metric-label" data-i18n="analytics.cacheHitShort">Cache hit</div><div class="metric-value" id="kpi-cache-rate">--</div><div class="metric-note" id="kpi-cache-rate-note"></div></div>
-        <div class="metric-cell metric-secondary"><div class="metric-label" data-i18n="analytics.outputTokens">Output tokens</div><div class="metric-value" id="kpi-output">--</div><div class="metric-note" data-i18n="analytics.generatedOutput">Generated output</div></div>
-        <div class="metric-cell metric-secondary"><div class="metric-label" data-i18n="detail.cacheRead">Cache read</div><div class="metric-value" id="kpi-cache-read">--</div><div class="metric-note" data-i18n="analytics.reusedInput">Reused input</div></div>
-        <div class="metric-cell metric-secondary"><div class="metric-label" data-i18n="detail.cacheCreation">Cache write</div><div class="metric-value" id="kpi-cache-write">--</div><div class="metric-note" data-i18n="analytics.newCacheInput">New cached input</div></div>
       </div>
-
+      <div class="token-breakdown-band">
+        <div class="metric-cell"><div class="metric-label" data-i18n="analytics.inputTokens">Input tokens</div><div class="metric-value" id="kpi-input">--</div><div class="metric-note" data-i18n="analytics.freshInput">Fresh input</div></div>
+        <div class="metric-cell"><div class="metric-label" data-i18n="detail.cacheRead">Cache read</div><div class="metric-value" id="kpi-cache-read">--</div><div class="metric-note" data-i18n="analytics.reusedInput">Reused input</div></div>
+        <div class="metric-cell"><div class="metric-label" data-i18n="detail.cacheCreation">Cache write</div><div class="metric-value" id="kpi-cache-write">--</div><div class="metric-note" data-i18n="analytics.newCacheInput">New cached input</div></div>
+        <div class="metric-cell"><div class="metric-label" data-i18n="analytics.outputTokens">Output tokens</div><div class="metric-value" id="kpi-output">--</div><div class="metric-note" data-i18n="analytics.generatedOutput">Generated output</div></div>
+      </div>
+      <div class="empty-state ledger-empty" id="analytics-empty" hidden><strong data-i18n="data.localEmpty">No retained requests in this view</strong><p data-i18n="data.localEmptyHint">Check the filters and retention policy. An empty local ledger does not mean no platform usage.</p></div>
+      <div id="analytics-insights">
+      <div class="analytics-chart-grid">
+        <section class="analytics-section analytics-trend-section"><h2 class="section-heading" data-i18n="analytics.requestTrend">Request trend</h2><div class="analytics-chart analytics-trend" id="analytics-request-trend"></div></section>
+        <section class="analytics-section analytics-trend-section"><h2 class="section-heading" data-i18n="analytics.tokenTrend">Token trend</h2><div class="analytics-chart analytics-trend" id="analytics-token-trend"></div></section>
+      </div>
       <section class="analytics-section">
         <div class="section-heading"><span data-i18n="analytics.periodDetails">Period details</span><span class="section-meta" id="analytics-period-count"></span></div>
         <div class="analytics-table-scroll"><table class="analytics-table usage-detail-table"><thead><tr>
@@ -517,6 +540,7 @@
           <div class="analytics-distribution" id="provider-distribution"></div>
         </section>
       </div>
+      </div>
       <span class="analytics-retained-range" id="analytics-retained-range"></span>
     </div>
   </div>
@@ -527,11 +551,10 @@
       <div class="page-heading">
         <div>
           <h1 data-i18n="quota.title">Usage &amp; Billing</h1>
-          <span class="page-meta" id="quota-meta"></span>
-          <span class="page-meta" id="quota-source"></span>
-          <details class="quota-source-details"><summary data-i18n="quota.sourceDetails">Source details</summary><span class="page-meta quota-endpoint" id="quota-endpoint"></span></details>
+          <p class="page-meta" data-i18n="quota.description">Account limits and subscriptions, with the local ledger kept separate.</p>
         </div>
-        <div class="analytics-controls">
+      </div>
+        <div class="page-toolbar analytics-controls">
           <label class="sr-only" for="quota-provider" data-i18n="filter.provider">Provider</label>
           <select class="filter-select" id="quota-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
             <option value="opencode-go">OpenCode Go</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option><option value="commandcode">CommandCode</option>
@@ -539,12 +562,12 @@
           <button type="button" class="btn btn-small" id="quota-open-settings" data-i18n="quota.openSettings">Platform settings</button>
           <button class="btn btn-small btn-icon" id="btn-refresh-quota"><svg width="14" height="14"><use href="#icon-refresh"/></svg><span class="sr-only" data-i18n="quota.refresh">Refresh</span></button>
         </div>
-      </div>
+      <div class="quota-metadata"><span class="page-meta" id="quota-meta"></span><span class="page-meta" id="quota-source"></span><details class="quota-source-details"><summary data-i18n="quota.sourceDetails">Source details</summary><span class="page-meta quota-endpoint" id="quota-endpoint"></span></details></div>
       <p id="quota-error" hidden role="alert" style="color:var(--ui-red)"></p>
       <div id="quota-links" class="analytics-controls"></div>
 
       <div id="quota-go">
-      <div class="metric-band metric-grid usage-metrics quota-metrics" aria-label="OpenCode Go quota summary">
+      <div class="metric-band metric-grid usage-metrics quota-metrics" id="quota-go-summary" aria-label="OpenCode Go quota summary">
         <div class="metric-cell">
           <div class="metric-label" data-i18n="quota.bottleneck">Tightest window</div>
           <div class="metric-value" id="quota-bottleneck">--</div>
@@ -625,7 +648,7 @@
   <!-- Settings Tab -->
   <div class="tab-content flex-1 overflow-y-auto" id="tab-settings">
     <div class="page-shell settings-page">
-    <div class="page-heading"><h1 data-i18n="tab.settings">Settings</h1><button class="btn btn-small" id="btn-lang-toggle" onclick="toggleLanguage()"><span data-i18n="lang.toggle">中文</span></button></div>
+    <div class="page-heading"><div><h1 data-i18n="tab.settings">Settings</h1><p class="page-meta settings-intro" data-i18n="setting.platformsHint">Configure each platform independently. Only changed fields are saved; masked credentials stay untouched.</p></div></div>
     <details class="settings-runtime">
       <summary data-i18n="setting.runtime">Runtime &amp; tools</summary>
       <div class="runtime-controls">
@@ -711,7 +734,7 @@
     <div class="settings-config">
       <p class="page-meta" id="provider-timeout-hint" data-i18n="label.timeoutHint">0 uses the provider default. Idle timeout limits gaps between streamed data; attempt timeout limits the entire streaming request.</p>
       <details class="config-section" data-settings-provider="opencode-go">
-        <summary>OpenCode Go</summary>
+        <summary><span class="provider-mark" aria-hidden="true">Go</span><span class="provider-name">OpenCode Go</span><span class="provider-capability">Chat · Messages · Responses</span></summary>
         <div class="config-fields">
         <div class="mb-2">
           <label for="cfg-go-base-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Base URL</label>
@@ -756,7 +779,7 @@
       </details>
 
       <details class="config-section" data-settings-provider="opencode-zen">
-        <summary>OpenCode Zen</summary>
+        <summary><span class="provider-mark" aria-hidden="true">Ze</span><span class="provider-name">OpenCode Zen</span><span class="provider-capability">Chat · Messages · Responses · Gemini</span></summary>
         <div class="config-fields">
         <div class="mb-2">
           <label for="cfg-zen-base-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Base URL</label>
@@ -808,7 +831,7 @@
       </details>
 
       <details class="config-section" data-settings-provider="aws-bedrock">
-        <summary>AWS Bedrock</summary>
+        <summary><span class="provider-mark" aria-hidden="true">Aw</span><span class="provider-name">AWS Bedrock</span><span class="provider-capability" data-i18n="setting.bedrockHint">Inference &amp; billing identity</span></summary>
         <div class="config-fields">
         <div class="mb-2">
           <label for="cfg-bedrock-base-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Base URL</label>
@@ -868,7 +891,7 @@
       </details>
 
       <details class="config-section" data-settings-provider="openrouter">
-        <summary>OpenRouter</summary>
+        <summary><span class="provider-mark" aria-hidden="true">Or</span><span class="provider-name">OpenRouter</span><span class="provider-capability" data-i18n="setting.openrouterHint">Inference &amp; account credits</span></summary>
         <div class="config-fields">
         <div class="mb-2">
           <label for="cfg-openrouter-base-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Base URL</label>
@@ -903,7 +926,7 @@
       </details>
 
       <details class="config-section" data-settings-provider="commandcode">
-        <summary>CommandCode</summary>
+        <summary><span class="provider-mark" aria-hidden="true">Cc</span><span class="provider-name">CommandCode</span><span class="provider-capability" data-i18n="setting.commandcodeHint">Native Messages &amp; Alpha account</span></summary>
         <div class="config-fields">
         <p class="text-xs text-[#98989d] mb-2" data-i18n="commandcode.keyHint">Uses its own API key; global keys are never sent to CommandCode.</p>
         <div class="mb-2">
@@ -942,7 +965,7 @@
       </details>
 
       <details class="config-section">
-        <summary>Server</summary>
+        <summary data-i18n="setting.server">Server</summary>
         <div class="config-fields">
         <div class="flex gap-2.5">
           <div class="flex-1 mb-2">
@@ -980,7 +1003,7 @@
       </details>
 
       <details class="config-section">
-        <summary>Logging</summary>
+        <summary data-i18n="setting.logging">Logging</summary>
         <div class="config-fields">
         <div class="mb-0">
           <label for="cfg-log-level" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Log Level</label>
@@ -1006,10 +1029,10 @@
     </div>
     </div>
   </div>
+  </main>
 </div>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
-<div id="ui-build" class="ui-build" title=""></div>
 <script src="app.js"></script>
 </body>
 </html>

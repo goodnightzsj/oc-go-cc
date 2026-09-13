@@ -278,9 +278,8 @@ func (r *ModelRouter) resolveFromCatalog(cat *catalog.IndexedCatalog, requestedM
 	return cfg, true
 }
 
-// legacyUnknownModelConfig builds a bare config for an unknown model and
-// inherits Temperature and MaxTokens from the default model when available.
-// legacyUnknownModelConfig builds a bare target for a model no source knows.
+// legacyUnknownModelConfig builds a bare target for a model no source knows,
+// inheriting Temperature and MaxTokens from the default model when available.
 // The platform is the active site when routing is scoped - the operator has
 // already said which platform they want - and the default platform otherwise,
 // which is what an unset provider has always meant.

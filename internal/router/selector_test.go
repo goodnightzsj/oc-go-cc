@@ -7,6 +7,7 @@ import (
 
 	"github.com/routatic/proxy/internal/catalog"
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/site"
 )
 
 // selectorTestCatalog loads the shared fixture catalog used by selector tests.
@@ -659,4 +660,57 @@ func TestSelectCheapest_GlobalPreferProviders(t *testing.T) {
 			t.Errorf("SelectCheapest(preferred_only) provider = %q, want %q", got.Provider, "openrouter")
 		}
 	})
+}
+
+// enabledProviders used to name four platforms in a hand-written map, so
+// CommandCode was absent however many keys it had and cost routing could never
+// pick it. The set now comes from the registry, and this pins that every
+// configured platform is reachable - a new platform must not need a second edit
+// here to become selectable.
+func TestEnabledProvidersCoversEveryConfiguredPlatform(t *testing.T) {
+	cfg := &config.Config{
+		OpenCodeGo:  config.OpenCodeGoConfig{APIKey: "go-key"},
+		CommandCode: config.CommandCodeConfig{APIKey: "cc-key"},
+		OpenRouter:  config.OpenRouterConfig{APIKey: "or-key"},
+	}
+	enabled := enabledProviders(cfg)
+
+	for _, want := range []string{"opencode-go", "commandcode", "openrouter"} {
+		if !enabled[want] {
+			t.Errorf("a platform with its own key must be selectable: %s (got %v)", want, enabled)
+		}
+	}
+	// A platform with no key of its own and no global fallback stays out.
+	if enabled["aws-bedrock"] {
+		t.Error("aws-bedrock has no key configured and must not be enabled")
+	}
+
+	// A global key still enables everything, as it did before.
+	global := enabledProviders(&config.Config{APIKey: "global-key"})
+	for _, want := range []string{"opencode-go", "commandcode", "opencode-zen", "aws-bedrock", "openrouter"} {
+		if !global[want] {
+			t.Errorf("a global key must enable %s (got %v)", want, global)
+		}
+	}
+}
+
+// The same guard config keeps over providerKeySource and providerTimeoutSource:
+// a hand-written platform map must cover the registry, or a platform silently
+// stops being selectable. This is the general form of the CommandCode omission
+// above, so a platform added later cannot reintroduce it here.
+func TestEnabledProvidersMatchesRegistryCoverage(t *testing.T) {
+	// A global key enables every platform, so this compares the registry
+	// against itself: any platform missing from the result is one the map
+	// cannot represent.
+	enabled := enabledProviders(&config.Config{APIKey: "global-key"})
+	for _, d := range site.All() {
+		if !enabled[d.ID] {
+			t.Errorf("platform %q is in the registry but cannot be selected by cost routing", d.ID)
+		}
+	}
+	for id := range enabled {
+		if _, ok := site.Lookup(id); !ok {
+			t.Errorf("cost routing enables %q, which is not a known platform", id)
+		}
+	}
 }

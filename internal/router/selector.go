@@ -9,6 +9,7 @@ import (
 
 	"github.com/routatic/proxy/internal/catalog"
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/site"
 )
 
 // ScenarioConstraints filters candidate models by required capabilities.
@@ -221,18 +222,18 @@ func modelMatches(model catalog.Model, scen config.CostScenario, constraints Sce
 
 // enabledProviders returns the providers that have an effective API key in the
 // active config. A non-empty global API key enables all known providers.
+//
+// The provider set comes from the registry, not a list written here: this map
+// used to name four platforms by hand and silently omitted CommandCode, so cost
+// routing would never select it however many keys it had. Config already knows
+// which platforms exist and which credential source each one uses, so asking it
+// per descriptor cannot drift the same way.
 func enabledProviders(cfg *config.Config) map[string]bool {
-	enabled := make(map[string]bool)
+	enabled := make(map[string]bool, len(site.All()))
 	globalKeys := cfg.EffectiveAPIKeys()
-	providerKeys := map[string][]string{
-		"opencode-go":  cfg.OpenCodeGo.EffectiveAPIKeys(),
-		"opencode-zen": cfg.OpenCodeZen.EffectiveAPIKeys(),
-		"aws-bedrock":  cfg.AWSBedrock.EffectiveAPIKeys(),
-		"openrouter":   cfg.OpenRouter.EffectiveAPIKeys(),
-	}
-	for p, keys := range providerKeys {
-		if len(keys) > 0 || len(globalKeys) > 0 {
-			enabled[p] = true
+	for _, descriptor := range site.All() {
+		if len(cfg.ProviderAPIKeys(descriptor.ID)) > 0 || len(globalKeys) > 0 {
+			enabled[descriptor.ID] = true
 		}
 	}
 	return enabled

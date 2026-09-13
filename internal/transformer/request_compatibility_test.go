@@ -36,12 +36,54 @@ func TestRequestPreservesImageSourcesAndOrder(t *testing.T) {
 	}
 }
 
-func TestRequestRejectsDroppedToolResultContent(t *testing.T) {
+// A tool_result may carry parts Chat Completions has no place for - an image,
+// or Claude Code's tool_reference. They are dropped and the text parts are
+// kept, matching the reference CommandCode proxy. The request succeeds; the
+// tool message simply carries less than the client sent.
+//
+// This replaced a check that failed the whole request instead. The trade is
+// deliberate, so this pins the drop: if a part ever stops being dropped, or the
+// request starts failing again, that is a behaviour change worth noticing.
+func TestRequestDropsUnrepresentableToolResultParts(t *testing.T) {
 	req := &types.MessageRequest{Messages: []types.Message{{Role: "user", Content: json.RawMessage(`[
 		{"type":"tool_result","tool_use_id":"call_1","content":[{"type":"text","text":"screenshot"},{"type":"image","source":{"type":"url","url":"https://example.test/one.png"}}]}
 	]`)}}}
-	if _, err := AnthropicToChatCompletion(req, config.ModelConfig{ModelID: "vision-model", Vision: true}); err == nil {
-		t.Fatal("tool result image must not silently disappear")
+	got, err := AnthropicToChatCompletion(req, config.ModelConfig{ModelID: "vision-model", Vision: true})
+	if err != nil {
+		t.Fatalf("an unrepresentable part must not fail the request: %v", err)
+	}
+	if len(got.Messages) != 1 || got.Messages[0].Role != "tool" {
+		t.Fatalf("expected one tool message, got %+v", got.Messages)
+	}
+	var text string
+	if err := json.Unmarshal(got.Messages[0].Content, &text); err != nil {
+		t.Fatalf("tool content is not text: %s", got.Messages[0].Content)
+	}
+	if text != "screenshot" {
+		t.Errorf("the representable part must survive; got %q", text)
+	}
+}
+
+// A tool_result carrying only unrepresentable parts becomes an empty tool
+// message. This is the ToolSearch case: the model proceeds without the tool's
+// content rather than the chain failing.
+func TestRequestKeepsEmptyToolMessageForToolReference(t *testing.T) {
+	req := &types.MessageRequest{Messages: []types.Message{{Role: "user", Content: json.RawMessage(`[
+		{"type":"tool_result","tool_use_id":"call_1","content":[{"type":"tool_reference","tool_name":"Monitor"}]}
+	]`)}}}
+	got, err := AnthropicToChatCompletion(req, config.ModelConfig{ModelID: "deepseek-v4.1-flash"})
+	if err != nil {
+		t.Fatalf("a tool_reference must not fail the request: %v", err)
+	}
+	if len(got.Messages) != 1 || got.Messages[0].Role != "tool" || got.Messages[0].ToolCallID != "call_1" {
+		t.Fatalf("expected one tool message keyed to call_1, got %+v", got.Messages)
+	}
+	var text string
+	if err := json.Unmarshal(got.Messages[0].Content, &text); err != nil {
+		t.Fatalf("tool content is not text: %s", got.Messages[0].Content)
+	}
+	if text != "" {
+		t.Errorf("expected an empty tool message, got %q", text)
 	}
 }
 

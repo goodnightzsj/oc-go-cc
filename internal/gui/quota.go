@@ -12,6 +12,7 @@ import (
 
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/quota"
+	"github.com/routatic/proxy/internal/site"
 	"github.com/routatic/proxy/internal/storage"
 )
 
@@ -38,6 +39,20 @@ type quotaAccount struct {
 	OpenRouter  *quota.OpenRouterKey     `json:"openrouter,omitempty"`
 	CommandCode *quota.CommandCodeReport `json:"commandcode,omitempty"`
 	Error       string                   `json:"error,omitempty"`
+
+	// Ledger is this instance's own record for the same billing period, set
+	// only for platforms whose account API reports one. It exists so the two
+	// figures can be read side by side: a request that reached the platform
+	// without passing through this proxy appears in the account's count and
+	// not here, and that difference is otherwise invisible.
+	Ledger *quotaLedger `json:"ledger,omitempty"`
+}
+
+// quotaLedger is a local-ledger total for one billing period.
+type quotaLedger struct {
+	Requests      int64   `json:"requests"`
+	KnownRequests int64   `json:"known_requests"`
+	CostUSD       float64 `json:"cost_usd"`
 }
 
 type quotaLink struct {
@@ -332,10 +347,53 @@ func (s *Server) handleCommandCodeQuota(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	resp.Accounts = fetchQuotaAccounts(r.Context(), resp.Provider, endpoint, keys)
+	s.attachCommandCodeLedger(resp.Accounts)
 	resp.Status = quotaStatus(resp)
 	resp.FetchedAt = time.Now().UTC()
 	s.storeQuota(endpoint, keys, resp)
 	writeJSON(w, resp)
+}
+
+// attachCommandCodeLedger pairs the account with this instance's own totals for
+// the subscription period the account reports, so the dashboard can show the
+// official figure and the local one together.
+//
+// Like monthlyModelUsage it refuses to attribute traffic when more than one key
+// is configured: local rows carry no key identity, so one account's period
+// cannot describe a pool. A missing or unparsable period leaves Ledger nil
+// rather than guessing a window, because a wrong window would look like a real
+// reconciliation gap.
+func (s *Server) attachCommandCodeLedger(accounts []quotaAccount) {
+	if s.storage == nil || len(accounts) != 1 {
+		return
+	}
+	report := accounts[0].CommandCode
+	if report == nil || report.Subscription == nil {
+		return
+	}
+	start, errStart := time.Parse(time.RFC3339, report.Subscription.CurrentPeriodStart)
+	end, errEnd := time.Parse(time.RFC3339, report.Subscription.CurrentPeriodEnd)
+	if errStart != nil || errEnd != nil || !end.After(start) {
+		return
+	}
+	win, err := storage.NewAnalytics(s.storage).WindowBetween(start, end)
+	if err != nil {
+		return
+	}
+	breakdown, err := storage.NewAnalytics(s.storage).ProviderBreakdown(win)
+	if err != nil {
+		return
+	}
+	ledger := &quotaLedger{}
+	for _, b := range breakdown {
+		if b.Provider == site.CommandCode {
+			ledger.Requests = b.Requests
+			ledger.KnownRequests = b.KnownRequests
+			ledger.CostUSD = b.EstCostUSD
+			break
+		}
+	}
+	accounts[0].Ledger = ledger
 }
 
 func quotaStatus(resp quotaResponse) string {

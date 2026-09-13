@@ -61,7 +61,12 @@ type CommandCodeUsage struct {
 	TotalTokensOut *int64   `json:"totalTokensOut"`
 	TotalTokens    *int64   `json:"totalTokens"`
 	TotalCredits   *float64 `json:"totalCredits"`
-	PeriodBasis    string   `json:"periodBasis"`
+	// TotalCost is what the platform says this period cost, in USD. It is the
+	// figure the local ledger is reconciled against, so it is kept separate
+	// from TotalCredits: credits are the plan's own accounting unit and a plan
+	// can convert them at a rate the proxy does not know.
+	TotalCost   *float64 `json:"totalCost"`
+	PeriodBasis string   `json:"periodBasis"`
 }
 
 // CommandCodeBaseURL preserves the configured origin and gateway mount. An

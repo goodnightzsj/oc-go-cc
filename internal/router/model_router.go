@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/routatic/proxy/internal/catalog"
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/site"
 	"github.com/routatic/proxy/internal/storage"
 )
 
@@ -27,6 +29,71 @@ type ModelRouter struct {
 	cat         *catalog.IndexedCatalog
 	catErr      error
 	catCache    time.Time
+
+	siteMu    sync.Mutex
+	siteCache []catalog.SiteModel
+	siteAt    time.Time
+}
+
+// siteModelsTTL bounds how often a platform's own model list is re-read. The
+// endpoints are not meant to be polled, and a model list changes on the order
+// of days, so the listing is served from this cache.
+const siteModelsTTL = 10 * time.Minute
+
+// siteModelsFailureTTL is how long a failed fetch is remembered. Retrying on
+// every client refresh would add a round trip to each one, but caching the
+// failure for the full TTL would hide a transient outage for ten minutes.
+const siteModelsFailureTTL = time.Minute
+
+// siteModelsClient is separate from the sending client: this call carries no
+// credential and must not inherit the retry or timeout policy of an inference
+// request.
+var siteModelsClient = &http.Client{Timeout: 10 * time.Second}
+
+// siteModels returns the models each configured platform publishes on its own
+// API. CommandCode is the reason this exists: it is absent from the models.dev
+// catalog, so without it the model listing offered nothing for that platform
+// and a client switching to it saw an empty picker.
+//
+// A platform is only asked when it has credentials and a derivable endpoint,
+// and a failure is logged rather than returned: this feeds a listing, and one
+// unreachable platform must not empty the whole answer. The site-scoped view
+// that will make a failure fatal arrives with the active-site work.
+func (r *ModelRouter) siteModels(ctx context.Context) []catalog.SiteModel {
+	r.siteMu.Lock()
+	defer r.siteMu.Unlock()
+
+	ttl := siteModelsTTL
+	if r.siteCache == nil {
+		ttl = siteModelsFailureTTL
+	}
+	if r.siteCache != nil || !r.siteAt.IsZero() {
+		if time.Since(r.siteAt) < ttl {
+			return r.siteCache
+		}
+	}
+
+	cfg := r.atomic.Get()
+	var out []catalog.SiteModel
+	for _, descriptor := range site.Visible() {
+		if len(cfg.ProviderAPIKeys(descriptor.ID)) == 0 {
+			continue
+		}
+		endpoint, err := catalog.SiteModelsURL(descriptor.ID, cfg.ProviderModelEndpoint(descriptor.ID))
+		if err != nil {
+			continue // this platform has no model-list endpoint of its own
+		}
+		fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		models, err := catalog.FetchSiteModels(fetchCtx, siteModelsClient, descriptor.ID, endpoint)
+		cancel()
+		if err != nil {
+			slog.Warn("platform model list unavailable", "platform", descriptor.ID, "err", err)
+			continue
+		}
+		out = append(out, models...)
+	}
+	r.siteCache, r.siteAt = out, time.Now()
+	return out
 }
 
 func NewModelRouter(atomic *config.AtomicConfig) *ModelRouter {
@@ -431,6 +498,12 @@ func (r *ModelRouter) ListModels(ctx context.Context) []ModelInfo {
 		for key, model := range cat.Models {
 			add(key, model.DisplayName(), catalog.ProviderFromModelKey(key))
 		}
+	}
+
+	// A platform that publishes its own model list is the authority for its own
+	// models, and the catalog does not know it at all.
+	for _, model := range r.siteModels(ctx) {
+		add(model.ID, model.DisplayName, model.Provider)
 	}
 
 	return slices.SortedFunc(maps.Values(seen), func(a, b ModelInfo) int {

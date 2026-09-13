@@ -25,7 +25,7 @@ func TestPriceForProviderModel_OfficialCommandCode(t *testing.T) {
 		{"longcat-2.0:free", 0, 0, 0},              // free models are priced at 0, not unknown
 	}
 	for _, c := range cases {
-		in, out, cacheRead, _, ok := PriceForProviderModel("commandcode", c.model)
+		in, out, cacheRead, _, ok := PriceForProviderModel("commandcode", c.model, 0)
 		if !ok || in != c.in || out != c.out || cacheRead != c.cacheRead {
 			t.Errorf("%s: got %v/%v/%v ok=%v, want %v/%v/%v",
 				c.model, in, out, cacheRead, ok, c.in, c.out, c.cacheRead)

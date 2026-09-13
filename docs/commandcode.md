@@ -122,22 +122,75 @@ supports_websockets = false
 - 无法无损映射的请求返回明确的 HTTP 400；不是静默丢字段。客户端版本、模型能力设置或插件引入上述能力时，需要相应关闭或另行实现并测试，不能宣称支持所有 Codex 功能。
 - `anthropic_first` 只作用于 Messages 入口，不接管 Codex Responses。
 
-### 峰谷计费（2026-09-13 核实）
+### 峰谷计费（2026-09-14 全站遍历核实）
 
-CommandCode 与 OpenCode Go 使用**同一套峰谷规则**：高峰为周一至周五的 01:00-04:00 与 06:00-10:00 UTC，其余（含周末）为 Off-Peak，倍率 2。依据 [GOAT 计划文档](https://commandcode.ai/docs/plans/goat)，每个受影响模型的行下方标注 `Off-peak shown (17h/day) · peak $X / $Y 01–04 & 06–10 UTC, Mon–Fri`。
+两个平台目前使用**同一套峰谷规则**，但这是各自文档的结论，不是共享常量：高峰为周一至周五的 01:00-04:00 与 06:00-10:00 UTC，其余（含周末）为 Off-Peak，倍率 2。
 
-覆盖的模型按该文档逐条列出，不按家族整体匹配——`deepseek/deepseek-v4-flash-fast` 由 API 提供但**不带**该标注，必须保持 Off-Peak：
+| 平台 | 出处 | 原文 |
+| --- | --- | --- |
+| OpenCode Go | [Go 文档](https://opencode.ai/docs/zh-cn/go) 价格表脚注 | `DeepSeek V4.1 Flash / V4 Pro / V4 Flash / V4 Flash Vision Exp: Peak 时段为周一至周五的 01:00-04:00 和 06:00-10:00 UTC；其他所有时段（包括周末）均为 Off-Peak.` |
+| CommandCode | [GOAT 计划文档](https://commandcode.ai/docs/plans/goat) 与 [/models](https://commandcode.ai/models) 行内标注 | `Off-peak shown (17h/day) · peak $X / $Y 01–04 & 06–10 UTC, Mon–Fri` |
+
+**覆盖的模型：两家完全相同，就是那 4 个 DeepSeek。** 这一点由 2026-09-14 的全站遍历确认：把两个站点的 sitemap 全部抓下来，逐页找峰谷标注，只有 OpenCode 的 `go` 页与 CommandCode 的 `/models` 页出现，且都只覆盖这 4 个。
+
+判定**不按家族整体匹配**，而是显式列出，因为三个方向的误判都会产生格式正确、数值错误的成本：
+
+| 不覆盖的模型 | 原因 |
+| --- | --- |
+| `deepseek-v3` / `deepseek-v3.2` / `deepseek-r1` / `deepseek-chat` / `deepseek-reasoner` | 老一代 DeepSeek，价格表只有单一费率；按家族子串匹配会把它们全部误判成 2 倍 |
+| `deepseek-v4-flash-fast` | 由 API 提供，但价格表**不带**峰谷标注（$0.28/$0.56 单一费率） |
+| `deepseek-v4-flash-0423` / `deepseek-v4-pro-0813` 等日期快照 | 上游按快照单独定价，价格表分行列出 |
 
 | 模型 | Off-peak（输入/输出） | Peak |
 | --- | --- | --- |
-| `deepseek/deepseek-v4.1-flash` | $0.15 / $0.60 | $0.30 / $1.20 |
-| `deepseek/deepseek-v4-flash` | $0.15 / $0.60 | $0.30 / $1.20 |
-| `deepseek/deepseek-v4-flash-vision-exp` | $0.22 / $0.66 | $0.44 / $1.32 |
-| `deepseek/deepseek-v4-pro` | $0.66 / $1.98 | $1.32 / $3.96 |
+| `deepseek-v4.1-flash` | $0.15 / $0.60 | $0.30 / $1.20 |
+| `deepseek-v4-flash` | $0.15 / $0.60 | $0.30 / $1.20 |
+| `deepseek-v4-flash-vision-exp` | $0.15 / $0.60 | $0.30 / $1.20 |
+| `deepseek-v4-pro` | $0.66 / $1.98 | $1.32 / $3.96 |
 
-`commandcode.ai/models` 与 `/pricing` 都只显示 Off-Peak 单价（模型页以 `+1` 标注按模型的 deal），峰谷标注只出现在上述文档页；只查 Models 端点或价格页会得出「没有峰谷」的错误结论。
+**判定入口**是 `history.ProviderPeakMultiplier`（`internal/history/record.go`）。时段与倍率按平台存放于 `peakSchedules`，不是共享一份：即便今天两家相同，任一平台改窗口或加模型时，这里必须是一行只影响该平台的改动，而不是静默地连另一家的钱一起改。存储层、费用估算、面板与回填共用这一处；`internal/models.ModelFamily` 把 `deepseek/deepseek-v4-flash` 与 `deepseek-v4-flash` 归一到同一族名。
 
-判定入口是 `history.ProviderPeakMultiplier`（`internal/history/record.go`），存储层、费用估算、面板与回填共用这一处；`internal/models.ModelFamily` 负责把 `deepseek/deepseek-v4-flash` 与 `deepseek-v4-flash` 归一到同一族名。
+面板有自己的副本（`PEAK_SCHEDULES`，`internal/gui/assets/app.js`），因为回填尚未覆盖的行也要能显示徽章。`TestPeakSchedulesMatchTheBackend`（`internal/gui/peak_parity_test.go`）断言两份不得漂移——前端漏列一个模型时该行会渲染成非高峰，而这一差异在页面上看不出任何异常，只有对账时才会发现。
+
+`commandcode.ai/models` 与 `/pricing` 只显示 Off-peak 单价（模型页以 `+1` 标注按模型的 deal），峰谷标注出现在 `/models` 行的 tooltip 与 `aria-label`（`<模型> input: $X during peak hours, ...`），GOAT 文档页亦同；只查 Models 端点会得出「没有峰谷」的错误结论。
+
+#### 价格表已改为按平台实时刷新（2026-09-14 修复）
+
+原先价格是编译进二进制的静态快照（`seed_prices_*.json` + `//go:embed`），注释标注 "Aug 2026"。核对时发现 **OpenCode Go 的 34 个可比对行中 20 行已与文档不符**，而且没有任何机制会报告这件事——面板照常显示格式正确、数值错误的成本。
+
+| 类型 | 模型 | 修复前 | 修复后（当前文档值） |
+| --- | --- | --- | --- |
+| 价格过期 | `deepseek-v4-flash` | 0.22 / 0.66 | 0.15 / 0.60 |
+| 价格过期 | `deepseek-v4-pro` | 0.435 / 0.87 | 0.66 / 1.98 |
+| 通配规则吃掉具体条目 | `glm-5.3-flash` | 命中 `glm` → 1.4 / 4.4 | 0.15 / 0.50 |
+| 通配规则吃掉具体条目 | `qwen3.8-flash` | 命中 `qwen3.8` → 2.0 / 6.0 | 0.15 / 0.47 |
+| 一个规则覆盖多个模型 | `gpt-5.6` 笼统匹配 Luna/Sol/Terra | 三者同为 0.2 / 1.2 | Luna 0.2 / 1.2，Sol 5 / 30，Terra 2 / 12 |
+| 分档未建模 | `qwen3.7-plus` / `qwen3.6-plus` / `grok-4.6` / `gpt-5.6-luna` 等 | 只有基准档 | 超过 token 阈值后按高档计价 |
+| 完全缺失 | `kimi-k3`、`mimo-v2.5`、`hy3`、`longcat-2.0` 等 | 无条目 | 有价格 |
+
+CommandCode 侧另有 `deepseek-v4-flash-vision-exp` 与 3 个模型的价格过期。
+
+**数据源**（均为该平台自己发布、且可机器解析的表）：
+
+| 平台 | 来源 | 形态 | 备注 |
+| --- | --- | --- | --- |
+| OpenCode Go | `models.dev` → `providers["opencode-go"].models` | 干净 JSON | 就是本项目**已在每日同步**的 catalog；此前 `catalog.Provider` 结构体没有 `Models` 字段，这份数据被直接丢弃 |
+| CommandCode | `commandcode.ai/docs/plans/pro` 页面内嵌 payload | `self.__next_f.push` flight 分片重组 | 它的 API 只给模型 id 不给价格，`/models` 是客户端渲染；内嵌 JSON 是唯一可解析的完整表 |
+
+**分档计价**已建模（`priceTier`，`internal/storage/database.go`）：档位按**整个 prompt** 的 input token 数选取。
+
+```go
+// 档位阈值是"高于此值才生效"，与两家文档措辞一致（Qwen3.7 Plus (> 256K tokens)）
+for i := range e.Tiers {
+    if t := &e.Tiers[i]; inputTokens > t.Size && t.Size > best { ... }
+}
+```
+
+**刷新**：`storage.PriceRefreshLoop` 每小时一次（`internal/gui/quota.go` 的 `priceRefreshLoop`），与既有的 `limitsLoop`（日刷额度表）同构。单个平台抓取失败时**保留该平台上一份可用表**，不会用空表或部分表覆盖——这正是"格式正确、数值错误"最难发现的地方。抓取失败会打 WARN 日志。
+
+**历史成本不重算**：`cost_usd` 在写入时计算并落库，`BackfillRequestCosts` 的 WHERE 是 `cost_usd IS NULL`，所以改价表只影响新请求。这一点有实证支撑：2026-08-28 的一张真实账单（18355 in / 18176 cache-read / 231 out = 0.00863558）能被子串里的旧价 `0.22/0.007/0.66` **精确复现**，而今天的新价复现不出来——说明价格确实在那之后变过，历史行必须保留各自当时的价。
+
+`internal/storage/pricing_test.go` 的 cache-overlap 断言因此改成对照当前表计算，并额外断言"不等于扣除缓存前缀的算法"，这样无论价格怎么变，它锁住的都是结构（miss 按 input 全价、hit 按 cache_read 另计），而不是某个快照数值。
 
 ### 2026-09-13 隔离实例实测（Codex 工具往返 + 两个上游协议）
 

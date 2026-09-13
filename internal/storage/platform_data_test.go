@@ -35,8 +35,8 @@ func TestPlatformDataCostsRespectProviderAndMissingRates(t *testing.T) {
 		known                 bool
 		cost, multiplier      float64
 	}{
-		{"go seed", "opencode-go", "deepseek-v4-flash", 0, 0, true, 1.76, 2},
-		{"legacy go seed", "", "deepseek-v4-flash", 0, 0, true, 1.76, 2},
+		{"go seed", "opencode-go", "deepseek-v4-flash", 0, 0, true, 1.5, 2},
+		{"legacy go seed", "", "deepseek-v4-flash", 0, 0, true, 1.5, 2},
 		// CommandCode publishes its own rates, so they win over the catalog row
 		// this test also inserts for the same model: 1M in at 0.15 + 1M out at
 		// 0.60, doubled in the 01:30Z peak window.

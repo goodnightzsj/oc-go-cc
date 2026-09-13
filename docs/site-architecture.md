@@ -87,8 +87,8 @@ type Site struct {
 | 上游协议选择（Anthropic / Chat Completions / Responses / Gemini） | **站点** | 同一模型在不同站点走不同端点 |
 | 站点若不原生提供 Anthropic / OpenAI 接口，则转换收发格式 | **站点** | 本项目在这里的角色就是代理 |
 | 缓存字段语义（`cache_control` 是否有效、是否剥离） | **站点** | 站点网关认不认该字段，是站点的事 |
-| 峰谷时段与倍率 | **站点** | 窗口可能相同，但覆盖的模型集合不同 |
-| 模型单价表 | **站点** | 同一模型在不同站点价不同，必须分表；跨表命中会产出格式正确、数值错误的成本 |
+| 峰谷时段与倍率 | **站点** | 窗口可能相同，但覆盖的模型集合不同。已按此落地：`peakSchedules`（`internal/history/record.go`）按平台各存一份 `models`/`windows`/`multiplier`，即便 OpenCode Go 与 CommandCode 今天逐字相同也不共享——该表进成本估算，共享会让一家的改动静默改掉另一家的钱 |
+| 模型单价表 | **站点** | 同一模型在不同站点价不同，必须分表；跨表命中会产出格式正确、数值错误的成本。已按此落地：`rateTableFiles`（`internal/storage/database.go`）按平台各存一份，运行期由 `PriceRefreshLoop` 每小时从各平台自己的发布源刷新（OpenCode Go 读已同步的 models.dev catalog，CommandCode 读其计划页内嵌 payload），单平台失败保留上一份可用表 |
 | 上游 usage 的 token 口径（毛值还是净形） | **站点** | CommandCode 的 `tokensIn` 是**毛值，含 cache read**；本项目落库的是**净形**（`input_tokens` 不含缓存 + 独立的 `cache_read_tokens`）。拿它的 `tokensIn` 直接套本项目的计价公式会双重扣减 |
 | 按次用量的可达性 | **站点** | CommandCode 的按次明细（`/internal/usage`，带每次的 `totalCost`/`cacheCost`）**只认浏览器会话**，API key 是 401；key 能拿到的只有 `/alpha/usage/summary` 汇总。因此服务端可长期自动跑的只有**对账**，按次明细的回填必须借浏览器 |
 | 账户 / 配额接口、模型目录来源 | **站点** | |

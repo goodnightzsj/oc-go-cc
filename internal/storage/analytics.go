@@ -203,23 +203,13 @@ func (a *Analytics) ModelBreakdown(window Window) ([]ModelBreakdown, error) {
 	return result, rows.Err()
 }
 
-// costForTokens prices OpenCode Go token counts in USD. Rates come from the
-// embedded seed rules; the models table (which has no cache columns) is used
-// only as a fallback for input/output when the model has no seed rule, so
-// catalog-synced or user-overridden prices still surface. Complete request
-// estimates must use costForProviderTokensAt to retain unknown-price semantics.
-func costForTokens(model string, in, out, cacheRead, cacheCreate int64, modelsInputPerM, modelsOutputPerM float64) float64 {
-	ipm, opm, crpm, cwpm, ok := PriceForModel(model)
-	if !ok {
-		if modelsInputPerM == 0 && modelsOutputPerM == 0 {
-			return 0
-		}
-		// No seed rule: fall back to models-table input/output rates and treat
-		// cache creation as input. Cache reads stay unpriced rather than being
-		// billed at the full input rate.
-		ipm, opm = modelsInputPerM, modelsOutputPerM
-	}
-	// OpenCode semantics: cache CREATION (first-time prompt write) bills at the
+// costForTokens prices a token mix in USD using the platform's own published
+// rates. Callers must already have established that the platform publishes a
+// rate for this model; complete request estimates go through
+// costForProviderTokensAt, which retains unknown-price semantics.
+func costForTokens(provider, model string, in, out, cacheRead, cacheCreate int64) float64 {
+	ipm, opm, crpm, cwpm, _ := PriceForProviderModel(provider, model)
+	// Cache semantics: cache CREATION (first-time prompt write) bills at the
 	// cache_write price when the model publishes one, otherwise at the input
 	// price; cache READ bills at the cheap cache_read price.
 	// `in` is the cache-miss part already (splitPromptTokens strips the cached

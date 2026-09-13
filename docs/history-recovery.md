@@ -16,7 +16,7 @@
 - 官方 `timeCreated` 是完成时刻，本地 `start_time` 是开始时刻；匹配需核对模型、Token 和实际完成时间。仅金额相等不足以证明同一请求。
 - 官方导入行使用稳定官方 ID，归属 `opencode-go`，费用来源 `provider`。无法从备份唯一证实的状态、耗时、流式和路由信息应标记未知（`details_known=0`），不能伪装成成功请求。
 
-历史 `oc_sync.py` 存在非事务 `INSERT OR REPLACE`、费用舍入和默认成功等行为；`scripts/platform_reconcile.py` 还有金额配对及固定模型写入。这些脚本可帮助理解旧协议，不应直接运行其写入模式恢复生产。
+历史 `oc_sync.py` 存在非事务 `INSERT OR REPLACE`、费用舍入和默认成功等行为；`scripts/platform_reconcile.py` 还有金额配对及固定模型写入（该脚本已移出跟踪，仅在本机保留）。这些脚本可帮助理解旧协议，不应直接运行其写入模式恢复生产。
 
 ## 恢复与验证顺序
 

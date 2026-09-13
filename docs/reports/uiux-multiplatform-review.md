@@ -115,6 +115,6 @@
 
 - 自动观察脚本：本地任务记录 `../.codex-tasks/20260910-platform-integration/tasks/07-uiux/raw/observe-uiux.cjs`（该目录不随仓库分发）。当前观察：`/tmp/oc-go-cc-uiux-current.axtgQT/observations.json`、同目录 `1440-*-top.png`、`390-*-top.png`、`quota-*.png`、`settings-accessibility.txt`、`chart-accessibility.txt`。
 - 部署后页面/API证据：`/tmp/oc-go-cc-header-final.PYhcpx/production-smoke/result.json` 及七页截图。当前运行状态复核没有再次重启服务。
-- 本地设计依据：[.impeccable.md](../.impeccable.md)；`ui-ux-pro-max` 的数据密集型面板、表格/焦点/触摸规则；`critique` 的启发式、认知负荷和使用者走查。建议受既有原生前端和零新增前端依赖约束。
+- 本地设计依据：仓库根目录的 `.impeccable.md`（本地文件，不随仓库分发）；`ui-ux-pro-max` 的数据密集型面板、表格/焦点/触摸规则；`critique` 的启发式、认知负荷和使用者走查。建议受既有原生前端和零新增前端依赖约束。
 - 目前实际浏览器为 Chrome 152。Safari、Firefox、移动真机、200% 缩放、屏幕阅读器完整流程和 WCAG 对比度尚未验收；六系统/架构编译通过也不等于六平台原生运行或托盘验证通过。
 - 本轮未进行真实付费推理或 AWS 付费查询，没有修改凭证、配置、账本、全局客户端设置或视觉代码。没有证据支持“所有平台所有数据和所有浏览器完全兼容”的表述。

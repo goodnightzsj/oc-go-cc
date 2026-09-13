@@ -40,6 +40,13 @@ artifacts/
 .codex-tasks/
 .ai/
 
+# Local-only tooling and operational scripts. Impeccable is still used in this
+# checkout; the context file just does not belong to the published tree, and
+# platform_reconcile.py can write to the production database, so it stays a
+# local reference rather than a shipped script.
+.impeccable.md
+scripts/platform_reconcile.py
+
 # One-time oc-go-cc -> routatic-proxy merge planning; the merge completed
 # 2026-08-06 (f4616cc), so this only survives as the author's local copy.
 MIGRATION.md

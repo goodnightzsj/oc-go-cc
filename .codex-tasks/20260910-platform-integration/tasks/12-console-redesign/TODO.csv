@@ -1,6 +1,0 @@
-id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,notes
-1,核实参考并建立统一七页设计,DONE,一手参考有来源;不更换技术栈;数据与设计不变量明确,test -s .impeccable.md,2026-09-11,0,参考与设计上下文已记录;完整读取HTML和CSS;复用原Edge确认UI01d300b9dadf;原生栈与五平台合同保留
-2,重设计导航和七页数据布局,DONE,七页均非换色级改善;功能和字段保留;无第三方前端依赖,go test ./internal/gui -count=1,2026-09-11,0,侧栏/工具条/七页数据层级完成;主线程完整核对HTML/CSS;GUI与quota隔离race通过
-3,补充交互与数据呈现回归,DONE,导航/主题/分页/空态/官方本地口径及五平台独立保存通过,go test -race -p 2 ./internal/gui ./internal/quota -count=1,2026-09-11,0,新增主题动作/偏好/双语回归通过;最新GUI3.079s与quota1.748s race通过;真实键盘导航由#5最终验收
-4,完成全量验证与安全部署,DONE,race/vet构建通过;配置账本备份且发布健康,go test -race -p 2 ./... -count=1,2026-09-11,0,660/1094 race与vet六目标Codex冒烟通过;b3c947d已部署;配置不变与1390原始行完整
-5,使用edge-debug-attach验收新线上UI,DONE,同一Edge连接验证七页五平台双语双主题与真实数据边界,echo SKIP,2026-09-12,2,前两次脚本失败记录保留;恢复同一Edge后563检查29组合70布局通过;468只读请求0异常0意外请求;21截图及逐页视觉复核;连接已关闭

@@ -1,5 +1,0 @@
-id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,notes
-1,补充P1键盘和信息层级回归,DONE,排序备用链开关图表及历史设置布局失败可复现,go test ./internal/gui -count=1,2026-09-11,0,语义与编辑行为回归通过;旧费用文案失败证据保留于initial-targeted.jsonl
-2,实施七页层级主题与移动端美化,DONE,原生交互可操作;数据语义五平台独立保存和收费边界不变,go test -race -p 2 ./internal/quota ./internal/gui -count=1,2026-09-11,0,层级折叠键盘主题实现及DOM回归已通过;实际视觉在#4用Edge远端验收
-3,执行本地全量回归与六目标构建,DONE,针对性与全量验证通过;局限明确,go test -race -p 2 ./... -count=1,2026-09-11,0,656顶层1090含子测试race与vet通过;六目标CGO0均构建通过;不启动新浏览器
-4,提交推送部署并用Edge验证远端,DONE,目标提交运行;五平台七页双语双主题只读验收;配置账本保留,node /tmp/oc-go-cc-edge-remote.Peo95y/keyboard-probe.mjs,2026-09-11,1,e29e79f已运行;29组合70布局通过;487项初过与7项脚本纠正后通过;0页面异常/越界写请求;进一步视觉重设计移交#12

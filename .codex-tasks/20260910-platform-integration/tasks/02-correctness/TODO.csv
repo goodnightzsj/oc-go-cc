@@ -1,5 +1,0 @@
-id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,notes
-1,统一凭证和平台模型身份,DONE,专属key池覆盖global且健康跨平台fallback有效,go test -race -p 2 ./... -count=1,2026-09-10,0,provider+model身份和专属凭证回归通过
-2,修复协议选择工具调用与usage,DONE,显式格式双向一致且Responses工具和usage保持,go test -race -p 2 ./... -count=1,2026-09-10,0,上游Responses工具流式用量与原生Messages回归通过
-3,限制账单同步到明确平台并保留未匹配行,DONE,其他平台和未知账户不被自动删除,go test -race -p 2 ./... -count=1,2026-09-10,0,合成数据库跨平台保留回归通过
-4,融合独立上游修复并复核,DONE,平台专属头百分位自启补丁已测试,go test -race -p 2 ./... -count=1,2026-09-10,0,独立请求头P95/P99与Homebrew路径通过;launchctl已隔离

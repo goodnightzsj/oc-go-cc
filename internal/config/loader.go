@@ -278,65 +278,10 @@ func applyDefaults(cfg *Config) {
 	if cfg.AnthropicFirst.BaseURL == "" {
 		cfg.AnthropicFirst.BaseURL = defaultAnthropicAPIURL
 	}
-	if cfg.OpenCodeGo.BaseURL == "" {
-		cfg.OpenCodeGo.BaseURL = defaultBaseURL
-	}
-	if cfg.OpenCodeGo.AnthropicBaseURL == "" {
-		cfg.OpenCodeGo.AnthropicBaseURL = defaultAnthropicBaseURL
-	}
-	if cfg.OpenCodeGo.ResponsesBaseURL == "" {
-		cfg.OpenCodeGo.ResponsesBaseURL = defaultResponsesBaseURL
-	}
-	if cfg.OpenCodeGo.TimeoutMs == 0 {
-		cfg.OpenCodeGo.TimeoutMs = defaultTimeoutMs
-	}
-	if cfg.OpenCodeGo.StreamTimeoutMs == 0 {
-		if cfg.OpenCodeGo.StreamingTimeoutMs > 0 {
-			cfg.OpenCodeGo.StreamTimeoutMs = cfg.OpenCodeGo.StreamingTimeoutMs
-		} else {
-			cfg.OpenCodeGo.StreamTimeoutMs = cfg.OpenCodeGo.TimeoutMs
-		}
-	}
-	if cfg.OpenCodeZen.BaseURL == "" {
-		cfg.OpenCodeZen.BaseURL = defaultZenBaseURL
-	}
-	if cfg.OpenCodeZen.AnthropicBaseURL == "" {
-		cfg.OpenCodeZen.AnthropicBaseURL = defaultZenAnthropicBaseURL
-	}
-	if cfg.OpenCodeZen.ResponsesBaseURL == "" {
-		cfg.OpenCodeZen.ResponsesBaseURL = defaultZenResponsesBaseURL
-	}
-	if cfg.OpenCodeZen.GeminiBaseURL == "" {
-		cfg.OpenCodeZen.GeminiBaseURL = defaultZenGeminiBaseURL
-	}
-	if cfg.OpenRouter.BaseURL == "" {
-		cfg.OpenRouter.BaseURL = defaultOpenRouterBaseURL
-	}
-	if cfg.CommandCode.BaseURL == "" {
-		cfg.CommandCode.BaseURL = defaultCommandCodeBaseURL
-	}
-	if cfg.CommandCode.AnthropicBaseURL == "" {
-		cfg.CommandCode.AnthropicBaseURL = defaultCommandCodeAnthropicBaseURL
-	}
-	if cfg.CommandCode.TimeoutMs == 0 {
-		cfg.CommandCode.TimeoutMs = defaultTimeoutMs
-	}
-	if cfg.CommandCode.StreamTimeoutMs == 0 {
-		cfg.CommandCode.StreamTimeoutMs = cfg.CommandCode.TimeoutMs
-	}
-	if cfg.CommandCode.StreamingTimeoutMs == 0 {
-		cfg.CommandCode.StreamingTimeoutMs = cfg.CommandCode.TimeoutMs
-	}
-	if cfg.OpenCodeZen.TimeoutMs == 0 {
-		cfg.OpenCodeZen.TimeoutMs = defaultTimeoutMs
-	}
-	if cfg.OpenCodeZen.StreamTimeoutMs == 0 {
-		if cfg.OpenCodeZen.StreamingTimeoutMs > 0 {
-			cfg.OpenCodeZen.StreamTimeoutMs = cfg.OpenCodeZen.StreamingTimeoutMs
-		} else {
-			cfg.OpenCodeZen.StreamTimeoutMs = cfg.OpenCodeZen.TimeoutMs
-		}
-	}
+	// Endpoint and timeout defaults, one row per field. Keeping this as a table
+	// rather than a chain of per-platform blocks is what makes "add a platform"
+	// a matter of adding rows instead of finding every branch that mentions one.
+	applySiteDefaults(cfg)
 	if cfg.Logging.Level == "" {
 		cfg.Logging.Level = defaultLogLevel
 	}
@@ -610,4 +555,59 @@ func validateModelConfig(label string, mc ModelConfig) error {
 		return fmt.Errorf("%s: commandcode supports only openai or anthropic upstream wire formats", label)
 	}
 	return nil
+}
+
+// applySiteDefaults fills every unset endpoint and timeout from the value its
+// API publishes.
+//
+// A row per field, so adding a platform means adding rows rather than hunting
+// for each branch that mentions one. The order inside a row is the fallback
+// order: an unset idle or total timeout takes the platform's overall timeout,
+// and the overall timeout takes the shared default.
+func applySiteDefaults(cfg *Config) {
+	for _, row := range []struct {
+		target *string
+		value  string
+	}{
+		{&cfg.OpenCodeGo.BaseURL, defaultBaseURL},
+		{&cfg.OpenCodeGo.AnthropicBaseURL, defaultAnthropicBaseURL},
+		{&cfg.OpenCodeGo.ResponsesBaseURL, defaultResponsesBaseURL},
+		{&cfg.OpenCodeZen.BaseURL, defaultZenBaseURL},
+		{&cfg.OpenCodeZen.AnthropicBaseURL, defaultZenAnthropicBaseURL},
+		{&cfg.OpenCodeZen.ResponsesBaseURL, defaultZenResponsesBaseURL},
+		{&cfg.OpenCodeZen.GeminiBaseURL, defaultZenGeminiBaseURL},
+		{&cfg.OpenRouter.BaseURL, defaultOpenRouterBaseURL},
+		{&cfg.CommandCode.BaseURL, defaultCommandCodeBaseURL},
+		{&cfg.CommandCode.AnthropicBaseURL, defaultCommandCodeAnthropicBaseURL},
+	} {
+		if *row.target == "" {
+			*row.target = row.value
+		}
+	}
+
+	// Timeouts share one default, so each row only names the duration it falls
+	// back to within its own platform.
+	for _, row := range []struct {
+		timeout, idle, streaming *int
+	}{
+		{&cfg.OpenCodeGo.TimeoutMs, &cfg.OpenCodeGo.StreamTimeoutMs, &cfg.OpenCodeGo.StreamingTimeoutMs},
+		{&cfg.OpenCodeZen.TimeoutMs, &cfg.OpenCodeZen.StreamTimeoutMs, &cfg.OpenCodeZen.StreamingTimeoutMs},
+		{&cfg.AWSBedrock.TimeoutMs, &cfg.AWSBedrock.StreamTimeoutMs, &cfg.AWSBedrock.StreamingTimeoutMs},
+		{&cfg.OpenRouter.TimeoutMs, &cfg.OpenRouter.StreamTimeoutMs, &cfg.OpenRouter.StreamingTimeoutMs},
+		{&cfg.CommandCode.TimeoutMs, &cfg.CommandCode.StreamTimeoutMs, &cfg.CommandCode.StreamingTimeoutMs},
+	} {
+		if *row.timeout == 0 {
+			*row.timeout = defaultTimeoutMs
+		}
+		if *row.idle == 0 {
+			if *row.streaming > 0 {
+				*row.idle = *row.streaming
+			} else {
+				*row.idle = *row.timeout
+			}
+		}
+		if *row.streaming == 0 {
+			*row.streaming = *row.timeout
+		}
+	}
 }

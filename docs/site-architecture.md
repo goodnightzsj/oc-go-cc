@@ -45,7 +45,7 @@
 | 账户与配额 | `internal/quota/` 各平台文件、`internal/gui/quota.go:128`、`internal/gui/analytics.go:78` |
 | 面板平台清单 | `internal/gui/config_io.go`、`internal/gui/assets/app.js` |
 | CLI 预设 | `cmd/routatic-proxy/init_provider.go`、`cmd/routatic-proxy/main.go` |
-| 遗留客户端 | `internal/client/opencode.go` 的 `Provider` / `IsZen` / `getEndpoint` |
+| 遗留客户端 | `internal/client/opencode.go` 的 `Provider`（`getEndpoint` / `IsZen` / `IsBedrock` / `IsOpenRouter` **保留**，见文末） |
 | 协议实现 | `internal/provider/*.go` —— **这条已经是对的**，保持 |
 
 ## 3. 目标架构
@@ -140,7 +140,7 @@ type Site struct {
 | 2 | `app.js` 与面板按 `Visible` 过滤，其余站点置 `false` | 前端少若干项，路由与数据不变 | 改一个布尔值 |
 | 3 | 接入每站点目录，修好 `/v1/models` | 仅影响模型列表内容 | 独立提交 |
 | 4 | `active_site` + 目录优先解析 + 面板选择器 | **唯一改变路由行为的阶段** | 移除 `active_site` 即回到阶段 3 |
-| 5 | 清理 `provider/*.go`、`loader.go`、`client/opencode.go` 中残留的平台分支 | 无 | — |
+| 5 | 清理 `provider/*.go`、`loader.go`、`client/opencode.go` 中残留的平台分支 | 无 | 已完成 `loader.go` 与 `storage/pricing.go`；`client/opencode.go` 经核实**不应清理**，见下 |
 
 **阶段 1 是承重点**：它必须零行为变化。做不到零变化说明描述符的边界划错了，应停下来重新划线而不是继续往上叠。
 
@@ -159,3 +159,11 @@ type Site struct {
 | 切换前需先配好目标 | 切换开关只在目标站点已有可用目标时才有意义。生产今天的 13 个路由目标（`models` 6 + `model_overrides` 5 + `fallbacks.default` 2）全部指向 `opencode-go`，CommandCode 有 key 但零引用，切过去会是空的 |
 | 目录优先覆盖重映射 | 见 §3.3，已知且接受 |
 | 描述符退化为配置桶 | 硬线：描述符只放**可枚举的元数据**。出现需要 `if` 才能解释的字段时，说明该行为不属于描述符，应放回各自包 |
+
+## 9. 阶段 5 的一处反例：`client.getEndpoint` 不应清理
+
+`internal/client/opencode.go` 的 `getEndpoint` 按平台分支返回端点，其中 Go / Zen / Bedrock 三个分支看起来是死代码——这四个平台都有 `core.Provider` 适配器并已在 registry 注册，handler 只在 registry 查不到时才落到这个客户端。
+
+**但它们是可达的**：`MessagesHandler` 的 `providerRegistry` 允许为 nil（`messages.go` 的 `if h.providerRegistry != nil`），此时所有平台都走这条路径。实际删掉后 `TestHandleStreaming_GoAnthropicModel_FallsThroughOnError` 与 `TestHandleStreaming_PerModelTimeoutFallback` 立即失败，已回退。
+
+结论：这条路径是**被支持的降级配置**，不是残留。要清理它，前提是先决定 registry 为 nil 是否仍是受支持的构造方式；在那之前保持原样。

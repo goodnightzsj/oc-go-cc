@@ -2809,6 +2809,13 @@ async function saveProxyConfig() {
       showSaveStatus(t('status.saveOk'), 'success');
       // Reload the full config from the server to stay in sync.
       await loadProxyConfig();
+      // A saved active_site or key change also moves what every other tab is
+      // showing: those selectors are set from /api/sites, which until now was
+      // only read at page load, so a new platform only took effect after a
+      // manual refresh. Re-derive both here so the rest of the dashboard
+      // follows the save it just acknowledged.
+      await applySelectableSites();
+      await applyActiveSite();
     } else {
       const txt = await r.text();
       showSaveStatus(t('status.saveFail') + txt, 'error');

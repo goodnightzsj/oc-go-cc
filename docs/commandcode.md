@@ -128,7 +128,7 @@ supports_websockets = false
 - **兼容缺口已修复**：Claude 自动生成会话标题发送 `output_config.format`，原实现在 `internal/transformer/request.go` 主动拒绝该结构化输出（1 次流错误、3 次非流式 502）。现改为无损映射为 OpenAI `response_format`：`{"type":"json_schema","schema":S}` → `{"type":"json_schema","json_schema":{"name":"response","schema":S,"strict":true}}`。Anthropic 只定义 `json_schema` 一种变体，且要求 schema 闭合（`additionalProperties:false` 且属性全部必需），与 OpenAI strict 模式的要求一致，因此映射不丢失约束；未知的 `format.type` 仍然显式报错，不会静默丢弃。
 - 两个测试库的费用均为未知；Claude CLI 对第三方模型显示 `costBasis: unknown`，其金额不作为官方扣费证据。测试进程、隧道和临时凭证副本已清理。
 
-映射后的回归在 `internal/transformer/request_test.go`（`TestTransformRequestMapsStructuredOutputFormat`、`TestTransformRequestRejectsUnknownStructuredOutputFormat`）与本轮全量 `go test -race -p 2 ./... -count=1` 中通过。上游是否对每个模型都接受 `response_format` 仍无单独承诺：[官方 Provider 文档](https://commandcode.ai/docs/provider)继续要求非 Claude 模型使用 Chat Completions，并引用标准请求 schema，但没有逐模型保证严格 `json_schema` 能力。因此“映射正确”已实测，“上游逐模型支持”仍属未验证，不能仅凭“OpenAI 兼容”宣称支持。详见[实测摘要](../.codex-tasks/20260910-platform-integration/tasks/14-commandcode-live/raw/live-result.json)。
+映射后的回归在 `internal/transformer/request_test.go`（`TestTransformRequestMapsStructuredOutputFormat`、`TestTransformRequestRejectsUnknownStructuredOutputFormat`）与本轮全量 `go test -race -p 2 ./... -count=1` 中通过。上游是否对每个模型都接受 `response_format` 仍无单独承诺：[官方 Provider 文档](https://commandcode.ai/docs/provider)继续要求非 Claude 模型使用 Chat Completions，并引用标准请求 schema，但没有逐模型保证严格 `json_schema` 能力。因此“映射正确”已实测，“上游逐模型支持”仍属未验证，不能仅凭“OpenAI 兼容”宣称支持。实测摘要见本地任务记录 `../.codex-tasks/20260910-platform-integration/tasks/14-commandcode-live/raw/live-result.json`（该目录不随仓库分发）。
 
 ### 日志与账户数据来源
 
@@ -153,7 +153,7 @@ supports_websockets = false
 
 美元计价的点数不是现金余额，也不是本地费用；多 Key 分别展示、不合计。Alpha 没有 `monthlyCreditsGranted`，不由剩余值推算月度百分比；仅滚动窗口自身的 `used/cap` 可计算比例。`resetAt` 是 Unix 毫秒，0 显示未知，不显示 1970。
 
-账户响应按端点和 Key 集合缓存 30 秒，`refresh=1` 手动刷新。额度、订阅、汇总各自保留错误；一个失败不会清空其他已成功数据。详细证据见[协议核实记录](../.codex-tasks/20260910-platform-integration/tasks/09-commandcode-account/raw/browser-contract.md)。
+账户响应按端点和 Key 集合缓存 30 秒，`refresh=1` 手动刷新。额度、订阅、汇总各自保留错误；一个失败不会清空其他已成功数据。详细证据见本地任务记录 `../.codex-tasks/20260910-platform-integration/tasks/09-commandcode-account/raw/browser-contract.md`（该目录不随仓库分发）。
 
 ## 指定参考项目与验证范围
 

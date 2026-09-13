@@ -1,8 +1,0 @@
-id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,notes
-1,补齐配置示例和两客户端接入文档,DONE,官方来源拓扑鉴权支持边界与真实实现一致,go test -race -p 2 ./... -count=1,2026-09-10,0,3份文档22个本地链接9个JSON块通过;最小配置实际validate通过;不覆盖现有客户端配置
-2,保存上游采纳与参考代码审阅结论,DONE,已采纳未采纳项固定提交许可证与原因可追溯,git diff --check,2026-09-10,0,上游HEAD b214eeb及27项已记录;MAXeaglet固定487f219 MIT;公开报告docs/platform-integration-review.md已补齐
-3,最终回归与跨平台验收,DONE,最新改动race与vet通过且构建和浏览器证据完整,go test -race -p 2 ./... -count=1,2026-09-10,0,625顶层1000含子测试通过;vet与六目标构建及显式Codex工具双轮通过;Chromium三宽度通过;无真实账户或其他OS运行验证
-4,同步五平台接口能力与使用说明,DONE,平台筛选和套餐能力说明与实现一致,git diff --check,2026-09-11,0,4份文档30本地链接20JSON块通过;CommandCode和OpenRouter完整配置经新二进制validate通过;官方接口缺口明确
-5,重新全量回归并审查部署门槛,DONE,新源码race与vet六目标构建及逐平台浏览器通过;所有缺口明确,go test -race -p 2 ./... -count=1,2026-09-11,0,边界修复后641顶层1039含子测试race与vet通过;六目标无CGO构建和Codex双轮通过;Chrome447断言31布局重新通过
-6,验证AWS官方账单增量及最终发布版本,DONE,最新race/vet六目标及有数据空数据浏览器通过;官方合同和示例一致,go test -race -p 2 ./... -count=1,2026-09-11,0,650顶层1073含子测试通过;vet六目标CGO0及Codex工具双轮通过;有数据459与空数据210检查通过;5文档35链接22JSON和4完整配置validate通过
-7,验证AWS表头增量修复,DONE,当前源码回归和五平台浏览器通过且译文已核实,go test -race -p 2 ./... -count=1,2026-09-11,0,当前650顶层1073含子测试race和vet通过;六目标CGO0及Codex双轮通过;五平台460检查31布局通过;证据/tmp/oc-go-cc-header-final.PYhcpx

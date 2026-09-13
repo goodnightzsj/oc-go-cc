@@ -1,3 +1,0 @@
-id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,notes
-1,部署后检查七页信息与交互,DONE,每页有真实结构证据且不展示敏感数据,node raw/observe-uiux.cjs FIXTURE_ORIGIN PLAYWRIGHT_PATH OUTPUT_DIR,2026-09-11,0,0b28ab2运行健康已复核;本轮14页视图及5平台套餐观察成功且0pageerror/越界请求;fixture正常退出;证据/tmp/oc-go-cc-uiux-current.axtgQT
-2,汇总美化优先级与实施建议,DONE,建议覆盖字段图表层级反馈与跨设备并区分必须修复和美化,test -s docs/uiux-multiplatform-review.md,2026-09-11,0,七页报告含P1/P2优先级与24/40人工启发式评分;4个相对链接及7页覆盖检查通过;未实施视觉改动

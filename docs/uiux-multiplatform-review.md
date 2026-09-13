@@ -4,7 +4,7 @@
 
 可以继续美化，优先级应是可操作性、信息层级、跨设备阅读，再是配色和细节；不需要更换前端框架或增加图表依赖。本轮只分析，没有修改产品视觉或交互行为。
 
-评估对象为已部署的 `0b28ab2`，UI build `95403ba4a0a5`。2026-09-11 再次确认服务 `active/running`、`NRestarts=0`、`/health` 为 `ok`；已有生产冒烟为 210 项检查、29 个平台/页面组合、21 项布局检查。五平台的数据与配置实现见[适配记录](platform-integration-review.md)，真实账户权限缺口仍是[未完成任务](../.codex-tasks/20260910-platform-integration/tasks/08-account-validation/SPEC.md)，不能因页面渲染正确而结项。
+评估对象为已部署的 `0b28ab2`，UI build `95403ba4a0a5`。2026-09-11 再次确认服务 `active/running`、`NRestarts=0`、`/health` 为 `ok`；已有生产冒烟为 210 项检查、29 个平台/页面组合、21 项布局检查。五平台的数据与配置实现见[适配记录](platform-integration-review.md)，真实账户权限缺口仍是未完成任务（本地记录 `../.codex-tasks/20260910-platform-integration/tasks/08-account-validation/SPEC.md`，该目录不随仓库分发），不能因页面渲染正确而结项。
 
 本轮另运行真实 Go/SQLite 合成后端，对七页的 1440/390px 视图及五个平台套餐视图作只读观察，14 个页面视图、5 个套餐视图成功，0 脚本异常、0 越界请求。测试服务正常停止并 PASS。截图中的金额、模型与 Key 均为合成数据，不代表生产账户。
 
@@ -113,7 +113,7 @@
 
 ## 证据与局限
 
-- 自动观察脚本：[observe-uiux.cjs](../.codex-tasks/20260910-platform-integration/tasks/07-uiux/raw/observe-uiux.cjs)。当前观察：`/tmp/oc-go-cc-uiux-current.axtgQT/observations.json`、同目录 `1440-*-top.png`、`390-*-top.png`、`quota-*.png`、`settings-accessibility.txt`、`chart-accessibility.txt`。
+- 自动观察脚本：本地任务记录 `../.codex-tasks/20260910-platform-integration/tasks/07-uiux/raw/observe-uiux.cjs`（该目录不随仓库分发）。当前观察：`/tmp/oc-go-cc-uiux-current.axtgQT/observations.json`、同目录 `1440-*-top.png`、`390-*-top.png`、`quota-*.png`、`settings-accessibility.txt`、`chart-accessibility.txt`。
 - 部署后页面/API证据：`/tmp/oc-go-cc-header-final.PYhcpx/production-smoke/result.json` 及七页截图。当前运行状态复核没有再次重启服务。
 - 本地设计依据：[.impeccable.md](../.impeccable.md)；`ui-ux-pro-max` 的数据密集型面板、表格/焦点/触摸规则；`critique` 的启发式、认知负荷和使用者走查。建议受既有原生前端和零新增前端依赖约束。
 - 目前实际浏览器为 Chrome 152。Safari、Firefox、移动真机、200% 缩放、屏幕阅读器完整流程和 WCAG 对比度尚未验收；六系统/架构编译通过也不等于六平台原生运行或托盘验证通过。

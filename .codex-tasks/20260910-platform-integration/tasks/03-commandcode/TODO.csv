@@ -1,5 +1,0 @@
-id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,notes
-1,核实官网的Codex和Claude Code原生支持,DONE,按客户端记录官方端点认证工具流式usage与原生或反代选择,test -s .codex-tasks/20260910-platform-integration/tasks/03-commandcode/raw/official-support.md,2026-09-10,0,已再次复核官方正文;Claude模型原生Messages;Codex直连未有公开Responses依据故适配;参考项目也无Responses;未使用真实账户
-2,接入独立配置环境变量CLI与provider,DONE,专属配置凭证校验注册模型路由回归通过,go test -race -p 2 ./... -count=1,2026-09-10,0,CLI预设与专属key默认URL模型路由和注册通过
-3,按原生优先决策实现并验证客户端链路,DONE,支持者原生转发不转换;缺口反代;Responses与Messages工具usage流式错误合同通过,go test -race -p 2 ./... -count=1,2026-09-10,0,合成上游及隔离Codex CLI双轮工具调用通过;真实平台未实测
-4,复核集成边界与移交日志套餐统计设置,DONE,相关race通过且官方账单本地估算未知状态与配置字段明确,go test -race -p 2 ./... -count=1,2026-09-10,1,主线程终审修复非流式工具参数非对象仍成功;4项回归先失败后通过;最新全量和显式Codex冒烟通过;官方未知能力不杜撰

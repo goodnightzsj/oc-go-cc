@@ -38,7 +38,7 @@
 
 ## 上游提交筛选
 
-上游为 [samueltuyizere/oc-go-cc](https://github.com/samueltuyizere/oc-go-cc)，第一轮筛选截至 `b214eeb279d9a397872bbc0795c2486e3a0dd969` 的 27 项提交。2026-09-11 再核实 HEAD 为 `1f15a76c4dcb18db938714a28ae93047cbcc4f3e`；本轮按行为移植，不整树 merge。提交、推送与部署状态见[当前任务记录](../.codex-tasks/20260910-platform-integration/PROGRESS.md)。
+上游为 [samueltuyizere/oc-go-cc](https://github.com/samueltuyizere/oc-go-cc)，第一轮筛选截至 `b214eeb279d9a397872bbc0795c2486e3a0dd969` 的 27 项提交。2026-09-11 再核实 HEAD 为 `1f15a76c4dcb18db938714a28ae93047cbcc4f3e`；本轮按行为移植，不整树 merge。提交、推送与部署状态见本地任务记录 `../.codex-tasks/20260910-platform-integration/PROGRESS.md`（该目录不随仓库分发）。
 
 | 提交 | 本轮处理 |
 | --- | --- |
@@ -63,7 +63,7 @@
 ## 验证与兼容边界
 
 - 自动测试使用临时 HOME/配置/数据库和合成 HTTP 上游。浏览器 fixture 清除继承的平台环境覆盖项，浏览器隔离 context 阻断外网与系统自启写接口。
-- 2026-09-10 阶段 race 通过 625 个顶层测试（含子测试 1000 项），vet 和六目标无 CGO 编译通过，Codex 冒烟显式通过；这不是新增平台筛选后的最终结果。当前源码验证及原始证据见 [任务验收记录](../.codex-tasks/20260910-platform-integration/PROGRESS.md)。
+- 2026-09-10 阶段 race 通过 625 个顶层测试（含子测试 1000 项），vet 和六目标无 CGO 编译通过，Codex 冒烟显式通过；这不是新增平台筛选后的最终结果。当前源码验证及原始证据见本地任务记录 `../.codex-tasks/20260910-platform-integration/PROGRESS.md`（该目录不随仓库分发）。
 - 旧 Chromium 三宽度七页签结果只作为基线；本轮使用真实 Go/SQLite 合成后端重新验证五平台筛选、局部保存和账户错误状态，不能仅凭选项存在或旧模拟数据宣称兼容。
 - Codex `0.144.3-cometix` 的隔离 CLI→合成上游双轮工具调用已验证，不等于真实 CommandCode 账户联调。Claude 原生接口的高级扩展仍取决于实际平台是否接受。
 - 五个平台均能被配置并在本地数据中独立展示，不等于五个平台都提供同样的账单/余额 API。真实账户权限、生成/扣费、所有模型、所有客户端版本、Safari/Firefox、Windows/Linux 实机和原生托盘仍未覆盖，不能宣称“所有平台完全兼容”。

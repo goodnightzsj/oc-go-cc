@@ -1448,8 +1448,14 @@ document.querySelectorAll('.tab').forEach(tab => {
 // serialising, and every bound control is set when applying.
 const VIEW_CONTROLS = {
   platform: ['provider-filter', 'overview-provider', 'perf-provider', 'analytics-provider', 'quota-provider'],
-  from: ['history-start', 'analytics-start'],
-  to: ['history-end', 'analytics-end'],
+  // The history and analytics date ranges are separate keys because they are
+  // separate controls with different defaults - history starts unbounded, the
+  // analytics view opens on the last seven days. Sharing one key made the
+  // analytics default the history view's range on every link.
+  from: ['history-start'],
+  to: ['history-end'],
+  afrom: ['analytics-start'],
+  ato: ['analytics-end'],
   q: ['history-search'],
   model: ['model-filter'],
   status: ['status-filter'],
@@ -1466,16 +1472,58 @@ const VIEW_CONTROLS = {
 // the hash would be rewritten while it is being read.
 let suppressViewStateSync = false;
 
-// buildViewHash serialises the current view. History pagination and sort order
-// are plain variables rather than controls, so they are appended separately and
-// only when they differ from the defaults - a link should not carry noise.
+// applyActiveSite points every platform selector at the configured site, which
+// is the right default but not an override: a link that names a platform has
+// already chosen one for the view, and re-pointing the selectors would silently
+// discard it. Saving the config clears the pin, because changing the active
+// site is a deliberate change to what the views open on.
+let viewPlatformPinned = false;
+
+// The default each control is measured against. Selects and inputs declare it
+// in markup, which the DOM exposes as defaultValue. The analytics date range
+// does not: it is computed from today when the module initialises, so its value
+// before any URL is applied is the only correct answer, and it is captured once
+// at boot.
+const viewDefaults = new Map();
+
+function captureViewDefaults() {
+  for (const ids of Object.values(VIEW_CONTROLS)) {
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (el && !el.defaultValue) viewDefaults.set(id, el.value ?? '');
+    }
+  }
+}
+
+function controlIsDefault(id, el) {
+  if (el.defaultValue) return el.value === el.defaultValue;
+  return el.value === (viewDefaults.get(id) ?? '');
+}
+
+// A default is only usable when it is actually known. A <select> always has
+// one - its first option, or the one marked selected. An input has one only if
+// boot captured it; resetting an input to an invented empty value would wipe a
+// range the panel computed for itself.
+function controlHasDefault(id, el) {
+  return el.tagName === 'SELECT' || viewDefaults.has(id);
+}
+
+function defaultControlValue(id, el) {
+  return el.defaultValue || viewDefaults.get(id) || '';
+}
+
+// buildViewHash serialises the current view. A parameter is written only when
+// its control differs from its default, so a link carries the reader's choices
+// rather than the panel's own opening state. History pagination and sort order
+// are plain variables rather than controls, so they are appended separately
+// under the same rule.
 function buildViewHash() {
   const params = new URLSearchParams();
   for (const [key, ids] of Object.entries(VIEW_CONTROLS)) {
     for (const id of ids) {
-      const value = document.getElementById(id)?.value;
-      if (value) {
-        params.set(key, value);
+      const el = document.getElementById(id);
+      if (el && el.value && !controlIsDefault(id, el)) {
+        params.set(key, el.value);
         break;
       }
     }
@@ -1512,11 +1560,15 @@ function applyViewState(params) {
   suppressViewStateSync = true;
   try {
     for (const [key, ids] of Object.entries(VIEW_CONTROLS)) {
-      if (!params.has(key)) continue;
-      const value = params.get(key) || '';
       for (const id of ids) {
         const el = document.getElementById(id);
-        if (!el || el.value === value) continue;
+        if (!el) continue;
+        // An absent parameter means the default, not "leave whatever is there":
+        // stepping back from a link that named a filter to one that omits it has
+        // to undo the choice, or the URL and the panel disagree about the view.
+        const value = params.has(key) ? (params.get(key) || '')
+          : controlHasDefault(id, el) ? defaultControlValue(id, el) : el.value;
+        if (el.value === value) continue;
         el.value = value;
         // The tab's own handler listens for this; a silent assignment would
         // leave the filter applied in the URL but not in the data.
@@ -2861,7 +2913,7 @@ async function applyActiveSite() {
   } catch (_) {
     return; // leave the selectors as rendered rather than guessing
   }
-  if (!active) return;
+  if (!active || viewPlatformPinned) return;
   for (const id of PLATFORM_SELECTORS) {
     const select = document.getElementById(id);
     if (!select) continue;
@@ -2933,6 +2985,7 @@ async function saveProxyConfig() {
       showSaveStatus(t('status.saveOk'), 'success');
       // Reload the full config from the server to stay in sync.
       await loadProxyConfig();
+      viewPlatformPinned = false;
       // A saved active_site or key change also moves what every other tab is
       // showing: those selectors are set from /api/sites, which until now was
       // only read at page load, so a new platform only took effect after a
@@ -3717,7 +3770,11 @@ startPolling();
 // const modules (e.g. AnalyticsModule) defined later in this script have
 // been initialized — otherwise accessing them here hits a TDZ error.
 queueMicrotask(() => {
+  // The defaults are read before the URL is applied, so a link cannot become
+  // the baseline its own parameters are measured against.
+  captureViewDefaults();
   const {name, params} = parseViewHash(location.hash);
+  viewPlatformPinned = params.has('platform');
   applyViewState(params);
   activateTab(name);
 });

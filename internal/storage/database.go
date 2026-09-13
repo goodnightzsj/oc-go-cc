@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/routatic/proxy/internal/history"
 	_ "modernc.org/sqlite"
 )
 
@@ -164,6 +165,11 @@ func Open(cfg Config) (*Database, error) {
 	_ = database.SeedDefaultModelPrices(ctx)
 	if _, err := database.BackfillRequestCosts(ctx); err != nil {
 		slog.Warn("request cost backfill warning", "err", err)
+	}
+	if n, err := database.BackfillPeakMultipliers(ctx); err != nil {
+		slog.Warn("peak multiplier backfill warning", "err", err)
+	} else if n > 0 {
+		slog.Info("restored peak markers on imported requests", "rows", n)
 	}
 
 	if cfg.VacuumOnStartup {
@@ -397,6 +403,84 @@ func (d *Database) BackfillRequestCosts(ctx context.Context) (int64, error) {
 	var updated int64
 	for _, row := range pending {
 		res, err := stmt.ExecContext(ctx, row.cost, CostSourceEstimated, row.id)
+		if err != nil {
+			return 0, err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		updated += n
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return updated, nil
+}
+
+// BackfillPeakMultipliers restores the peak flag on OpenCode Go rows that never
+// had it set. Imported billing history arrives with the column default, so a
+// request that fell inside the DeepSeek peak window is stored as off-peak and
+// everything reading the column - the API, the detail view, analytics - reports
+// the off-peak rate for a peak-billed request.
+//
+// The multiplier is recomputed with history.ProviderPeakMultiplier, the same
+// rule live inserts use, so the peak schedule keeps one owner instead of a
+// second copy in SQL. Rows already marked peak are left alone: our start_time
+// can sit a second or two away from the platform's billing clock at a window
+// boundary, and when the two disagree the platform's own figure is the billed
+// one.
+func (d *Database) BackfillPeakMultipliers(ctx context.Context) (int64, error) {
+	// ponytail: rescans the not-yet-peak rows on every startup. A few thousand
+	// rows cost nothing; add a schema_info marker if the table grows large.
+	rows, err := d.db.QueryContext(ctx, `
+		SELECT id, model, COALESCE(provider, ''), start_time
+		FROM requests
+		WHERE peak_multiplier <= 1
+	`)
+	if err != nil {
+		return 0, err
+	}
+	type peakRow struct {
+		id         string
+		multiplier float64
+	}
+	var pending []peakRow
+	for rows.Next() {
+		var id, model, provider, startTime string
+		if err := rows.Scan(&id, &model, &provider, &startTime); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		if multiplier := history.ProviderPeakMultiplier(provider, model, parseRequestTime(startTime)); multiplier > 1 {
+			pending = append(pending, peakRow{id: id, multiplier: multiplier})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	if len(pending) == 0 {
+		return 0, nil
+	}
+
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	stmt, err := tx.PrepareContext(ctx, `UPDATE requests SET peak_multiplier = ? WHERE id = ? AND peak_multiplier <= 1`)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = stmt.Close() }()
+
+	var updated int64
+	for _, row := range pending {
+		res, err := stmt.ExecContext(ctx, row.multiplier, row.id)
 		if err != nil {
 			return 0, err
 		}

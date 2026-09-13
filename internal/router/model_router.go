@@ -280,9 +280,17 @@ func (r *ModelRouter) resolveFromCatalog(cat *catalog.IndexedCatalog, requestedM
 
 // legacyUnknownModelConfig builds a bare config for an unknown model and
 // inherits Temperature and MaxTokens from the default model when available.
+// legacyUnknownModelConfig builds a bare target for a model no source knows.
+// The platform is the active site when routing is scoped - the operator has
+// already said which platform they want - and the default platform otherwise,
+// which is what an unset provider has always meant.
 func (r *ModelRouter) legacyUnknownModelConfig(cfg *config.Config, requestedModel string) config.ModelConfig {
+	provider := site.DefaultID()
+	if cfg.ActiveSite != "" {
+		provider = cfg.ActiveSite
+	}
 	primary := config.ModelConfig{
-		Provider: "opencode-go",
+		Provider: provider,
 		ModelID:  requestedModel,
 	}
 	if def, ok := cfg.Models["default"]; ok {

@@ -403,3 +403,52 @@ func (c *Config) ProviderAPIKeys(provider string) []string {
 	}
 	return c.EffectiveAPIKeys()
 }
+
+// ProviderTimeouts is one platform's configured timeouts, in milliseconds, with
+// the idle and total values already fallen back to the platform's overall
+// timeout. Zero means unset everywhere, which callers read as "use their own
+// default".
+type ProviderTimeouts struct {
+	RequestMs        int
+	StreamIdleMs     int
+	StreamingTotalMs int
+}
+
+// providerTimeoutSource binds each platform to the config block holding its
+// timeouts, the same way providerKeySource binds its credentials. A platform
+// with no block of its own - one served by the generic OpenAI-compatible path -
+// uses the default platform's block, which is what the per-platform switches
+// this replaces did.
+var providerTimeoutSource = map[string]func(*Config) (request, idle, total int){
+	site.OpenCodeGo: func(c *Config) (int, int, int) {
+		return c.OpenCodeGo.TimeoutMs, c.OpenCodeGo.StreamTimeoutMs, c.OpenCodeGo.StreamingTimeoutMs
+	},
+	site.OpenCodeZen: func(c *Config) (int, int, int) {
+		return c.OpenCodeZen.TimeoutMs, c.OpenCodeZen.StreamTimeoutMs, c.OpenCodeZen.StreamingTimeoutMs
+	},
+	site.AWSBedrock: func(c *Config) (int, int, int) {
+		return c.AWSBedrock.TimeoutMs, c.AWSBedrock.StreamTimeoutMs, c.AWSBedrock.StreamingTimeoutMs
+	},
+	site.OpenRouter: func(c *Config) (int, int, int) {
+		return c.OpenRouter.TimeoutMs, c.OpenRouter.StreamTimeoutMs, c.OpenRouter.StreamingTimeoutMs
+	},
+	site.CommandCode: func(c *Config) (int, int, int) {
+		return c.CommandCode.TimeoutMs, c.CommandCode.StreamTimeoutMs, c.CommandCode.StreamingTimeoutMs
+	},
+}
+
+// ProviderTimeouts returns a platform's configured timeouts.
+func (c *Config) ProviderTimeouts(provider string) ProviderTimeouts {
+	source, ok := providerTimeoutSource[site.Normalize(provider)]
+	if !ok {
+		source = providerTimeoutSource[site.DefaultID()]
+	}
+	request, idle, total := source(c)
+	if idle <= 0 {
+		idle = request
+	}
+	if total <= 0 {
+		total = request
+	}
+	return ProviderTimeouts{RequestMs: request, StreamIdleMs: idle, StreamingTotalMs: total}
+}

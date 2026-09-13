@@ -56,6 +56,8 @@ func siteConfig(t *testing.T, active string) *config.Config {
 			// A deliberate re-map: this id is named after a model CommandCode
 			// also publishes, but the operator routed it to OpenCode Go.
 			"deepseek/deepseek-v4-flash": {Provider: "opencode-go", ModelID: "kimi-k2.6"},
+			// A configured name the active site cannot serve.
+			"legacy-alias": {Provider: "opencode-go", ModelID: "kimi-k2.6"},
 		},
 		CommandCode: config.CommandCodeConfig{
 			APIKey:  "synthetic-key",
@@ -109,17 +111,32 @@ func TestActiveSiteFiltersConfiguredTargets(t *testing.T) {
 	}
 }
 
-// A request the selected site cannot serve is the operator's configuration not
-// covering that site, and saying so beats routing to a platform they did not
-// choose.
+// A request the operator's own configuration routes to a platform the active
+// site excludes is their configuration not covering that site. Saying so beats
+// quietly routing to a platform they did not choose.
 func TestActiveSiteWithoutATargetFailsExplicitly(t *testing.T) {
 	handler := activeSiteHandler(t, siteConfig(t, site.CommandCode))
-	_, err := chainFor(t, handler, "claude-opus-4-7")
+	_, err := chainFor(t, handler, "legacy-alias")
 	if err == nil {
 		t.Fatal("a request with no target on the active site was routed anyway")
 	}
 	if !strings.Contains(err.Error(), site.CommandCode) {
 		t.Fatalf("error does not name the active site: %v", err)
+	}
+}
+
+// A model name no source knows is still the client's choice of model, and this
+// proxy does not manage models. It goes to the active site and lets the platform
+// answer for itself, rather than being sent to a platform the operator excluded
+// or refused here on the platform's behalf.
+func TestActiveSiteCarriesAnUnknownModelName(t *testing.T) {
+	handler := activeSiteHandler(t, siteConfig(t, site.CommandCode))
+	chain, err := chainFor(t, handler, "some-model-nobody-publishes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chain) == 0 || chain[0].Provider != site.CommandCode || chain[0].ModelID != "some-model-nobody-publishes" {
+		t.Fatalf("chain = %+v, want the name carried to the active site", chain)
 	}
 }
 

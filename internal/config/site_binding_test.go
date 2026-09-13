@@ -43,3 +43,46 @@ func TestGlobalKeyFallbackIsPerPlatform(t *testing.T) {
 		}
 	}
 }
+
+// The registry says which platforms exist; each binding says where that
+// platform's credentials and timeouts live. A platform missing from a binding
+// falls back to the default platform's values silently, so the two lists have
+// to match rather than merely compile.
+func TestProviderTimeoutSourceCoversRegistry(t *testing.T) {
+	known := make(map[string]bool, len(site.All()))
+	for _, d := range site.All() {
+		known[d.ID] = true
+		if _, ok := providerTimeoutSource[d.ID]; !ok {
+			t.Errorf("platform %q is registered but has no timeout binding", d.ID)
+		}
+	}
+	for id := range providerTimeoutSource {
+		if !known[id] {
+			t.Errorf("timeout binding %q does not correspond to a registered platform", id)
+		}
+	}
+}
+
+// Each value falls back to the platform's own overall timeout, and an unknown
+// platform uses the default platform's block rather than none at all - which is
+// what the per-platform switches this replaced did.
+func TestProviderTimeoutsFallBackWithinThePlatform(t *testing.T) {
+	cfg := &Config{
+		CommandCode: CommandCodeConfig{TimeoutMs: 1000},
+		OpenCodeGo:  OpenCodeGoConfig{TimeoutMs: 2000, StreamTimeoutMs: 300, StreamingTimeoutMs: 4000},
+		OpenRouter:  OpenRouterConfig{TimeoutMs: 7000},
+		OpenCodeZen: OpenCodeZenConfig{TimeoutMs: 100},
+		AWSBedrock:  AWSBedrockConfig{TimeoutMs: 9000},
+	}
+	got := cfg.ProviderTimeouts(site.CommandCode)
+	if got.RequestMs != 1000 || got.StreamIdleMs != 1000 || got.StreamingTotalMs != 1000 {
+		t.Errorf("unset idle/total did not fall back to the platform timeout: %+v", got)
+	}
+	got = cfg.ProviderTimeouts(site.OpenCodeGo)
+	if got.RequestMs != 2000 || got.StreamIdleMs != 300 || got.StreamingTotalMs != 4000 {
+		t.Errorf("explicit values were not honoured: %+v", got)
+	}
+	if got := cfg.ProviderTimeouts("not-a-platform"); got.RequestMs != 2000 {
+		t.Errorf("an unknown platform did not use the default platform's block: %+v", got)
+	}
+}

@@ -487,7 +487,7 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 
 	// Route to appropriate model and build fallback chain.
 	facts := router.AnalyzeRequestFacts(routerMessages)
-	modelChain, routeResult, err := h.buildModelChain(anthropicReq.Model, routerMessages, tokenCount, isStreaming, anthropicReq.MaxTokens, facts.NeedsVision, needsTools)
+	modelChain, routeResult, err := h.buildModelChain(r.Context(), anthropicReq.Model, routerMessages, tokenCount, isStreaming, anthropicReq.MaxTokens, facts.NeedsVision, needsTools)
 	if err != nil {
 		status := http.StatusInternalServerError
 		message := "routing failed"
@@ -533,6 +533,7 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 //     Exact overrides win over family matches.
 //  2. Otherwise, fall through to scenario-based routing via routeOnce.
 func (h *MessagesHandler) buildModelChain(
+	ctx context.Context,
 	requestedModel string,
 	routerMessages []router.MessageContent,
 	tokenCount int,
@@ -543,6 +544,23 @@ func (h *MessagesHandler) buildModelChain(
 ) ([]config.ModelConfig, router.RouteResult, error) {
 	var chain []config.ModelConfig
 	var result router.RouteResult
+
+	// The active site is the authority for its own model names, so a client that
+	// picked a model from the listing gets exactly that model on that platform.
+	// This runs before the override lookup on purpose: the listing is what the
+	// client chose from, and re-mapping its choice through a configured alias
+	// would send the request somewhere the client did not ask for.
+	if published, ok := h.modelRouter.PublishedByActiveSite(ctx, requestedModel); ok {
+		primary := config.ModelConfig{Provider: h.modelRouter.ActiveSite(), ModelID: published}
+		primary = config.ResolveModelConfig(primary)
+		// The scenario chain stays as a safety net, but only within the active
+		// site: falling back to another platform is what the scope exists to
+		// prevent.
+		fallbacks, _ := h.routeOnce(routerMessages, tokenCount, "", isStreaming)
+		net := router.RestrictToActiveSite(h.modelRouter.ActiveSite(), fallbacks.GetModelChain())
+		result := router.RouteResult{Primary: primary, Scenario: router.ScenarioOverride}
+		return appendUniqueModels([]config.ModelConfig{primary}, net), result, nil
+	}
 
 	if requestedModel != "" {
 		overrideResult, ok := h.modelRouter.RouteWithOverride(requestedModel)
@@ -575,6 +593,17 @@ func (h *MessagesHandler) buildModelChain(
 
 	for _, s := range decision.Skipped {
 		h.logger.Info("model skipped by capacity filter", "model", s.ModelID, "reason", s.Reason)
+	}
+
+	// The active site scopes the chain rather than reordering it. An empty
+	// result is the operator's configuration not covering the selected site,
+	// and it is reported as such instead of routing to a platform they did not
+	// choose.
+	if active := h.modelRouter.ActiveSite(); active != "" {
+		decision.Models = router.RestrictToActiveSite(active, decision.Models)
+		if len(decision.Models) == 0 {
+			return nil, result, fmt.Errorf("active site %q has no routing target for this request; configure a model for it or switch the site", active)
+		}
 	}
 
 	return decision.Models, result, nil

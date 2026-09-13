@@ -15,28 +15,32 @@ import (
 // supports environment variable interpolation via ${VAR} syntax and hot-reloading
 // when hot_reload is enabled.
 type Config struct {
-	APIKey                         string                   `json:"api_key"`
-	APIKeys                        []string                 `json:"api_keys"`
-	Host                           string                   `json:"host"`
-	Port                           int                      `json:"port"`
-	HotReload                      bool                     `json:"hot_reload"`
-	EnableStreamingScenarioRouting bool                     `json:"enable_streaming_scenario_routing"`
-	EnableCostBasedRouting         bool                     `json:"enable_cost_based_routing"`
-	CostRouting                    *CostRoutingConfig       `json:"cost_routing,omitempty"`
-	RespectRequestedModel          *bool                    `json:"respect_requested_model,omitempty"`
-	Models                         map[string]ModelConfig   `json:"models"`
-	Fallbacks                      map[string][]ModelConfig `json:"fallbacks"`
-	ModelOverrides                 map[string]ModelConfig   `json:"model_overrides"`
-	ModelFamilyOverrides           map[string]ModelConfig   `json:"model_family_overrides"`
-	AWSBedrock                     AWSBedrockConfig         `json:"aws_bedrock"`
-	OpenCodeGo                     OpenCodeGoConfig         `json:"opencode_go"`
-	OpenCodeZen                    OpenCodeZenConfig        `json:"opencode_zen"`
-	OpenRouter                     OpenRouterConfig         `json:"openrouter"`
-	CommandCode                    CommandCodeConfig        `json:"commandcode"`
-	AnthropicFirst                 AnthropicFirstConfig     `json:"anthropic_first"`
-	Logging                        LoggingConfig            `json:"logging"`
-	Catalog                        CatalogConfig            `json:"catalog"`
-	Storage                        *StorageConfig           `json:"storage,omitempty"`
+	APIKey                         string             `json:"api_key"`
+	APIKeys                        []string           `json:"api_keys"`
+	Host                           string             `json:"host"`
+	Port                           int                `json:"port"`
+	HotReload                      bool               `json:"hot_reload"`
+	EnableStreamingScenarioRouting bool               `json:"enable_streaming_scenario_routing"`
+	EnableCostBasedRouting         bool               `json:"enable_cost_based_routing"`
+	CostRouting                    *CostRoutingConfig `json:"cost_routing,omitempty"`
+	RespectRequestedModel          *bool              `json:"respect_requested_model,omitempty"`
+	// ActiveSite restricts routing to one platform. Empty means unrestricted,
+	// which is what an existing config does: setting it is how an operator opts
+	// into single-site routing from the dashboard.
+	ActiveSite           string                   `json:"active_site,omitempty"`
+	Models               map[string]ModelConfig   `json:"models"`
+	Fallbacks            map[string][]ModelConfig `json:"fallbacks"`
+	ModelOverrides       map[string]ModelConfig   `json:"model_overrides"`
+	ModelFamilyOverrides map[string]ModelConfig   `json:"model_family_overrides"`
+	AWSBedrock           AWSBedrockConfig         `json:"aws_bedrock"`
+	OpenCodeGo           OpenCodeGoConfig         `json:"opencode_go"`
+	OpenCodeZen          OpenCodeZenConfig        `json:"opencode_zen"`
+	OpenRouter           OpenRouterConfig         `json:"openrouter"`
+	CommandCode          CommandCodeConfig        `json:"commandcode"`
+	AnthropicFirst       AnthropicFirstConfig     `json:"anthropic_first"`
+	Logging              LoggingConfig            `json:"logging"`
+	Catalog              CatalogConfig            `json:"catalog"`
+	Storage              *StorageConfig           `json:"storage,omitempty"`
 }
 
 // CostRoutingConfig controls cost-aware model selection.

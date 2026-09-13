@@ -153,39 +153,10 @@ func (c *OpenCodeClient) StreamIdleTimeout(modelConfig config.ModelConfig) time.
 	if c == nil || c.atomic == nil {
 		return fallback
 	}
-	cfg := c.atomic.Get()
-	var ms int
-	switch {
-	case IsBedrock(modelConfig):
-		ms = cfg.AWSBedrock.StreamTimeoutMs
-		if ms <= 0 {
-			ms = cfg.AWSBedrock.TimeoutMs
-		}
-	case IsZen(modelConfig):
-		ms = cfg.OpenCodeZen.StreamTimeoutMs
-		if ms <= 0 {
-			ms = cfg.OpenCodeZen.TimeoutMs
-		}
-	case IsOpenRouter(modelConfig):
-		ms = cfg.OpenRouter.StreamTimeoutMs
-		if ms <= 0 {
-			ms = cfg.OpenRouter.TimeoutMs
-		}
-	case Provider(modelConfig) == ProviderCommandCode:
-		ms = cfg.CommandCode.StreamTimeoutMs
-		if ms <= 0 {
-			ms = cfg.CommandCode.TimeoutMs
-		}
-	default:
-		ms = cfg.OpenCodeGo.StreamTimeoutMs
-		if ms <= 0 {
-			ms = cfg.OpenCodeGo.TimeoutMs
-		}
+	if ms := c.atomic.Get().ProviderTimeouts(Provider(modelConfig)).StreamIdleMs; ms > 0 {
+		return time.Duration(ms) * time.Millisecond
 	}
-	if ms <= 0 {
-		return fallback
-	}
-	return time.Duration(ms) * time.Millisecond
+	return fallback
 }
 
 // RequestTimeout returns the provider timeout for a non-streaming attempt.
@@ -193,22 +164,8 @@ func (c *OpenCodeClient) RequestTimeout(model config.ModelConfig) time.Duration 
 	if c == nil || c.atomic == nil {
 		return 5 * time.Minute
 	}
-	cfg := c.atomic.Get()
-	var timeoutMs int
-	switch {
-	case IsBedrock(model):
-		timeoutMs = cfg.AWSBedrock.TimeoutMs
-	case IsZen(model):
-		timeoutMs = cfg.OpenCodeZen.TimeoutMs
-	case IsOpenRouter(model):
-		timeoutMs = cfg.OpenRouter.TimeoutMs
-	case Provider(model) == ProviderCommandCode:
-		timeoutMs = cfg.CommandCode.TimeoutMs
-	default:
-		timeoutMs = cfg.OpenCodeGo.TimeoutMs
-	}
-	if timeoutMs > 0 {
-		return time.Duration(timeoutMs) * time.Millisecond
+	if ms := c.atomic.Get().ProviderTimeouts(Provider(model)).RequestMs; ms > 0 {
+		return time.Duration(ms) * time.Millisecond
 	}
 	return 5 * time.Minute
 }
@@ -218,37 +175,8 @@ func (c *OpenCodeClient) StreamingTimeout(model config.ModelConfig) time.Duratio
 	if c == nil || c.atomic == nil {
 		return 5 * time.Minute
 	}
-	cfg := c.atomic.Get()
-	var timeoutMs int
-	switch {
-	case IsBedrock(model):
-		timeoutMs = cfg.AWSBedrock.StreamingTimeoutMs
-		if timeoutMs <= 0 {
-			timeoutMs = cfg.AWSBedrock.TimeoutMs
-		}
-	case IsZen(model):
-		timeoutMs = cfg.OpenCodeZen.StreamingTimeoutMs
-		if timeoutMs <= 0 {
-			timeoutMs = cfg.OpenCodeZen.TimeoutMs
-		}
-	case IsOpenRouter(model):
-		timeoutMs = cfg.OpenRouter.StreamingTimeoutMs
-		if timeoutMs <= 0 {
-			timeoutMs = cfg.OpenRouter.TimeoutMs
-		}
-	case Provider(model) == ProviderCommandCode:
-		timeoutMs = cfg.CommandCode.StreamingTimeoutMs
-		if timeoutMs <= 0 {
-			timeoutMs = cfg.CommandCode.TimeoutMs
-		}
-	default:
-		timeoutMs = cfg.OpenCodeGo.StreamingTimeoutMs
-		if timeoutMs <= 0 {
-			timeoutMs = cfg.OpenCodeGo.TimeoutMs
-		}
-	}
-	if timeoutMs > 0 {
-		return time.Duration(timeoutMs) * time.Millisecond
+	if ms := c.atomic.Get().ProviderTimeouts(Provider(model)).StreamingTotalMs; ms > 0 {
+		return time.Duration(ms) * time.Millisecond
 	}
 	return 5 * time.Minute
 }

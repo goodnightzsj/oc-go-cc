@@ -594,12 +594,13 @@ func (w *ResponsesStreamWriter) event(data []byte) error {
 		w.blocks[*event.Index] = block
 		w.output = append(w.output, item)
 		kind := item["type"].(string)
-		if kind == "function_call" {
+		switch kind {
+		case "function_call":
 			block.initialJSON = item["arguments"].(string)
 			item["arguments"] = ""
-		} else if kind == "message" {
+		case "message":
 			item["content"] = []map[string]any{}
-		} else {
+		default:
 			item["summary"] = []map[string]any{}
 		}
 		if err := w.emit("response.output_item.added", map[string]any{"output_index": block.outputIndex, "item": item}); err != nil {

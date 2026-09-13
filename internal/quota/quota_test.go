@@ -165,7 +165,7 @@ func TestGoQuotaFetchProtectsCredentialBoundary(t *testing.T) {
 	var forwarded atomic.Bool
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		forwarded.Store(true)
-		fmt.Fprint(w, `{"monthly":{"usagePercent":0}}`)
+		_, _ = fmt.Fprint(w, `{"monthly":{"usagePercent":0}}`)
 	}))
 	defer target.Close()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +174,7 @@ func TestGoQuotaFetchProtectsCredentialBoundary(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusBadGateway)
-		fmt.Fprint(w, r.Header.Get("Authorization"))
+		_, _ = fmt.Fprint(w, r.Header.Get("Authorization"))
 	}))
 	defer srv.Close()
 	for _, path := range []string{"/failure", "/redirect"} {

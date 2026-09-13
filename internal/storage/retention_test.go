@@ -26,7 +26,7 @@ func TestRetentionPolicy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 			for _, age := range []int{0, 2, 10} {
 				when := time.Now().AddDate(0, 0, -age).UTC().Format(time.RFC3339Nano)
 				if _, err := db.DB().Exec(`INSERT INTO requests (id, model, start_time, created_at) VALUES (?, ?, ?, ?)`, fmt.Sprint(age), "test-model", when, when); err != nil {

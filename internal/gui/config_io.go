@@ -232,8 +232,8 @@ func writeConfigFile(path string, data []byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to create config file: %w", err)
 	}
-	defer os.Remove(file.Name())
-	defer file.Close()
+	defer func() { _ = os.Remove(file.Name()) }()
+	defer func() { _ = file.Close() }()
 	if _, err := file.Write(data); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}

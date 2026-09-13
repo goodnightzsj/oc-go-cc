@@ -56,7 +56,7 @@ func TestCalculateStatsP95(t *testing.T) {
 	if st.P95 != 95*time.Millisecond {
 		t.Errorf("P95 = %v, want 95ms", st.P95)
 	}
-	if !(st.P90 <= st.P95 && st.P95 <= st.P99) {
+	if st.P90 > st.P95 || st.P95 > st.P99 {
 		t.Errorf("percentiles out of order: p90=%v p95=%v p99=%v", st.P90, st.P95, st.P99)
 	}
 	tail := calculateStats("m", []int64{10, 500})

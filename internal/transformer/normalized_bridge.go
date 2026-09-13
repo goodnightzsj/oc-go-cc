@@ -78,7 +78,7 @@ func AnthropicToResponses(anthropicReq *types.MessageRequest, model config.Model
 			case "tool_use":
 				flushText()
 				if block.ID == "" || block.Name == "" {
-					return nil, fmt.Errorf("Responses tool_use requires id and name")
+					return nil, fmt.Errorf("responses tool_use requires id and name")
 				}
 				arguments := string(block.Input)
 				if arguments == "" {
@@ -91,13 +91,13 @@ func AnthropicToResponses(anthropicReq *types.MessageRequest, model config.Model
 			case "tool_result":
 				flushText()
 				if block.GetToolID() == "" {
-					return nil, fmt.Errorf("Responses tool_result requires tool_use_id")
+					return nil, fmt.Errorf("responses tool_result requires tool_use_id")
 				}
 				responsesReq.Input = append(responsesReq.Input, types.ResponsesInput{Type: "function_call_output", CallID: block.GetToolID(), Output: rawJSONString(block.TextContent())})
 			case "image":
 				flushText()
 				if !model.Vision {
-					return nil, fmt.Errorf("Responses image input requires a vision-capable model")
+					return nil, fmt.Errorf("responses image input requires a vision-capable model")
 				}
 				url, err := imageSourceURL(block.Source)
 				if err != nil {

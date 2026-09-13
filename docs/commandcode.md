@@ -77,6 +77,10 @@ claude --model commandcode
 
 这里的 `unused` 不是平台密钥，真实上游密钥由本项目独立配置提供。本地代理没有入站鉴权，保持 loopback 监听，不直接暴露公网。原生 Messages 会保留请求中的工具定义、cache control、beta 扩展以及 `anthropic-version`/`anthropic-beta`；上游是否接受具体扩展仍取决于平台。
 
+**已知限制：`tool_reference` 在 Chat Completions 上会被丢弃。** Claude Code 的 ToolSearch 会把工具检索结果作为 `tool_result` 里的 `tool_reference` 内容块发回，该形状在 Chat Completions 里没有对应表示。当 `active_site` 指向一个只提供 Chat Completions 的平台（CommandCode 上除 Claude 外的全部模型）时，该块被丢弃，`tool_result` 里可表达的部分（文本）保留；只有 `tool_reference` 的结果会成为一条空的 tool 消息，请求本身成功。
+
+这与参考项目 [MAXeaglet/commandcode-proxy](https://github.com/MAXeaglet/commandcode-proxy) 的处理一致（它把同一块映射为 `""`），是刻意选择的取舍：**请求成功、模型在没有该工具内容的情况下继续**，而不是让整条链因为一个无法表达的块失败。代价是模型可能基于"工具没有返回内容"这个错误前提继续推理，且客户端看不到提示——排障时需知道这一点。要避免该丢弃，需换用原生 Messages 的目标（Claude 模型）。
+
 若不需要本地记录，也可让 Claude Code 直接调用官方 Claude 模型：
 
 ```sh

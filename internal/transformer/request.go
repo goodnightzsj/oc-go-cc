@@ -533,20 +533,18 @@ func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, v
 			textParts = append(textParts, block.Text)
 			parts = append(parts, types.ChatContentPart{Type: "text", Text: block.Text})
 		case "tool_result":
-			// Chat tool messages accept text, not images or document blocks.
-			// Native Messages forwarding retains them; conversion must not drop them.
-			if len(block.Content) > 0 && strings.HasPrefix(strings.TrimSpace(string(block.Content)), "[") {
-				var inner []types.ContentBlock
-				if err := json.Unmarshal(block.Content, &inner); err != nil {
-					return nil, fmt.Errorf("invalid tool_result content: %w", err)
-				}
-				for _, part := range inner {
-					if part.Type != "text" {
-						return nil, fmt.Errorf("tool_result content type %q requires native Messages forwarding", part.Type)
-					}
-				}
-			}
-			// In OpenAI, tool results are separate messages with role "tool"
+			// Only the text parts of a tool result can be sent over Chat
+			// Completions. Anything else has no representation, so it is dropped
+			// the same way every other unmapped block type is: TextContent
+			// concatenates the text parts, and a result carrying only
+			// unrepresentable parts (Claude Code's ToolSearch returns a
+			// tool_reference block) becomes an empty tool message rather than
+			// failing the request.
+			//
+			// This mirrors the reference CommandCode proxy, which maps the same
+			// block to "". The trade is deliberate: the request succeeds and the
+			// model proceeds without the tool's content, rather than the whole
+			// chain failing on a block that cannot be expressed.
 			toolContent := block.TextContent()
 			result = append(result, types.ChatMessage{
 				Role:       "tool",

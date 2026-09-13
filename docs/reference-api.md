@@ -228,7 +228,22 @@ Messages application errors follow Anthropic's error format (method/rate-limit r
 | 413 | Request body too large (>100MB) |
 | 429 | Rate limited |
 | 500 | Internal error (routing failed, transform error) |
-| 502 | All upstream models failed |
+| 502 | All upstream models failed, with no more specific cause retained |
+| 503 | The active platform (`active_site`) has no routing target for this request |
+
+The proxy forwards several platforms, so a refusal the platform named is
+reported as that refusal: its status code and message are passed through
+unchanged (`401`, `403 MODEL_NOT_IN_PLAN`, `404`, `422`, `429` from upstream),
+truncated at 4 KB. This matters operationally because an intermediary may
+replace the body of a 5xx — Cloudflare substitutes its own error page for a
+`502`, which previously hid the platform's reason entirely.
+
+Content the target wire format cannot carry is **dropped, not rejected**: only
+the representable parts of a `tool_result` reach the upstream, and a result with
+no representable part becomes an empty tool message. The request still succeeds.
+This covers Claude Code's `tool_reference` (ToolSearch) and an image inside a
+`tool_result`; see [CommandCode 已知限制](commandcode.md) for the trade this
+makes.
 
 ## Streaming
 

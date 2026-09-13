@@ -468,6 +468,15 @@ func validate(cfg *Config) error {
 		return err
 	}
 
+	// An unknown site here would filter every routing target away and read as a
+	// routing failure later, so it is caught where the typo was made.
+	if cfg.ActiveSite != "" {
+		if !SupportedProvider(cfg.ActiveSite) {
+			return fmt.Errorf("active_site %q is not a known platform", cfg.ActiveSite)
+		}
+		cfg.ActiveSite = NormalizeProvider(cfg.ActiveSite)
+	}
+
 	return nil
 }
 

@@ -39,7 +39,9 @@ async function checks() {
   assert.equal(link.params.has('sort'), false, 'the default sort must be omitted');
   assert.equal(link.params.has('dir'), false, 'the default direction must be omitted');
 
-  // Apply: a link restores the whole view, not just the tab.
+  // Apply: a link restores the whole view, not just the tab. The controls go
+  // back to their opening state and that state is captured the way boot does,
+  // so an omitted parameter can be resolved back to it.
   for (const id of ['provider-filter','overview-provider','perf-provider','analytics-provider','quota-provider']) {
     get(id).value = '';
   }
@@ -47,6 +49,7 @@ async function checks() {
   historyPage = 1;
   currentSort = {field:'start_time', dir:'desc'};
   activeTab = 'overview';
+  captureViewDefaults();
 
   const moved = applyViewState(new URLSearchParams('platform=commandcode&q=cache&page=3&sort=duration_ms&dir=asc'));
   assert.ok(moved, 'restoring a page must report that history pagination moved');
@@ -62,9 +65,12 @@ async function checks() {
     assert.equal(get(id).value, 'commandcode', 'every control for one concept must follow the link: ' + id);
   }
 
-  // A parameter the link omits is left alone, so a partial link is not a reset.
+  // An omitted parameter means the default, so stepping back from a link that
+  // named a filter to one that does not has to undo it - otherwise the panel
+  // and its own URL disagree about what is being shown.
   applyViewState(new URLSearchParams('platform=opencode-go'));
-  assert.equal(get('history-search').value, 'cache', 'an omitted parameter must not clear a control');
+  assert.equal(get('history-search').value, '', 'an omitted filter must return to its default');
+  assert.equal(historyPage, 1, 'an omitted page must return to the first');
   assert.equal(get('provider-filter').value, 'opencode-go');
 }
 ` + platformBehaviorRunScript

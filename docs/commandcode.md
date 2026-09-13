@@ -113,9 +113,28 @@ supports_websockets = false
 支持边界：
 
 - 流式/非流式、文本、用户图片、instructions、JSON `function` 工具（`strict:false`）、字符串工具结果和缓存 usage。
+- Codex 0.144 会把部分工具放进 `{"type":"namespace","name":"multi_agent_v1","tools":[…]}` 容器，与普通 function 工具并列发送。容器只是分组，适配器就地展开后再走同一套工具校验，因此其中的 custom/strict/无名工具仍被拒绝。2026-09-13 之前该容器被当作未知字段，导致所有 Codex 请求以 `json: unknown field "tools"` 失败。
 - 不提供服务端会话/响应存储、`previous_response_id`、`conversation`、后台任务、非空 `include`、reasoning summary/加密 reasoning、托管搜索/执行工具、custom/freeform 工具、严格 JSON 输出或 WebSocket。
 - 无法无损映射的请求返回明确的 HTTP 400；不是静默丢字段。客户端版本、模型能力设置或插件引入上述能力时，需要相应关闭或另行实现并测试，不能宣称支持所有 Codex 功能。
 - `anthropic_first` 只作用于 Messages 入口，不接管 Codex Responses。
+
+### 2026-09-13 隔离实例实测（Codex 工具往返 + 两个上游协议）
+
+本机 Codex `0.144.3-cometix`、Claude Code `2.1.263` 经 SSH 隧道调用远端新二进制（commit `8133635`）的 loopback 隔离实例，独立配置与独立 DB；生产路由、生产服务和生产 DB 全程未改动。模型为 `deepseek/deepseek-v4-flash` 与 `moonshotai/Kimi-K2.6`。
+
+| 客户端 | 别名（上游模型） | 结果 |
+| --- | --- | --- |
+| Claude Code（`ANTHROPIC_BASE_URL` 注入） | cc-deepseek（Chat Completions） | `CC_CLAUDE_OPENAI_OK`、`end_turn` |
+| Claude Code（同上） | cc-kimi（Chat Completions） | `CC_CLAUDE_KIMI_OK` |
+| Claude Code（Read 工具往返） | cc-deepseek | 读回 `CC_CLAUDE_TOOL_MARKER` |
+| Codex（`env_key` 注入） | cc-deepseek | `CC_CODEX_OPENAI_OK`、`turn.completed` |
+| Codex（shell 工具往返） | cc-deepseek | 模型调用 → Codex 执行 `printf CC_TOOL_OK` → 回传 → 最终文本 |
+| Codex（shell 工具往返） | cc-kimi | 同上，`CC_KIMI_TOOL_OK` |
+
+- 隔离 DB 全部记录 `provider=commandcode`、`success=1`。多轮请求的上游缓存读取量在 512–10112 之间，说明前缀缓存已在实际链路上产生命中；`cache_control` 现在确实进入上游报文（由 `TestModelFamilyRulesStillDiscriminate` 断言），但缓存命中同时也可能来自上游自动行为，两者未做因果分离。
+- **Anthropic 上游分支无法在本账户上实测**：套餐不含 Claude 模型，`claude-sonnet-4-6` 与 `claude-haiku-4-5-20251001` 均返回 `403 MODEL_NOT_IN_PLAN`；强制非 Claude 模型走 Messages 端点则返回 `400 Model "deepseek/deepseek-v4-flash" is not supported on this endpoint. Use /provider/v1/chat/completions`。两条错误都是上游对请求的正确拒绝，说明端点选择与报文形状无误，但该分支的行为只由单元测试覆盖，没有真实端点证据。
+- 生产部署后复验：服务 active、NRestarts=0、release `20260913200404-e8964f7be618`（commit `8133635`）、DB `quick_check=ok` 且 6561 条 `requests`/`provider_usage` 无丢失。
+- 顺带发现（与本次改动无关）：生产 OpenCode Go 返回 `401 CreditsError: Insufficient balance`，且生产 `model_overrides` 中没有任何模型指向 CommandCode——该密钥已配置但未被路由使用。老 release 在部署前 80 分钟内服务了 0 个请求，因此这不是回归，而是上游计费状态。
 
 ## 日志、套餐和统计
 

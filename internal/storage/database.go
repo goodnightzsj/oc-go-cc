@@ -531,12 +531,56 @@ func expandPath(path string) string {
 
 // priceEntry defines a pricing rule for models whose id/name/display_name
 // contains the match substring. Catalog seeding only fills absent Go rates.
+//
+// Tiers are rates that replace the base ones once the request's input tokens
+// reach Size. Both platforms publish them (OpenCode Go "Qwen3.7 Plus (> 256K
+// tokens)", CommandCode "Long context > 512K"), and they are not optional
+// detail: a long-context request priced at the base rate can be off by 3x.
 type priceEntry struct {
-	Match      string  `json:"match"`
+	Match      string      `json:"match"`
+	Input      float64     `json:"input"`
+	Output     float64     `json:"output"`
+	CacheRead  float64     `json:"cache_read,omitempty"`
+	CacheWrite float64     `json:"cache_write,omitempty"`
+	Tiers      []priceTier `json:"tiers,omitempty"`
+}
+
+// priceTier is one context-size band. Size is the threshold the band applies
+// above, matching how both platforms word it ("Qwen3.7 Plus (> 256K tokens)",
+// "Long context > 512K"): a request of exactly Size tokens still bills at the
+// base rate, and the highest band the request exceeds wins.
+type priceTier struct {
+	Size       int64   `json:"size"`
 	Input      float64 `json:"input"`
 	Output     float64 `json:"output"`
 	CacheRead  float64 `json:"cache_read,omitempty"`
 	CacheWrite float64 `json:"cache_write,omitempty"`
+}
+
+// ratesFor returns the band that applies to a request consuming inputTokens
+// input tokens. Each field falls back to the base rate independently, because
+// the published tables leave cache columns blank for bands that do not change
+// them - treating a blank as zero would price cache reads as free.
+func (e priceEntry) ratesFor(inputTokens int64) (input, output, cacheRead, cacheWrite float64) {
+	input, output, cacheRead, cacheWrite = e.Input, e.Output, e.CacheRead, e.CacheWrite
+	best := int64(-1)
+	var chosen *priceTier
+	for i := range e.Tiers {
+		if t := &e.Tiers[i]; inputTokens > t.Size && t.Size > best {
+			best, chosen = t.Size, t
+		}
+	}
+	if chosen == nil {
+		return input, output, cacheRead, cacheWrite
+	}
+	input, output = chosen.Input, chosen.Output
+	if chosen.CacheRead != 0 {
+		cacheRead = chosen.CacheRead
+	}
+	if chosen.CacheWrite != 0 {
+		cacheWrite = chosen.CacheWrite
+	}
+	return input, output, cacheRead, cacheWrite
 }
 
 //go:embed seed_prices_opencode_go.json
@@ -580,23 +624,31 @@ var rateTables = sync.OnceValues(func() (map[string][]priceEntry, error) {
 //
 // This is independent of the catalog/models tables so cost figures are always
 // available even when a model is absent from the catalog sync.
-func PriceForProviderModel(provider, model string) (inputPerM, outputPerM, cacheReadPerM, cacheWritePerM float64, ok bool) {
+// inputTokens selects the context band: a model published with several bands
+// bills the one its request reaches, so the same model has more than one
+// correct price and the caller must say which. Pass 0 for the base band.
+func PriceForProviderModel(provider, model string, inputTokens int64) (inputPerM, outputPerM, cacheReadPerM, cacheWritePerM float64, ok bool) {
 	descriptor, known := site.Lookup(provider)
 	if !known || descriptor.RateTable == "" || model == "" {
 		return 0, 0, 0, 0, false
 	}
-	tables, err := rateTables()
-	if err != nil {
+	entries, published := tableFor(descriptor.RateTable)
+	if !published {
 		return 0, 0, 0, 0, false
 	}
+	// ok means "a rule matched this model", not "the platform has a table": a
+	// platform with a table and no rule for this model is unpriced, and must
+	// report unknown rather than free.
+	ok = false
 	bestLen := -1
-	for _, e := range tables[descriptor.RateTable] {
+	for _, e := range entries {
 		if e.Match == "" {
 			continue
 		}
 		if strings.Contains(strings.ToLower(model), strings.ToLower(e.Match)) && len(e.Match) > bestLen {
 			bestLen = len(e.Match)
-			inputPerM, outputPerM, cacheReadPerM, cacheWritePerM, ok = e.Input, e.Output, e.CacheRead, e.CacheWrite, true
+			inputPerM, outputPerM, cacheReadPerM, cacheWritePerM = e.ratesFor(inputTokens)
+			ok = true
 		}
 	}
 	return inputPerM, outputPerM, cacheReadPerM, cacheWritePerM, ok

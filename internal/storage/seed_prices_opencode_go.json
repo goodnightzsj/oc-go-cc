@@ -1,9 +1,12 @@
 [
   {
-    "_comment": "OpenCode Go subscription pricing (per 1M tokens, USD) per opencode.ai/docs/zh-cn/go (Aug 2026) — input / output"
+    "_comment": "OpenCode Go pricing (USD per 1M tokens). Base rows and tiers mirror models.dev providers[\"opencode-go\"].models - the catalog this proxy already syncs - because it is machine-readable and matches opencode.ai/docs/zh-cn/go row for row. Regenerated 2026-09-14. A runtime refresher rewrites this hourly; this baseline is what a failed refresh falls back to."
   },
   {
-    "_comment": "Free-tier variants (explicit)"
+    "_comment": "cache_write is merged in from the docs table, which publishes a Cache Write column that models.dev omits (MiniMax M2.5/M2.7 write at 0.375). Without it, cache creation on those models would bill at the input rate and under-price."
+  },
+  {
+    "_comment": "Free tiers are priced at explicit 0 rather than left unknown. The generic -free catch-all must come after the specific ones, and -free never matches a paid id."
   },
   {
     "match": "nemotron-3-ultra-free",
@@ -21,75 +24,42 @@
     "output": 0.0
   },
   {
-    "_comment": "Generic free-tier catch-all (must come after specific free entries)"
-  },
-  {
     "match": "-free",
     "input": 0.0,
     "output": 0.0
   },
   {
-    "_comment": "Go model prices (official, longest-match wins)"
+    "_comment": "Published rows, longest match wins. `tiers` replace the base rates once the whole prompt exceeds `size` input tokens."
   },
   {
     "match": "deepseek-v4-flash",
-    "input": 0.22,
-    "output": 0.66,
-    "cache_read": 0.007
+    "input": 0.15,
+    "output": 0.6,
+    "cache_read": 0.003
+  },
+  {
+    "match": "deepseek-v4-flash-vision-exp",
+    "input": 0.15,
+    "output": 0.6,
+    "cache_read": 0.003
   },
   {
     "match": "deepseek-v4-pro",
-    "input": 0.435,
-    "output": 0.87,
-    "cache_read": 0.003625
+    "input": 0.66,
+    "output": 1.98,
+    "cache_read": 0.022
   },
   {
-    "match": "deepseek-v4",
-    "input": 0.435,
-    "output": 0.87,
-    "cache_read": 0.003625
+    "match": "deepseek-v4.1-flash",
+    "input": 0.15,
+    "output": 0.6,
+    "cache_read": 0.003
   },
   {
-    "match": "deepseek",
-    "input": 0.435,
-    "output": 0.87,
-    "cache_read": 0.003625
-  },
-  {
-    "match": "kimi-k2.7-code",
-    "input": 0.95,
-    "output": 4.0,
-    "cache_read": 0.19
-  },
-  {
-    "match": "kimi-k2.7",
-    "input": 0.95,
-    "output": 4.0,
-    "cache_read": 0.19
-  },
-  {
-    "match": "kimi-k2.6",
-    "input": 0.95,
-    "output": 4.0,
-    "cache_read": 0.16
-  },
-  {
-    "match": "kimi-k3",
-    "input": 3.0,
-    "output": 15.0,
-    "cache_read": 0.3
-  },
-  {
-    "match": "kimi-k",
-    "input": 0.95,
-    "output": 4.0,
-    "cache_read": 0.16
-  },
-  {
-    "match": "glm-5.2",
-    "input": 1.4,
-    "output": 4.4,
-    "cache_read": 0.26
+    "match": "glm-5",
+    "input": 1.0,
+    "output": 3.2,
+    "cache_read": 0.2
   },
   {
     "match": "glm-5.1",
@@ -98,29 +68,140 @@
     "cache_read": 0.26
   },
   {
-    "match": "glm-5",
+    "match": "glm-5.2",
     "input": 1.4,
     "output": 4.4,
     "cache_read": 0.26
   },
   {
-    "match": "glm",
+    "match": "glm-5.3",
     "input": 1.4,
     "output": 4.4,
     "cache_read": 0.26
   },
   {
-    "match": "minimax-m3",
-    "input": 0.3,
-    "output": 1.2,
-    "cache_read": 0.06
+    "match": "glm-5.3-flash",
+    "input": 0.15,
+    "output": 0.5,
+    "cache_read": 0.03
   },
   {
-    "match": "minimax-m2.7",
+    "match": "gpt-5.6-luna",
+    "input": 0.2,
+    "output": 1.2,
+    "cache_read": 0.02,
+    "cache_write": 0.25,
+    "tiers": [
+      {
+        "size": 272000,
+        "input": 0.4,
+        "output": 1.8,
+        "cache_read": 0.04,
+        "cache_write": 0.5
+      }
+    ]
+  },
+  {
+    "match": "grok-4.5",
+    "input": 2.0,
+    "output": 6.0,
+    "cache_read": 0.3,
+    "tiers": [
+      {
+        "size": 200000,
+        "input": 4.0,
+        "output": 12.0,
+        "cache_read": 0.6
+      }
+    ]
+  },
+  {
+    "match": "grok-4.6",
+    "input": 2.0,
+    "output": 6.0,
+    "cache_read": 0.5,
+    "tiers": [
+      {
+        "size": 200000,
+        "input": 4.0,
+        "output": 12.0,
+        "cache_read": 1.0
+      }
+    ]
+  },
+  {
+    "match": "hy3",
+    "input": 0.14,
+    "output": 0.58,
+    "cache_read": 0.035
+  },
+  {
+    "match": "hy4-preview",
+    "input": 0.834,
+    "output": 2.501,
+    "cache_read": 0.042
+  },
+  {
+    "match": "kimi-k2.5",
+    "input": 0.6,
+    "output": 3.0,
+    "cache_read": 0.1
+  },
+  {
+    "match": "kimi-k2.6",
+    "input": 0.95,
+    "output": 4.0,
+    "cache_read": 0.16
+  },
+  {
+    "match": "kimi-k2.7-code",
+    "input": 0.95,
+    "output": 4.0,
+    "cache_read": 0.19
+  },
+  {
+    "match": "kimi-k3",
+    "input": 3.0,
+    "output": 15.0,
+    "cache_read": 0.3
+  },
+  {
+    "match": "longcat-2.0",
     "input": 0.3,
     "output": 1.2,
-    "cache_read": 0.06,
-    "cache_write": 0.375
+    "cache_read": 0.006
+  },
+  {
+    "match": "mimo-v2-omni",
+    "input": 0.4,
+    "output": 2.0,
+    "cache_read": 0.08
+  },
+  {
+    "match": "mimo-v2-pro",
+    "input": 1.0,
+    "output": 3.0,
+    "cache_read": 0.2,
+    "tiers": [
+      {
+        "size": 256000,
+        "input": 2.0,
+        "output": 6.0,
+        "cache_read": 0.4
+      }
+    ]
+  },
+  {
+    "match": "mimo-v2.5",
+    "input": 0.14,
+    "output": 0.28,
+    "cache_read": 0.0028
+  },
+  {
+    "match": "mimo-v2.5-pro",
+    "input": 0.435,
+    "output": 0.87,
+    "cache_read": 0.003625
   },
   {
     "match": "minimax-m2.5",
@@ -130,42 +211,72 @@
     "cache_write": 0.375
   },
   {
-    "match": "minimax",
+    "match": "minimax-m2.7",
     "input": 0.3,
     "output": 1.2,
-    "cache_read": 0.06
+    "cache_read": 0.06,
+    "cache_write": 0.375
   },
   {
-    "match": "mimo-v2.5-pro",
-    "input": 0.435,
-    "output": 0.87,
-    "cache_read": 0.003625
+    "match": "minimax-m3",
+    "input": 0.3,
+    "output": 1.2,
+    "cache_read": 0.06,
+    "tiers": [
+      {
+        "size": 512000,
+        "input": 0.6,
+        "output": 2.4,
+        "cache_read": 0.12
+      }
+    ]
   },
   {
-    "match": "mimo-v2.5",
-    "input": 0.14,
-    "output": 0.28,
-    "cache_read": 0.0028
+    "match": "muse-spark-1.2-contributor",
+    "input": 0.1,
+    "output": 0.2,
+    "cache_read": 0.002
   },
   {
-    "match": "mimo-v2",
-    "input": 0.14,
-    "output": 0.28,
-    "cache_read": 0.0028
+    "match": "muse-spark-1.3-contributor",
+    "input": 0.1,
+    "output": 0.2,
+    "cache_read": 0.002
   },
   {
-    "match": "qwen3.8-max",
-    "input": 2.0,
-    "output": 6.0,
-    "cache_read": 0.25,
-    "cache_write": 2.5
+    "match": "omen-alpha",
+    "input": 0.2,
+    "output": 0.66,
+    "cache_read": 0.04
   },
   {
-    "match": "qwen3.8",
-    "input": 2.0,
-    "output": 6.0,
-    "cache_read": 0.25,
-    "cache_write": 2.5
+    "match": "ox-alpha-free",
+    "input": 0.0,
+    "output": 0.0,
+    "cache_read": 0.0
+  },
+  {
+    "match": "qwen3.5-plus",
+    "input": 0.2,
+    "output": 1.2,
+    "cache_read": 0.02,
+    "cache_write": 0.25
+  },
+  {
+    "match": "qwen3.6-plus",
+    "input": 0.5,
+    "output": 3.0,
+    "cache_read": 0.05,
+    "cache_write": 0.625,
+    "tiers": [
+      {
+        "size": 256000,
+        "input": 2.0,
+        "output": 6.0,
+        "cache_read": 0.2,
+        "cache_write": 2.5
+      }
+    ]
   },
   {
     "match": "qwen3.7-max",
@@ -179,50 +290,33 @@
     "input": 0.4,
     "output": 1.6,
     "cache_read": 0.04,
-    "cache_write": 0.5
+    "cache_write": 0.5,
+    "tiers": [
+      {
+        "size": 256000,
+        "input": 1.2,
+        "output": 4.8,
+        "cache_read": 0.12,
+        "cache_write": 1.5
+      }
+    ]
   },
   {
-    "match": "qwen3.7",
-    "input": 0.4,
-    "output": 1.6,
-    "cache_read": 0.04,
-    "cache_write": 0.5
+    "match": "qwen3.8-flash",
+    "input": 0.15,
+    "output": 0.47,
+    "cache_read": 0.016,
+    "cache_write": 0.2
   },
   {
-    "match": "qwen3.6-plus",
-    "input": 0.5,
-    "output": 3.0,
-    "cache_read": 0.05,
-    "cache_write": 0.625
-  },
-  {
-    "match": "qwen3.6",
-    "input": 0.5,
-    "output": 3.0,
-    "cache_read": 0.05,
-    "cache_write": 0.625
-  },
-  {
-    "match": "qwen3.5",
-    "input": 0.5,
-    "output": 1.0,
-    "cache_read": 0.05
-  },
-  {
-    "match": "qwen3",
-    "input": 0.4,
-    "output": 1.6,
-    "cache_read": 0.04,
-    "cache_write": 0.5
-  },
-  {
-    "_comment": "OpenCode Zen / other paid models (approximate public list prices)"
-  },
-  {
-    "match": "grok-4.5",
+    "match": "qwen3.8-max",
     "input": 2.0,
     "output": 6.0,
-    "cache_read": 0.3
+    "cache_read": 0.25,
+    "cache_write": 2.5
+  },
+  {
+    "_comment": "Generic fallbacks for models OpenCode Go publishes no row for. Approximate public list prices, carried over unchanged; they apply only when no specific rule above matches."
   },
   {
     "match": "grok-4",
@@ -263,13 +357,6 @@
     "match": "claude-fable",
     "input": 2.5,
     "output": 12.5
-  },
-  {
-    "match": "gpt-5.6",
-    "input": 0.2,
-    "output": 1.2,
-    "cache_read": 0.02,
-    "cache_write": 0.25
   },
   {
     "match": "gpt-5",

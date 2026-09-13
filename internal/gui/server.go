@@ -174,6 +174,12 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 	// ensureModelLimits covers the first request after startup.
 	go s.limitsLoop(ctx)
 
+	// Refresh both platforms' price tables hourly. The build-time snapshot is
+	// what cost estimation falls back to, and it has gone stale before without
+	// anything reporting it, so cost figures are re-based on the published
+	// tables rather than on whatever shipped in the binary.
+	go s.priceRefreshLoop(ctx)
+
 	mux := http.NewServeMux()
 
 	// Content-hashed static assets. index.html is served from a rendered copy

@@ -33,26 +33,61 @@ const (
 // Descriptor is one platform's identity.
 type Descriptor struct {
 	ID string
+	// DisplayName is the label the model listing, the CLI and the dashboard
+	// show. The dashboard's colour for a platform is not part of its identity
+	// and stays in the frontend.
+	DisplayName string
 	// Order is the presentation order shared by the model listing, the CLI and
 	// the dashboard. It is a display concern only: routing precedence, fallback
 	// chains and key rotation order remain owned by their configured order.
 	Order int
+	// Visible reports whether the dashboard offers this platform in its
+	// selectors and settings. Hiding one changes only what the dashboard lists:
+	// its adapter, credentials, routing and stored history all keep working,
+	// and records already stored under it still resolve a label.
+	Visible bool
 	// Default marks the platform an empty provider name means. Exactly one
 	// descriptor sets it; TestDefaultPlatformIsUnique holds that.
 	Default bool
 }
 
 var registry = []Descriptor{
-	{ID: OpenCodeGo, Order: 0, Default: true},
-	{ID: CommandCode, Order: 1},
-	{ID: OpenCodeZen, Order: 2},
-	{ID: AWSBedrock, Order: 3},
-	{ID: OpenRouter, Order: 4},
+	{ID: OpenCodeGo, DisplayName: "OpenCode Go", Order: 0, Visible: true, Default: true},
+	{ID: CommandCode, DisplayName: "CommandCode", Order: 1, Visible: true},
+	{ID: OpenCodeZen, DisplayName: "OpenCode Zen", Order: 2},
+	{ID: AWSBedrock, DisplayName: "AWS Bedrock", Order: 3},
+	{ID: OpenRouter, DisplayName: "OpenRouter", Order: 4},
 }
 
 // All returns every descriptor in presentation order. Callers must not assume
 // they may mutate the result.
 func All() []Descriptor { return registry }
+
+// Visible returns the platforms the dashboard offers, in presentation order. A
+// hidden platform is still returned by All and still resolves through Lookup,
+// so stored records keep their label and configured-but-hidden platforms keep
+// working.
+func Visible() []Descriptor {
+	out := make([]Descriptor, 0, len(registry))
+	for _, d := range registry {
+		if d.Visible {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// Hidden returns the platforms the dashboard does not offer, in presentation
+// order. The dashboard still needs their labels to render stored records.
+func Hidden() []Descriptor {
+	out := make([]Descriptor, 0, len(registry))
+	for _, d := range registry {
+		if !d.Visible {
+			out = append(out, d)
+		}
+	}
+	return out
+}
 
 // Lookup returns the descriptor for a name and whether it names a known
 // platform. The name is normalized first, so the legacy spellings resolve too.

@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/routatic/proxy/internal/site"
 )
 
 func TestUIUXSemanticControls(t *testing.T) {
@@ -21,9 +23,12 @@ func TestUIUXSemanticControls(t *testing.T) {
 			t.Fatalf("sorting must use a labeled native button inside th: %s", header)
 		}
 	}
-	for _, provider := range []string{"opencode-go", "opencode-zen", "aws-bedrock", "openrouter", "commandcode"} {
-		if !strings.Contains(page, `data-settings-provider="`+provider+`"`) {
-			t.Errorf("missing independently expandable platform: %s", provider)
+	// Only the platforms the dashboard offers: site_parity_test.go holds this
+	// list to the registry, so hiding a platform is a registry change rather
+	// than an edit here.
+	for _, descriptor := range site.Visible() {
+		if !strings.Contains(page, `data-settings-provider="`+descriptor.ID+`"`) {
+			t.Errorf("missing independently expandable platform: %s", descriptor.ID)
 		}
 	}
 	for _, name := range []string{"proxy", "autostart", "notify"} {

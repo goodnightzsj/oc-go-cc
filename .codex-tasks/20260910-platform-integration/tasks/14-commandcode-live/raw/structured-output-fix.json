@@ -1,0 +1,42 @@
+{
+  "fixed_on": "2026-09-13",
+  "owner_cli": "Claude",
+  "continuation_of": "raw/live-result.json#known_failure",
+  "defect": {
+    "source": "Claude generate_session_title",
+    "field": "output_config.format",
+    "previous_behavior": "internal/transformer/request.go returned 'output_config.format is not supported by the Chat Completions adapter'",
+    "observed_impact": "1 stream error and 3 non-streaming HTTP 502 during the 2026-09-12 live test"
+  },
+  "anthropic_contract": {
+    "shape": "output_config.format = {\"type\":\"json_schema\",\"schema\":{...}}",
+    "variants": 1,
+    "schema_requirement": "closed schema: additionalProperties:false with every property listed in required",
+    "source": "bundled claude-api skill, python/claude-api/tool-use.md structured outputs example; matches shared/model-migration.md prefill-replacement table"
+  },
+  "mapping": {
+    "from": "output_config.format {\"type\":\"json_schema\",\"schema\":S}",
+    "to": "response_format {\"type\":\"json_schema\",\"json_schema\":{\"name\":\"response\",\"schema\":S,\"strict\":true}}",
+    "lossless_reason": "Anthropic requires the closed-schema form that OpenAI strict mode also requires, so no constraint is dropped",
+    "unknown_format_type": "still rejected with an explicit error; the field is never silently discarded"
+  },
+  "changed_files": [
+    "pkg/types/openai.go (ChatCompletionRequest.ResponseFormat)",
+    "internal/transformer/request.go (openAIResponseFormat helper replaces the rejection)",
+    "internal/transformer/request_test.go (2 new tests)"
+  ],
+  "call_path_checked": [
+    "internal/transformer/normalized_bridge.go:334 AnthropicToChatCompletion delegates to TransformRequest, so all five providers share this single owner",
+    "internal/provider/{commandcode,opencode_go,opencode_zen,aws_bedrock}.go marshal the struct directly; no intermediate layer rebuilds it field by field",
+    "internal/client/opencode.go json.Marshal(req) forwards response_format unchanged"
+  ],
+  "verification": {
+    "focused": "go test ./internal/transformer/... -count=1 -> ok",
+    "full": "go test -race -p 2 ./... -count=1 -> exit 0, no failures",
+    "vet": "go vet -p 2 ./... -> exit 0",
+    "build": "go build ./... -> ok"
+  },
+  "still_unverified": "Whether every upstream model accepts response_format json_schema is not guaranteed by any per-model official statement; the official Provider page only references the standard Chat Completions schema. Mapping correctness is tested locally; upstream per-model acceptance is not.",
+  "not_a_regression": "Requests carrying output_config.format previously failed at this adapter, so no previously working request changes behavior.",
+  "browser_or_live_retest_performed": false
+}

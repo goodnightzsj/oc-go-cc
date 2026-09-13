@@ -38,6 +38,7 @@ type ChatCompletionRequest struct {
 	Tools             []ToolDef       `json:"tools,omitempty"`
 	ToolChoice        interface{}     `json:"tool_choice,omitempty"`
 	ParallelToolCalls *bool           `json:"parallel_tool_calls,omitempty"`
+	ResponseFormat    json.RawMessage `json:"response_format,omitempty"`
 	Stop              interface{}     `json:"stop,omitempty"`
 	StreamOptions     *StreamOptions  `json:"stream_options,omitempty"`
 }

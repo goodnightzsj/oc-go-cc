@@ -1,4 +1,4 @@
 id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,notes
-1,核实指定模型路由和隔离CLI参数,TODO,两路均明确锁定CommandCode及指定模型;无全局配置写入,echo SKIP,,0,
-2,执行最小Codex和Claude真实请求,TODO,真实两路成功或准确暴露上游错误;不使用替代模型,echo SKIP,,0,
-3,核对响应Token与平台日志,TODO,请求响应与requests记录可一一核对;费用未知不伪造,echo SKIP,,0,
+1,核实指定模型路由和隔离CLI参数,DONE,两路均明确锁定CommandCode及指定模型;无全局配置写入,echo SKIP,2026-09-12,0,隔离配置和本机help/官方manual已核实;CodexDB确认指定模型及provider
+2,执行最小Codex和Claude真实请求,DONE,真实两路成功或准确暴露上游错误;不使用替代模型,echo SKIP,2026-09-12,1,真实主请求CC_CODEX_OK及CC_CLAUDE_OK均通过;另准确暴露Claude自动标题output_config.format导致的流错误及502;不宣称全功能兼容
+3,核对响应Token与平台日志,DONE,请求响应与requests记录可一一核对;费用未知不伪造,echo SKIP,2026-09-12,0,两次主请求Token与独立DB相同;费用NULL;未使用CLI未知价格;测试进程/隧道/凭证副本已清理;raw/live-result.json保留失败

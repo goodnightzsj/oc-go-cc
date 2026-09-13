@@ -1,6 +1,6 @@
 # CommandCode、Claude Code 与 Codex 接入
 
-核实日期：2026-09-11。接入使用官方 Provider API，不读取或修改用户的全局客户端配置。
+核实日期：2026-09-12。接入使用官方 Provider API，不读取或修改用户的全局客户端配置。
 
 ## 原生支持与路径选择
 
@@ -118,6 +118,19 @@ supports_websockets = false
 - `anthropic_first` 只作用于 Messages 入口，不接管 Codex Responses。
 
 ## 日志、套餐和统计
+
+### 2026-09-12 指定 DeepSeek 模型真实实测
+
+本机 Codex `0.144.3-cometix`、Claude Code `2.1.263` 经 SSH 隧道调用远端已部署 `d7b25fb` 二进制的 loopback 隔离实例，上游固定为 `deepseek/deepseek-v4.1-flash`。没有改变正式默认路由、全局客户端配置或使用替代模型，测试记录位于独立数据库。
+
+- Codex 主请求返回 `CC_CODEX_OK`、`turn.completed`。CLI 输入 7075（缓存 4352）、输出 6；DB 纯输入 2723、缓存读取 4352、输出 6，逐项一致。
+- Claude 主请求返回 `CC_CLAUDE_OK`、`end_turn`、退出码 0。输入 144、输出 21、缓存 0，与 DB 一致。
+- **兼容缺口已修复**：Claude 自动生成会话标题发送 `output_config.format`，原实现在 `internal/transformer/request.go` 主动拒绝该结构化输出（1 次流错误、3 次非流式 502）。现改为无损映射为 OpenAI `response_format`：`{"type":"json_schema","schema":S}` → `{"type":"json_schema","json_schema":{"name":"response","schema":S,"strict":true}}`。Anthropic 只定义 `json_schema` 一种变体，且要求 schema 闭合（`additionalProperties:false` 且属性全部必需），与 OpenAI strict 模式的要求一致，因此映射不丢失约束；未知的 `format.type` 仍然显式报错，不会静默丢弃。
+- 两个测试库的费用均为未知；Claude CLI 对第三方模型显示 `costBasis: unknown`，其金额不作为官方扣费证据。测试进程、隧道和临时凭证副本已清理。
+
+映射后的回归在 `internal/transformer/request_test.go`（`TestTransformRequestMapsStructuredOutputFormat`、`TestTransformRequestRejectsUnknownStructuredOutputFormat`）与本轮全量 `go test -race -p 2 ./... -count=1` 中通过。上游是否对每个模型都接受 `response_format` 仍无单独承诺：[官方 Provider 文档](https://commandcode.ai/docs/provider)继续要求非 Claude 模型使用 Chat Completions，并引用标准请求 schema，但没有逐模型保证严格 `json_schema` 能力。因此“映射正确”已实测，“上游逐模型支持”仍属未验证，不能仅凭“OpenAI 兼容”宣称支持。详见[实测摘要](../.codex-tasks/20260910-platform-integration/tasks/14-commandcode-live/raw/live-result.json)。
+
+### 日志与账户数据来源
 
 - 五个平台的配置、路由健康、历史、性能和模型费用按平台归属；概览、历史、性能、分析可分别筛选平台，相同模型 ID 不再跨平台串账。套餐页另有平台独立的本实例请求、Token、费用及缺价统计，详见[五平台能力矩阵](platform-integration-review.md#五平台页面与账户能力)。
 - 价格缺失时显示 `—`，混合已知/未知金额显示“已知”小计及未知记录数。平台账单、代理估算和未知费用不能互相替代；峰谷倍率只作用于其所属平台。

@@ -3,16 +3,18 @@
 ## Context Recovery Block
 
 - 任务：修复全部已报告问题，独立接入 CommandCode，融合有价值的上游更新，分析 Codex/Claude Code 对接。
-- 形态：epic；11/15 子任务完成；#11/#12已完成；新增#13恢复历史、#14真实客户端测试、#15平台排序；#8账户缺口仍保留。
-- 当前：b3c947d已部署，UIe12b7231828e经原Edge563项检查与逐页视觉复核；CommandCode三块真实账户可用。最新两项用户请求已交付，没有恢复Go旧记录或调整retention。
-- 真源：SUBTASKS.csv；当前tasks/13-history-restore/TODO.csv；#12已5/5，#8账户缺口另存。
+- 形态：epic；15/16 子任务完成；#13官方当前6561条恢复与#15原Edge最终验收均完成；#16 Claude结构化输出缺口已修复（未部署）；#8真实账户权限缺口仍保留。
+- 当前：d7b25fb已部署，retention_days=-1，6561条Go历史已恢复并通过原Edge全分页、Token/金额与SQLite对账；七页565检查/29组合/70布局通过。正式服务新启动仍确认cleanup disabled。CommandCode两CLI主请求成功；Claude自动标题的output_config.format已在源码修复并通过全量回归，但尚未部署到远端。
+- 真源：SUBTASKS.csv及子任务TODO.csv；#13已5/5、#15已3/3、#16已1/1。上游delta复核已完成（3abc2e1无需移植），#8账户权限限制另存。
 - 起点：main，HEAD 684235d，初始工作区干净。origin=goodnightzsj/oc-go-cc；upstream=samueltuyizere/oc-go-cc（GitHub）。
 - 已知：上轮 /tmp/oc-go-cc-review.WPJFmt/ 与 /tmp/oc-go-cc-routing-review.yHSDWm/ 有合成复现；本轮不依赖缓存成功。全量基线有 tokenizer 外网 EOF、日期过期测试失败；init 测试未隔离 HOME。
 - 不读取或输出真实凭证，不读取本地真实 DB；部署已获授权但须在实现与验证完成后进行，部署前读 SSH 运行手册。
-- 下一步：按2026-09-12新授权关闭自动清理并恢复，先核实Claude最终同步与官方全部可见数据/备份，演练后部署及事务恢复，再指定模型真实测试。Edge仍有现成调试口；不重启浏览器。
+- 下一步：提交本轮恢复/验收证据、文档与结构化输出修复，按需部署；保留真实账户权限缺口。不要重复恢复6561条、付费主请求测试或无改动的二进制部署。
 - 最新要求已落实：先核实 CommandCode 官网；Claude 模型走原生 Messages，Codex 公开合同缺口使用本项目 Responses 适配，并参考 MAXeaglet 的公开协议行为。日志、套餐入口、统计与独立配置保留并通过验收。
 
 ## 2026-09-10 启动
+
+> 2026-09-13 最新证据：`tasks/13-history-restore/raw/production-acceptance.json`、`tasks/15-provider-order/raw/production-acceptance.json`、`tasks/14-commandcode-live/raw/live-result.json`。最终恢复备份在远端`/root/oc-go-cc/.tmp/official-history-20260912.c9MOtJ`；旧过程记录保持原样，按顶部恢复块与子任务CSV续做。
 
 - 用户明确授权实现、独立平台接入和有价值上游融合；追加 Codex/Claude Code 对接分析。
 - 已读 preflight/taskmaster/karpathy/ponytail/llmdoc-maintainer/openai-docs 指令及 llmdoc 必读和计费审计资料。
@@ -183,3 +185,20 @@
 - 关闭远端自动清理、恢复备份并获取官方全部可见历史对账；来源仅本项目Claude session，不接触其它项目日志。新增#13/#14/#15，不重开已完成的UI重设计。
 - 使用deepseek/deepseek-v4.1-flash进行CommandCode的Codex/Claude最小真实测试；展示顺序暂定Go、CommandCode、Zen、AWS、OpenRouter，路由/密钥顺序不变。
 - provider_order_map与retention_disable_map均因服务工具输出解码失败，无有效结论；主线程接手，不重复调用失败路径。
+
+## 2026-09-13 当前官方全量与原Edge收尾
+
+- 恢复时发现父任务/交接仍停留3649条及Edge受阻，而#13/#15子任务已有更晚的6561全量事务和已执行复验。以当前层级CSV及实际结果为准，未重复写入生产。
+- SSH只读确认正式d7b25fb、PID893、active/running、NRestarts0；本次启动仍cleanup disabled。SQLite quick_check=ok，requests/provider_usage各6561。
+- 原Edge单一连接仍可复用：八页唯一ID、Token、官方费用2514740738单位与history/analytics及数据库逐项一致；真实历史页50行/总计6561、未知详情无成功标记。六个原生/渲染平台菜单与设置顺序再次通过。
+- 核对上一轮已完成的独立最终报告：565检查、29组合、70布局、21截图、377只读请求、0失败/异常/写请求，状态恢复成功。先前两条验证器字段误判完整保留，修正没有改生产合同。
+- #13/#15标记DONE，Epic14/15；#8仍Go账户error、Zen无公开合同、Bedrock账单未启用、OpenRouter未配置，CommandCode账户available。另继续复核Claude标题output_config.format缺口，不能将主请求通过等同全功能兼容。
+
+## 2026-09-13 Claude接手：结构化输出修复与上游delta复核
+
+- 恢复来源：本目录 Codex session 日志确认上一轮停在 `turn_aborted`（`upstream_delta` 子代理 11.5 小时未返回后被用户中断），没有正在运行的任务；工作区仍为已部署的 `d7b25fb` 加 29 项未提交变更。
+- 修复 `output_config.format`：新增 `ChatCompletionRequest.ResponseFormat`（`pkg/types/openai.go`），`internal/transformer/request.go` 用 `openAIResponseFormat` 取代原来的拒绝分支，映射为 `response_format` 的 strict `json_schema`。Anthropic 只定义这一种变体且要求闭合 schema，与 OpenAI strict 要求一致，因此无约束丢失；未知 `format.type` 仍显式报错。
+- 唯一入口核对：`AnthropicToChatCompletion`（`internal/transformer/normalized_bridge.go:334`）委托给 `TransformRequest`，五个 provider 与 `handlers/messages.go` 共用；各 provider 直接 `json.Marshal` 结构体，没有逐字段重建导致字段丢失的中间层。
+- 验证：新增 `TestTransformRequestMapsStructuredOutputFormat` 与 `TestTransformRequestRejectsUnknownStructuredOutputFormat` 通过；`go test -race -p 2 ./... -count=1` 退出 0；`go vet -p 2 ./...` 退出 0；`go build ./...` 通过。证据 `tasks/14-commandcode-live/raw/structured-output-fix.json`。未做真实上游或浏览器复测，也未部署。
+- 上游 delta 复核（`1f15a76`→`043fb66`，5 项）：唯一实质变更是 `3abc2e1`（#173 Responses 工具调用）。其三处修复均**无需移植**——`ResponsesToNormalized` 与 `ProxyResponsesStream` 在本仓库已各自上报 `tool_use`（并有 `TestNormalizedResponsesPreservesCacheAndToolStop` 覆盖，语义等价、实现不同）；`normalizeToolArguments` 的键空白修复在本仓库没有对应实现，因而不存在上游修掉的“重编码改写参数值”缺陷；流结束补发部分参数一项，本仓库改为 `json.Valid` 校验后显式报错，是有意保留的更严格选择。其余 4 项为依赖/CI 版本提升（x/sys、sqlite、setup-go）与发布提交，本轮未采纳，依赖漂移单独记录。
+- 未完成：本轮改动**尚未提交、尚未部署**；远端仍运行 `d7b25fb`。

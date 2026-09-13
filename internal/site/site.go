@@ -49,10 +49,21 @@ type Descriptor struct {
 	// Default marks the platform an empty provider name means. Exactly one
 	// descriptor sets it; TestDefaultPlatformIsUnique holds that.
 	Default bool
+
+	// SeededRates reports that this platform's prices come from the built-in
+	// seed table rather than a synced catalog. It decides which rate source a
+	// cost estimate is allowed to use.
+	SeededRates bool
+	// CacheCreationBilledAsInput reports that this platform bills cache
+	// creation tokens at its input rate. Without it a request that used cache
+	// creation has no computable price and is reported as unknown rather than
+	// estimated from a rate this proxy would be inventing.
+	CacheCreationBilledAsInput bool
 }
 
 var registry = []Descriptor{
-	{ID: OpenCodeGo, DisplayName: "OpenCode Go", Order: 0, Visible: true, Default: true},
+	{ID: OpenCodeGo, DisplayName: "OpenCode Go", Order: 0, Visible: true, Default: true,
+		SeededRates: true, CacheCreationBilledAsInput: true},
 	{ID: CommandCode, DisplayName: "CommandCode", Order: 1, Visible: true},
 	{ID: OpenCodeZen, DisplayName: "OpenCode Zen", Order: 2},
 	{ID: AWSBedrock, DisplayName: "AWS Bedrock", Order: 3},

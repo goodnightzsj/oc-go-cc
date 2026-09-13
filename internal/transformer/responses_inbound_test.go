@@ -261,3 +261,42 @@ func TestResponsesOutboundRejectsNonObjectToolArguments(t *testing.T) {
 		})
 	}
 }
+
+// Codex 0.144 sends some of its function tools inside a "namespace" container
+// in the same array as ordinary function tools. The container only groups them,
+// so failing the whole request on a field the adapter does not model would
+// reject tools it can already serve.
+func TestResponsesInboundFlattensCodexToolNamespaces(t *testing.T) {
+	raw := []byte(`{"model":"m","input":"hi","tools":[
+		{"type":"function","name":"exec_command","strict":false,"parameters":{"type":"object","properties":{}}},
+		{"type":"namespace","name":"multi_agent_v1","description":"Tools for spawning and managing sub-agents.","tools":[
+			{"type":"function","name":"close_agent","strict":false,"parameters":{"type":"object","properties":{"target":{"type":"string"}}}},
+			{"type":"namespace","name":"inner","tools":[
+				{"type":"function","name":"resume_agent","strict":false,"parameters":{"type":"object","properties":{}}}
+			]}
+		]}
+	]}`)
+	req, err := ResponsesToMessageRequest(raw)
+	if err != nil {
+		t.Fatalf("a namespace container must not fail the request: %v", err)
+	}
+	var names []string
+	for _, tool := range req.Tools {
+		names = append(names, tool.Name)
+	}
+	if got := strings.Join(names, ","); got != "exec_command,close_agent,resume_agent" {
+		t.Fatalf("tools = %q, want the container expanded in place", got)
+	}
+
+	// Flattening must not become a way to smuggle in a tool kind the adapter
+	// refuses, nor to skip its validation.
+	for name, body := range map[string]string{
+		"custom tool":  `{"type":"namespace","name":"n","tools":[{"type":"custom","name":"c"}]}`,
+		"strict tool":  `{"type":"namespace","name":"n","tools":[{"type":"function","name":"c","strict":true,"parameters":{"type":"object"}}]}`,
+		"unnamed tool": `{"type":"namespace","name":"n","tools":[{"type":"function","strict":false,"parameters":{"type":"object"}}]}`,
+	} {
+		if _, err := ResponsesToMessageRequest([]byte(`{"model":"m","input":"hi","tools":[` + body + `]}`)); err == nil {
+			t.Fatalf("%s inside a namespace was accepted", name)
+		}
+	}
+}

@@ -89,6 +89,13 @@ func CommandCodeBaseURL(baseURL string) (string, error) {
 
 // FetchCommandCode keeps successful blocks when another account endpoint fails.
 // A successful subscriptions response with data:null means no returned plan.
+//
+// Only the /alpha endpoints are reachable this way. The per-run usage list the
+// dashboard's own Usage page reads (api.commandcode.ai/internal/usage, which
+// carries each run's totalCost and cacheCost) answers 401 "You're logged out"
+// to an API key: it is a browser-session endpoint. That is why everything
+// served from a key here is an aggregate, and why per-run detail can only come
+// from a session the operator is present for.
 func FetchCommandCode(parent context.Context, client *http.Client, alphaBase, apiKey string) (*CommandCodeReport, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, errors.New("no CommandCode API key configured")

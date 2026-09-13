@@ -85,6 +85,8 @@ type Site struct {
 | 缓存字段语义（`cache_control` 是否有效、是否剥离） | **站点** | 站点网关认不认该字段，是站点的事 |
 | 峰谷时段与倍率 | **站点** | 窗口可能相同，但覆盖的模型集合不同 |
 | 模型单价表 | **站点** | 同一模型在不同站点价不同，必须分表；跨表命中会产出格式正确、数值错误的成本 |
+| 上游 usage 的 token 口径（毛值还是净形） | **站点** | CommandCode 的 `tokensIn` 是**毛值，含 cache read**；本项目落库的是**净形**（`input_tokens` 不含缓存 + 独立的 `cache_read_tokens`）。拿它的 `tokensIn` 直接套本项目的计价公式会双重扣减 |
+| 按次用量的可达性 | **站点** | CommandCode 的按次明细（`/internal/usage`，带每次的 `totalCost`/`cacheCost`）**只认浏览器会话**，API key 是 401；key 能拿到的只有 `/alpha/usage/summary` 汇总。因此服务端可长期自动跑的只有**对账**，按次明细的回填必须借浏览器 |
 | 账户 / 配额接口、模型目录来源 | **站点** | |
 | `thinking` / `reasoning_effort` 字段 | **模型家族** | 模型厂商的 API 契约 |
 | temperature 约束、`reasoning_content` 占位 | **模型家族** | 同上 |

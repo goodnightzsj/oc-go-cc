@@ -35,7 +35,7 @@ func costForProviderTokensAt(provider, model string, in, out, cacheRead, cacheCr
 	// conservative answer the name comparison gave.
 	descriptor, _ := site.Lookup(provider)
 	if descriptor.RateTable != "" {
-		if _, _, _, _, ok := PriceForProviderModel(provider, model); ok {
+		if _, _, _, _, ok := PriceForProviderModel(provider, model, in+cacheRead+cacheCreate); ok {
 			return costForTokens(provider, model, in, out, cacheRead, cacheCreate) *
 				history.ProviderPeakMultiplier(provider, model, t), true
 		}

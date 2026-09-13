@@ -208,7 +208,10 @@ func (a *Analytics) ModelBreakdown(window Window) ([]ModelBreakdown, error) {
 // rate for this model; complete request estimates go through
 // costForProviderTokensAt, which retains unknown-price semantics.
 func costForTokens(provider, model string, in, out, cacheRead, cacheCreate int64) float64 {
-	ipm, opm, crpm, cwpm, _ := PriceForProviderModel(provider, model)
+	// The published context bands are measured against the whole prompt, not
+	// the cache-miss part alone: a request that reads 500K cached tokens and
+	// misses on 1K still bills in the > 256K band.
+	ipm, opm, crpm, cwpm, _ := PriceForProviderModel(provider, model, in+cacheRead+cacheCreate)
 	// Cache semantics: cache CREATION (first-time prompt write) bills at the
 	// cache_write price when the model publishes one, otherwise at the input
 	// price; cache READ bills at the cheap cache_read price.

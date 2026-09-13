@@ -282,6 +282,10 @@ const TRANSLATIONS = {
     'detail.billingWindow': 'Billing window',
     'detail.peak': 'Peak',
     'detail.offPeak': 'Off-peak',
+    'setting.activeSite': 'Active platform',
+    'setting.activeSiteUnrestricted': 'Not restricted',
+    'setting.activeSiteHint': 'Routes every request through the selected platform.',
+    'setting.activeSiteUnavailable': 'No credential is configured for this platform.',
     'detail.status': 'Status',
     'detail.success': 'Success',
     'detail.failed': 'Failed',
@@ -724,6 +728,10 @@ const TRANSLATIONS = {
     'detail.billingWindow': '计费时段',
     'detail.peak': '高峰',
     'detail.offPeak': '非高峰',
+    'setting.activeSite': '当前平台',
+    'setting.activeSiteUnrestricted': '不限制',
+    'setting.activeSiteHint': '所有请求都走选中的平台。',
+    'setting.activeSiteUnavailable': '该平台未配置凭证。',
     'detail.status': '状态',
     'detail.success': '成功',
     'detail.failed': '失败',
@@ -2588,6 +2596,11 @@ const CONFIG_FIELDS = [
   ['commandcode.zero_data_retention', 'cfg-commandcode-zdr', 'bool'],
 
   // Logging
+  // Routing scope. The option list carries the visible platforms; which of
+  // them this deployment can actually use comes from /api/sites, because the
+  // credential rule lives in config and must not be restated here.
+  ['active_site', 'cfg-active-site', 'string'],
+
   ['logging.level', 'cfg-log-level', 'string'],
 ];
 
@@ -2704,11 +2717,37 @@ document.addEventListener('DOMContentLoaded', () => {
     field?.addEventListener('input', updateConfigChangeCount);
     field?.addEventListener('change', updateConfigChangeCount);
   }
+  applySelectableSites();
   document.getElementById('settings-provider-jump')?.addEventListener('change', event => {
     const provider = event.target.value;
     queueMicrotask(() => openProviderSettings(provider));
   });
 });
+
+// Mark the platforms this deployment can actually route to. The rule lives in
+// config - a platform's own keys, plus the global key for the platforms allowed
+// to fall back to it - and the server answers it, so this only applies the
+// answer. A platform with no credential stays visible but cannot be chosen:
+// picking it would route every request into a 401.
+async function applySelectableSites() {
+  const select = document.getElementById('cfg-active-site');
+  if (!select) return;
+  let sites;
+  try {
+    sites = (await fetchJSON('/api/sites')).sites || [];
+  } catch (_) {
+    return; // leave the selector as rendered rather than guessing
+  }
+  const selectable = new Map(sites.map(s => [s.id, s.selectable]));
+  for (const option of select.options) {
+    if (!option.value) continue;
+    const ok = selectable.get(option.value) === true;
+    option.disabled = !ok;
+    option.title = ok ? '' : t('setting.activeSiteUnavailable');
+  }
+  // A stored value that is no longer selectable must not look chosen.
+  if (select.value && selectable.get(select.value) !== true) select.value = '';
+}
 
 async function saveProxyConfig() {
   if (!currentProxyConfig) {

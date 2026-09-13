@@ -5,6 +5,7 @@
   "hot_reload": false,
   "enable_streaming_scenario_routing": false,
   "respect_requested_model": false,
+  "active_site": "",
   "enable_cost_based_routing": false,
   "cost_routing": {
     "enabled": true,

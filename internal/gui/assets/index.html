@@ -730,6 +730,12 @@
     <div class="settings-config-heading"><h2 class="section-heading" data-i18n="section.proxyConfig">Proxy Configuration</h2>
       <label class="sr-only" for="settings-provider-jump" data-i18n="setting.platformJump">Jump to platform</label>
       <select id="settings-provider-jump" class="filter-select"><option value="" data-i18n-option="setting.platformJump">Jump to platform</option><option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option></select>
+      <label class="sr-only" for="cfg-active-site" data-i18n="setting.activeSite">Active platform</label>
+      <select id="cfg-active-site" class="filter-select" aria-describedby="cfg-active-site-hint">
+        <option value="" data-i18n-option="setting.activeSiteUnrestricted">Not restricted</option>
+        <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option>
+      </select>
+      <span id="cfg-active-site-hint" class="page-meta" data-i18n="setting.activeSiteHint">Routes every request through the selected platform.</span>
     </div>
     <div class="settings-config">
       <p class="page-meta" id="provider-timeout-hint" data-i18n="label.timeoutHint">0 uses the provider default. Idle timeout limits gaps between streamed data; attempt timeout limits the entire streaming request.</p>

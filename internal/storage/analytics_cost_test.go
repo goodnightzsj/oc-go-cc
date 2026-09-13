@@ -40,21 +40,53 @@ func insertCostRecord(t *testing.T, db *Database, rec history.RequestRecord) {
 // use the cheap cache_read rate, and cache creation uses cache_write when the
 // model publishes one (Qwen3.7 Plus writes at $0.50 vs $0.40 input) or the input
 // rate otherwise (DeepSeek V4 Flash).
+//
+// The token counts stay inside the base context band, because the tier check
+// runs on the whole prompt: one million of every category would total 3M and
+// trip the 256K band, pricing at the long-context rates instead.
 func TestCostForTokens_CacheWriteRate(t *testing.T) {
-	const million = 1_000_000
+	// 50K of each category totals 150K of prompt, safely inside Qwen's 256K
+	// band; four times this would cross it and change the expected numbers.
+	const perCategory = 50_000
 
-	// Qwen3.7 Plus: in 0.40, out 1.60, cache_read 0.04, cache_write 0.50.
-	got := costForTokens("opencode-go", "qwen3.7-plus", million, million, million, million)
-	want := 0.40 + 1.60 + 0.04 + 0.50
+	// Qwen3.7 Plus base band: in 0.40, out 1.60, cache_read 0.04, cache_write 0.50.
+	got := costForTokens("opencode-go", "qwen3.7-plus", perCategory, perCategory, perCategory, perCategory)
+	want := (0.40 + 1.60 + 0.04 + 0.50) * 0.05
 	if math.Abs(got-want) > 1e-9 {
 		t.Errorf("qwen3.7-plus cost = %v, want %v", got, want)
 	}
 
 	// DeepSeek V4 Flash has no cache_write price, so creation bills at input.
-	got = costForTokens("opencode-go", "deepseek-v4-flash", million, million, million, million)
-	want = 0.22 + 0.66 + 0.007 + 0.22
+	got = costForTokens("opencode-go", "deepseek-v4-flash", perCategory, perCategory, perCategory, perCategory)
+	want = (0.15 + 0.60 + 0.003 + 0.15) * 0.05
 	if math.Abs(got-want) > 1e-9 {
 		t.Errorf("deepseek-v4-flash cost = %v, want %v", got, want)
+	}
+}
+
+// A prompt that crosses a published context band bills at that band's rates.
+// This is the difference the tier support exists for: before it, a 300K-token
+// Qwen3.7 Plus turn was priced at the ≤256K rate and under-billed 3x.
+func TestCostForTokens_ContextTierSwitches(t *testing.T) {
+	// 300K input, no cache, 1K output: past the 256K band.
+	in, out := int64(300_000), int64(1_000)
+	got := costForTokens("opencode-go", "qwen3.7-plus", in, out, 0, 0)
+	want := (float64(in)*1.20 + float64(out)*4.80) / 1e6
+	if math.Abs(got-want) > 1e-12 {
+		t.Errorf("past-band cost = %v, want %v (1.20/4.80)", got, want)
+	}
+	// One token below the threshold stays on the base band.
+	in = 256_000
+	got = costForTokens("opencode-go", "qwen3.7-plus", in, out, 0, 0)
+	want = (float64(in)*0.40 + float64(out)*1.60) / 1e6
+	if math.Abs(got-want) > 1e-12 {
+		t.Errorf("at-threshold cost = %v, want %v (0.40/1.60)", got, want)
+	}
+	// The band is measured on the whole prompt, so cache reads count toward it.
+	got = costForTokens("opencode-go", "qwen3.7-plus", 1_000, out, 300_000, 0)
+	want = (1_000*1.20 + 300_000*0.12 + float64(out)*4.80) / 1e6
+	if math.Abs(got-want) > 1e-12 {
+		t.Errorf("cache-inclusive band cost = %v, want %v", got, want)
 	}
 }
 

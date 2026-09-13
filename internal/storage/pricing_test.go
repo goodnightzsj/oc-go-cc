@@ -87,18 +87,29 @@ func TestParseRequestTime(t *testing.T) {
 	}
 	// Platform never deducts cache from input: `in` is the cache-miss part
 	// already, billed at the full input rate; the hit part bills at the cache
-	// rate on top. Verified 2026-08-28 against the platform invoice for a
-	// miss>hit request (18355-in/18176-cr/231-out == 0.00863558 doubled):
-	// 516638*0.22 + 516608*0.007 + 399*0.66, doubled in the 07:00Z peak
-	// window -> 23507991 units (1e-8 USD). The old formula subtracted the
-	// cache-read prefix and under-priced every miss>hit row.
-	cacheOverlap, ok := costForProviderTokensAt("opencode-go", "deepseek-v4-flash", 516638, 399, 516608, 0,
+	// rate on top. This is the structural claim, and it holds at whatever rates
+	// are current, so it is asserted against the table rather than a literal.
+	//
+	// The rates themselves changed: an invoice on 2026-08-28 priced
+	// 18355-in/18176-cr/231-out at 0.00863558, which the old 0.22/0.007/0.66
+	// reproduces exactly and today's 0.15/0.003/0.60 does not. Recompute that
+	// invoice from the current table and it disagrees - which is why historical
+	// rows keep their stored cost and are never re-priced.
+	const in, out, cacheRead = 516638, 399, 516608
+	ipm, opm, crpm, _, _ := PriceForProviderModel("opencode-go", "deepseek-v4-flash", in+cacheRead)
+	want := (float64(in)*ipm + float64(cacheRead)*crpm + float64(out)*opm) / 1e6 * 2
+	cacheOverlap, ok := costForProviderTokensAt("opencode-go", "deepseek-v4-flash", in, out, cacheRead, 0,
 		sql.NullFloat64{}, sql.NullFloat64{}, peakT)
 	if !ok {
 		t.Fatal("deepseek-v4-flash on opencode-go must be priced")
 	}
-	if got := int64(math.Round(cacheOverlap * 1e8)); got != 23507991 {
-		t.Fatalf("cache-overlap cost %v units, want platform 23507991", got)
+	if math.Abs(cacheOverlap-want) > 1e-12 {
+		t.Fatalf("cache-overlap cost %v, want %v (miss at input + hit at cache_read, doubled)", cacheOverlap, want)
+	}
+	// A deduction of the cache prefix would price this lower; that was the bug.
+	deducted := (float64(in-cacheRead)*ipm + float64(cacheRead)*crpm + float64(out)*opm) / 1e6 * 2
+	if math.Abs(cacheOverlap-deducted) < 1e-12 {
+		t.Fatal("cost equals the cache-deducted formula, so the miss part is being under-billed again")
 	}
 }
 

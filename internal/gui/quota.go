@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -539,6 +540,31 @@ func (s *Server) limitsLoop(ctx context.Context) {
 			s.ensureModelLimits(context.Background())
 		}
 	}
+}
+
+// priceRefreshLoop keeps the cost-estimation tables current. It reads the
+// OpenCode Go table out of the already-synced models.dev catalog and scrapes
+// CommandCode's plan page for the other; a platform whose fetch fails keeps
+// whatever table it already had, so a broken page degrades to the last known
+// prices rather than to no prices at all.
+func (s *Server) priceRefreshLoop(ctx context.Context) {
+	cfg := storage.PriceRefreshConfig{
+		CatalogPath: filepath.Join(s.catalogDir, "catalog.json"),
+		Interval:    storage.DefaultPriceRefreshInterval,
+	}
+	if s.catalogDir == "" {
+		cfg.CatalogPath = "" // the fetch reports this rather than guessing a path
+	}
+	storage.PriceRefreshLoop(ctx, cfg, &http.Client{Timeout: 30 * time.Second},
+		func(counts map[string]int, errs map[string]error) {
+			for provider, err := range errs {
+				s.logger.Warn("price refresh failed; keeping the previous table",
+					"provider", provider, "error", err)
+			}
+			for provider, n := range counts {
+				s.logger.Info("prices refreshed", "provider", provider, "rules", n)
+			}
+		})
 }
 
 // monthlyModelUsage builds the console-style per-model usage rows for the

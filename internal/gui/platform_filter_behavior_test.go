@@ -58,6 +58,16 @@ func runPlatformBehavior(t *testing.T, script string) {
 
 const platformBehaviorDOMScript = `
 const assert = require('node:assert/strict');
+// The router reads and writes the browser's URL globals, so the shim provides
+// them. They are declared here rather than inline in the context object so the
+// history stub closes over the same object the vm sees.
+const location = {hash: ''};
+const history = {replaceState(_state, _title, url) {
+  const at = String(url).indexOf('#');
+  location.hash = at < 0 ? '' : String(url).slice(at);
+}};
+// The router dispatches change events at controls it restores from the URL.
+const Event = class { constructor(type, init) { this.type = type; Object.assign(this, init || {}); } };
 const vm = require('node:vm');
 const input = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
 const nodes = new Map();
@@ -68,6 +78,7 @@ function node(id) {
     classList: {add(){},remove(){},toggle(){},contains(){return false}},
     addEventListener(type, handler){(this.listeners[type] ||= []).push(handler)},
     emit(type){return Promise.all((this.listeners[type] || []).map(handler => handler({target:this})))},
+    dispatchEvent(event){return Promise.resolve(this.emit(event.type))},
     setAttribute(){}, querySelectorAll(){return []}, querySelector(){return null}, focus(){},
     appendChild(child){this.children.push(child)},
   });
@@ -80,7 +91,8 @@ const context = vm.createContext({
   visiblePlatforms:input.visible, allPlatforms:input.all,
   document: {getElementById:node,querySelectorAll(){return []},querySelector(){return null},addEventListener(){},documentElement:{},createElement(){return {}}},
   window: {addEventListener(){}}, localStorage:{getItem(){return null}},
-  location:{hash:''}, setTimeout(){},clearTimeout(){},setInterval(){},queueMicrotask(){},
+  location, history, Event,
+  setTimeout(){},clearTimeout(){},setInterval(){},queueMicrotask(){},
   fetch:async()=>({ok:false,status:503,text:async()=> 'synthetic unavailable response'}),
   console:{error(){}},
 });

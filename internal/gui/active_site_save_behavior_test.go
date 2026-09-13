@@ -12,17 +12,13 @@ func TestSavingActiveSiteMovesEveryView(t *testing.T) {
 // only appeared after a manual refresh. This drives the real save path and
 // asserts the rest of the dashboard follows the save it just acknowledged.
 const activeSiteSaveScript = platformBehaviorDOMScript + `
-context.Event = class { constructor(type, init) { this.type = type; Object.assign(this, init || {}); } };
 async function checks() {
   const get = id => document.getElementById(id);
   const views = ['overview-provider','provider-filter','perf-provider','analytics-provider','quota-provider'];
   const option = value => ({value, disabled:false});
   const choices = [option(''), option('opencode-go'), option('commandcode')];
   for (const id of [...views, 'cfg-active-site']) {
-    const select = get(id);
-    select.options = choices;
-    // The shim's nodes expose emit(); the selector code dispatches a real event.
-    select.dispatchEvent = event => Promise.resolve(select.emit(event.type));
+    get(id).options = choices;
   }
   get('overview-provider').value = '';
   get('provider-filter').value = '';

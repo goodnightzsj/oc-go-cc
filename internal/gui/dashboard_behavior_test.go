@@ -61,8 +61,16 @@ function node(id) {
   });
   return nodes.get(id);
 }
+// The router reads and writes the browser's URL globals. Without them a hash
+// write throws inside the history render path, where the refresh handler's own
+// error handling turns it into what looks like a failed data load.
+const location = {hash: ''};
+const history = {replaceState(_state, _title, url) {
+  const at = String(url).indexOf('#');
+  location.hash = at < 0 ? '' : String(url).slice(at);
+}};
 const context = vm.createContext({
-  assert, page: input.page, visiblePlatforms: input.visible,
+  assert, page: input.page, visiblePlatforms: input.visible, location, history,
   document: {
     getElementById: node, querySelectorAll(){return []}, querySelector(){return null},
     addEventListener(){}, documentElement: {}, createElement(){return {}},

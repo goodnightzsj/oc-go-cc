@@ -26,6 +26,9 @@ var (
 	platformSelectID = []string{
 		"overview-provider", "provider-filter", "perf-provider",
 		"analytics-provider", "quota-provider", "settings-provider-jump",
+		// The active-platform selector offers the same set; its extra
+		// "not restricted" entry has an empty value and is filtered out.
+		"cfg-active-site",
 	}
 )
 

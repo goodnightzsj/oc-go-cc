@@ -202,6 +202,7 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 	mux.HandleFunc("/api/catalog/lock", s.handleCatalogLock)
 	mux.HandleFunc("/api/catalog/sync", s.handleCatalogSync)
 	mux.HandleFunc("/api/quota", s.handleQuota)
+	mux.HandleFunc("/api/sites", s.handleSites)
 	mux.HandleFunc("/api/test/send", s.handleTestSend)
 
 	// New endpoints for advanced GUI features

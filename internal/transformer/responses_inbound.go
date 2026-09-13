@@ -72,16 +72,27 @@ type responsesInboundTool struct {
 // namespace is a grouping device rather than a capability this adapter would
 // have to implement. Refusing the container would fail an entire Codex request
 // over tools the adapter can already serve.
-func flattenTools(tools []responsesInboundTool) []responsesInboundTool {
+//
+// A container that groups nothing is refused instead of expanded to nothing:
+// accepting it would report success for tools that never took effect, which is
+// the silent-drop this adapter exists to avoid.
+func flattenTools(tools []responsesInboundTool) ([]responsesInboundTool, error) {
 	out := make([]responsesInboundTool, 0, len(tools))
 	for _, tool := range tools {
-		if tool.Type == "namespace" {
-			out = append(out, flattenTools(tool.Tools)...)
+		if tool.Type != "namespace" {
+			out = append(out, tool)
 			continue
 		}
-		out = append(out, tool)
+		if len(tool.Tools) == 0 {
+			return nil, fmt.Errorf("namespace %q declares no tools", tool.Name)
+		}
+		expanded, err := flattenTools(tool.Tools)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, expanded...)
 	}
-	return out
+	return out, nil
 }
 
 type responsesInboundItem struct {
@@ -161,7 +172,11 @@ func ResponsesToMessageRequest(raw []byte) (*types.MessageRequest, error) {
 			return nil, fmt.Errorf("reasoning.effort %q has no supported upstream mapping", in.Reasoning.Effort)
 		}
 	}
-	for _, tool := range flattenTools(in.Tools) {
+	tools, err := flattenTools(in.Tools)
+	if err != nil {
+		return nil, err
+	}
+	for _, tool := range tools {
 		if tool.Type != "function" {
 			return nil, fmt.Errorf("tool type %q is not supported; use JSON function tools, not custom/freeform or hosted tools", tool.Type)
 		}

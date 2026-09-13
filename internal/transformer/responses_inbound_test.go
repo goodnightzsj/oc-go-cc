@@ -294,6 +294,10 @@ func TestResponsesInboundFlattensCodexToolNamespaces(t *testing.T) {
 		"custom tool":  `{"type":"namespace","name":"n","tools":[{"type":"custom","name":"c"}]}`,
 		"strict tool":  `{"type":"namespace","name":"n","tools":[{"type":"function","name":"c","strict":true,"parameters":{"type":"object"}}]}`,
 		"unnamed tool": `{"type":"namespace","name":"n","tools":[{"type":"function","strict":false,"parameters":{"type":"object"}}]}`,
+		// A container that groups nothing would expand to nothing, reporting
+		// success for tools that never took effect.
+		"empty container": `{"type":"namespace","name":"n"}`,
+		"empty inner":     `{"type":"namespace","name":"n","tools":[{"type":"namespace","name":"m","tools":[]}]}`,
 	} {
 		if _, err := ResponsesToMessageRequest([]byte(`{"model":"m","input":"hi","tools":[` + body + `]}`)); err == nil {
 			t.Fatalf("%s inside a namespace was accepted", name)

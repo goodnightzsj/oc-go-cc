@@ -842,9 +842,15 @@ func TestExecuteWithFallback_AuthErrorMultiKeyContinues(t *testing.T) {
 		t.Fatal("expected error after all models failed")
 	}
 
-	// All models failed but are not retryable, so the error is generic
-	if IsAuthError(err) {
-		t.Error("expected generic error (all models failed), not auth error")
+	// The last attempt's error is retained so the caller can report why the
+	// request failed. For a multi-key provider that is the 401 itself, which the
+	// proxy forwards; IsAuthError inspecting the returned chain is therefore
+	// expected here. What must stay true is that every model was attempted.
+	if !errors.Is(err, ErrAllModelsFailed) {
+		t.Errorf("error should identify the exhausted chain, got %v", err)
+	}
+	if !IsAuthError(err) {
+		t.Errorf("the retained cause should be the upstream 401, got %v", err)
 	}
 }
 

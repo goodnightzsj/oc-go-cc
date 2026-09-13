@@ -16,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -602,7 +603,7 @@ func (h *MessagesHandler) buildModelChain(
 	if active := h.modelRouter.ActiveSite(); active != "" {
 		decision.Models = router.RestrictToActiveSite(active, decision.Models)
 		if len(decision.Models) == 0 {
-			return nil, result, fmt.Errorf("active site %q has no routing target for this request; configure a model for it or switch the site", active)
+			return nil, result, fmt.Errorf("%w: active site %q has no routing target for this request; configure a model for it or switch the site", router.ErrWithinSiteNoTarget, active)
 		}
 	}
 
@@ -676,6 +677,10 @@ func (h *MessagesHandler) handleStreaming(
 
 	streamStart := time.Now()
 	blockedProviders := make(map[string]bool)
+	// lastStreamErr keeps the last refusal so the terminal response can name the
+	// cause. Without it every exhausted chain reads as "all streaming models
+	// failed", which says nothing a client can act on.
+	var lastStreamErr error
 
 	for attempt, model := range modelChain {
 		select {
@@ -831,6 +836,11 @@ func (h *MessagesHandler) handleStreaming(
 					if router.IsUsageLimitError(err) {
 						blockedProviders[providerName] = true
 					}
+					// Streaming cannot retry once the SSE head is out, so a
+					// deterministic refusal is the client's answer. Keeping it
+					// lets the terminal error below name the cause instead of a
+					// generic "all streaming models failed".
+					lastStreamErr = err
 					h.logger.Warn("streaming request failed via provider", "model", model.ModelID, "provider", model.Provider, "error", err)
 					continue
 				}
@@ -932,10 +942,27 @@ func (h *MessagesHandler) handleStreaming(
 		return
 	}
 	if !rw.wroteHeader {
-		h.sendError(w, http.StatusBadGateway, "all streaming models failed", nil)
+		h.sendError(w, http.StatusBadGateway, "all streaming models failed", lastStreamErr)
 	} else {
-		h.sendStreamError(rw, "all upstream models failed")
+		h.sendStreamError(rw, streamFailureMessage(lastStreamErr))
 	}
+}
+
+// streamFailureMessage names the cause of an exhausted streaming chain for the
+// SSE error event. The event carries a message and no status, so the upstream
+// text is the only detail the client can get.
+func streamFailureMessage(err error) string {
+	if err == nil {
+		return "all upstream models failed"
+	}
+	var apiErr *client.APIError
+	if errors.As(err, &apiErr) {
+		if body := strings.TrimSpace(apiErr.Body); body != "" {
+			return truncateError(body)
+		}
+		return apiErr.Error()
+	}
+	return truncateError(err.Error())
 }
 
 // sendStreamError sends an error event in the SSE stream.
@@ -1129,11 +1156,57 @@ func imageHashesFromBlocks(blocks []types.ContentBlock) []string {
 	return hashes
 }
 
+// maxForwardedErrorBody bounds what a client sees of an upstream error body.
+// The body is untrusted and can hold anything the platform chose to include, so
+// only enough to identify the refusal is passed on.
+const maxForwardedErrorBody = 4096
+
+// clientError maps an internal failure to the status and message the client
+// should see. Upstream refusals keep their own status and body: the proxy is a
+// gateway for several platforms, and a client can only react to a failure the
+// platform actually named. Rewriting every upstream error into a gateway status
+// both hides the cause and lets an intermediary replace the body - Cloudflare
+// substitutes its own page for a 502, so the reason never arrived at all.
+func clientError(statusCode int, message string, err error) (int, string) {
+	// Retained upstream refusal: this is the platform's own answer and already
+	// maps to an Anthropic status, so pass it through unchanged.
+	var apiErr *client.APIError
+	if errors.As(err, &apiErr) {
+		if body := strings.TrimSpace(apiErr.Body); body != "" {
+			return apiErr.StatusCode, truncateError(body)
+		}
+		return apiErr.StatusCode, apiErr.Error()
+	}
+
+	// The chain was scoped to the active platform and came up empty. That is a
+	// configuration fault on this side, not an upstream failure.
+	if errors.Is(err, router.ErrWithinSiteNoTarget) {
+		return http.StatusServiceUnavailable, err.Error()
+	}
+
+	return statusCode, message
+}
+
+// truncateError returns the error text up to maxForwardedErrorBody bytes, cut on
+// a rune boundary so the result stays valid UTF-8.
+func truncateError(s string) string {
+	if len(s) <= maxForwardedErrorBody {
+		return s
+	}
+	cut := maxForwardedErrorBody
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "… (truncated)"
+}
+
 // sendError sends an error response in Anthropic format.
 func (h *MessagesHandler) sendError(w http.ResponseWriter, statusCode int, message string, err error) {
+	clientStatus, clientMessage := clientError(statusCode, message, err)
+
 	h.logger.Error("request error",
-		"status", statusCode,
-		"message", message,
+		"status", clientStatus,
+		"message", clientMessage,
 		"error", err,
 	)
 
@@ -1142,8 +1215,8 @@ func (h *MessagesHandler) sendError(w http.ResponseWriter, statusCode int, messa
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
+	w.WriteHeader(clientStatus)
 
-	errorResp := transformer.TransformErrorResponse(statusCode, message)
+	errorResp := transformer.TransformErrorResponse(clientStatus, clientMessage)
 	_ = json.NewEncoder(w).Encode(errorResp)
 }

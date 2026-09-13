@@ -1,4 +1,0 @@
-id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,notes
-1,定位所有可见平台清单与语义边界,DONE,入口及已有共享定义明确;路由优先级不改,go test ./internal/config ./internal/catalog ./internal/handlers -count=1,2026-09-12,0,共享比较器仅用于展示;六个选择器和设置区块及CLI模型/API列表覆盖
-2,统一排序并补行为回归,DONE,五平台顺序一致;统计值和配置保存不变,go test -race ./internal/gui ./cmd/routatic-proxy -count=1,2026-09-12,1,固定顺序及源数据不变回归通过;旧费用排名颜色断言改为平台身份断言;首次测试修订的JS模板转义失败已修正并保留日志
-3,完成全量门禁和发布验收,IN_PROGRESS,全量通过并部署;原Edge验证排序及恢复后真实数据;配置保留,go test -race -p 2 ./... -count=1,,1,666顶层1103含子测试race/vet/六目标及Codex合成双轮通过;待发布与原Edge线上验收

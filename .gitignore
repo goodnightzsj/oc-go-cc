@@ -3,7 +3,9 @@ dist/
 *.exe
 *.pid
 .env
-configs/config.json
+# Real proxy config holds API keys; only the shipped example is tracked.
+configs/*.json
+!configs/config.example.json
 .tmp/
 oc-go-cc
 /routatic-proxy
@@ -19,7 +21,7 @@ brag-output-**
 .spartan/ai.env
 .claude
 
-router.test
+*.test
 .playwright-mcp
 .gstack/
 node_modules/
@@ -27,3 +29,30 @@ node_modules/
 # Generated Windows resource files (built by go-winres in CI)
 *.syso
 __pycache__/
+*.pyc
+
+# Tool scratch directories created in the working tree
+.llmdoc-tmp/
+artifacts/
+
+# Local working records. These stay on disk for the CLIs that read them but
+# are not part of the published tree.
+.codex-tasks/
+.ai/
+
+# One-time oc-go-cc -> routatic-proxy merge planning; the merge completed
+# 2026-08-06 (f4616cc), so this only survives as the author's local copy.
+MIGRATION.md
+
+# Stray file from a shell quoting accident. The real fixtures live under
+# internal/*/testdata/.
+/testdata/
+
+# Runtime databases hold real usage records and must never be committed.
+# The deployed DB lives in ~/.local/share/routatic-proxy/, so these only
+# catch a local run pointed at a relative path.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3

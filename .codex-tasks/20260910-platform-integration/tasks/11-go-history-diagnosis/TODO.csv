@@ -1,4 +1,0 @@
-id,task,status,acceptance_criteria,validation_command,completed_at,retry_count,notes
-1,确认现用DB与备份表计数,DONE,路径和计数只读取得且未读取凭证,sqlite3 -readonly /root/.local/share/routatic-proxy/data.db,2026-09-11,0,当前requests0/provider_usage1390;8月10日备份1390;9月11日六份部署前备份均0
-2,定位清理与账本展示链路,DONE,实际配置时间及源码共同支撑根因;无法确定的时刻注明,echo SKIP,2026-09-11,0,配置未设置retention故实际7天;1390旧记录全部符合清理;启动/每小时清理requests;无Debug日志不能确认具体时刻
-3,输出诊断和安全恢复选项,DONE,报告有证据与来源;未经授权不回填,test -s docs/go-history-diagnosis.md,2026-09-11,0,7个源码链接/JSON证据与diff检查通过;明确精确删除时刻不可追溯;没有恢复或更改策略

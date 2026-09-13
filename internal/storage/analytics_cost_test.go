@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"database/sql"
 	"math"
 	"path/filepath"
 	"testing"
@@ -43,31 +44,40 @@ func TestCostForTokens_CacheWriteRate(t *testing.T) {
 	const million = 1_000_000
 
 	// Qwen3.7 Plus: in 0.40, out 1.60, cache_read 0.04, cache_write 0.50.
-	got := costForTokens("qwen3.7-plus", million, million, million, million, 0, 0)
+	got := costForTokens("opencode-go", "qwen3.7-plus", million, million, million, million)
 	want := 0.40 + 1.60 + 0.04 + 0.50
 	if math.Abs(got-want) > 1e-9 {
 		t.Errorf("qwen3.7-plus cost = %v, want %v", got, want)
 	}
 
 	// DeepSeek V4 Flash has no cache_write price, so creation bills at input.
-	got = costForTokens("deepseek-v4-flash", million, million, million, million, 0, 0)
+	got = costForTokens("opencode-go", "deepseek-v4-flash", million, million, million, million)
 	want = 0.22 + 0.66 + 0.007 + 0.22
 	if math.Abs(got-want) > 1e-9 {
 		t.Errorf("deepseek-v4-flash cost = %v, want %v", got, want)
 	}
 }
 
-// TestCostForTokens_ModelsTableFallback covers a model with no seed rule: the
-// models-table rates price input/output, and cache reads must not be billed at
-// the full input rate.
-func TestCostForTokens_ModelsTableFallback(t *testing.T) {
-	const million = 1_000_000
-	got := costForTokens("totally-unknown-model", million, million, million, 0, 2.0, 8.0)
-	if want := 2.0 + 8.0; math.Abs(got-want) > 1e-9 {
-		t.Errorf("fallback cost = %v, want %v (cache reads must stay unpriced)", got, want)
+// TestCostForProviderTokensAt_UnpricedStaysUnknown covers a platform with no
+// published prices and a model absent from a platform that has some. Both must
+// report unknown rather than zero: a rate this proxy invented would be logged
+// as a real cost, and a missing rate must never read as free usage.
+func TestCostForProviderTokensAt_UnpricedStaysUnknown(t *testing.T) {
+	at := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name     string
+		provider string
+		model    string
+	}{
+		{"platform publishes no rates", "opencode-zen", "qwen3.7-plus"},
+		{"model absent from its platform's table", "commandcode", "totally-unknown-model"},
+		{"unknown platform", "no-such-platform", "deepseek-v4-flash"},
 	}
-	if got := costForTokens("totally-unknown-model", million, million, 0, 0, 0, 0); got != 0 {
-		t.Errorf("unknown model with no rates = %v, want 0", got)
+	for _, c := range cases {
+		if cost, ok := costForProviderTokensAt(c.provider, c.model, 1_000, 1_000, 0, 0,
+			sql.NullFloat64{}, sql.NullFloat64{}, at); ok {
+			t.Errorf("%s: got cost=%v ok=true, want unknown", c.name, cost)
+		}
 	}
 }
 
@@ -123,8 +133,8 @@ func TestModelBreakdownSumsToSummary(t *testing.T) {
 
 	// Independently: cached tokens must cost far less than the same volume of
 	// raw input, which is what the old SQL path got wrong.
-	wantDeepseek := costForTokens("deepseek-v4-flash", 5_000, 2_500, 96_000, 0, 0, 0)
-	wantQwen := costForTokens("qwen3.7-plus", 10_000, 5_000, 50_000, 20_000, 0, 0)
+	wantDeepseek := costForTokens("opencode-go", "deepseek-v4-flash", 5_000, 2_500, 96_000, 0)
+	wantQwen := costForTokens("opencode-go", "qwen3.7-plus", 10_000, 5_000, 50_000, 20_000)
 	if math.Abs(summary.EstCostUSD-(wantDeepseek+wantQwen)) > 1e-9 {
 		t.Errorf("summary %v, want %v", summary.EstCostUSD, wantDeepseek+wantQwen)
 	}

@@ -292,6 +292,7 @@ const TRANSLATIONS = {
     'setting.activeSiteUnrestricted': 'Not restricted',
     'setting.activeSiteHint': 'Routes every request through the selected platform.',
     'setting.activeSiteUnavailable': 'No credential is configured for this platform.',
+    'setting.activeSiteNotShown': 'Active platform "{site}" is not offered here, so these views show all platforms.',
     'detail.status': 'Status',
     'detail.success': 'Success',
     'detail.failed': 'Failed',
@@ -744,6 +745,7 @@ const TRANSLATIONS = {
     'setting.activeSiteUnrestricted': '不限制',
     'setting.activeSiteHint': '所有请求都走选中的平台。',
     'setting.activeSiteUnavailable': '该平台未配置凭证。',
+    'setting.activeSiteNotShown': '当前平台「{site}」未在此列出，各视图按全部平台展示。',
     'detail.status': '状态',
     'detail.success': '成功',
     'detail.failed': '失败',
@@ -1477,7 +1479,13 @@ let suppressViewStateSync = false;
 // already chosen one for the view, and re-pointing the selectors would silently
 // discard it. Saving the config clears the pin, because changing the active
 // site is a deliberate change to what the views open on.
-let viewPlatformPinned = false;
+//
+// The pin records which platform the link named, not merely that it named one.
+// A link naming a platform this deployment no longer offers cannot be honoured -
+// the selector has no such option, so the view would open on "all platforms"
+// while the proxy routes to the active site, and that mismatch would persist for
+// the whole session because the pin never expires by itself.
+let viewPlatformPinned = '';
 
 // The default each control is measured against. Selects and inputs declare it
 // in markup, which the DOM exposes as defaultValue. The analytics date range
@@ -1613,6 +1621,9 @@ function startPolling() {
   refreshAll();
   PerfModule.init();
   PerfModule.refresh();
+  // The active site is not a metric: it changes when an operator changes it,
+  // which is rare, so it is polled slowly rather than with the 3s core loop.
+  startActiveSitePolling();
   // Core metrics stay warm globally; tab-specific work only runs when visible.
   setInterval(refreshCore, 3000);
   setInterval(refreshCurrentTab, 3000);
@@ -2893,7 +2904,14 @@ document.addEventListener('DOMContentLoaded', () => {
   applyActiveSite();
   const viewControlIds = new Set(Object.values(VIEW_CONTROLS).flat());
   document.addEventListener('change', event => {
-    if (viewControlIds.has(event.target?.id)) syncViewState();
+    if (!viewControlIds.has(event.target?.id)) return;
+    // applyActiveSite sets these controls from the active site and dispatches
+    // change so each tab reloads its data. That is the default being applied,
+    // not a choice the reader made, so it must not be written into the link -
+    // otherwise the site default pins itself on first open and every later
+    // platform switch on the server stops reaching this session.
+    if (applyingSiteDefault) return;
+    syncViewState();
   });
   document.getElementById('settings-provider-jump')?.addEventListener('change', event => {
     const provider = event.target.value;
@@ -2906,6 +2924,19 @@ document.addEventListener('DOMContentLoaded', () => {
 // would show mostly history the deployment no longer produces.
 const PLATFORM_SELECTORS = ['overview-provider', 'provider-filter', 'perf-provider', 'analytics-provider', 'quota-provider'];
 
+// applyActiveSite follows a platform switch made anywhere other than this page.
+// The active site is read at boot and after a save, so a change made in the
+// config file (hot_reload) or in another window never reached an open dashboard:
+// every view kept filtering by the platform it rendered on entry. Polling the
+// same endpoint closes that, and the value is only applied when it actually
+// moved, so an unchanged site causes no work.
+const ACTIVE_SITE_POLL_MS = 30000;
+let lastActiveSite = null;
+
+// Set while applyActiveSite applies the site default, so the change events it
+// dispatches reload each tab without being mistaken for a reader's choice.
+let applyingSiteDefault = false;
+
 async function applyActiveSite() {
   let active;
   try {
@@ -2913,15 +2944,59 @@ async function applyActiveSite() {
   } catch (_) {
     return; // leave the selectors as rendered rather than guessing
   }
-  if (!active || viewPlatformPinned) return;
-  for (const id of PLATFORM_SELECTORS) {
-    const select = document.getElementById(id);
-    if (!select) continue;
-    const option = [...select.options].find(o => o.value === active);
-    if (!option || option.disabled) continue; // never default to an unavailable platform
-    select.value = active;
-    select.dispatchEvent(new Event('change', {bubbles: true}));
+  lastActiveSite = active;
+  if (!active) return;
+  // A link naming a platform still in the list wins; the pin is dropped rather
+  // than obeyed when the platform is gone, so a stale link cannot hold every
+  // view on "all platforms" while routing goes to the active site.
+  if (viewPlatformPinned) {
+    const known = PLATFORM_SELECTORS.some(id => {
+      const select = document.getElementById(id);
+      return select && [...select.options].some(o => o.value === viewPlatformPinned && !o.disabled);
+    });
+    if (known) return;
+    viewPlatformPinned = '';
   }
+  let moved = false;
+  let offered = false;
+  applyingSiteDefault = true;
+  try {
+    for (const id of PLATFORM_SELECTORS) {
+      const select = document.getElementById(id);
+      if (!select) continue;
+      const option = [...select.options].find(o => o.value === active);
+      // The dashboard only offers visible platforms, but config accepts any
+      // known one, so an active site can be real and unrepresentable here.
+      // Saying nothing would leave the views on all platforms while routing
+      // goes to one of them - a difference the operator cannot see.
+      if (!option || option.disabled) continue;
+      offered = true;
+      if (select.value === active) continue;
+      select.value = active;
+      select.dispatchEvent(new Event('change', {bubbles: true}));
+      moved = true;
+    }
+  } finally {
+    applyingSiteDefault = false;
+  }
+  renderActiveSiteNote(offered ? '' : active);
+  // The panels moved with the platform, so the link must follow: it would
+  // otherwise still name the platform this session is no longer showing.
+  if (moved) syncViewState({replace: true});
+}
+
+// renderActiveSiteNote shows why the views cannot open on the active platform.
+function renderActiveSiteNote(site) {
+  const el = document.getElementById('active-site-note');
+  if (!el) return;
+  el.hidden = !site;
+  el.textContent = site
+    ? t('setting.activeSiteNotShown').replace('{site}', providerInfo(site)?.name || site)
+    : '';
+}
+
+function startActiveSitePolling() {
+  setInterval(() => { applyActiveSite(); }, ACTIVE_SITE_POLL_MS);
 }
 
 // Mark the platforms this deployment can actually route to. The rule lives in
@@ -2985,7 +3060,7 @@ async function saveProxyConfig() {
       showSaveStatus(t('status.saveOk'), 'success');
       // Reload the full config from the server to stay in sync.
       await loadProxyConfig();
-      viewPlatformPinned = false;
+      viewPlatformPinned = '';
       // A saved active_site or key change also moves what every other tab is
       // showing: those selectors are set from /api/sites, which until now was
       // only read at page load, so a new platform only took effect after a
@@ -3774,7 +3849,7 @@ queueMicrotask(() => {
   // the baseline its own parameters are measured against.
   captureViewDefaults();
   const {name, params} = parseViewHash(location.hash);
-  viewPlatformPinned = params.has('platform');
+  viewPlatformPinned = params.get('platform') || '';
   applyViewState(params);
   activateTab(name);
 });

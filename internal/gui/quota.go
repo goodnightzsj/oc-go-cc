@@ -358,6 +358,12 @@ func (s *Server) handleCommandCodeQuota(w http.ResponseWriter, r *http.Request, 
 // the subscription period the account reports, so the dashboard can show the
 // official figure and the local one together.
 //
+// The two sides do not cover the same requests, and the difference is not only
+// bypassed traffic: the account summary counts every mode on the account,
+// including the vendor CLI, while the per-run list behind it is api-only. So
+// this is a reconciliation view, not an equality check - an account that runs
+// the CLI will always show a gap that says nothing about this proxy.
+//
 // Like monthlyModelUsage it refuses to attribute traffic when more than one key
 // is configured: local rows carry no key identity, so one account's period
 // cannot describe a pool. A missing or unparsable period leaves Ledger nil

@@ -10,6 +10,7 @@ routatic-proxy（oc-go-cc）：Claude Code / Codex ↔ 上游模型网关的反�
 | architecture/usage-pipeline.md | 用量/缓存 token 链路（入口→路由→发送→转换→录制→成本→下游） |
 | architecture/provider-layer.md | 五平台 vs 四个已登记 provider、wire format 推断、平台展示顺序 |
 | architecture/model-routing.md | 场景判定、override 优先级、成本路由与场景键的同步点 |
+| `docs/site-architecture.md`（仓库根，非 llmdoc 内）| 站点可插拔架构设计（已定稿未实现）：描述符、current-site 切换、目录优先解析、`/v1/models` 缺陷与五阶段推进 |
 | reference/inbound-protocols.md | 入站路由表、Responses 适配器与 fail-closed 边界 |
 | reference/cache-billing-audit.md | 2026-08-26 缓存与计费修复、三端对账（OpenCode/代理/CompactGate） |
 | must/accounting-baseline.md | 记账/调试硬约束（缓存语义、seed 价格同步、capture 约定、保留策略、部署与时区底线） |

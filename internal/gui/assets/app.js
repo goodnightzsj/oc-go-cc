@@ -1436,10 +1436,112 @@ document.querySelectorAll('.tab').forEach(tab => {
   });
 });
 
+/* ── View state in the URL ─────────────────────────────────────── */
+// A view is the active tab *and* the filters that decide what it shows, so the
+// whole of it goes in the hash: a view can be linked, survive a reload, and be
+// reached with the browser's back button. Only the tab name used to be
+// routable, so paging into history and then pressing back left the tab instead
+// of stepping back one page.
+//
+// Several controls drive one concept - the platform filter appears on five tabs
+// - so a key binds a list of element ids. The first non-empty value wins when
+// serialising, and every bound control is set when applying.
+const VIEW_CONTROLS = {
+  platform: ['provider-filter', 'overview-provider', 'perf-provider', 'analytics-provider', 'quota-provider'],
+  from: ['history-start', 'analytics-start'],
+  to: ['history-end', 'analytics-end'],
+  q: ['history-search'],
+  model: ['model-filter'],
+  status: ['status-filter'],
+  streaming: ['streaming-filter'],
+  cost: ['cost-source-filter'],
+  scenario: ['scenario-filter'],
+  size: ['history-page-size'],
+  days: ['quota-local-days'],
+  range: ['perf-time-range'],
+};
+
+// Set while a hash is being applied. Assigning a control's value is silent, but
+// the change event dispatched to trigger its handler is not, and without this
+// the hash would be rewritten while it is being read.
+let suppressViewStateSync = false;
+
+// buildViewHash serialises the current view. History pagination and sort order
+// are plain variables rather than controls, so they are appended separately and
+// only when they differ from the defaults - a link should not carry noise.
+function buildViewHash() {
+  const params = new URLSearchParams();
+  for (const [key, ids] of Object.entries(VIEW_CONTROLS)) {
+    for (const id of ids) {
+      const value = document.getElementById(id)?.value;
+      if (value) {
+        params.set(key, value);
+        break;
+      }
+    }
+  }
+  if (activeTab === 'history') {
+    if (historyPage > 1) params.set('page', String(historyPage));
+    if (currentSort.field !== 'start_time') params.set('sort', currentSort.field);
+    if (currentSort.dir !== 'desc') params.set('dir', currentSort.dir);
+  }
+  const query = params.toString();
+  return '#' + (activeTab || 'overview') + (query ? '?' + query : '');
+}
+
+// syncViewState writes the current view into the URL. `replace` is for changes
+// that are not navigation - typing in the search box, or a reload settling the
+// page number - so the back button does not collect one entry per keystroke.
+function syncViewState({replace = false} = {}) {
+  if (suppressViewStateSync) return;
+  const next = buildViewHash();
+  if (next === (location.hash || '')) return;
+  if (replace) history.replaceState(null, '', next);
+  else location.hash = next;
+}
+
+function parseViewHash(hash) {
+  const [name, query = ''] = (hash || '').replace(/^#/, '').split('?');
+  return {name: name || 'overview', params: new URLSearchParams(query)};
+}
+
+// applyViewState restores a view from the URL and reports whether it moved
+// history pagination, which has no control of its own to trigger a reload.
+function applyViewState(params) {
+  const before = `${historyPage}|${currentSort.field}|${currentSort.dir}`;
+  suppressViewStateSync = true;
+  try {
+    for (const [key, ids] of Object.entries(VIEW_CONTROLS)) {
+      if (!params.has(key)) continue;
+      const value = params.get(key) || '';
+      for (const id of ids) {
+        const el = document.getElementById(id);
+        if (!el || el.value === value) continue;
+        el.value = value;
+        // The tab's own handler listens for this; a silent assignment would
+        // leave the filter applied in the URL but not in the data.
+        el.dispatchEvent(new Event('change', {bubbles: true}));
+      }
+    }
+    if (params.has('page')) historyPage = Math.max(1, Number(params.get('page')) || 1);
+    if (params.has('sort')) currentSort = {field: params.get('sort'), dir: currentSort.dir};
+    if (params.has('dir')) currentSort = {field: currentSort.field, dir: params.get('dir')};
+  } finally {
+    suppressViewStateSync = false;
+  }
+  window.CustomSelect?.syncAll();
+  return `${historyPage}|${currentSort.field}|${currentSort.dir}` !== before;
+}
+
 // Respond to back/forward and manual hash edits.
 window.addEventListener('hashchange', () => {
-  const name = (location.hash || '').replace(/^#/, '') || 'overview';
-  if (name !== activeTab) activateTab(name);
+  const {name, params} = parseViewHash(location.hash);
+  const historyMoved = applyViewState(params);
+  if (name !== activeTab) {
+    activateTab(name);
+    return;
+  }
+  if (historyMoved) refreshCurrentTab();
 });
 
 /* ── Polling ───────────────────────────────────────────────────── */
@@ -1888,6 +1990,7 @@ function historyGoToPage(p) {
   const max = Math.max(1, Math.ceil(historyTotal / historySize));
   if (p > max) p = max;
   historyPage = p;
+  syncViewState();
   refreshHistory();
 }
 
@@ -1901,6 +2004,11 @@ function renderHistoryPager() {
   if (pageTotal) pageTotal.textContent = currentLang === 'zh' ? `共 ${historyTotal} 条` : `${historyTotal} records`;
   if (prev) prev.disabled = historyPage <= 1;
   if (next) next.disabled = historyPage >= max;
+  // The loaded page can differ from the one asked for (a shrinking result set
+  // clamps it), so settle the URL on what is actually shown. replaceState, not
+  // the hash setter: this runs during a load and must not push an entry or
+  // fire a hashchange back into the loader.
+  syncViewState({replace: true});
 }
 
 // Which models each platform peak-prices. OpenCode Go covers a family; null
@@ -2731,6 +2839,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   applySelectableSites();
   applyActiveSite();
+  const viewControlIds = new Set(Object.values(VIEW_CONTROLS).flat());
+  document.addEventListener('change', event => {
+    if (viewControlIds.has(event.target?.id)) syncViewState();
+  });
   document.getElementById('settings-provider-jump')?.addEventListener('change', event => {
     const provider = event.target.value;
     queueMicrotask(() => openProviderSettings(provider));
@@ -2933,6 +3045,7 @@ document.querySelectorAll('.history-table .sortable').forEach(th => {
     this.classList.add(currentSort.dir);
     this.setAttribute('aria-sort', currentSort.dir === 'asc' ? 'ascending' : 'descending');
     historyPage = 1;
+    syncViewState();
     refreshHistory();
   });
 });
@@ -3604,7 +3717,9 @@ startPolling();
 // const modules (e.g. AnalyticsModule) defined later in this script have
 // been initialized — otherwise accessing them here hits a TDZ error.
 queueMicrotask(() => {
-  activateTab((location.hash || '').replace(/^#/, '') || 'overview');
+  const {name, params} = parseViewHash(location.hash);
+  applyViewState(params);
+  activateTab(name);
 });
 
 // History pagination controls.

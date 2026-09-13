@@ -177,7 +177,11 @@ func (t *RequestTransformer) TransformRequest(
 			return nil, fmt.Errorf("invalid output_config: %w", err)
 		}
 		if len(output.Format) > 0 && string(output.Format) != "null" {
-			return nil, fmt.Errorf("output_config.format is not supported by the Chat Completions adapter")
+			responseFormat, err := openAIResponseFormat(output.Format)
+			if err != nil {
+				return nil, err
+			}
+			openaiReq.ResponseFormat = responseFormat
 		}
 		switch output.Effort {
 		case "":
@@ -189,6 +193,35 @@ func (t *RequestTransformer) TransformRequest(
 	}
 
 	return openaiReq, nil
+}
+
+// openAIResponseFormat maps Anthropic's output_config.format onto the OpenAI
+// Chat Completions response_format the upstream actually receives.
+//
+// Anthropic defines a single variant, {"type":"json_schema","schema":{...}},
+// and requires the schema to be closed (additionalProperties:false with every
+// property required), which is exactly what OpenAI's strict mode demands - so
+// the mapping is lossless. Anything else is rejected instead of dropped, so a
+// caller never silently loses the structured-output guarantee it asked for.
+func openAIResponseFormat(format json.RawMessage) (json.RawMessage, error) {
+	var parsed struct {
+		Type   string          `json:"type"`
+		Schema json.RawMessage `json:"schema"`
+	}
+	if err := json.Unmarshal(format, &parsed); err != nil {
+		return nil, fmt.Errorf("invalid output_config.format: %w", err)
+	}
+	if parsed.Type != "json_schema" || len(parsed.Schema) == 0 || string(parsed.Schema) == "null" {
+		return nil, fmt.Errorf("unsupported output_config.format type %q", parsed.Type)
+	}
+	return json.Marshal(map[string]any{
+		"type": "json_schema",
+		"json_schema": map[string]any{
+			"name":   "response",
+			"schema": parsed.Schema,
+			"strict": true,
+		},
+	})
 }
 
 // HasThinkingBlocks returns true if any assistant message contains

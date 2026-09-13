@@ -319,6 +319,57 @@ func TestTransformRequestAppliesReasoningEffortAndThinking(t *testing.T) {
 	}
 }
 
+// Claude Code's generate_session_title sends output_config.format, so the Chat
+// Completions adapter must forward it as response_format rather than 502.
+func TestTransformRequestMapsStructuredOutputFormat(t *testing.T) {
+	transformer := NewRequestTransformer()
+	schema := `{"type":"object","properties":{"title":{"type":"string"}},"required":["title"],"additionalProperties":false}`
+
+	req := &types.MessageRequest{
+		Model:        "claude-test",
+		MaxTokens:    64,
+		OutputConfig: json.RawMessage(`{"format":{"type":"json_schema","schema":` + schema + `}}`),
+		Messages:     []types.Message{{Role: "user", Content: json.RawMessage(`"name this session"`)}},
+	}
+
+	openaiReq, err := transformer.TransformRequest(req, config.ModelConfig{ModelID: "kimi-k2.6"})
+	if err != nil {
+		t.Fatalf("TransformRequest() error = %v", err)
+	}
+
+	var got struct {
+		Type       string `json:"type"`
+		JSONSchema struct {
+			Name   string          `json:"name"`
+			Schema json.RawMessage `json:"schema"`
+			Strict bool            `json:"strict"`
+		} `json:"json_schema"`
+	}
+	if err := json.Unmarshal(openaiReq.ResponseFormat, &got); err != nil {
+		t.Fatalf("response_format = %s, want a JSON object: %v", openaiReq.ResponseFormat, err)
+	}
+	if got.Type != "json_schema" || got.JSONSchema.Name != "response" || !got.JSONSchema.Strict {
+		t.Fatalf("response_format = %s, want a strict json_schema named response", openaiReq.ResponseFormat)
+	}
+	if string(got.JSONSchema.Schema) != schema {
+		t.Fatalf("schema = %s, want %s", got.JSONSchema.Schema, schema)
+	}
+}
+
+func TestTransformRequestRejectsUnknownStructuredOutputFormat(t *testing.T) {
+	transformer := NewRequestTransformer()
+	req := &types.MessageRequest{
+		Model:        "claude-test",
+		MaxTokens:    64,
+		OutputConfig: json.RawMessage(`{"format":{"type":"text"}}`),
+		Messages:     []types.Message{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+	}
+
+	if _, err := transformer.TransformRequest(req, config.ModelConfig{ModelID: "kimi-k2.6"}); err == nil {
+		t.Fatal("TransformRequest() error = nil, want a non-json_schema format rejected")
+	}
+}
+
 func TestTransformRequestDeepSeekHistoryGuardOverridesExplicitThinking(t *testing.T) {
 	transformer := NewRequestTransformer()
 

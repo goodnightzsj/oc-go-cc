@@ -1,24 +1,27 @@
 # Current Handoff
 
 ## Task
-- Name: 五平台完整适配、部署验收与后续 UI/UX 分析
-- Goal: 继续全部平台任务；完成后提交推送和既有 SSH 部署，再分析页面美化。
+- Name: OpenCode历史恢复、CommandCode指定模型实测与平台排序
+- Goal: 关闭远端清理、安全恢复可核实历史、测试deepseek/deepseek-v4.1-flash双客户端、统一OpenCode Go和CommandCode优先展示。
 - Owner CLI: Codex
-- Support CLI: Claude 的本项目历史 session 仅作为部署流程证据。
+- Support CLI: Claude本项目最终session仅作为部署和官方同步/Token拆分证据；没有把真实凭证导出到本机。
 
 ## Status
-- Current phase: Epic 7/8；软件0b28ab2已推送部署验收，七页UI/UX分析完成；真实账户联调BLOCKED_EXTERNAL。
-- Current step: 08-account-validation第1项，等待用户配置权限及明确未公开余额接口的合法数据来源。
-- Done: 上游语义融合、路由/记账修复、CommandCode双客户端、五平台独立页面、OpenRouter额度、AWS独立SDK账单；当前源码650顶层/1073含子测试race与vet、六目标、Codex双轮、有数据460/31布局、生产210/21布局通过。UI/UX新增14页/5套餐视图观察与七页报告完成，未改视觉。
-- Next: 用户自行在服务端补足配置/权限后，再通过应用验证真实账户；Zen/CommandCode账户只读登录态采集需要另获授权，不能擅自读取。UI美化仅在确认后实施；不要重做已完成的适配、全量验证或重复部署。
-- Blockers: #8仍未完成：Go账户403；Zen/CommandCode缺公开账户合同；Bedrock需独立IAM授权；OpenRouter/CommandCode真实账户未配置。软件和合成测试不能替代真实账户验收。
+- Current phase: Epic 15/16；正式d7b25fb已部署，自动清理关闭；#13官方6561条全量恢复与#15原Edge验收完成；#16结构化输出缺口已修复（源码+全量race/vet/build通过，尚未提交、尚未部署）。新增任务脚本、证据和文档尚未提交。
+- Current step: 整理提交本轮恢复/验收证据、文档与#16修复；#8其余账户权限缺口仍保留。#14测试交付完成不等于上游逐模型已兼容。
+- Done: 当前官方132非空页/明确空页/6561唯一ID已重新取得；事务补齐requests/provider_usage各6561，四类Token及$25.14740738与官方/原Edge分页/两个汇总API/SQLite一致。2337条保留原生详情，4224条未知详情，3条无唯一对应备份日志未额外计费。新启动PID893仍cleanup disabled，配置-1。
+- Done: Go→CommandCode→Zen→Bedrock→OpenRouter在六个原生/渲染菜单及设置中通过；七页565检查/29组合/70布局/21截图/377只读请求全通过，0异常或意外写请求。原d7b25fb全量666/1103及六目标记录保留；本轮没改应用源码或再次部署。
+- Done: Codex0.144.3-cometix返回CC_CODEX_OK（纯输入2723/缓存4352/输出6）；Claude2.1.263返回CC_CLAUDE_OK（输入144/输出21），均为指定模型和CommandCode归属。使用同release隔离实例；正式路由/账本未混入测试。临时凭证副本、进程、隧道已清理。
+- Next: 提交本轮恢复/验收证据、文档与#16修复；是否部署需另行确认。原Edge driver仍在`/tmp/oc-go-cc-resume-20260912.SHViXM/edge-driver.mjs`，复用同一连接，结束后断开并提醒关闭调试许可。
+- Blockers: #8为Go账户error、Zen无公开合同、Bedrock账单disabled、OpenRouter未配置。结构化输出本身已不阻塞：`output_config.format` 现映射为 `response_format`（证据 `tasks/14-commandcode-live/raw/structured-output-fix.json`），但上游是否逐模型接受 `response_format` 无官方承诺，且未做真实复测。不得忽略format或把未知费用伪装成功。
 
 ## Sources of Truth
-- llmdoc: `llmdoc/startup.md`、`llmdoc/must/accounting-baseline.md`；此次扩展的llmdoc同步待用户确认。
-- task files: `.codex-tasks/20260910-platform-integration/SUBTASKS.csv`、`tasks/08-account-validation/TODO.csv`。
-- key paths: `internal/gui/`、`internal/quota/`、`internal/storage/`、`docs/commandcode.md`、`docs/uiux-multiplatform-review.md`、`tasks/06-deploy/deployment-flow.md`、`scripts/prod-deploy.sh`。最新部署证据 `/tmp/oc-go-cc-header-final.PYhcpx/`，UI观察 `/tmp/oc-go-cc-uiux-current.axtgQT/`。
+- llmdoc: `llmdoc/startup.md`、`llmdoc/must/accounting-baseline.md`与最终计费审计；当前恢复方法详见`docs/history-recovery.md`。
+- task files: `.codex-tasks/20260910-platform-integration/SUBTASKS.csv`及`tasks/13-history-restore/`、`tasks/14-commandcode-live/`、`tasks/15-provider-order/`。
+- key paths: `docs/history-recovery.md`、`docs/troubleshooting-cost-mismatch.md`、`llmdoc/must/accounting-baseline.md`、`llmdoc/architecture/usage-pipeline.md`、`docs/commandcode.md`、`internal/transformer/request.go`、`pkg/types/openai.go`、`internal/config/provider_display.go`、`internal/storage/retention.go`。
+- Remote evidence: `/root/oc-go-cc/.tmp/official-history-20260912.c9MOtJ/`含最终备份/计划/演练/事务报告；旧native-history-audit目录保留。生产验收摘要分别在task13和task15的raw/production-acceptance.json，完整核验在`/tmp/oc-go-cc-final-20260913.4mrEaW/`。不提交原始业务数据或凭证。
 
 ## Why Handoff
-- Reason: 保留跨会话执行上下文；旧20260808任务已完成，不再作为当前任务真源。
+- Reason: 修正落后于子任务的交接状态，保留真实完成结果与未解除的权限/协议限制；不得从旧恢复块重写生产。
 - What the next CLI should do: 先读活动CSV及恢复块，保留失败证据和已完成工作。
-- What it must not redo: 不读取凭证、不读取无关session、不覆盖未提交实现、不把旧验收结果作为当前源码验收、不在部署前开展视觉重设计。
+- What it must not redo: 不重复恢复6561条、不读取凭证或无关session、不覆盖用户改动、不清表/全库覆盖、不把旧TSV当当前全量、不重复主请求消耗、不回滚到会把-1当7天清理的旧程序、不用新浏览器冒充原Edge验收。

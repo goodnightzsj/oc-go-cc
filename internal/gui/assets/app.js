@@ -2074,14 +2074,18 @@ function renderHistoryPager() {
   syncViewState({replace: true});
 }
 
-// Which models each platform peak-prices. OpenCode Go covers a family; null
-// means "any deepseek model". CommandCode prints the peak sub-line on
-// individual model rows (commandcode.ai/docs/plans/goat), so its set is listed
-// rather than matched by family - variants published without the sub-line must
-// not be peak-priced.
-const PEAK_MODELS = {
-  'opencode-go': null,
-  commandcode: ['deepseek-v4.1-flash', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp', 'deepseek-v4-pro'],
+// Each platform's published peak-pricing rule, mirroring history.peakSchedules
+// (internal/history/record.go) - the Go side owns the answer and
+// TestPeakSchedulesMatchTheBackend keeps this mirror honest.
+//
+// Both platforms name their covered models row by row in their pricing table,
+// so the set is listed rather than matched by substring: the older
+// deepseek-v3/r1/chat families, the "fast" variant and the dated snapshots all
+// carry a single rate and must stay off-peak.
+const PEAK_FAMILIES = ['deepseek-v4.1-flash', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp', 'deepseek-v4-pro'];
+const PEAK_SCHEDULES = {
+  'opencode-go': {models: PEAK_FAMILIES, windows: [[1, 4], [6, 10]], multiplier: 2},
+  commandcode: {models: PEAK_FAMILIES, windows: [[1, 4], [6, 10]], multiplier: 2},
 };
 
 // Derive the peak multiplier from provider + model + start_time, matching
@@ -2092,17 +2096,20 @@ const PEAK_MODELS = {
 function effectivePeakMultiplier(h) {
   const stored = Number(h.peak_multiplier);
   if (stored > 1) return stored;
-  const provider = String(h.provider || '').replace(/_/g, '-');
-  if (provider !== '' && !(provider in PEAK_MODELS)) return 1;
+  // An empty provider keeps the pre-provider-column reading, like the backend:
+  // opencode-go is the platform a blank provider means.
+  const provider = String(h.provider || '').replace(/_/g, '-') || 'opencode-go';
+  const schedule = PEAK_SCHEDULES[provider];
+  if (!schedule) return 1;
   const model = String(h.model || '').toLowerCase().split('/').pop();
-  const listed = PEAK_MODELS[provider];
-  if (listed ? listed.indexOf(model) < 0 : !model.includes('deepseek')) return 1;
+  if (schedule.models.indexOf(model) < 0) return 1;
   const t = new Date(h.start_time);
   if (isNaN(t.getTime())) return 1;
   const day = t.getUTCDay();
   if (day === 0 || day === 6) return 1;
   const hour = t.getUTCHours();
-  return (hour >= 1 && hour < 4) || (hour >= 6 && hour < 10) ? 2 : 1;
+  const inWindow = schedule.windows.some(w => hour >= w[0] && hour < w[1]);
+  return inWindow ? schedule.multiplier : 1;
 }
 
 // Peak or off-peak as billed, for the request detail view.

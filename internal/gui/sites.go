@@ -44,7 +44,10 @@ func (s *Server) handleSites(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := json.NewEncoder(w).Encode(map[string]any{"sites": views}); err != nil {
+	// The active site is the platform the operator routes to, so the dashboard
+	// opens on it rather than on a mixed view of platforms the deployment may no
+	// longer be sending anything to.
+	if err := json.NewEncoder(w).Encode(map[string]any{"sites": views, "active": cfg.ActiveSite}); err != nil {
 		s.logger.Warn("write sites response", "err", err)
 	}
 }

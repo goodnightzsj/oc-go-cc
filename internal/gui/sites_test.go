@@ -25,13 +25,17 @@ func TestSitesEndpointReportsSelectability(t *testing.T) {
 		t.Error("selectability changes with the config and must not be browser-cached")
 	}
 	var body struct {
-		Sites []siteView `json:"sites"`
+		Sites  []siteView `json:"sites"`
+		Active string     `json:"active"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
 	if len(body.Sites) != len(site.Visible()) {
 		t.Fatalf("listed %d platforms, registry offers %d", len(body.Sites), len(site.Visible()))
+	}
+	if body.Active != "" {
+		t.Fatalf("active = %q, want empty when routing is unrestricted", body.Active)
 	}
 	for i, want := range site.Visible() {
 		got := body.Sites[i]
@@ -49,6 +53,17 @@ func TestSitesEndpointReportsSelectability(t *testing.T) {
 				t.Error("a platform with its own key was reported as unconfigured")
 			}
 		}
+	}
+
+	// The dashboard opens on the active site, so it has to be reported.
+	scoped, _ := configTestServer(t, `{"active_site":"commandcode","commandcode":{"api_key":"synthetic-commandcode"}}`)
+	rec = httptest.NewRecorder()
+	scoped.handleSites(rec, httptest.NewRequest(http.MethodGet, "/api/sites", nil))
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Active != site.CommandCode {
+		t.Fatalf("active = %q, want %q", body.Active, site.CommandCode)
 	}
 
 	// Without a global key, the platform that depends on it stops being offered.

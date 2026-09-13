@@ -2718,11 +2718,35 @@ document.addEventListener('DOMContentLoaded', () => {
     field?.addEventListener('change', updateConfigChangeCount);
   }
   applySelectableSites();
+  applyActiveSite();
   document.getElementById('settings-provider-jump')?.addEventListener('change', event => {
     const provider = event.target.value;
     queueMicrotask(() => openProviderSettings(provider));
   });
 });
+
+// The dashboard's platform selectors open on the active site. Routing is
+// scoped to one platform, so defaulting the views to a mixed "all platforms"
+// would show mostly history the deployment no longer produces.
+const PLATFORM_SELECTORS = ['overview-provider', 'provider-filter', 'perf-provider', 'analytics-provider', 'quota-provider'];
+
+async function applyActiveSite() {
+  let active;
+  try {
+    active = (await fetchJSON('/api/sites')).active || '';
+  } catch (_) {
+    return; // leave the selectors as rendered rather than guessing
+  }
+  if (!active) return;
+  for (const id of PLATFORM_SELECTORS) {
+    const select = document.getElementById(id);
+    if (!select) continue;
+    const option = [...select.options].find(o => o.value === active);
+    if (!option || option.disabled) continue; // never default to an unavailable platform
+    select.value = active;
+    select.dispatchEvent(new Event('change', {bubbles: true}));
+  }
+}
 
 // Mark the platforms this deployment can actually route to. The rule lives in
 // config - a platform's own keys, plus the global key for the platforms allowed

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/routatic/proxy/internal/site"
 )
 
 // Config is the root configuration loaded from ~/.config/routatic-proxy/config.json.
@@ -334,10 +336,7 @@ func (c *Config) EffectiveAPIKeys() []string {
 
 // NormalizeProvider preserves the legacy empty-provider default and spelling.
 func NormalizeProvider(provider string) string {
-	if provider == "" {
-		return "opencode-go"
-	}
-	return strings.ReplaceAll(provider, "_", "-")
+	return site.Normalize(provider)
 }
 
 // ModelKey identifies a routing target, including its provider.
@@ -347,35 +346,44 @@ func ModelKey(model ModelConfig) string {
 
 // SupportedProvider reports whether the runtime has an adapter for this name.
 func SupportedProvider(provider string) bool {
-	switch NormalizeProvider(provider) {
-	case "opencode-go", "opencode-zen", "aws-bedrock", "openrouter", "commandcode":
-		return true
-	default:
-		return false
-	}
+	return site.IsKnown(provider)
+}
+
+// providerKeySource binds each platform to the config fields holding its own
+// credentials. Config knows its own shape and site knows which platforms exist;
+// keeping the binding here rather than in the registry is what avoids the
+// import cycle, and providerKeySourceCoversRegistry keeps the two lists from
+// drifting apart.
+//
+// globalFallback repeats the long-standing rule that the four original
+// platforms may use the global key. CommandCode must not: its credential is not
+// an OpenCode one, and a global key issued for another host would be sent to a
+// host it was never issued for.
+var providerKeySource = map[string]struct {
+	keys           func(*Config) []string
+	globalFallback bool
+}{
+	site.OpenCodeGo:  {func(c *Config) []string { return c.OpenCodeGo.EffectiveAPIKeys() }, true},
+	site.OpenCodeZen: {func(c *Config) []string { return c.OpenCodeZen.EffectiveAPIKeys() }, true},
+	site.AWSBedrock:  {func(c *Config) []string { return c.AWSBedrock.EffectiveAPIKeys() }, true},
+	site.OpenRouter:  {func(c *Config) []string { return c.OpenRouter.EffectiveAPIKeys() }, true},
+	site.CommandCode: {func(c *Config) []string { return c.CommandCode.EffectiveAPIKeys() }, false},
 }
 
 // ProviderAPIKeys is the credential source shared by sending and fallback logic.
-// The original providers retain their global-key fallback; unknown providers
-// must never receive another platform's credentials.
+// A platform with no key of its own falls back to the global key only when the
+// binding above allows it; unknown providers must never receive another
+// platform's credentials.
 func (c *Config) ProviderAPIKeys(provider string) []string {
-	var keys []string
-	switch NormalizeProvider(provider) {
-	case "opencode-go":
-		keys = c.OpenCodeGo.EffectiveAPIKeys()
-	case "opencode-zen":
-		keys = c.OpenCodeZen.EffectiveAPIKeys()
-	case "aws-bedrock":
-		keys = c.AWSBedrock.EffectiveAPIKeys()
-	case "openrouter":
-		keys = c.OpenRouter.EffectiveAPIKeys()
-	case "commandcode":
-		return c.CommandCode.EffectiveAPIKeys()
-	default:
+	source, ok := providerKeySource[site.Normalize(provider)]
+	if !ok {
 		return nil
 	}
-	if len(keys) > 0 {
+	if keys := source.keys(c); len(keys) > 0 {
 		return keys
+	}
+	if !source.globalFallback {
+		return nil
 	}
 	return c.EffectiveAPIKeys()
 }

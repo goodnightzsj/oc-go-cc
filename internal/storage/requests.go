@@ -503,15 +503,12 @@ func boolToInt(b bool) int {
 
 // peakMultiplierForRecord returns the billing multiplier to persist for a
 // record: the caller-set value when present, else computed from start time.
+// Which platforms peak-price which models is history.ProviderPeakMultiplier's
+// decision alone - a second provider gate here would silently disagree with it
+// as soon as another platform adopts peak pricing.
 func peakMultiplierForRecord(rec history.RequestRecord) float64 {
-	if rec.Provider != "" && rec.Provider != "opencode-go" {
-		return 1
-	}
 	if rec.PeakMultiplier > 0 {
 		return rec.PeakMultiplier
-	}
-	if rec.StartTime.IsZero() {
-		return 1
 	}
 	return history.ProviderPeakMultiplier(rec.Provider, rec.Model, rec.StartTime)
 }

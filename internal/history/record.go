@@ -4,6 +4,8 @@ package history
 import (
 	"strings"
 	"time"
+
+	"github.com/routatic/proxy/internal/models"
 )
 
 // RequestRecord holds metadata for a single completed proxy request.
@@ -39,28 +41,53 @@ type RequestRecord struct {
 // 06:00-10:00 UTC (opencode.ai/docs/zh-cn/go). Weekends and other models are
 // always off-peak (multiplier 1). A zero time degrades to 1.
 func PeakMultiplier(model string, t time.Time) float64 {
-	if t.IsZero() || !strings.Contains(strings.ToLower(model), "deepseek") {
+	return ProviderPeakMultiplier("opencode-go", model, t)
+}
+
+// commandCodePeakModels lists the CommandCode models that carry a peak rate,
+// keyed by family so a vendor-prefixed id matches like a flat one. CommandCode
+// prints the peak sub-line on each model's row rather than covering a family as
+// a whole, and variants such as "deepseek-v4-flash-fast" do not carry it, so the
+// set is listed instead of matched by substring.
+// Source: commandcode.ai/docs/plans/goat (peak 01-04 & 06-10 UTC, Mon-Fri).
+var commandCodePeakModels = map[string]bool{
+	"deepseek-v4.1-flash":          true,
+	"deepseek-v4-flash":            true,
+	"deepseek-v4-flash-vision-exp": true,
+	"deepseek-v4-pro":              true,
+}
+
+// ProviderPeakMultiplier answers, for one provider's request, whether the
+// platform billed it at its peak rate. OpenCode Go and CommandCode publish the
+// same window (Mon-Fri 01:00-04:00 and 06:00-10:00 UTC) and the same 2x rate, so
+// the schedule is stated once and each platform only answers the model question.
+// A platform with no peak pricing - and an empty provider, which retains the
+// interpretation of legacy OpenCode Go records - is always off-peak.
+func ProviderPeakMultiplier(provider, model string, t time.Time) float64 {
+	if t.IsZero() {
 		return 1
 	}
-	t = t.UTC()
-	wd := t.Weekday()
-	if wd == time.Saturday || wd == time.Sunday {
+	family := models.ModelFamily(model)
+	switch provider {
+	case "", "opencode-go":
+		if !strings.Contains(family, "deepseek") {
+			return 1
+		}
+	case "commandcode":
+		if !commandCodePeakModels[family] {
+			return 1
+		}
+	default:
 		return 1
 	}
-	h := t.Hour()
-	if (h >= 1 && h < 4) || (h >= 6 && h < 10) {
+	utc := t.UTC()
+	if wd := utc.Weekday(); wd == time.Saturday || wd == time.Sunday {
+		return 1
+	}
+	if h := utc.Hour(); (h >= 1 && h < 4) || (h >= 6 && h < 10) {
 		return 2
 	}
 	return 1
-}
-
-// ProviderPeakMultiplier applies OpenCode Go's peak rule only to its requests.
-// An empty provider retains the interpretation of legacy OpenCode Go records.
-func ProviderPeakMultiplier(provider, model string, t time.Time) float64 {
-	if provider != "" && provider != "opencode-go" {
-		return 1
-	}
-	return PeakMultiplier(model, t)
 }
 
 // DisplayInputTokens is the total input a user consumed (raw + cache), used

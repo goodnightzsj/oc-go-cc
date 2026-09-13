@@ -137,7 +137,15 @@ vm.runInContext(` + "`" + `
   assert.equal(FallbackModule.chains.default[1].wire_format, 'anthropic');
   assert.equal(FallbackModule.chains.default[1].max_tokens, 4096);
   assert.equal(configModelKey({provider:'opencode_go',model_id:'shared'}), configModelKey(go));
+  // CommandCode peak-prices only the models it publishes with a peak sub-line,
+  // on the same window as OpenCode Go.
   assert.equal(effectivePeakMultiplier({provider:'commandcode',model:'deepseek',start_time:'2026-09-07T02:00:00Z'}),1);
+  assert.equal(effectivePeakMultiplier({provider:'commandcode',model:'deepseek/deepseek-v4-flash',start_time:'2026-09-07T02:00:00Z'}),2);
+  assert.equal(effectivePeakMultiplier({provider:'commandcode',model:'deepseek/deepseek-v4-pro',start_time:'2026-09-07T08:30:00Z'}),2);
+  assert.equal(effectivePeakMultiplier({provider:'commandcode',model:'deepseek/deepseek-v4-flash-fast',start_time:'2026-09-07T02:00:00Z'}),1);
+  assert.equal(effectivePeakMultiplier({provider:'commandcode',model:'deepseek/deepseek-v4-flash',start_time:'2026-09-12T02:00:00Z'}),1);
+  assert.equal(effectivePeakMultiplier({provider:'commandcode',model:'deepseek/deepseek-v4-flash',start_time:'2026-09-07T12:00:00Z'}),1);
+  assert.equal(billingWindowLabel({provider:'opencode-go',model:'deepseek-v4-pro',start_time:'2026-09-07T02:00:00Z'}), t('detail.peak') + ' \u00d72');
 
   const unknownRecord = {id:'unknown', provider:'commandcode', model:'shared', details_known:false, success:false, streaming:false, duration_ms:0, attempt:0};
   allHistory = [unknownRecord];

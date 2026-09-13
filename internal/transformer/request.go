@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/models"
 	"github.com/routatic/proxy/pkg/types"
 )
 
@@ -37,20 +38,11 @@ func isThinkingDisabled(thinking json.RawMessage) bool {
 	return ok && t == "disabled"
 }
 
-// modelFamily reduces an upstream model id to the bare family name that the
-// rules below are written against. Upstreams namespace their ids differently -
-// OpenCode ships "deepseek-v4-flash" and "kimi-k2.6", CommandCode ships
-// "deepseek/deepseek-v4-flash" and "moonshotai/Kimi-K2.7-Code" - but the
-// behaviour each family needs is the same. Normalising here keeps one owner for
-// family detection instead of a second rule per provider and per family.
-//
-// The result is only ever compared, never sent upstream: the wire model id stays
-// the caller's original string.
+// modelFamily reduces an upstream model id to the bare family name. The
+// normaliser lives in internal/models so the peak-billing rules and these
+// request-shaping rules cannot drift apart on how an id is spelled.
 func modelFamily(modelID string) string {
-	if slash := strings.LastIndex(modelID, "/"); slash >= 0 {
-		modelID = modelID[slash+1:]
-	}
-	return strings.ToLower(modelID)
+	return models.ModelFamily(modelID)
 }
 
 // isDeepSeekModel returns true for DeepSeek models that require thinking mode handling.

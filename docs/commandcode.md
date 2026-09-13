@@ -118,6 +118,23 @@ supports_websockets = false
 - 无法无损映射的请求返回明确的 HTTP 400；不是静默丢字段。客户端版本、模型能力设置或插件引入上述能力时，需要相应关闭或另行实现并测试，不能宣称支持所有 Codex 功能。
 - `anthropic_first` 只作用于 Messages 入口，不接管 Codex Responses。
 
+### 峰谷计费（2026-09-13 核实）
+
+CommandCode 与 OpenCode Go 使用**同一套峰谷规则**：高峰为周一至周五的 01:00-04:00 与 06:00-10:00 UTC，其余（含周末）为 Off-Peak，倍率 2。依据 [GOAT 计划文档](https://commandcode.ai/docs/plans/goat)，每个受影响模型的行下方标注 `Off-peak shown (17h/day) · peak $X / $Y 01–04 & 06–10 UTC, Mon–Fri`。
+
+覆盖的模型按该文档逐条列出，不按家族整体匹配——`deepseek/deepseek-v4-flash-fast` 由 API 提供但**不带**该标注，必须保持 Off-Peak：
+
+| 模型 | Off-peak（输入/输出） | Peak |
+| --- | --- | --- |
+| `deepseek/deepseek-v4.1-flash` | $0.15 / $0.60 | $0.30 / $1.20 |
+| `deepseek/deepseek-v4-flash` | $0.15 / $0.60 | $0.30 / $1.20 |
+| `deepseek/deepseek-v4-flash-vision-exp` | $0.22 / $0.66 | $0.44 / $1.32 |
+| `deepseek/deepseek-v4-pro` | $0.66 / $1.98 | $1.32 / $3.96 |
+
+`commandcode.ai/models` 与 `/pricing` 都只显示 Off-Peak 单价（模型页以 `+1` 标注按模型的 deal），峰谷标注只出现在上述文档页；只查 Models 端点或价格页会得出「没有峰谷」的错误结论。
+
+判定入口是 `history.ProviderPeakMultiplier`（`internal/history/record.go`），存储层、费用估算、面板与回填共用这一处；`internal/models.ModelFamily` 负责把 `deepseek/deepseek-v4-flash` 与 `deepseek-v4-flash` 归一到同一族名。
+
 ### 2026-09-13 隔离实例实测（Codex 工具往返 + 两个上游协议）
 
 本机 Codex `0.144.3-cometix`、Claude Code `2.1.263` 经 SSH 隧道调用远端新二进制（commit `8133635`）的 loopback 隔离实例，独立配置与独立 DB；生产路由、生产服务和生产 DB 全程未改动。模型为 `deepseek/deepseek-v4-flash` 与 `moonshotai/Kimi-K2.6`。

@@ -60,7 +60,10 @@
 
 - **平台峰值窗口实测边界**：逐条对比平台 `cost` 与 off-peak 公式（in×0.22 + cr×0.007 + out×0.66）——UTC 09:59:57 行 ×2.0，UTC 10:00:17 行 ×1.0。**窗口为 `[06:00, 10:00) UTC` 左闭右开**，与 `history.PeakMultiplier`（`internal/history/record.go:41`）和 `TestPeakMultiplier` 断言一致。
 - **`costMultiplier: 2` 是 lite 计划固定标记，与 Peak 无关**：平台记录 `enrichment: {"plan":"lite","costMultiplier":2}` 恒为 2（`/tmp/platform_keep.json` 全量验证），**不计入 `cost` 字段**；`cost` 本身已是 peak 后最终值，对账直接 `units/1e8` 即可。
-- **徽章前端现算**（commit `17f663f`）：`internal/gui/assets/app.js:1313` `effectivePeakMultiplier()` 按 `start_time + model` 前端判定 deepseek 工作日高峰，回填行不再依赖存储的 `peak_multiplier` 列（回填路径从不写该列，此前导致回填行集体丢徽章）。特效：存储值 >1 优先，避免平台记账时刻与 start_time 在边界（±秒级）判定分歧时徽章消失。
+- **徽章前端现算**（commit `17f663f`）：`effectivePeakMultiplier()` 按 `start_time + model` 前端判定 deepseek 工作日高峰，回填行不再依赖存储的 `peak_multiplier` 列（回填路径从不写该列，此前导致回填行集体丢徽章）。特效：存储值 >1 优先，避免平台记账时刻与 start_time 在边界（±秒级）判定分歧时徽章消失。
+- **2026-09-13 补上存储列**：前端现算只是兜底，存储列本身仍是错的——导入的 4224 行全部停在 schema 默认 1.0，其中 1313 行按规则应为 2.0，而 API、详情弹窗、分析与导出读的都是该列。现由 `storage.BackfillPeakMultipliers`（`internal/storage/database.go`）在启动时用 `history.ProviderPeakMultiplier` 同一套规则补齐，只抬高不降低（平台记账时钟与 `start_time` 在窗口边界可能差几秒，冲突时以平台为准）。生产 dry-run 与实测均为 761 → 2074，行数不变。
+- **判定只有一处**：`history.ProviderPeakMultiplier` 是平台峰谷的唯一所有者，`requests.peakMultiplierForRecord` 曾另有一份 `provider != "opencode-go" 就返回 1` 的短路判断，会把 CommandCode 的峰值吞掉，已删除。
+- **CommandCode 也有峰谷**，窗口与 Go 相同（UTC 01-04、06-10，周一至周五，×2），但模型集合按 [GOAT 文档](https://commandcode.ai/docs/plans/goat) 逐个列出而非按家族匹配（`deepseek/deepseek-v4-flash-fast` 不带该标注）。`commandcode.ai/models` 与 `/pricing` 只显示 Off-Peak 价，只看这两处会误判为「无峰谷」。
 - **遗留时区 bug 修复**：9 行回填插入行 `start_time` 原存 UTC `+00:00`（回填脚本未转时区），按日统计错位 8 小时；已转 `+08:00`（备份 `backup-20260827-tzfix.db`，远端 `~/.local/share/routatic-proxy/`）。
 - **2026-08-26/27 对账结论**：双方同时存在的行逐行成本差异为 0（1493+ 行精确到 1e-8）；8-26 远端 $4.9977 vs 平台 $4.9939（差 2 条平台未列出的记录 `$0.0015`），8-27 差异全为记账时差（平台 usage 页数据滞后约 5 分钟）。
 

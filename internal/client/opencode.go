@@ -16,6 +16,7 @@ import (
 	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/internal/debug"
 	"github.com/routatic/proxy/internal/models"
+	"github.com/routatic/proxy/internal/site"
 	"github.com/routatic/proxy/pkg/types"
 )
 
@@ -58,13 +59,15 @@ func CaptureBody(body io.ReadCloser, capture func(data []byte)) io.ReadCloser {
 // Provider constants identify the upstream API that handles a model's request.
 // These are used throughout the codebase for endpoint selection, timeout
 // configuration, and provider-specific error handling (e.g., auth error
-// short-circuit logic).
+// short-circuit logic). They alias the platform registry instead of repeating
+// the ids, so this package cannot end up disagreeing with config about what a
+// platform is called.
 const (
-	ProviderOpenCodeGo  = "opencode-go"
-	ProviderOpenCodeZen = "opencode-zen"
-	ProviderAWSBedrock  = "aws-bedrock"
-	ProviderOpenRouter  = "openrouter"
-	ProviderCommandCode = "commandcode"
+	ProviderOpenCodeGo  = site.OpenCodeGo
+	ProviderOpenCodeZen = site.OpenCodeZen
+	ProviderAWSBedrock  = site.AWSBedrock
+	ProviderOpenRouter  = site.OpenRouter
+	ProviderCommandCode = site.CommandCode
 )
 
 // APIError represents an HTTP API error returned by an upstream provider.

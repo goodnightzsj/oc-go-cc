@@ -37,14 +37,14 @@ func TestPlatformDataCostsRespectProviderAndMissingRates(t *testing.T) {
 	}{
 		{"go seed", "opencode-go", "deepseek-v4-flash", 0, 0, true, 1.76, 2},
 		{"legacy go seed", "", "deepseek-v4-flash", 0, 0, true, 1.76, 2},
-		{"commandcode catalog", "commandcode", "deepseek-v4-flash", 0, 0, true, 10, 1},
+		{"commandcode catalog", "commandcode", "deepseek-v4-flash", 0, 0, true, 20, 2},
 		{"openrouter catalog", "openrouter", "deepseek-v4-flash", 0, 0, true, 12, 1},
 		{"other provider has no catalog", "opencode-zen", "deepseek-v4-flash", 0, 0, false, 0, 1},
 		{"unknown model", "commandcode", "unknown-model", 0, 0, false, 0, 1},
 		{"explicit free catalog", "commandcode", "free-model", 0, 0, true, 0, 1},
 		{"partial catalog", "commandcode", "partial-model", 0, 0, false, 0, 1},
-		{"unpriced cache read", "commandcode", "deepseek-v4-flash", 500, 0, false, 0, 1},
-		{"unpriced cache write", "commandcode", "deepseek-v4-flash", 0, 500, false, 0, 1},
+		{"unpriced cache read", "commandcode", "deepseek-v4-flash", 500, 0, false, 0, 2},
+		{"unpriced cache write", "commandcode", "deepseek-v4-flash", 0, 500, false, 0, 2},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := history.RequestRecord{ID: tt.name, Provider: tt.provider, Model: tt.model, StartTime: peak,
@@ -73,7 +73,7 @@ func TestPlatformDataCostsRespectProviderAndMissingRates(t *testing.T) {
 		t.Fatalf("backfill provider catalog: updated=%d err=%v, want 5", updated, err)
 	}
 	for id, want := range map[string]sql.NullFloat64{
-		"commandcode catalog":           {Float64: 10, Valid: true},
+		"commandcode catalog":           {Float64: 20, Valid: true},
 		"openrouter catalog":            {Float64: 12, Valid: true},
 		"explicit free catalog":         {Valid: true},
 		"other provider has no catalog": {},
@@ -296,13 +296,22 @@ func TestPlatformDataPeakUsesUTCWeekday(t *testing.T) {
 			if got := history.PeakMultiplier("deepseek-v4-flash", stamp); got != tt.want {
 				t.Errorf("PeakMultiplier at %v = %v, want %v", stamp, got, tt.want)
 			}
-			for _, provider := range []string{"", "opencode-go", "commandcode", "opencode-zen", "aws-bedrock", "openrouter"} {
-				want := tt.want
-				if provider != "" && provider != "opencode-go" {
-					want = 1
+			for _, provider := range []struct {
+				name  string
+				peaks bool
+			}{
+				{"", true}, {"opencode-go", true},
+				// CommandCode bills the same models on the same window.
+				{"commandcode", true},
+				// Platforms with no peak pricing at all.
+				{"opencode-zen", false}, {"aws-bedrock", false}, {"openrouter", false},
+			} {
+				want := 1.0
+				if provider.peaks {
+					want = tt.want
 				}
-				if got := history.ProviderPeakMultiplier(provider, "deepseek-v4-flash", stamp); got != want {
-					t.Errorf("%s peak at %v = %v, want %v", provider, stamp, got, want)
+				if got := history.ProviderPeakMultiplier(provider.name, "deepseek-v4-flash", stamp); got != want {
+					t.Errorf("%s peak at %v = %v, want %v", provider.name, stamp, got, want)
 				}
 			}
 		}

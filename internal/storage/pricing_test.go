@@ -87,3 +87,33 @@ func TestParseRequestTime(t *testing.T) {
 		t.Fatalf("cache-overlap cost %v units, want platform 23507991", got)
 	}
 }
+
+// CommandCode prints the peak sub-line on individual model rows rather than
+// covering a whole family, so the covered set has to be exactly what it
+// publishes - a substring match would wrongly peak-price the variants that are
+// listed without it. Source: commandcode.ai/docs/plans/goat (peak 01-04 &
+// 06-10 UTC, Mon-Fri).
+func TestCommandCodePeakCoversOnlyPublishedModels(t *testing.T) {
+	peak := time.Date(2026, 9, 7, 1, 30, 0, 0, time.UTC) // Monday, inside the window
+	for model, want := range map[string]float64{
+		"deepseek/deepseek-v4.1-flash":          2,
+		"deepseek/deepseek-v4-flash":            2,
+		"deepseek/deepseek-v4-flash-vision-exp": 2,
+		"deepseek/deepseek-v4-pro":              2,
+		// Served by the API but published without the peak sub-line.
+		"deepseek/deepseek-v4-flash-fast": 1,
+		"moonshotai/Kimi-K2.6":            1,
+	} {
+		if got := history.ProviderPeakMultiplier("commandcode", model, peak); got != want {
+			t.Errorf("commandcode %s = %v, want %v", model, got, want)
+		}
+	}
+	for _, stamp := range []time.Time{
+		time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC), // weekday, outside the window
+		time.Date(2026, 9, 6, 8, 0, 0, 0, time.UTC),  // Sunday, inside the hours
+	} {
+		if got := history.ProviderPeakMultiplier("commandcode", "deepseek/deepseek-v4-flash", stamp); got != 1 {
+			t.Errorf("commandcode at %v = %v, want 1", stamp, got)
+		}
+	}
+}

@@ -5,6 +5,22 @@ package models
 
 import "strings"
 
+// ModelFamily reduces an upstream model id to the bare family name the
+// model-specific rules are written against. Upstreams namespace their ids
+// differently - OpenCode ships "deepseek-v4-flash" and "kimi-k2.6", CommandCode
+// ships "deepseek/deepseek-v4-flash" and "moonshotai/Kimi-K2.7-Code" - but the
+// behaviour each family needs is the same, so normalising here keeps one owner
+// for family detection instead of a second rule per provider.
+//
+// The result is only ever compared, never sent upstream: the wire model id stays
+// the caller's original string.
+func ModelFamily(modelID string) string {
+	if slash := strings.LastIndex(modelID, "/"); slash >= 0 {
+		modelID = modelID[slash+1:]
+	}
+	return strings.ToLower(modelID)
+}
+
 // EndpointType determines which API endpoint format to use for a model.
 type EndpointType int
 

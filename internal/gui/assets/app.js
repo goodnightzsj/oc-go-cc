@@ -279,6 +279,9 @@ const TRANSLATIONS = {
     'detail.cacheCreation': 'Cache write',
     'detail.outputTokens': 'Output',
     'detail.duration': 'Duration',
+    'detail.billingWindow': 'Billing window',
+    'detail.peak': 'Peak',
+    'detail.offPeak': 'Off-peak',
     'detail.status': 'Status',
     'detail.success': 'Success',
     'detail.failed': 'Failed',
@@ -718,6 +721,9 @@ const TRANSLATIONS = {
     'detail.cacheCreation': '缓存写入',
     'detail.outputTokens': '输出',
     'detail.duration': '耗时',
+    'detail.billingWindow': '计费时段',
+    'detail.peak': '高峰',
+    'detail.offPeak': '非高峰',
     'detail.status': '状态',
     'detail.success': '成功',
     'detail.failed': '失败',
@@ -1877,22 +1883,41 @@ function renderHistoryPager() {
   if (next) next.disabled = historyPage >= max;
 }
 
-// Derive the deepseek peak multiplier from start_time + model, matching
-// history.PeakMultiplier (weekday UTC 01-04 / 06-10). Falls back to 1 when
-// the timestamp cannot be parsed or the model is not deepseek. Used in place
-// of the stored column so backfilled rows show the badge too; an explicit
-// stored multiplier > 1 (written by live inserts) wins over the re-derivation.
+// Which models each platform peak-prices. OpenCode Go covers a family; null
+// means "any deepseek model". CommandCode prints the peak sub-line on
+// individual model rows (commandcode.ai/docs/plans/goat), so its set is listed
+// rather than matched by family - variants published without the sub-line must
+// not be peak-priced.
+const PEAK_MODELS = {
+  'opencode-go': null,
+  commandcode: ['deepseek-v4.1-flash', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp', 'deepseek-v4-pro'],
+};
+
+// Derive the peak multiplier from provider + model + start_time, matching
+// history.ProviderPeakMultiplier (weekday UTC 01-04 / 06-10). Used in place of
+// the stored column so a row the backfill has not reached still shows the
+// badge; an explicit stored multiplier > 1 wins, because the platform's billing
+// clock can sit a second or two from our start_time at a window boundary.
 function effectivePeakMultiplier(h) {
   const stored = Number(h.peak_multiplier);
   if (stored > 1) return stored;
-  if (h.provider !== 'opencode-go' && h.provider !== 'opencode_go') return 1;
-  if (!/deepseek/i.test(String(h.model || ''))) return 1;
+  const provider = String(h.provider || '').replace(/_/g, '-');
+  if (provider !== '' && !(provider in PEAK_MODELS)) return 1;
+  const model = String(h.model || '').toLowerCase().split('/').pop();
+  const listed = PEAK_MODELS[provider];
+  if (listed ? listed.indexOf(model) < 0 : !model.includes('deepseek')) return 1;
   const t = new Date(h.start_time);
   if (isNaN(t.getTime())) return 1;
   const day = t.getUTCDay();
   if (day === 0 || day === 6) return 1;
   const hour = t.getUTCHours();
   return (hour >= 1 && hour < 4) || (hour >= 6 && hour < 10) ? 2 : 1;
+}
+
+// Peak or off-peak as billed, for the request detail view.
+function billingWindowLabel(record) {
+  const pm = effectivePeakMultiplier(record);
+  return pm > 1 ? t('detail.peak') + ' \u00d7' + pm : t('detail.offPeak');
 }
 
 function renderHistory() {
@@ -2871,6 +2896,7 @@ function showHistoryDetail(record) {
     <div class="detail-metadata">
       <div class="detail-row"><span class="detail-label">${t('detail.requestId')}</span><span class="detail-value">${escapeHtml(record.id || '—')}</span></div>
       <div class="detail-row"><span class="detail-label">${t('history.costSource')}</span><span class="detail-value">${costSourceLabel(record.cost_source)}</span></div>
+      <div class="detail-row"><span class="detail-label">${t('detail.billingWindow')}</span><span class="detail-value">${billingWindowLabel(record)}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.requestType')}</span><span class="detail-value">${detailsKnown ? t(record.streaming ? 'detail.streaming' : 'detail.nonStreaming') : t('detail.unavailable')}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.attempt')}</span><span class="detail-value">${detailsKnown ? (record.attempt || 1) : t('detail.unavailable')}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.duration')}</span><span class="detail-value">${detailsKnown ? fmtDuration(record.duration_ms) : t('detail.unavailable')}</span></div>

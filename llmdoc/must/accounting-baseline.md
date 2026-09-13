@@ -9,7 +9,9 @@
 
 ## 成本估算
 
-- 价格唯一来源 `internal/storage/seed_prices.json`，最长子串匹配（`PriceForModel`）。价格变更必须同步 `price_official_test.go` 与 `analytics_cost_test.go` 的断言，并用真实账单反推验证（方法见 `reference/cache-billing-audit.md`）。
+- 价格**按平台分表**，一张表一个平台：`internal/storage/seed_prices_opencode_go.json` 与 `seed_prices_commandcode.json`。表的归属由 `site.Descriptor.RateTable` 声明，查价入口是 `PriceForProviderModel(provider, model)`，在该平台自己的表内做最长子串匹配。
+- Hard: 定价必须带 provider。同一个模型名在不同平台价不同（`deepseek-v4-flash` 在 OpenCode Go 是 0.22/0.66，在 CommandCode 是 0.15/0.60），跨表命中会产生一个格式完全正确、数值错误的成本。没有发布费率的平台返回 unknown，不得回落到别家的表。
+- 价格变更必须同步 `price_official_test.go`、`analytics_cost_test.go`、`platform_data_test.go` 的断言，并用真实账单反推验证（方法见 `reference/cache-billing-audit.md`；CommandCode 的回归见 `price_commandcode_test.go`，19 条官方 run 逐条复现）。
 - 平台账单含 `costMultiplier`（lite 计划倍率），代理一律按基础价估算，不乘倍率。
 
 ## debug_capture

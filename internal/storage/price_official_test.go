@@ -2,7 +2,7 @@ package storage
 
 import "testing"
 
-func TestPriceForModel_OfficialOpenCode(t *testing.T) {
+func TestPriceForProviderModel_OfficialOpenCode(t *testing.T) {
 	// input / output / cache_read / cache_write (per 1M tokens, USD), per
 	// opencode.ai/docs/zh-cn/go. cacheWrite is 0 for models the docs list with
 	// no separate cache-write price; those bill cache creation at the input rate.
@@ -30,7 +30,7 @@ func TestPriceForModel_OfficialOpenCode(t *testing.T) {
 		{"qwen3.6-plus", 0.50, 3.00, 0.05, 0.625},
 	}
 	for _, c := range cases {
-		in, out, cacheRead, cacheWrite, ok := PriceForModel(c.model)
+		in, out, cacheRead, cacheWrite, ok := PriceForProviderModel("opencode-go", c.model)
 		if !ok || in != c.in || out != c.out || cacheRead != c.cacheRead || cacheWrite != c.cacheWrite {
 			t.Errorf("%s: got %v/%v/%v/%v ok=%v, want %v/%v/%v/%v",
 				c.model, in, out, cacheRead, cacheWrite, ok, c.in, c.out, c.cacheRead, c.cacheWrite)

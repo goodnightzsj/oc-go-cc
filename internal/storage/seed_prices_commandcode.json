@@ -1,0 +1,441 @@
+[
+  {
+    "_comment": "CommandCode model pricing (per 1M tokens, USD) per commandcode.ai/docs/resources/pricing-limits, captured 2026-09-13. These are the Provider-API 'at cost' rates, which are also what the account's own usage records bill at."
+  },
+  {
+    "_comment": "Rates are the OFF-PEAK figures. The four DeepSeek models bill at 2x during 01-04 and 06-10 UTC Mon-Fri; that multiplier is applied at compute time by history.ProviderPeakMultiplier, not stored here."
+  },
+  {
+    "_comment": "The published table has one row per model name; `match` is the model id tail the API advertises, so the lookup is a substring test on the id this proxy stores. Free models are priced at an explicit 0."
+  },
+  {
+    "match": "claude-fable-5",
+    "input": 10.0,
+    "output": 50.0,
+    "cache_read": 1.0,
+    "cache_write": 12.5
+  },
+  {
+    "match": "claude-fable-5-1",
+    "input": 10.0,
+    "output": 50.0,
+    "cache_read": 0.25,
+    "cache_write": 12.5
+  },
+  {
+    "match": "claude-haiku-4-5-20251001",
+    "input": 1.0,
+    "output": 5.0,
+    "cache_read": 0.1,
+    "cache_write": 1.25
+  },
+  {
+    "match": "claude-opus-4-7",
+    "input": 5.0,
+    "output": 25.0,
+    "cache_read": 0.5,
+    "cache_write": 6.25
+  },
+  {
+    "match": "claude-opus-4-8",
+    "input": 5.0,
+    "output": 25.0,
+    "cache_read": 0.5,
+    "cache_write": 6.25
+  },
+  {
+    "match": "claude-opus-5",
+    "input": 5.0,
+    "output": 25.0,
+    "cache_read": 0.5,
+    "cache_write": 6.25
+  },
+  {
+    "match": "claude-sonnet-4-6",
+    "input": 3.0,
+    "output": 15.0,
+    "cache_read": 0.3,
+    "cache_write": 3.75
+  },
+  {
+    "match": "claude-sonnet-5",
+    "input": 2.0,
+    "output": 10.0,
+    "cache_read": 0.2,
+    "cache_write": 2.5
+  },
+  {
+    "match": "deepseek-v4-flash",
+    "input": 0.15,
+    "output": 0.6,
+    "cache_read": 0.003
+  },
+  {
+    "match": "deepseek-v4-flash-fast",
+    "input": 0.28,
+    "output": 0.56,
+    "cache_read": 0.07
+  },
+  {
+    "match": "deepseek-v4-flash-vision-exp",
+    "input": 0.22,
+    "output": 0.66,
+    "cache_read": 0.007
+  },
+  {
+    "match": "deepseek-v4-pro",
+    "input": 0.66,
+    "output": 1.98,
+    "cache_read": 0.022
+  },
+  {
+    "match": "deepseek-v4.1-flash",
+    "input": 0.15,
+    "output": 0.6,
+    "cache_read": 0.003
+  },
+  {
+    "match": "fugu-ultra",
+    "input": 5.0,
+    "output": 30.0,
+    "cache_read": 0.5
+  },
+  {
+    "match": "gemini-3.1-flash-lite",
+    "input": 0.25,
+    "output": 1.5,
+    "cache_read": 0.03
+  },
+  {
+    "match": "gemini-3.5-flash",
+    "input": 1.5,
+    "output": 9.0,
+    "cache_read": 0.15
+  },
+  {
+    "match": "gemini-3.5-flash-lite",
+    "input": 0.3,
+    "output": 2.5,
+    "cache_read": 0.03
+  },
+  {
+    "match": "gemini-3.6-flash",
+    "input": 1.5,
+    "output": 7.5,
+    "cache_read": 0.15
+  },
+  {
+    "match": "gemini-3.7-flash",
+    "input": 1.5,
+    "output": 7.5,
+    "cache_read": 0.15,
+    "cache_write": 0.08334
+  },
+  {
+    "match": "gemini-3.8-flash",
+    "input": 1.5,
+    "output": 7.5,
+    "cache_read": 0.15
+  },
+  {
+    "match": "glm-5",
+    "input": 1.0,
+    "output": 3.2,
+    "cache_read": 0.2
+  },
+  {
+    "match": "glm-5.1",
+    "input": 1.4,
+    "output": 4.4,
+    "cache_read": 0.26
+  },
+  {
+    "match": "glm-5.2",
+    "input": 1.4,
+    "output": 4.4,
+    "cache_read": 0.26
+  },
+  {
+    "match": "glm-5.2-fast",
+    "input": 3.0,
+    "output": 10.25,
+    "cache_read": 0.5
+  },
+  {
+    "match": "glm-5.3",
+    "input": 1.4,
+    "output": 4.4,
+    "cache_read": 0.26
+  },
+  {
+    "match": "glm-5.3-flash",
+    "input": 0.15,
+    "output": 0.5,
+    "cache_read": 0.03
+  },
+  {
+    "match": "gpt-5.3-codex",
+    "input": 2.0,
+    "output": 8.0,
+    "cache_read": 0.5
+  },
+  {
+    "match": "gpt-5.4",
+    "input": 2.5,
+    "output": 15.0,
+    "cache_read": 0.25
+  },
+  {
+    "match": "gpt-5.4-mini",
+    "input": 0.75,
+    "output": 4.5,
+    "cache_read": 0.075
+  },
+  {
+    "match": "gpt-5.5",
+    "input": 5.0,
+    "output": 30.0,
+    "cache_read": 0.5
+  },
+  {
+    "match": "gpt-5.6-luna",
+    "input": 0.2,
+    "output": 1.2,
+    "cache_read": 0.02,
+    "cache_write": 0.25
+  },
+  {
+    "match": "gpt-5.6-sol",
+    "input": 5.0,
+    "output": 30.0,
+    "cache_read": 0.5,
+    "cache_write": 6.25
+  },
+  {
+    "match": "gpt-5.6-terra",
+    "input": 2.0,
+    "output": 12.0,
+    "cache_read": 0.2,
+    "cache_write": 2.5
+  },
+  {
+    "match": "grok-4.5",
+    "input": 2.0,
+    "output": 6.0,
+    "cache_read": 0.5
+  },
+  {
+    "match": "grok-4.6",
+    "input": 2.0,
+    "output": 6.0,
+    "cache_read": 0.5
+  },
+  {
+    "match": "hy3-paid",
+    "input": 0.14,
+    "output": 0.58,
+    "cache_read": 0.035
+  },
+  {
+    "match": "hy4-preview",
+    "input": 0.834,
+    "output": 2.501,
+    "cache_read": 0.042
+  },
+  {
+    "match": "inkling",
+    "input": 1.0,
+    "output": 4.05,
+    "cache_read": 0.17
+  },
+  {
+    "match": "inkling-small",
+    "input": 0.5,
+    "output": 1.2,
+    "cache_read": 0.1
+  },
+  {
+    "match": "kimi-k2.5",
+    "input": 0.6,
+    "output": 3.0,
+    "cache_read": 0.1
+  },
+  {
+    "match": "kimi-k2.6",
+    "input": 0.95,
+    "output": 4.0,
+    "cache_read": 0.16
+  },
+  {
+    "match": "kimi-k2.7-code",
+    "input": 0.95,
+    "output": 4.0,
+    "cache_read": 0.19
+  },
+  {
+    "match": "kimi-k2.7-code-highspeed",
+    "input": 1.9,
+    "output": 8.0,
+    "cache_read": 0.38
+  },
+  {
+    "match": "kimi-k3",
+    "input": 3.0,
+    "output": 15.0,
+    "cache_read": 0.3
+  },
+  {
+    "match": "laguna-s-2.1-free",
+    "input": 0.0,
+    "output": 0.0,
+    "cache_read": 0.0
+  },
+  {
+    "match": "ling-3.0-flash-sante:free",
+    "input": 0.0,
+    "output": 0.0,
+    "cache_read": 0.0
+  },
+  {
+    "match": "longcat-2.0:free",
+    "input": 0.0,
+    "output": 0.0,
+    "cache_read": 0.0
+  },
+  {
+    "match": "mimo-v2.5",
+    "input": 0.14,
+    "output": 0.28,
+    "cache_read": 0.0028
+  },
+  {
+    "match": "mimo-v2.5-pro",
+    "input": 0.435,
+    "output": 0.87,
+    "cache_read": 0.0036
+  },
+  {
+    "match": "minimax-m2.5",
+    "input": 0.3,
+    "output": 1.2,
+    "cache_read": 0.03
+  },
+  {
+    "match": "minimax-m2.7",
+    "input": 0.3,
+    "output": 1.2,
+    "cache_read": 0.06
+  },
+  {
+    "match": "minimax-m3",
+    "input": 0.3,
+    "output": 1.2,
+    "cache_read": 0.06
+  },
+  {
+    "match": "muse-spark-1.1",
+    "input": 1.25,
+    "output": 4.25,
+    "cache_read": 0.15
+  },
+  {
+    "match": "muse-spark-1.2",
+    "input": 1.25,
+    "output": 4.25,
+    "cache_read": 0.15
+  },
+  {
+    "match": "muse-spark-1.2-contributor",
+    "input": 0.1,
+    "output": 0.2,
+    "cache_read": 0.002
+  },
+  {
+    "match": "muse-spark-1.3",
+    "input": 1.25,
+    "output": 4.25,
+    "cache_read": 0.15
+  },
+  {
+    "match": "muse-spark-1.3-contributor",
+    "input": 0.1,
+    "output": 0.2,
+    "cache_read": 0.002
+  },
+  {
+    "match": "nemotron-3-ultra-550b-a55b",
+    "input": 0.6,
+    "output": 2.4,
+    "cache_read": 0.12
+  },
+  {
+    "match": "qwen3.6-max-preview",
+    "input": 1.3,
+    "output": 7.8,
+    "cache_read": 0.26,
+    "cache_write": 1.63
+  },
+  {
+    "match": "qwen3.6-plus",
+    "input": 0.5,
+    "output": 3.0,
+    "cache_read": 0.1
+  },
+  {
+    "match": "qwen3.7-flash",
+    "input": 0.03,
+    "output": 0.13,
+    "cache_read": 0.006,
+    "cache_write": 0.038
+  },
+  {
+    "match": "qwen3.7-max",
+    "input": 2.5,
+    "output": 7.5,
+    "cache_read": 0.5,
+    "cache_write": 3.13
+  },
+  {
+    "match": "qwen3.7-plus",
+    "input": 0.4,
+    "output": 1.6,
+    "cache_read": 0.08,
+    "cache_write": 0.5
+  },
+  {
+    "match": "qwen3.8-27b",
+    "input": 0.4,
+    "output": 3.0,
+    "cache_read": 0.04
+  },
+  {
+    "match": "qwen3.8-flash",
+    "input": 0.16,
+    "output": 0.47,
+    "cache_read": 0.016
+  },
+  {
+    "match": "qwen3.8-max",
+    "input": 2.0,
+    "output": 6.0,
+    "cache_read": 0.25
+  },
+  {
+    "match": "qwen3.8-max-0902",
+    "input": 2.0,
+    "output": 6.0,
+    "cache_read": 0.25
+  },
+  {
+    "match": "step-3.5-flash",
+    "input": 0.1,
+    "output": 0.3,
+    "cache_read": 0.02
+  },
+  {
+    "match": "step-3.7-flash",
+    "input": 0.2,
+    "output": 1.15,
+    "cache_read": 0.04
+  }
+]

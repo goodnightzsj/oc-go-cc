@@ -50,10 +50,16 @@ type Descriptor struct {
 	// descriptor sets it; TestDefaultPlatformIsUnique holds that.
 	Default bool
 
-	// SeededRates reports that this platform's prices come from the built-in
-	// seed table rather than a synced catalog. It decides which rate source a
-	// cost estimate is allowed to use.
-	SeededRates bool
+	// RateTable names the published price table this platform's models are
+	// priced from, or "" when the platform publishes no per-token prices this
+	// proxy can use.
+	//
+	// It is a table name rather than a yes/no flag because the same model costs
+	// different money on different platforms: deepseek-v4-flash is 0.22/0.66 per
+	// million tokens on OpenCode Go and 0.15/0.60 on CommandCode. A single
+	// shared table would silently price one platform's traffic with another
+	// platform's rates, and the row would look perfectly well-formed.
+	RateTable string
 	// CacheCreationBilledAsInput reports that this platform bills cache
 	// creation tokens at its input rate. Without it a request that used cache
 	// creation has no computable price and is reported as unknown rather than
@@ -63,8 +69,9 @@ type Descriptor struct {
 
 var registry = []Descriptor{
 	{ID: OpenCodeGo, DisplayName: "OpenCode Go", Order: 0, Visible: true, Default: true,
-		SeededRates: true, CacheCreationBilledAsInput: true},
-	{ID: CommandCode, DisplayName: "CommandCode", Order: 1, Visible: true},
+		RateTable: OpenCodeGo, CacheCreationBilledAsInput: true},
+	{ID: CommandCode, DisplayName: "CommandCode", Order: 1, Visible: true,
+		RateTable: CommandCode},
 	{ID: OpenCodeZen, DisplayName: "OpenCode Zen", Order: 2},
 	{ID: AWSBedrock, DisplayName: "AWS Bedrock", Order: 3},
 	{ID: OpenRouter, DisplayName: "OpenRouter", Order: 4},

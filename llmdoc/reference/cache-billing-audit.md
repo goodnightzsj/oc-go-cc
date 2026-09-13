@@ -6,7 +6,7 @@
 
 1. **缓存计数丢失**：OpenCode Go 的 oa-compat 网关在 OpenAI 兼容端点上把缓存拆分放在 `prompt_tokens_details.cached_tokens`（OpenAI 标准），而代理只解析 DeepSeek 风格 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`。`splitPromptTokens`（`internal/transformer/stream.go:645`）落入 "无缓存字段" 分支，把全量 prompt 记为输入。
 2. **后果**：远端 `requests` 表缓存列全 0、输入列是全量（语义失真）；估计成本把 95%+ 的缓存 token 按输入价计费；面板 token 总量与成本均虚高。
-3. **价格过时**：`internal/storage/seed_prices.json` 中 deepseek-v4-flash 记 0.14/0.28/0.0028，而 OpenCode 实际账单为 0.22/0.66/0.007（多行联立反推，误差 <0.1%）。
+3. **价格过时**：当时的单一价格表（现 `internal/storage/seed_prices_opencode_go.json`）中 deepseek-v4-flash 记 0.14/0.28/0.0028，而 OpenCode 实际账单为 0.22/0.66/0.007（多行联立反推，误差 <0.1%）。
 
 ## 修复提交（均已部署远端）
 

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/routatic/proxy/internal/history"
+	"github.com/routatic/proxy/internal/site"
 	_ "modernc.org/sqlite"
 )
 
@@ -538,33 +539,58 @@ type priceEntry struct {
 	CacheWrite float64 `json:"cache_write,omitempty"`
 }
 
-//go:embed seed_prices.json
-var defaultModelPrices []byte
+//go:embed seed_prices_opencode_go.json
+var openCodeGoPrices []byte
 
-// seedPrices parses the embedded rules once. PriceForModel is called per model
-// per aggregation row, so re-unmarshalling on every call showed up as pure
+//go:embed seed_prices_commandcode.json
+var commandCodePrices []byte
+
+// rateTableFiles maps a site's RateTable name to its embedded table. A platform
+// absent from this map has no published prices, which is different from having
+// prices of zero.
+var rateTableFiles = map[string][]byte{
+	site.OpenCodeGo:  openCodeGoPrices,
+	site.CommandCode: commandCodePrices,
+}
+
+// rateTables parses every embedded table once. Pricing runs per model per
+// aggregation row, so re-unmarshalling on every call showed up as pure
 // overhead.
-var seedPrices = sync.OnceValues(func() ([]priceEntry, error) {
-	if len(defaultModelPrices) == 0 {
-		return nil, nil
+var rateTables = sync.OnceValues(func() (map[string][]priceEntry, error) {
+	out := make(map[string][]priceEntry, len(rateTableFiles))
+	for name, raw := range rateTableFiles {
+		var entries []priceEntry
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			return nil, fmt.Errorf("parse %s price table: %w", name, err)
+		}
+		out[name] = entries
 	}
-	var entries []priceEntry
-	err := json.Unmarshal(defaultModelPrices, &entries)
-	return entries, err
+	return out, nil
 })
 
-// PriceForModel returns the seeded per-1M-token prices (USD) for a model ID,
-// matching the longest seed rule whose Match substring occurs in the model ID.
+// PriceForProviderModel returns the published per-1M-token prices (USD) for a
+// model on the platform that publishes them, matching the longest rule whose
+// Match substring occurs in the model ID.
+//
+// The provider is part of the lookup, not a filter applied afterwards: the same
+// model name carries different rates on different platforms, so a match found
+// in the wrong table is worse than no match at all. An unknown or unpriced
+// platform therefore returns ok=false, which callers report as an unknown cost
+// rather than as free usage.
+//
 // This is independent of the catalog/models tables so cost figures are always
-// available even when a model is absent from the catalog sync. Returns ok=false
-// when no rule matches (or embedded data is unavailable).
-func PriceForModel(model string) (inputPerM, outputPerM, cacheReadPerM, cacheWritePerM float64, ok bool) {
-	entries, err := seedPrices()
-	if model == "" || err != nil {
+// available even when a model is absent from the catalog sync.
+func PriceForProviderModel(provider, model string) (inputPerM, outputPerM, cacheReadPerM, cacheWritePerM float64, ok bool) {
+	descriptor, known := site.Lookup(provider)
+	if !known || descriptor.RateTable == "" || model == "" {
+		return 0, 0, 0, 0, false
+	}
+	tables, err := rateTables()
+	if err != nil {
 		return 0, 0, 0, 0, false
 	}
 	bestLen := -1
-	for _, e := range entries {
+	for _, e := range tables[descriptor.RateTable] {
 		if e.Match == "" {
 			continue
 		}
@@ -583,13 +609,19 @@ func PriceForModel(model string) (inputPerM, outputPerM, cacheReadPerM, cacheWri
 // sourced from official provider documentation and pricing pages as of
 // July 2026: OpenAI (GPT), Anthropic (Claude), Z.ai (GLM), Moonshot (Kimi),
 // Alibaba (Qwen), xAI (Grok), DeepSeek, MiniMax, NVIDIA (Nemotron), and
-// others. Free-tier variants are explicitly zeroed. Update seed_prices.json
-// to refresh values; the JSON is embedded at build time.
+// others. Free-tier variants are explicitly zeroed. Update
+// seed_prices_opencode_go.json to refresh values; the JSON is embedded at build
+// time.
+//
+// Only the OpenCode Go table is seeded here: this writes into the synced
+// catalog, which carries OpenCode Go's models. CommandCode's models are priced
+// straight from its own table at read time and never enter the catalog.
 func (d *Database) SeedDefaultModelPrices(ctx context.Context) error {
-	entries, err := seedPrices()
+	tables, err := rateTables()
 	if err != nil {
-		return fmt.Errorf("parse seed_prices.json: %w", err)
+		return err
 	}
+	entries := tables[site.OpenCodeGo]
 
 	for _, e := range entries {
 		if e.Match == "" {

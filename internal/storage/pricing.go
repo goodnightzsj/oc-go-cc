@@ -25,23 +25,19 @@ func parseRequestTime(s string) time.Time {
 	return t
 }
 
-// costForTokensAt prices OpenCode Go tokens at time t using its seeded rates.
-func costForTokensAt(model string, in, out, cacheRead, cacheCreate int64, modelsInputPerM, modelsOutputPerM float64, t time.Time) float64 {
-	return costForTokens(model, in, out, cacheRead, cacheCreate, modelsInputPerM, modelsOutputPerM) * history.PeakMultiplier(model, t)
-}
-
 // costForProviderTokensAt returns a complete estimate only when every consumed
 // token category has a known rate. Catalog prices are provider-specific and do
 // not include cache rates; a missing rate must not be interpreted as free usage.
 func costForProviderTokensAt(provider, model string, in, out, cacheRead, cacheCreate int64, inputRate, outputRate sql.NullFloat64, t time.Time) (float64, bool) {
 	// Which rate source and cache-creation rule apply is platform metadata, not
 	// something to infer from the provider's name here. An unknown provider
-	// resolves to no descriptor, which leaves both flags false - the same
+	// resolves to no descriptor, which leaves the table empty - the same
 	// conservative answer the name comparison gave.
 	descriptor, _ := site.Lookup(provider)
-	if descriptor.SeededRates {
-		if _, _, _, _, ok := PriceForModel(model); ok {
-			return costForTokensAt(model, in, out, cacheRead, cacheCreate, 0, 0, t), true
+	if descriptor.RateTable != "" {
+		if _, _, _, _, ok := PriceForProviderModel(provider, model); ok {
+			return costForTokens(provider, model, in, out, cacheRead, cacheCreate) *
+				history.ProviderPeakMultiplier(provider, model, t), true
 		}
 	}
 	if !inputRate.Valid || !outputRate.Valid || cacheRead != 0 || (!descriptor.CacheCreationBilledAsInput && cacheCreate != 0) {

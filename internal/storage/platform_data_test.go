@@ -37,14 +37,24 @@ func TestPlatformDataCostsRespectProviderAndMissingRates(t *testing.T) {
 	}{
 		{"go seed", "opencode-go", "deepseek-v4-flash", 0, 0, true, 1.76, 2},
 		{"legacy go seed", "", "deepseek-v4-flash", 0, 0, true, 1.76, 2},
-		{"commandcode catalog", "commandcode", "deepseek-v4-flash", 0, 0, true, 20, 2},
+		// CommandCode publishes its own rates, so they win over the catalog row
+		// this test also inserts for the same model: 1M in at 0.15 + 1M out at
+		// 0.60, doubled in the 01:30Z peak window.
+		{"commandcode rate table", "commandcode", "deepseek-v4-flash", 0, 0, true, 1.5, 2},
 		{"openrouter catalog", "openrouter", "deepseek-v4-flash", 0, 0, true, 12, 1},
 		{"other provider has no catalog", "opencode-zen", "deepseek-v4-flash", 0, 0, false, 0, 1},
 		{"unknown model", "commandcode", "unknown-model", 0, 0, false, 0, 1},
 		{"explicit free catalog", "commandcode", "free-model", 0, 0, true, 0, 1},
 		{"partial catalog", "commandcode", "partial-model", 0, 0, false, 0, 1},
-		{"unpriced cache read", "commandcode", "deepseek-v4-flash", 500, 0, false, 0, 2},
-		{"unpriced cache write", "commandcode", "deepseek-v4-flash", 0, 500, false, 0, 2},
+		// CommandCode publishes a cache_read rate, so a cached turn stays
+		// priced; its table has no cache_write rate for this model, so a cache
+		// write bills at the input rate.
+		{"priced cache read", "commandcode", "deepseek-v4-flash", 500, 0, true, 1.500003, 2},
+		{"cache write billed as input", "commandcode", "deepseek-v4-flash", 0, 500, true, 1.50015, 2},
+		// A catalog-priced platform has no cache rate at all, so those two
+		// categories stay unknown rather than being billed as free usage.
+		{"unpriced cache read", "openrouter", "deepseek-v4-flash", 500, 0, false, 0, 1},
+		{"unpriced cache write", "openrouter", "deepseek-v4-flash", 0, 500, false, 0, 1},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := history.RequestRecord{ID: tt.name, Provider: tt.provider, Model: tt.model, StartTime: peak,
@@ -69,13 +79,14 @@ func TestPlatformDataCostsRespectProviderAndMissingRates(t *testing.T) {
 	if _, err := db.DB().Exec(`UPDATE requests SET cost_usd = NULL, cost_source = NULL`); err != nil {
 		t.Fatal(err)
 	}
-	if updated, err := db.BackfillRequestCosts(context.Background()); err != nil || updated != 5 {
-		t.Fatalf("backfill provider catalog: updated=%d err=%v, want 5", updated, err)
+	if updated, err := db.BackfillRequestCosts(context.Background()); err != nil || updated != 7 {
+		t.Fatalf("backfill provider catalog: updated=%d err=%v, want 7", updated, err)
 	}
 	for id, want := range map[string]sql.NullFloat64{
-		"commandcode catalog":           {Float64: 20, Valid: true},
+		"commandcode rate table":        {Float64: 1.5, Valid: true},
 		"openrouter catalog":            {Float64: 12, Valid: true},
 		"explicit free catalog":         {Valid: true},
+		"priced cache read":             {Float64: 1.500003, Valid: true},
 		"other provider has no catalog": {},
 		"unpriced cache read":           {},
 	} {

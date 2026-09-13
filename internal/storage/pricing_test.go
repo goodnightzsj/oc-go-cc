@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"database/sql"
 	"math"
 	"testing"
 	"time"
@@ -68,10 +69,19 @@ func TestParseRequestTime(t *testing.T) {
 	if !parseRequestTime("").IsZero() {
 		t.Fatal("empty should parse to zero time")
 	}
-	// costForTokensAt in peak window doubles base cost
-	peakT := time.Date(2026, 8, 25, 7, 0, 0, 0, time.UTC) // Tuesday 07:00Z
-	base := costForTokens("deepseek-v4-flash", 1000, 500, 200000, 0, 0.22, 0.66)
-	peak := costForTokensAt("deepseek-v4-flash", 1000, 500, 200000, 0, 0.22, 0.66, peakT)
+	// costForProviderTokensAt in the peak window doubles the off-peak cost
+	peakT := time.Date(2026, 8, 25, 7, 0, 0, 0, time.UTC)     // Tuesday 07:00Z, deepseek ×2
+	offPeakT := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC) // Tuesday 12:00Z, deepseek ×1
+	base, ok := costForProviderTokensAt("opencode-go", "deepseek-v4-flash", 1000, 500, 200000, 0,
+		sql.NullFloat64{}, sql.NullFloat64{}, offPeakT)
+	if !ok {
+		t.Fatal("deepseek-v4-flash on opencode-go must be priced")
+	}
+	peak, ok := costForProviderTokensAt("opencode-go", "deepseek-v4-flash", 1000, 500, 200000, 0,
+		sql.NullFloat64{}, sql.NullFloat64{}, peakT)
+	if !ok {
+		t.Fatal("deepseek-v4-flash on opencode-go must be priced in the peak window too")
+	}
 	if peak != 2*base {
 		t.Fatalf("peak cost %v, want 2×base %v", peak, 2*base)
 	}
@@ -82,7 +92,11 @@ func TestParseRequestTime(t *testing.T) {
 	// 516638*0.22 + 516608*0.007 + 399*0.66, doubled in the 07:00Z peak
 	// window -> 23507991 units (1e-8 USD). The old formula subtracted the
 	// cache-read prefix and under-priced every miss>hit row.
-	cacheOverlap := costForTokensAt("deepseek-v4-flash", 516638, 399, 516608, 0, 0.22, 0.66, peakT)
+	cacheOverlap, ok := costForProviderTokensAt("opencode-go", "deepseek-v4-flash", 516638, 399, 516608, 0,
+		sql.NullFloat64{}, sql.NullFloat64{}, peakT)
+	if !ok {
+		t.Fatal("deepseek-v4-flash on opencode-go must be priced")
+	}
 	if got := int64(math.Round(cacheOverlap * 1e8)); got != 23507991 {
 		t.Fatalf("cache-overlap cost %v units, want platform 23507991", got)
 	}

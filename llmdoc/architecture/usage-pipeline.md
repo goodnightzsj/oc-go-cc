@@ -12,7 +12,7 @@
    - DeepSeek 分区形：`prompt_cache_hit/miss_tokens` hit+miss == prompt → (miss, hit, 0)
    - 无缓存字段：全量当 input（最坏情形，成本会上浮）
 5. **录制**：流量完成后 `history.RequestRecord`（含 CacheReadTokens/CacheCreationTokens）→ `internal/storage/requests.go` Insert → SQLite `requests` 表。
-6. **成本**：`internal/storage/analytics.go` 的 `costForTokens` 按 seed_prices 估算（见 `reference/cache-billing-audit.md`）；provider 同步路径另有 `provider_usage` 表（平台真实账单快照，`cost_units`/1e8 = USD）。
+6. **成本**：`internal/storage/analytics.go` 的 `costForTokens` 按该平台自己的费率表估算（见 `reference/cache-billing-audit.md`）；provider 同步路径另有 `provider_usage` 表（平台真实账单快照，`cost_units`/1e8 = USD）。
 7. **下游**：GUI（`internal/gui`）读 requests/analytics 汇总；本地 CompactGate 网关作为客户端读代理回传的 usage（cached_input_tokens 与代理 cache_read 同源）。
 
 ## 语义约定

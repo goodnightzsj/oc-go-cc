@@ -37,21 +37,44 @@ func isThinkingDisabled(thinking json.RawMessage) bool {
 	return ok && t == "disabled"
 }
 
+// modelFamily reduces an upstream model id to the bare family name that the
+// rules below are written against. Upstreams namespace their ids differently -
+// OpenCode ships "deepseek-v4-flash" and "kimi-k2.6", CommandCode ships
+// "deepseek/deepseek-v4-flash" and "moonshotai/Kimi-K2.7-Code" - but the
+// behaviour each family needs is the same. Normalising here keeps one owner for
+// family detection instead of a second rule per provider and per family.
+//
+// The result is only ever compared, never sent upstream: the wire model id stays
+// the caller's original string.
+func modelFamily(modelID string) string {
+	if slash := strings.LastIndex(modelID, "/"); slash >= 0 {
+		modelID = modelID[slash+1:]
+	}
+	return strings.ToLower(modelID)
+}
+
 // isDeepSeekModel returns true for DeepSeek models that require thinking mode handling.
 func isDeepSeekModel(modelID string) bool {
-	return strings.HasPrefix(modelID, "deepseek-")
+	return strings.HasPrefix(modelFamily(modelID), "deepseek")
 }
 
 // isOpenAIReasoningModel returns true for OpenAI o1 and o3 models.
 func isOpenAIReasoningModel(modelID string) bool {
-	return strings.HasPrefix(modelID, "o1-") || strings.HasPrefix(modelID, "o3-")
+	family := modelFamily(modelID)
+	return strings.HasPrefix(family, "o1-") || strings.HasPrefix(family, "o3-")
+}
+
+// isMoonshotModel returns true for Moonshot/Kimi models, which reject
+// cache_control on the system block and only accept temperature=1.
+func isMoonshotModel(modelID string) bool {
+	return strings.HasPrefix(modelFamily(modelID), "kimi")
 }
 
 // needsPlaceholderReasoning returns true for providers whose validators require
 // a non-empty reasoning_content field on assistant tool-call messages.
 func needsPlaceholderReasoning(modelID string) bool {
 	// Moonshot's validator treats an empty string as missing.
-	return strings.HasPrefix(modelID, "kimi-")
+	return isMoonshotModel(modelID)
 }
 
 // constrainTemperature overrides model-specific temperature constraints.
@@ -59,7 +82,7 @@ func needsPlaceholderReasoning(modelID string) bool {
 // value or the original if no constraint applies.
 func constrainTemperature(modelID string, temp float64) float64 {
 	// Moonshot AI (kimi-k2.7-code) only allows temperature=1.
-	if modelID == "kimi-k2.7-code" {
+	if modelFamily(modelID) == "kimi-k2.7-code" {
 		return 1.0
 	}
 	return temp
@@ -413,7 +436,7 @@ func (t *RequestTransformer) transformMessages(anthropicReq *types.MessageReques
 			Role:    "system",
 			Content: contentText(systemText),
 		}
-		if !strings.HasPrefix(modelID, "kimi-") && len(anthropicReq.System) > 0 {
+		if !isMoonshotModel(modelID) && len(anthropicReq.System) > 0 {
 			var blocks []types.SystemContentBlock
 			if err := json.Unmarshal(anthropicReq.System, &blocks); err == nil {
 				for _, b := range blocks {

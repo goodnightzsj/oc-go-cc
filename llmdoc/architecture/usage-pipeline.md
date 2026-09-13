@@ -4,9 +4,9 @@
 
 ## 链路
 
-1. **入口**：`internal/handlers/messages.go` 接收 Anthropic `/v1/messages`，`CaptureOriginal` 记录原始请求（仅 debug_capture 开启时）。
+1. **入口**：`internal/handlers/messages.go` 接收 Anthropic `/v1/messages`，`CaptureOriginal` 记录原始请求（仅 debug_capture 开启时）。Responses 与 Chat Completions 入站最终都汇入同一条管线，见 `reference/inbound-protocols.md`。
 2. **路由**：`internal/router/` 按场景选择模型（scenario / override / family override），产出模型链。
-3. **发送**：`internal/provider/opencode_go.go` 的 `Stream`（真实流量主路径）或 `client/opencode.go` 的 `ChatCompletion`（registry 缺失兜底）；两者均在 debug_capture 开启时记录 upstream request/response（`CaptureBody` 异步 tee）。
+3. **发送**：`internal/provider/opencode_go.go` 的 `Stream`（真实流量主路径）或 `client/opencode.go` 的 `ChatCompletion`（registry 缺失兜底，OpenRouter 属此类）；两者均在 debug_capture 开启时记录 upstream request/response（`CaptureBody` 异步 tee）。provider 选择见 `architecture/provider-layer.md`。
 4. **响应转换**：上游 OpenAI usage → Anthropic usage，`usageInfoToAnthropic`（`internal/transformer/stream.go:619`）→ `splitPromptTokens`：
    - OpenAI 标准：`prompt_tokens_details.cached_tokens` → cache_read；input = prompt − cached
    - DeepSeek 分区形：`prompt_cache_hit/miss_tokens` hit+miss == prompt → (miss, hit, 0)

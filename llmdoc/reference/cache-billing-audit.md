@@ -89,4 +89,4 @@
 
 - **平台 timeCreated = 请求完成时刻（实证）**：同一请求的 proxy `streaming completed` 日志（`internal/handlers/messages.go:636`）与平台 `timeCreated` **同秒**（8-27 15:56:29 起、15:57:02 完成的请求 → 平台 07:57:02Z）；远端 `start_time` = 请求开始 → 同一请求两端时间差 = 请求时长（可变，几秒～分钟）。对账配对必须用 token 三元组 + 宽时间窗（±600s），不能用固定时间偏移。
 - **永久缺口场景（不会自动收敛）**：SSE 已产出后流式中断（connection reset）→ 平台按已用 token 出账（8-27 例：518407-token 请求失败但产出 6239 token，平台记 usg_01M110H60 $0.016260），而 proxy 失败路径不写库（`extractUsageFromSSE` 只解析 message_delta 事件的 usage，中断时拿不到计数）→ **平台有、远端无，永久单向差额**。反向缺口（失败请求平台不出账但远端转正）此前已通过 in>cr 计费修复消除。
-- **对账工具**：`scripts/platform_reconcile.py`（Edge CDP 抓平台 usage + ssh 远端 db）——北京日窗口、token 三元组匹配、金额对消判定（同一账单不同 token 拆分：远端保留全量 input，平台剥离 cache 后 input，金额相等即视为对齐）；默认 dry-run 报告，`--apply` 补录平台独有账单行（id=usg_*、值取平台原样、start_time=timeCreated）。2026-08-27 终态：8-26 $4.9939、8-27 $3.4018，两端分毫不差。
+- **对账工具**：`scripts/platform_reconcile.py`（Edge CDP 抓平台 usage + ssh 远端 db；2026-09-13 起已移出 git 跟踪，仅本机保留——它有 `--apply` 写库能力，不应随仓库分发）——北京日窗口、token 三元组匹配、金额对消判定（同一账单不同 token 拆分：远端保留全量 input，平台剥离 cache 后 input，金额相等即视为对齐）；默认 dry-run 报告，`--apply` 补录平台独有账单行（id=usg_*、值取平台原样、start_time=timeCreated）。2026-08-27 终态：8-26 $4.9939、8-27 $3.4018，两端分毫不差。

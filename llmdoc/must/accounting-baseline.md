@@ -18,6 +18,12 @@
 - `CaptureEntry.Data` 是 string（SSE 多文档流不能作为 json.RawMessage）。
 - 流式上游捕获依赖 `CaptureBody`（`internal/client/opencode.go`）——关闭管道通过 Close 触发，任何替换必须保持该语义；`ChatCompletionNonStreaming` 仍无捕获（已知缺口）。
 
+## 请求历史保留（不可回退）
+
+- `storage.retention_days`：**负数禁用清理**；`0` 或省略仍使用默认 7 天；正整数为保留天数。语义在 `internal/storage/retention.go:17-20`（`days==0 → 7`）与 `:41-44`（负数记 `request retention cleanup disabled` 后直接返回）；默认值 `internal/storage/database.go:53`，overlay 仅在字段 `!= 0` 时生效（`database.go:78`）。
+- 只清 `requests` 表（`retention.go:65`、`:71`），每小时一次（`:25`）；不触碰 `provider_usage`。
+- Hard: 恢复历史**之前**必须先部署含负数禁用语义的版本；恢复后不得回滚到把非正数当 7 天的旧程序，否则下次启动会再次删除已恢复的行。方法与恢复顺序见 `docs/history-recovery.md`。
+
 ## 部署底线
 
 - 远端部署 = `git pull origin main && bash scripts/prod-deploy.sh`；成功后以 `curl 127.0.0.1:3456/health` 验证。重启会短暂中断本地 AI（反代穿透）。

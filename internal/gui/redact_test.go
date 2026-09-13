@@ -82,7 +82,9 @@ func TestStripMaskedKeys_DropsMaskedFields(t *testing.T) {
 		t.Fatalf("unmarshal patch: %v", err)
 	}
 
-	stripMaskedKeys(patch)
+	if err := stripMaskedKeys(patch); err != nil {
+		t.Fatalf("strip masked keys: %v", err)
+	}
 
 	if _, ok := patch["api_key"]; ok {
 		t.Error("top-level masked api_key survived the strip")

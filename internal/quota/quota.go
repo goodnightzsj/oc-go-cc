@@ -79,7 +79,7 @@ func UsageURL(baseURL string) (string, error) {
 	u, err := url.Parse(base)
 	if err != nil || u == nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
 		u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.ForceQuery {
-		return "", fmt.Errorf("Go base_url must be an HTTP(S) API URL without credentials, query or fragment")
+		return "", fmt.Errorf("invalid Go base_url: must be an HTTP(S) API URL without credentials, query or fragment")
 	}
 	if strings.HasSuffix(base, "/usage") {
 		return base, nil

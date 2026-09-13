@@ -148,9 +148,10 @@ func (r *Requests) Summary(q RequestQuery) (*RequestSummary, error) {
 		{"model", &out.Models}, {"provider", &out.Providers}, {"scenario", &out.Scenarios},
 	} {
 		dimension := spec.column
-		if spec.column == "scenario" {
+		switch spec.column {
+		case "scenario":
 			dimension = "CASE WHEN LOWER(TRIM(COALESCE(scenario, ''))) IN ('', 'unknown') THEN 'override' ELSE scenario END"
-		} else if spec.column == "provider" {
+		case "provider":
 			dimension = "COALESCE(provider, '')"
 		}
 		providerColumn := "''"

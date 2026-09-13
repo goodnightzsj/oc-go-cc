@@ -200,7 +200,7 @@ func fetchCommandCodeJSON(ctx context.Context, client *http.Client, endpoint, ap
 	if err != nil {
 		return fmt.Errorf("account request failed: %s", strings.ReplaceAll(err.Error(), apiKey, "[redacted]"))
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, http.StatusText(resp.StatusCode))
 	}

@@ -247,7 +247,7 @@ func TestResponsesOutboundNonStreamingAndIncomplete(t *testing.T) {
 		}
 	}
 	if err := w.Finish(); err != nil || !strings.Contains(out.String(), "response.incomplete") || strings.Contains(out.String(), "response.completed") {
-		t.Fatal(fmt.Sprintf("incomplete stream = %s, err=%v", out.String(), err))
+		t.Fatalf("incomplete stream = %s, err=%v", out.String(), err)
 	}
 }
 

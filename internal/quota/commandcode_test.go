@@ -36,11 +36,11 @@ func TestCommandCodeURLAndAccountContract(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/alpha/billing/credits":
-			fmt.Fprint(w, commandCodeCreditsFixture)
+			_, _ = fmt.Fprint(w, commandCodeCreditsFixture)
 		case "/alpha/billing/subscriptions":
-			fmt.Fprint(w, commandCodeSubscriptionFixture)
+			_, _ = fmt.Fprint(w, commandCodeSubscriptionFixture)
 		case "/alpha/usage/summary":
-			fmt.Fprint(w, commandCodeUsageFixture)
+			_, _ = fmt.Fprint(w, commandCodeUsageFixture)
 		default:
 			t.Errorf("unexpected account path: %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -71,7 +71,7 @@ func TestCommandCodePartialFailuresAndSafety(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if mode == "all-denied" || mode == "subscription-denied" && strings.HasSuffix(r.URL.Path, "/subscriptions") {
 					w.WriteHeader(http.StatusForbidden)
-					fmt.Fprint(w, r.Header.Get("Authorization"))
+					_, _ = fmt.Fprint(w, r.Header.Get("Authorization"))
 					return
 				}
 				if mode == "redirect" {
@@ -82,9 +82,10 @@ func TestCommandCodePartialFailuresAndSafety(t *testing.T) {
 				switch {
 				case strings.HasSuffix(r.URL.Path, "/subscriptions"):
 					body = commandCodeSubscriptionFixture
-					if mode == "no-subscription" {
+					switch mode {
+					case "no-subscription":
 						body = `{"success":true,"data":null}`
-					} else if mode == "invalid-period" {
+					case "invalid-period":
 						body = strings.ReplaceAll(body, "2026-09-10T07:35:57.000Z", "not-a-date")
 					}
 				case strings.HasSuffix(r.URL.Path, "/summary"):
@@ -108,7 +109,7 @@ func TestCommandCodePartialFailuresAndSafety(t *testing.T) {
 						body = `{"credits":`
 					}
 				}
-				fmt.Fprint(w, body)
+				_, _ = fmt.Fprint(w, body)
 			}))
 			defer server.Close()
 			report, err := FetchCommandCode(context.Background(), server.Client(), server.URL+"/alpha", "synthetic-key")

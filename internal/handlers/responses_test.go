@@ -137,7 +137,7 @@ func TestHandleResponsesStreamsBeforeUpstreamCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "text/event-stream" {
 		t.Fatalf("stream headers=%v status=%d", resp.Header, resp.StatusCode)
 	}

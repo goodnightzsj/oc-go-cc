@@ -40,7 +40,7 @@ func TestGoExplicitResponsesEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 	if _, err := io.Copy(io.Discard, body); err != nil {
 		t.Fatal(err)
 	}

@@ -130,7 +130,7 @@ func (p *OpenCodeGoProvider) executeResponses(ctx context.Context, req *types.Me
 	if err != nil {
 		return nil, err
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 	raw, err := io.ReadAll(body)
 	if err != nil {
 		return nil, fmt.Errorf("read Responses response: %w", err)

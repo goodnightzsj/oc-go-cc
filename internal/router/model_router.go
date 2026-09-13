@@ -248,8 +248,8 @@ func (r *ModelRouter) Route(messages []MessageContent, tokenCount int, requested
 		constraints := requestConstraints(messages, tokenCount)
 		selector := NewSelector(cat, cfg)
 		resolved, err := selector.SelectCheapest(scenarioKey, constraints)
-		switch {
-		case err == nil:
+		switch err {
+		case nil:
 			primary = resolvedModelToConfig(resolved)
 			ok = true
 		default:
@@ -469,8 +469,8 @@ func (r *ModelRouter) RouteForStreaming(messages []MessageContent, tokenCount in
 		constraints := requestConstraints(messages, tokenCount)
 		selector := NewSelector(cat, cfg)
 		resolved, err := selector.SelectCheapest(scenarioKey, constraints)
-		switch {
-		case err == nil:
+		switch err {
+		case nil:
 			primary = resolvedModelToConfig(resolved)
 			ok = true
 		default:

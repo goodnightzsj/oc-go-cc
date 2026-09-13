@@ -1762,7 +1762,7 @@ func TestHandleStreaming_FailedStreamWithUsage_RecordsFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	handler.storage = NewStorageAdapter(db)
 
 	stream := true
@@ -1818,7 +1818,7 @@ func TestHandleStreaming_FailedBeforeUsage_DoesNotRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	handler.storage = NewStorageAdapter(db)
 
 	stream := true

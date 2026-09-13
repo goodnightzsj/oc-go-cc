@@ -50,14 +50,38 @@ type responsesInboundRequest struct {
 		} `json:"format"`
 		Verbosity string `json:"verbosity"`
 	} `json:"text"`
-	Tools []struct {
-		Type        string          `json:"type"`
-		Name        string          `json:"name"`
-		Description string          `json:"description"`
-		Parameters  json.RawMessage `json:"parameters"`
-		Strict      *bool           `json:"strict"`
-		Format      json.RawMessage `json:"format"`
-	} `json:"tools"`
+	Tools []responsesInboundTool `json:"tools"`
+}
+
+// responsesInboundTool is one entry of the Responses "tools" array. Tools is
+// recursive because Codex groups related function tools under a "namespace"
+// container ({"type":"namespace","name":"multi_agent_v1","tools":[...]}) and
+// sends that container alongside ordinary function tools.
+type responsesInboundTool struct {
+	Type        string                 `json:"type"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Parameters  json.RawMessage        `json:"parameters"`
+	Strict      *bool                  `json:"strict"`
+	Format      json.RawMessage        `json:"format"`
+	Tools       []responsesInboundTool `json:"tools"`
+}
+
+// flattenTools expands namespace containers into the function tools they group.
+// The nested entries are plain function tools that name themselves, so a
+// namespace is a grouping device rather than a capability this adapter would
+// have to implement. Refusing the container would fail an entire Codex request
+// over tools the adapter can already serve.
+func flattenTools(tools []responsesInboundTool) []responsesInboundTool {
+	out := make([]responsesInboundTool, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Type == "namespace" {
+			out = append(out, flattenTools(tool.Tools)...)
+			continue
+		}
+		out = append(out, tool)
+	}
+	return out
 }
 
 type responsesInboundItem struct {
@@ -137,7 +161,7 @@ func ResponsesToMessageRequest(raw []byte) (*types.MessageRequest, error) {
 			return nil, fmt.Errorf("reasoning.effort %q has no supported upstream mapping", in.Reasoning.Effort)
 		}
 	}
-	for _, tool := range in.Tools {
+	for _, tool := range flattenTools(in.Tools) {
 		if tool.Type != "function" {
 			return nil, fmt.Errorf("tool type %q is not supported; use JSON function tools, not custom/freeform or hosted tools", tool.Type)
 		}

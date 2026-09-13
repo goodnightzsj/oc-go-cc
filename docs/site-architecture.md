@@ -1,8 +1,12 @@
 # 站点可插拔架构
 
-设计定稿：2026-09-13。状态：**阶段 0–4 已实施**，阶段 5（清理残留平台分支）未开始。
+设计定稿：2026-09-13。状态：**阶段 0–5 已实施**。
 
 已实施：`internal/site` 注册表与重复清单收敛（0/1，零行为变化）；面板只保留 `opencode-go` 与 `commandcode`，隐藏项保留代码与历史（2）；站点自有模型目录接入，修好 `/v1/models` 对 CommandCode 返回 0 项（3）；`active_site` 作用域 + 目录优先解析 + 面板选择器（4）。
+
+阶段 5 的核查结果与预期不同，记录如下以免重做：`provider/*.go` 已无任何按平台名的分支（0 处 `switch provider`），`loader.go` 与 `storage/pricing.go` 已在阶段 1 收敛，`client/opencode.go` 按 §9 保持原样。**真正的遗漏在 §2 清单之外**：`internal/router/selector.go` 的 `enabledProviders` 自带一份四平台名单（Go/Zen/Bedrock/OpenRouter），漏掉 CommandCode——于是成本路由下 CommandCode 无论配了多少 key 都不会被选中。已改为遍历 `site.All()` 并向 `config.ProviderAPIKeys` 逐个取凭证，配 `TestEnabledProvidersMatchesRegistryCoverage` 守卫，形态与 config 的 `TestProviderKeySourceCoversRegistry` 一致。
+
+仍未收敛的一处（§2 清单已列，属面板层）：`assets/index.html` 有 7 份手工维护的平台 `<option>` 列表，由 `site_parity_test.go` 用正则维持与注册表一致。正确的归宿是运行时由 `/api/sites` 注入，但那会让这 5 个选择器在首帧出现前依赖一次请求，与 §4「面板不得显示与实际路由不符的状态」需要一起设计，因此留待单独的提交。
 
 生产配置不在本设计范围内改动，由操作者自行修改；`active_site` 未设置时路由行为与从前完全一致。
 
@@ -172,3 +176,26 @@ type Site struct {
 **但它们是可达的**：`MessagesHandler` 的 `providerRegistry` 允许为 nil（`messages.go` 的 `if h.providerRegistry != nil`），此时所有平台都走这条路径。实际删掉后 `TestHandleStreaming_GoAnthropicModel_FallsThroughOnError` 与 `TestHandleStreaming_PerModelTimeoutFallback` 立即失败，已回退。
 
 结论：这条路径是**被支持的降级配置**，不是残留。要清理它，前提是先决定 registry 为 nil 是否仍是受支持的构造方式；在那之前保持原样。
+
+## 10. 本轮未采纳的两项（记录以免重做）
+
+### 10.1 §3.1 的六个描述符字段：只做不划算
+
+阶段 5 核查后确认 §2 清单里 8 项已收敛、4 项是真实领域差异应保留，§3.1 描述的六个字段（`Credentials`/`Endpoints`/`Provider`/`Peak`/`Account`/`Catalog`）**未实现**。评估后**不做**，理由：
+
+- 现状的三张手写平台表（`providerKeySource`、`providerTimeoutSource`、`loader.go` 的端点默认值）**都已有覆盖注册表的守卫测试**，唯一漏掉守卫的是 `router/enabledProviders`，本轮已修并补上同类守卫。所以「漏一个平台」这个风险已被测试挡住。
+- 搬进描述符的收益是「三张表 + 三个守卫」变「一个描述符 + 一个守卫」，是整洁性收益。
+- 代价是真实的：`Credentials` 现在是 `func(*Config) []string` 闭包，而 `site` 不能 import `config`（会成环），所以只能退化成字符串标签 + 运行期查表——**把编译期检查换成运行期检查**，正是本文 §8 硬线警告的形态。
+- `Provider` 字段还会直接引入导入环（`site` ↔ `core`）。
+
+结论：记为**按需实现**——等真的新增平台、感到三处同步的痛苦时再做，而不是现在为一个假想收益换掉类型安全。
+
+### 10.2 `tool_reference`：从拒绝改为丢弃
+
+`tool_result` 里 Chat Completions 无法表达的内容块（Claude Code ToolSearch 的 `tool_reference`、以及内嵌 image），原先由 `transformer` 显式拒绝 → 400。现改为**丢弃**，只保留可表达的文本部分；只有 `tool_reference` 的结果成为空 tool 消息，请求成功。
+
+采纳理由：与参考项目 [MAXeaglet/commandcode-proxy](https://github.com/MAXeaglet/commandcode-proxy)（`proxy.mjs` 把同一块映射为 `""`）行为一致，且这是本轮明确选择的取舍——**请求成功、模型在缺该工具内容的情况下继续**，而不是整链失败。
+
+需要留意的后果，记录在此以备排障：模型可能基于「工具没有返回内容」的错误前提继续推理，且**没有任何客户端可见信号**。原先的 400 至少是可见的失败。要避免丢弃，需换用原生 Messages 的目标。
+
+顺带核对：该转换层另外三处 `switch`（`transformUserMessage`、`transformAssistantMessage`、`transformMessage` 的 default）**本来就静默丢弃**未映射的块类型（`document`/`search_result`/`server_tool_use`/`redacted_thinking` 等，Anthropic 官方 15 种类型中我们只解析 5 种）。参考项目同样全丢且无日志。本轮**未改变**这些路径，也未给转换层加日志——该包保持零日志、纯函数，这是它在依赖分层中位于编排层下方的性质。

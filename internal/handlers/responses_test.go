@@ -257,8 +257,14 @@ func TestHandleResponsesUpstreamFailureNeverCompletes(t *testing.T) {
 	for _, stream := range []string{"false", "true"} {
 		w := httptest.NewRecorder()
 		h.HandleResponses(w, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"m","input":"hi","stream":`+stream+`}`)))
-		if stream == "false" && w.Code != http.StatusBadGateway {
+		// The upstream's own status and reason reach the client: this proxy
+		// fronts several platforms, so a refusal the platform named is reported
+		// as that refusal rather than rewritten into a gateway error.
+		if stream == "false" && w.Code != http.StatusUnauthorized {
 			t.Fatalf("failure status=%d body=%s", w.Code, w.Body.String())
+		}
+		if stream == "false" && !strings.Contains(w.Body.String(), "synthetic auth rejection") {
+			t.Fatalf("upstream reason not forwarded: %s", w.Body.String())
 		}
 		if stream == "true" && (!strings.Contains(w.Body.String(), "response.failed") || strings.Contains(w.Body.String(), "response.completed")) {
 			t.Fatalf("failed upstream looks complete: %s", w.Body.String())

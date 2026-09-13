@@ -208,6 +208,11 @@ func (h *FallbackHandler) ExecuteWithFallback(
 	blockedProviders := make(map[string]bool)
 	var usageLimitErr error
 	var authErr error
+	// lastErr keeps the most recent attempt's error so the caller can report
+	// why the request failed instead of only that it did. The proxy forwards
+	// upstream refusals to the client, so discarding this turned every
+	// deterministic failure into an opaque 502.
+	var lastErr error
 	authAttempted := 0
 
 	for i, model := range models {
@@ -266,6 +271,7 @@ func (h *FallbackHandler) ExecuteWithFallback(
 
 		// A provider-wide usage limit makes its remaining models pointless.
 		// Skip them, but continue if the chain includes another provider.
+		lastErr = err
 		if IsUsageLimitError(err) {
 			usageLimitErr = err
 			blockedProviders[provider] = true
@@ -335,12 +341,33 @@ func (h *FallbackHandler) ExecuteWithFallback(
 		}, nil, usageLimitErr
 	}
 
+	// Every candidate can be skipped before it is ever sent - all circuit
+	// breakers open, or the provider already blocked on a usage limit. There is
+	// then no upstream error to report, and %w would render a nil operand.
+	if lastErr == nil {
+		return &FallbackResult{
+			ModelID:   models[0].ModelID,
+			Provider:  client.Provider(models[0]),
+			Attempted: totalModels,
+		}, nil, fmt.Errorf("%w (%d attempts): no candidate was attempted", ErrAllModelsFailed, totalModels)
+	}
+
 	return &FallbackResult{
 		ModelID:   models[0].ModelID,
 		Provider:  client.Provider(models[0]),
 		Attempted: totalModels,
-	}, nil, fmt.Errorf("all models failed (%d attempts)", totalModels)
+	}, nil, fmt.Errorf("%w (%d attempts): %w", ErrAllModelsFailed, totalModels, lastErr)
 }
+
+// ErrAllModelsFailed marks an exhausted chain. Callers classify it with
+// errors.Is rather than matching the message text, so the wording can change
+// without breaking the mapping.
+var ErrAllModelsFailed = errors.New("all models failed")
+
+// ErrWithinSiteNoTarget marks a chain that narrowed to the active platform and
+// came up empty. It is the operator's configuration rather than an upstream
+// failure, so it is reported as such instead of as a gateway error.
+var ErrWithinSiteNoTarget = errors.New("active site has no routing target")
 
 // IsRetryableError determines if an error is worth retrying with a fallback.
 func IsRetryableError(err error) bool {

@@ -40,26 +40,26 @@ func TestMultiPlatformBrowserServer(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/docs":
-			fmt.Fprint(w, `<table><tr><th>模型</th><th>输入</th><th>使用额度</th></tr><tr><td>Shared Model</td><td>$1</td><td>$60</td></tr></table>`)
+			_, _ = fmt.Fprint(w, `<table><tr><th>模型</th><th>输入</th><th>使用额度</th></tr><tr><td>Shared Model</td><td>$1</td><td>$60</td></tr></table>`)
 		case "/go/usage":
-			fmt.Fprintf(w, `{"plan":"go","rolling5h":{"usagePercent":25},"weekly":{"usagePercent":10},"monthly":{"usagePercent":50,"resetsAt":%q}}`, time.Now().UTC().Add(15*24*time.Hour).Format(time.RFC3339))
+			_, _ = fmt.Fprintf(w, `{"plan":"go","rolling5h":{"usagePercent":25},"weekly":{"usagePercent":10},"monthly":{"usagePercent":50,"resetsAt":%q}}`, time.Now().UTC().Add(15*24*time.Hour).Format(time.RFC3339))
 		case "/router/v1/key":
 			if r.Header.Get("Authorization") == "Bearer synthetic-router-bad" {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
-			fmt.Fprint(w, `{"data":{"limit":10,"limit_remaining":8,"limit_reset":"monthly","usage":2,"usage_daily":0,"usage_monthly":1,"byok_usage":3,"include_byok_in_limit":false,"is_free_tier":false}}`)
+			_, _ = fmt.Fprint(w, `{"data":{"limit":10,"limit_remaining":8,"limit_reset":"monthly","usage":2,"usage_daily":0,"usage_monthly":1,"byok_usage":3,"include_byok_in_limit":false,"is_free_tier":false}}`)
 		case "/router/v1/credits":
-			fmt.Fprint(w, `{"data":{"total_credits":1,"total_usage":2}}`)
+			_, _ = fmt.Fprint(w, `{"data":{"total_credits":1,"total_usage":2}}`)
 		case "/command/alpha/billing/credits":
-			fmt.Fprint(w, `{"credits":{"freeCredits":0,"monthlyCredits":60,"purchasedCredits":2},"windowLimits":{"limited":true,"fiveHour":{"used":3,"cap":14,"exceeded":false,"resetAt":0},"weekly":{"used":10,"cap":35,"exceeded":false,"resetAt":1910000000000}}}`)
+			_, _ = fmt.Fprint(w, `{"credits":{"freeCredits":0,"monthlyCredits":60,"purchasedCredits":2},"windowLimits":{"limited":true,"fiveHour":{"used":3,"cap":14,"exceeded":false,"resetAt":0},"weekly":{"used":10,"cap":35,"exceeded":false,"resetAt":1910000000000}}}`)
 		case "/command/alpha/billing/subscriptions":
-			fmt.Fprint(w, `{"success":true,"data":{"planId":"individual-goat","status":"active","currentPeriodStart":"2026-09-10T07:35:57.000Z","currentPeriodEnd":"2026-10-10T07:35:57.000Z","cancelAtPeriodEnd":false}}`)
+			_, _ = fmt.Fprint(w, `{"success":true,"data":{"planId":"individual-goat","status":"active","currentPeriodStart":"2026-09-10T07:35:57.000Z","currentPeriodEnd":"2026-10-10T07:35:57.000Z","cancelAtPeriodEnd":false}}`)
 		case "/command/alpha/usage/summary":
-			fmt.Fprint(w, `{"totalCount":2,"completedCount":1,"failedCount":1,"totalTokensIn":100,"totalTokensOut":20,"totalTokens":120,"totalCredits":10,"periodBasis":"billing-period"}`)
+			_, _ = fmt.Fprint(w, `{"totalCount":2,"completedCount":1,"failedCount":1,"totalTokensIn":100,"totalTokensOut":20,"totalTokens":120,"totalCredits":10,"periodBasis":"billing-period"}`)
 		case "/v1/messages":
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"id":"synthetic-message","type":"message","role":"assistant","content":[{"type":"text","text":"synthetic browser fixture"}],"model":"shared-model","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
+			_, _ = fmt.Fprint(w, `{"id":"synthetic-message","type":"message","role":"assistant","content":[{"type":"text","text":"synthetic browser fixture"}],"model":"shared-model","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
 		default:
 			http.Error(w, "unexpected synthetic upstream endpoint", http.StatusNotFound)
 		}

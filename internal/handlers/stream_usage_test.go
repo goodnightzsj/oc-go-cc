@@ -43,7 +43,7 @@ func TestNativeAnthropicStreamPreservesInitialAndTerminalUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	h := &MessagesHandler{
 		client: client.NewOpenCodeClient(cfg, nil), providerRegistry: reg,
 		streamProxy: NewStreamProxy(), logger: slog.Default(), metrics: metrics.New(),

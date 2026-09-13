@@ -26,7 +26,7 @@ func TestQuotaPlatformCapabilitiesDoNotSendGoKeys(t *testing.T) {
 	srv.atomicCfg.ApplyLoaded(&cfg)
 	for provider, reason := range map[string]string{
 		"opencode-zen": "no_public_account_api",
-		"aws-bedrock": "aws_billing_disabled",
+		"aws-bedrock":  "aws_billing_disabled",
 	} {
 		t.Run(provider, func(t *testing.T) {
 			rec := httptest.NewRecorder()
@@ -66,10 +66,10 @@ func TestOpenRouterQuotaScopeAndCache(t *testing.T) {
 			keyHits.Add(1)
 			switch r.Header.Get("Authorization") {
 			case "Bearer synthetic-or-good":
-				fmt.Fprint(w, `{"data":{"limit":10,"limit_remaining":8,"limit_reset":"monthly","usage":2,"usage_daily":0,"byok_usage":7,"include_byok_in_limit":false}}`)
+				_, _ = fmt.Fprint(w, `{"data":{"limit":10,"limit_remaining":8,"limit_reset":"monthly","usage":2,"usage_daily":0,"byok_usage":7,"include_byok_in_limit":false}}`)
 			case "Bearer synthetic-or-bad":
 				w.WriteHeader(http.StatusUnauthorized)
-				fmt.Fprint(w, r.Header.Get("Authorization"))
+				_, _ = fmt.Fprint(w, r.Header.Get("Authorization"))
 			default:
 				t.Error("wrong key sent to the inference-key quota endpoint")
 				w.WriteHeader(http.StatusForbidden)
@@ -79,10 +79,10 @@ func TestOpenRouterQuotaScopeAndCache(t *testing.T) {
 			if r.Header.Get("Authorization") != "Bearer synthetic-management" {
 				t.Error("inference key or other platform key used for account credits")
 			}
-			fmt.Fprint(w, `{"data":{"total_credits":1,"total_usage":2}}`)
+			_, _ = fmt.Fprint(w, `{"data":{"total_credits":1,"total_usage":2}}`)
 		case "/go/usage":
 			goHits.Add(1)
-			fmt.Fprint(w, `{"monthly":{"usagePercent":25}}`)
+			_, _ = fmt.Fprint(w, `{"monthly":{"usagePercent":25}}`)
 		default:
 			t.Errorf("unexpected upstream path %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -132,7 +132,9 @@ func TestOpenRouterQuotaScopeAndCache(t *testing.T) {
 		t.Fatal("explicit refresh did not refresh the selected platform")
 	}
 	var patch map[string]json.RawMessage
-	json.Unmarshal([]byte(`{"openrouter":{"management_api_key":""}}`), &patch)
+	if err := json.Unmarshal([]byte(`{"openrouter":{"management_api_key":""}}`), &patch); err != nil {
+		t.Fatalf("unmarshal patch: %v", err)
+	}
 	if _, err := srv.updateProxyConfig(patch, true); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +159,9 @@ func TestOpenRouterManagementKeySettingsRoundTrip(t *testing.T) {
 		}
 		var fields map[string]any
 		encoded, _ := json.Marshal(result.OpenRouter)
-		json.Unmarshal(encoded, &fields)
+		if err := json.Unmarshal(encoded, &fields); err != nil {
+			t.Fatalf("unmarshal openrouter fields: %v", err)
+		}
 		if fields["management_api_key"] != keyMask {
 			t.Fatal("management key is missing from masked settings")
 		}
@@ -184,7 +188,7 @@ func TestOpenRouterQuotaDoesNotProbeGlobalKeys(t *testing.T) {
 					if r.Header.Get("Authorization") != "Bearer synthetic-management" {
 						t.Error("account credits used an unrelated credential")
 					}
-					fmt.Fprint(w, `{"data":{"total_credits":1,"total_usage":0}}`)
+					_, _ = fmt.Fprint(w, `{"data":{"total_credits":1,"total_usage":0}}`)
 					return
 				}
 				keyHits.Add(1)

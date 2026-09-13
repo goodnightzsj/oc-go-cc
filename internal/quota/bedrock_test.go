@@ -60,12 +60,12 @@ func TestBedrockBillingScopePaginationAndCurrency(t *testing.T) {
 				t.Error("service discovery contract changed")
 			}
 			if dimensions == 1 {
-				fmt.Fprint(w, `{"DimensionValues":[{"Value":"Amazon Bedrock"}],"NextPageToken":"services-next"}`)
+				_, _ = fmt.Fprint(w, `{"DimensionValues":[{"Value":"Amazon Bedrock"}],"NextPageToken":"services-next"}`)
 			} else {
 				if input["NextPageToken"] != "services-next" {
 					t.Error("service pagination token missing")
 				}
-				fmt.Fprint(w, `{"DimensionValues":[{"Value":"Amazon Bedrock Mantle"}]}`)
+				_, _ = fmt.Fprint(w, `{"DimensionValues":[{"Value":"Amazon Bedrock Mantle"}]}`)
 			}
 		case "AWSInsightsIndexService.GetCostAndUsage":
 			costs++
@@ -73,12 +73,12 @@ func TestBedrockBillingScopePaginationAndCurrency(t *testing.T) {
 				t.Error("cost query lost discovered services, account, metric or granularity")
 			}
 			if costs == 1 {
-				fmt.Fprint(w, `{"ResultsByTime":[{"TimePeriod":{"Start":"2026-09-09","End":"2026-09-10"},"Estimated":true,"Total":{"UnblendedCost":{"Amount":"1.25","Unit":"EUR"}}}],"NextPageToken":"cost-next"}`)
+				_, _ = fmt.Fprint(w, `{"ResultsByTime":[{"TimePeriod":{"Start":"2026-09-09","End":"2026-09-10"},"Estimated":true,"Total":{"UnblendedCost":{"Amount":"1.25","Unit":"EUR"}}}],"NextPageToken":"cost-next"}`)
 			} else {
 				if input["NextPageToken"] != "cost-next" {
 					t.Error("cost pagination token missing")
 				}
-				fmt.Fprint(w, `{"ResultsByTime":[{"TimePeriod":{"Start":"2026-09-08","End":"2026-09-09"},"Estimated":false,"Total":{"UnblendedCost":{"Amount":"-2.5","Unit":"EUR"}}}]}`)
+				_, _ = fmt.Fprint(w, `{"ResultsByTime":[{"TimePeriod":{"Start":"2026-09-08","End":"2026-09-09"},"Estimated":false,"Total":{"UnblendedCost":{"Amount":"-2.5","Unit":"EUR"}}}]}`)
 			}
 		default:
 			t.Error("unexpected AWS operation")
@@ -113,7 +113,7 @@ func TestBedrockBillingRejectsInvalidAndPartialData(t *testing.T) {
 			calls := 0
 			client := bedrockBillingTestClient(t, func(w http.ResponseWriter, r *http.Request, input map[string]any) {
 				if strings.HasSuffix(r.Header.Get("X-Amz-Target"), ".GetDimensionValues") {
-					fmt.Fprint(w, `{"DimensionValues":[{"Value":"Amazon Bedrock"}]}`)
+					_, _ = fmt.Fprint(w, `{"DimensionValues":[{"Value":"Amazon Bedrock"}]}`)
 					return
 				}
 				calls++
@@ -123,10 +123,10 @@ func TestBedrockBillingRejectsInvalidAndPartialData(t *testing.T) {
 				}
 				if body == "denied" {
 					w.WriteHeader(http.StatusForbidden)
-					fmt.Fprint(w, `{"__type":"AccessDeniedException","message":"synthetic-billing-secret synthetic-session"}`)
+					_, _ = fmt.Fprint(w, `{"__type":"AccessDeniedException","message":"synthetic-billing-secret synthetic-session"}`)
 					return
 				}
-				fmt.Fprint(w, body)
+				_, _ = fmt.Fprint(w, body)
 			})
 			got, err := fetchBedrockBilling(context.Background(), client, "123456789012", time.Date(2026, 9, 10, 1, 0, 0, 0, time.UTC))
 			if err == nil || got != nil {
@@ -146,14 +146,14 @@ func TestBedrockBillingEmptyZeroAndOptIn(t *testing.T) {
 			client := bedrockBillingTestClient(t, func(w http.ResponseWriter, r *http.Request, _ map[string]any) {
 				if strings.HasSuffix(r.Header.Get("X-Amz-Target"), ".GetDimensionValues") {
 					if services {
-						fmt.Fprint(w, `{"DimensionValues":[{"Value":"Amazon Bedrock"}]}`)
+						_, _ = fmt.Fprint(w, `{"DimensionValues":[{"Value":"Amazon Bedrock"}]}`)
 					} else {
-						fmt.Fprint(w, `{"DimensionValues":[]}`)
+						_, _ = fmt.Fprint(w, `{"DimensionValues":[]}`)
 					}
 					return
 				}
 				costCalls++
-				fmt.Fprint(w, `{"ResultsByTime":[{"TimePeriod":{"Start":"2026-09-09","End":"2026-09-10"},"Estimated":false,"Total":{"UnblendedCost":{"Amount":"0","Unit":"USD"}}}]}`)
+				_, _ = fmt.Fprint(w, `{"ResultsByTime":[{"TimePeriod":{"Start":"2026-09-09","End":"2026-09-10"},"Estimated":false,"Total":{"UnblendedCost":{"Amount":"0","Unit":"USD"}}}]}`)
 			})
 			got, err := fetchBedrockBilling(context.Background(), client, "123456789012", time.Date(2026, 9, 10, 1, 0, 0, 0, time.UTC))
 			if err != nil {

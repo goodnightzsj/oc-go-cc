@@ -19,7 +19,7 @@ func TestCommandCodeQuotaScopeAndCache(t *testing.T) {
 		}
 		if r.Header.Get("Authorization") == "Bearer synthetic-command-bad" {
 			w.WriteHeader(http.StatusUnauthorized)
-			fmt.Fprint(w, r.Header.Get("Authorization"))
+			_, _ = fmt.Fprint(w, r.Header.Get("Authorization"))
 			return
 		}
 		if r.Header.Get("Authorization") != "Bearer synthetic-command-good" {
@@ -27,11 +27,11 @@ func TestCommandCodeQuotaScopeAndCache(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/gateway/alpha/billing/credits":
-			fmt.Fprint(w, `{"credits":{"freeCredits":0,"monthlyCredits":60,"purchasedCredits":2},"windowLimits":{"limited":true,"exceeded":null,"fiveHour":{"used":3,"cap":14,"resetAt":0,"exceeded":false},"weekly":{"used":10,"cap":35,"resetAt":0,"exceeded":false}}}`)
+			_, _ = fmt.Fprint(w, `{"credits":{"freeCredits":0,"monthlyCredits":60,"purchasedCredits":2},"windowLimits":{"limited":true,"exceeded":null,"fiveHour":{"used":3,"cap":14,"resetAt":0,"exceeded":false},"weekly":{"used":10,"cap":35,"resetAt":0,"exceeded":false}}}`)
 		case "/gateway/alpha/billing/subscriptions":
-			fmt.Fprint(w, `{"success":true,"data":{"planId":"individual-goat","status":"active","currentPeriodStart":"2026-09-10T07:35:57.000Z","currentPeriodEnd":"2026-10-10T07:35:57.000Z","cancelAtPeriodEnd":false,"userId":"private-identity"}}`)
+			_, _ = fmt.Fprint(w, `{"success":true,"data":{"planId":"individual-goat","status":"active","currentPeriodStart":"2026-09-10T07:35:57.000Z","currentPeriodEnd":"2026-10-10T07:35:57.000Z","cancelAtPeriodEnd":false,"userId":"private-identity"}}`)
 		case "/gateway/alpha/usage/summary":
-			fmt.Fprint(w, `{"totalCount":2,"totalCost":5,"averageCost":2.5,"successRate":0.5,"completedCount":1,"failedCount":1,"totalTokensIn":100,"totalTokensOut":10,"totalTokens":110,"totalCredits":10,"totalFreeCredits":0,"totalMonthlyCredits":10,"totalPurchasedCredits":0,"periodBasis":"billing-period"}`)
+			_, _ = fmt.Fprint(w, `{"totalCount":2,"totalCost":5,"averageCost":2.5,"successRate":0.5,"completedCount":1,"failedCount":1,"totalTokensIn":100,"totalTokensOut":10,"totalTokens":110,"totalCredits":10,"totalFreeCredits":0,"totalMonthlyCredits":10,"totalPurchasedCredits":0,"periodBasis":"billing-period"}`)
 		default:
 			t.Errorf("unexpected endpoint: %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)

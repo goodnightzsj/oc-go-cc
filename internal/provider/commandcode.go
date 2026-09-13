@@ -45,7 +45,7 @@ func (p *CommandCodeProvider) Execute(ctx context.Context, req *types.MessageReq
 	if err != nil {
 		return nil, err
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 	raw, err := io.ReadAll(body)
 	if err != nil {
 		return nil, fmt.Errorf("read commandcode response: %w", err)
@@ -124,7 +124,7 @@ func (p *CommandCodeProvider) request(ctx context.Context, req *types.MessageReq
 		return nil, fmt.Errorf("commandcode request failed: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		if err != nil {
 			return nil, fmt.Errorf("read commandcode error (HTTP %d): %w", resp.StatusCode, err)

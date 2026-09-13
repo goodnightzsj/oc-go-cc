@@ -809,7 +809,7 @@ func (h *StreamHandler) ProxyResponsesStream(
 	}
 
 	if !state.terminal {
-		return fmt.Errorf("Responses stream has no terminal event: %w", io.ErrUnexpectedEOF)
+		return fmt.Errorf("responses stream has no terminal event: %w", io.ErrUnexpectedEOF)
 	}
 	if err := state.closeText(w); err != nil {
 		return err
@@ -935,7 +935,7 @@ func (h *StreamHandler) processResponsesSSELine(
 			item = &chunk.Output[0]
 		}
 		if item == nil {
-			return fmt.Errorf("Responses output item is missing")
+			return fmt.Errorf("responses output item is missing")
 		}
 		if item.Type == "message" && chunk.Type == "response.output_item.done" {
 			return state.closeText(w)
@@ -960,7 +960,7 @@ func (h *StreamHandler) processResponsesSSELine(
 		}
 		if item.Arguments != "" && item.Arguments != tool.arguments {
 			if tool.closed || !bytes.HasPrefix([]byte(item.Arguments), []byte(tool.arguments)) {
-				return fmt.Errorf("Responses function arguments changed after streaming")
+				return fmt.Errorf("responses function arguments changed after streaming")
 			}
 			if err := tool.appendArguments(w, item.Arguments[len(tool.arguments):]); err != nil {
 				return err
@@ -980,7 +980,7 @@ func (h *StreamHandler) processResponsesSSELine(
 	if chunk.Type == "response.function_call_arguments.delta" {
 		tool := state.tools[chunk.ItemID]
 		if tool == nil || tool.closed {
-			return fmt.Errorf("Responses arguments reference an unopened function")
+			return fmt.Errorf("responses arguments reference an unopened function")
 		}
 		if err := tool.appendArguments(w, chunk.Delta); err != nil {
 			return err

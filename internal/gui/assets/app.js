@@ -184,6 +184,12 @@ const TRANSLATIONS = {
     'commandcode.cancelAtEnd': 'Cancels at period end',
     'commandcode.usageSummary': 'Official usage summary',
     'commandcode.usageCredits': 'Usage credits consumed',
+    'commandcode.officialCost': 'Official cost',
+    'commandcode.ledger': 'Recorded by this instance',
+    'commandcode.ledgerRequests': 'Requests recorded here',
+    'commandcode.ledgerCost': 'Cost recorded here',
+    'commandcode.ledgerGap': 'Not seen by this proxy',
+    'commandcode.ledgerHint': 'The official figures cover every request on the account; this instance only records the traffic that passed through it. A gap here is traffic that reached the platform directly.',
     'commandcode.usagePeriod': 'Usage scope',
     'commandcode.billingPeriodScope': 'Current billing period',
     'commandcode.usage': 'Official usage',
@@ -629,6 +635,12 @@ const TRANSLATIONS = {
     'commandcode.cancelAtEnd': '周期结束时取消',
     'commandcode.usageSummary': '官方用量汇总',
     'commandcode.usageCredits': '已消耗用量点数',
+    'commandcode.officialCost': '官方费用',
+    'commandcode.ledger': '本实例记录',
+    'commandcode.ledgerRequests': '本实例记录的请求数',
+    'commandcode.ledgerCost': '本实例记录的费用',
+    'commandcode.ledgerGap': '未经本代理',
+    'commandcode.ledgerHint': '官方口径覆盖该账户的全部请求；本实例只记录经过它的流量。这里出现差额，说明有请求直连了平台。',
     'commandcode.usagePeriod': '用量范围',
     'commandcode.billingPeriodScope': '当前账单周期',
     'commandcode.usage': '官方用量',
@@ -4713,8 +4725,19 @@ const QuotaModule = {
       ['analytics.requests', fmt(usage.totalCount)], ['metric.success', fmt(usage.completedCount)], ['metric.failed', fmt(usage.failedCount)],
       ['analytics.inputTokens', fmt(usage.totalTokensIn)], ['analytics.outputTokens', fmt(usage.totalTokensOut)],
       ['analytics.totalTokens', fmt(usage.totalTokens)], ['commandcode.usageCredits', fmtCost(usage.totalCredits)],
+      ['commandcode.officialCost', fmtCost(usage.totalCost)],
     ]) : `<p class="page-meta">${t('detail.unavailable')}</p>`;
-    return `<section class="quota-account commandcode-account">${head}<div class="commandcode-panels">${section('commandcode.credits', credits, 'commandcode-credits')}${section('quota.plan', subscription)}${section('commandcode.usageSummary', summary)}</div></section>`;
+    // The account's count and this instance's count describe different things,
+    // so they are shown as two blocks with their difference named rather than
+    // merged into one number.
+    const ledger = data.ledger ? figures([
+      ['commandcode.ledgerRequests', fmt(data.ledger.requests)],
+      ['commandcode.ledgerCost', fmtCost(data.ledger.cost_usd)],
+      ...(usage && usage.totalCount != null
+        ? [['commandcode.ledgerGap', `${fmt(Math.max(0, usage.totalCount - data.ledger.requests))} · ${t('commandcode.ledgerHint')}`]]
+        : []),
+    ]) : '';
+    return `<section class="quota-account commandcode-account">${head}<div class="commandcode-panels">${section('commandcode.credits', credits, 'commandcode-credits')}${section('quota.plan', subscription)}${section('commandcode.usageSummary', summary)}${ledger ? section('commandcode.ledger', ledger, 'commandcode-ledger') : ''}</div></section>`;
   },
 
   renderAccount(account) {

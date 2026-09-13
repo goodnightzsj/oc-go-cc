@@ -370,6 +370,18 @@ var providerKeySource = map[string]struct {
 	site.CommandCode: {func(c *Config) []string { return c.CommandCode.EffectiveAPIKeys() }, false},
 }
 
+// ProviderModelEndpoint is the configured API endpoint a platform's model list
+// is derived from. Empty means this platform has no model-list endpoint of its
+// own, so its models come from the shared catalog instead.
+func (c *Config) ProviderModelEndpoint(provider string) string {
+	switch site.Normalize(provider) {
+	case site.CommandCode:
+		return c.CommandCode.BaseURL
+	default:
+		return ""
+	}
+}
+
 // ProviderAPIKeys is the credential source shared by sending and fallback logic.
 // A platform with no key of its own falls back to the global key only when the
 // binding above allows it; unknown providers must never receive another

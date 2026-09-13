@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/routatic/proxy/internal/catalog"
+	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/site"
 	"github.com/routatic/proxy/internal/storage"
@@ -589,4 +590,45 @@ func (r *ModelRouter) RouteForStreaming(messages []MessageContent, tokenCount in
 
 func isVisionScenario(s Scenario) bool {
 	return s == ScenarioVision || s == ScenarioVisionComplex || s == ScenarioVisionLongContext
+}
+
+// ActiveSite is the platform routing is restricted to, or "" when the config
+// does not restrict it. An unrestricted config behaves exactly as it did before
+// this field existed: every configured target stays a candidate.
+func (r *ModelRouter) ActiveSite() string {
+	return r.atomic.Get().ActiveSite
+}
+
+// PublishedByActiveSite returns the active site and true when that site
+// publishes this model id. The active site is the authority for its own model
+// names, so a client that picked a model from the listing gets exactly that
+// model - it does not get re-mapped by a configured alias.
+func (r *ModelRouter) PublishedByActiveSite(ctx context.Context, modelID string) (string, bool) {
+	active := r.ActiveSite()
+	if active == "" || strings.TrimSpace(modelID) == "" {
+		return "", false
+	}
+	for _, m := range r.siteModels(ctx) {
+		if m.Provider == active && m.ID == modelID {
+			return m.ID, true
+		}
+	}
+	return "", false
+}
+
+// RestrictToActiveSite keeps only the targets belonging to the active site. The
+// active site is a scope rather than an override: it decides which configured
+// targets may be used, and the caller reports an empty result as an error naming
+// the site instead of quietly routing somewhere the operator did not choose.
+func RestrictToActiveSite(active string, chain []config.ModelConfig) []config.ModelConfig {
+	if active == "" {
+		return chain
+	}
+	out := make([]config.ModelConfig, 0, len(chain))
+	for _, target := range chain {
+		if client.Provider(target) == active {
+			out = append(out, target)
+		}
+	}
+	return out
 }

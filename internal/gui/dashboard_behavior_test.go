@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+
+	"github.com/routatic/proxy/internal/site"
 )
 
 // Run the shipped script with synthetic DOM/network collaborators. No browser,
@@ -23,7 +25,11 @@ func TestDashboardPlatformDataBehavior(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload, err := json.Marshal(map[string]string{"app": string(app), "page": string(page)})
+	visible := make([]string, 0)
+	for _, d := range site.Visible() {
+		visible = append(visible, d.ID)
+	}
+	payload, err := json.Marshal(map[string]any{"app": string(app), "page": string(page), "visible": visible})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +62,7 @@ function node(id) {
   return nodes.get(id);
 }
 const context = vm.createContext({
-  assert, page: input.page,
+  assert, page: input.page, visiblePlatforms: input.visible,
   document: {
     getElementById: node, querySelectorAll(){return []}, querySelector(){return null},
     addEventListener(){}, documentElement: {}, createElement(){return {}},
@@ -81,7 +87,7 @@ vm.runInContext(` + "`" + `
   assert.ok(page.includes('id="quota-links"'), 'official platform links need a shared rendering target');
   assert.ok(page.includes('https://api.commandcode.ai/provider/v1/chat/completions'));
   assert.ok(page.includes('https://api.commandcode.ai/provider/v1/messages'));
-  for (const provider of ['opencode-go', 'opencode-zen', 'aws-bedrock', 'openrouter', 'commandcode']) {
+  for (const provider of visiblePlatforms) {
     assert.ok(page.includes('value="' + provider + '"'), 'missing provider choice: ' + provider);
   }
   assert.ok(document.getElementById('provider-filter').listeners.change?.includes(scheduleHistoryRefresh), 'the themed platform picker must refresh history on change');

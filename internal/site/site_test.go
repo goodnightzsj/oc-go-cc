@@ -72,3 +72,36 @@ func TestLookupAndOrderSortUnknownLast(t *testing.T) {
 		t.Fatalf("legacy spelling did not resolve: %+v %v", d, ok)
 	}
 }
+
+func TestDescriptorNamesArePresentAndUnique(t *testing.T) {
+	seen := make(map[string]string, len(registry))
+	for _, d := range registry {
+		if d.DisplayName == "" {
+			t.Errorf("%s has no display name, so the dashboard would fall back to the raw id", d.ID)
+		}
+		if other, dup := seen[d.DisplayName]; dup {
+			t.Errorf("%s and %s share the display name %q", other, d.ID, d.DisplayName)
+		}
+		seen[d.DisplayName] = d.ID
+	}
+}
+
+// Hiding a platform only changes what the dashboard offers. Everything else
+// must keep working, or a config that still names the platform would stop
+// validating and its stored records would lose their label.
+func TestHidingAPlatformKeepsItAddressable(t *testing.T) {
+	for _, d := range Hidden() {
+		if got, ok := Lookup(d.ID); !ok || got.ID != d.ID {
+			t.Errorf("hidden platform %s no longer resolves: %+v %v", d.ID, got, ok)
+		}
+		if !IsKnown(d.ID) {
+			t.Errorf("hidden platform %s is no longer accepted in config", d.ID)
+		}
+	}
+	if len(Visible())+len(Hidden()) != len(All()) {
+		t.Fatal("Visible and Hidden do not partition the registry")
+	}
+	if len(Visible()) == 0 {
+		t.Fatal("no platform is visible, so the dashboard would offer none")
+	}
+}

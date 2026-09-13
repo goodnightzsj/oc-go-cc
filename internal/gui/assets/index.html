@@ -64,7 +64,7 @@
         <label for="overview-provider" data-i18n="filter.provider">Provider</label>
         <select class="filter-select" id="overview-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
           <option value="" data-i18n-option="filter.allProviders">All platforms</option>
-          <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option>
+          <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option>
         </select>
         <div class="metric-segment range-segment" id="overview-range" role="group" aria-label="Dashboard range">
           <button type="button" data-days="7" class="active" data-i18n="analytics.last7d">Last 7 days</button>
@@ -167,7 +167,7 @@
         </div>
         <select class="filter-select" id="provider-filter" aria-label="Provider" data-i18n-aria-label="filter.provider">
           <option value="" data-i18n-option="filter.allProviders">All platforms</option>
-          <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option>
+          <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option>
         </select>
         <select class="filter-select" id="status-filter" aria-label="Filter by status">
           <option value="" data-i18n-option="filter.allStatuses">All statuses</option>
@@ -362,7 +362,7 @@
       <label for="perf-provider" data-i18n="filter.provider">Provider</label>
       <select class="filter-select" id="perf-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
         <option value="" data-i18n-option="filter.allProviders">All platforms</option>
-        <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option>
+        <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option>
       </select>
       <select class="filter-select" id="perf-time-range" aria-label="Time range filter">
         <option value="1h" data-i18n="perf.lastHour">Last Hour</option>
@@ -448,7 +448,7 @@
           <label for="analytics-provider" data-i18n="filter.provider">Provider</label>
           <select class="filter-select" id="analytics-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
             <option value="" data-i18n-option="filter.allProviders">All platforms</option>
-            <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option>
+            <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option>
           </select>
           <button class="btn btn-small" id="btn-refresh-analytics" data-i18n="analytics.refresh">Refresh</button>
         </div>
@@ -557,7 +557,7 @@
         <div class="page-toolbar analytics-controls">
           <label class="sr-only" for="quota-provider" data-i18n="filter.provider">Provider</label>
           <select class="filter-select" id="quota-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
-            <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option>
+            <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option>
           </select>
           <button type="button" class="btn btn-small" id="quota-open-settings" data-i18n="quota.openSettings">Platform settings</button>
           <button class="btn btn-small btn-icon" id="btn-refresh-quota"><svg width="14" height="14"><use href="#icon-refresh"/></svg><span class="sr-only" data-i18n="quota.refresh">Refresh</span></button>
@@ -729,7 +729,7 @@
 
     <div class="settings-config-heading"><h2 class="section-heading" data-i18n="section.proxyConfig">Proxy Configuration</h2>
       <label class="sr-only" for="settings-provider-jump" data-i18n="setting.platformJump">Jump to platform</label>
-      <select id="settings-provider-jump" class="filter-select"><option value="" data-i18n-option="setting.platformJump">Jump to platform</option><option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option><option value="opencode-zen">OpenCode Zen</option><option value="aws-bedrock">AWS Bedrock</option><option value="openrouter">OpenRouter</option></select>
+      <select id="settings-provider-jump" class="filter-select"><option value="" data-i18n-option="setting.platformJump">Jump to platform</option><option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option></select>
     </div>
     <div class="settings-config">
       <p class="page-meta" id="provider-timeout-hint" data-i18n="label.timeoutHint">0 uses the provider default. Idle timeout limits gaps between streamed data; attempt timeout limits the entire streaming request.</p>
@@ -817,152 +817,8 @@
         </div>
       </details>
 
-      <details class="config-section" data-settings-provider="opencode-zen">
-        <summary><span class="provider-mark" aria-hidden="true">Ze</span><span class="provider-name">OpenCode Zen</span><span class="provider-capability">Chat · Messages · Responses · Gemini</span></summary>
-        <div class="config-fields">
-        <div class="mb-2">
-          <label for="cfg-zen-base-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Base URL</label>
-          <input type="text" id="cfg-zen-base-url" placeholder="https://opencode.ai/zen/v1/chat/completions" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-zen-anthropic-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Anthropic Base URL</label>
-          <input type="text" id="cfg-zen-anthropic-url" placeholder="https://opencode.ai/zen/v1/messages" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-zen-responses-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Responses Base URL</label>
-          <input type="text" id="cfg-zen-responses-url" placeholder="https://opencode.ai/zen/v1/responses" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-zen-gemini-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Gemini Base URL</label>
-          <input type="text" id="cfg-zen-gemini-url" placeholder="https://opencode.ai/zen/v1/models" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-zen-api-key" class="block text-[11px] font-medium text-[#98989d] mb-0.5">API Key</label>
-          <div class="input-with-btn flex gap-1 w-full">
-            <input type="password" id="cfg-zen-api-key" placeholder="Use env var or leave empty" class="flex-1 px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-            <button type="button" class="btn-show-hide" onclick="togglePasswordVisibility('cfg-zen-api-key')" aria-label="Toggle password visibility">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                <circle cx="12" cy="12" r="3"></circle>
-              </svg>
-            </button>
-          </div>
-        </div>
-        <div class="mb-2">
-          <label for="cfg-zen-api-keys" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.apiKeys">API keys (comma-separated, takes precedence over the single key)</label>
-          <input type="password" id="cfg-zen-api-keys" autocomplete="new-password" aria-describedby="api-keys-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="flex gap-2.5">
-          <div class="flex-1 mb-2">
-            <label for="cfg-zen-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.requestTimeout">Request timeout (ms)</label>
-            <input type="number" id="cfg-zen-timeout" placeholder="300000" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-          </div>
-          <div class="flex-1 mb-2">
-            <label for="cfg-zen-stream-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamIdleTimeout">Stream idle timeout (ms)</label>
-            <input type="number" id="cfg-zen-stream-timeout" placeholder="" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-          </div>
-        </div>
-        <div class="mb-2">
-          <label for="cfg-zen-streaming-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamingTimeout">Streaming attempt timeout (ms)</label>
-          <input type="number" id="cfg-zen-streaming-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        </div>
-      </details>
 
-      <details class="config-section" data-settings-provider="aws-bedrock">
-        <summary><span class="provider-mark" aria-hidden="true">Aw</span><span class="provider-name">AWS Bedrock</span><span class="provider-capability" data-i18n="setting.bedrockHint">Inference &amp; billing identity</span></summary>
-        <div class="config-fields">
-        <div class="mb-2">
-          <label for="cfg-bedrock-base-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Base URL</label>
-          <input type="text" id="cfg-bedrock-base-url" placeholder="" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-bedrock-anthropic-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Anthropic Base URL</label>
-          <input type="text" id="cfg-bedrock-anthropic-url" placeholder="" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-bedrock-api-key" class="block text-[11px] font-medium text-[#98989d] mb-0.5">API Key</label>
-          <div class="input-with-btn flex gap-1 w-full">
-            <input type="password" id="cfg-bedrock-api-key" placeholder="Use env var or leave empty" class="flex-1 px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-            <button type="button" class="btn-show-hide" onclick="togglePasswordVisibility('cfg-bedrock-api-key')" aria-label="Toggle password visibility">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                <circle cx="12" cy="12" r="3"></circle>
-              </svg>
-            </button>
-          </div>
-        </div>
-        <div class="mb-2">
-          <label for="cfg-bedrock-project-id" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Project ID</label>
-          <input type="text" id="cfg-bedrock-project-id" placeholder="" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-bedrock-api-keys" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.apiKeys">API keys (comma-separated, takes precedence over the single key)</label>
-          <input type="password" id="cfg-bedrock-api-keys" autocomplete="new-password" aria-describedby="api-keys-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="flex gap-2.5">
-          <div class="flex-1 mb-2">
-            <label for="cfg-bedrock-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.requestTimeout">Request timeout (ms)</label>
-            <input type="number" id="cfg-bedrock-timeout" placeholder="300000" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-          </div>
-          <div class="flex-1 mb-2">
-            <label for="cfg-bedrock-stream-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamIdleTimeout">Stream idle timeout (ms)</label>
-            <input type="number" id="cfg-bedrock-stream-timeout" placeholder="" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-          </div>
-        </div>
-        <div class="mb-2">
-          <label for="cfg-bedrock-streaming-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamingTimeout">Streaming attempt timeout (ms)</label>
-          <input type="number" id="cfg-bedrock-streaming-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-bedrock-billing-enabled"><input type="checkbox" id="cfg-bedrock-billing-enabled" aria-describedby="bedrock-billing-config-hint"> <span data-i18n="aws.billingEnable">Enable manual AWS billing queries (paid)</span></label>
-        </div>
-        <p class="page-meta" id="bedrock-billing-config-hint" data-i18n="aws.billingConfigHint">Account ID is required when enabled. The service uses standard AWS SDK credentials or the selected profile, never a Bedrock inference key. IAM must allow ce:GetDimensionValues and ce:GetCostAndUsage.</p>
-        <div class="mb-2">
-          <label for="cfg-bedrock-billing-profile" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="aws.billingProfile">AWS SDK profile (optional)</label>
-          <input type="text" id="cfg-bedrock-billing-profile" aria-describedby="bedrock-billing-config-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-bedrock-billing-account" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="aws.billingAccount">Billing account ID</label>
-          <input type="text" id="cfg-bedrock-billing-account" inputmode="numeric" pattern="[0-9]{12}" maxlength="12" aria-describedby="bedrock-billing-config-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        </div>
-      </details>
 
-      <details class="config-section" data-settings-provider="openrouter">
-        <summary><span class="provider-mark" aria-hidden="true">Or</span><span class="provider-name">OpenRouter</span><span class="provider-capability" data-i18n="setting.openrouterHint">Inference &amp; account credits</span></summary>
-        <div class="config-fields">
-        <div class="mb-2">
-          <label for="cfg-openrouter-base-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5">Base URL</label>
-          <input type="text" id="cfg-openrouter-base-url" placeholder="https://openrouter.ai/api/v1/chat/completions" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-openrouter-api-key" class="block text-[11px] font-medium text-[#98989d] mb-0.5">API Key</label>
-          <input type="password" id="cfg-openrouter-api-key" placeholder="" autocomplete="new-password" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-openrouter-api-keys" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.apiKeys">API keys (comma-separated, takes precedence over the single key)</label>
-          <input type="password" id="cfg-openrouter-api-keys" autocomplete="new-password" aria-describedby="api-keys-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-openrouter-management-key" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="openrouter.managementKey">Management API key (optional)</label>
-          <input type="password" id="cfg-openrouter-management-key" autocomplete="new-password" aria-describedby="openrouter-management-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-          <p class="page-meta" id="openrouter-management-hint" data-i18n="openrouter.managementHint">Optional management key used only to query account balance, never for inference.</p>
-        </div>
-        <div class="mb-2">
-          <label for="cfg-openrouter-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.requestTimeout">Request timeout (ms)</label>
-          <input type="number" id="cfg-openrouter-timeout" placeholder="300000" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-openrouter-stream-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamIdleTimeout">Stream idle timeout (ms)</label>
-          <input type="number" id="cfg-openrouter-stream-timeout" placeholder="" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        <div class="mb-2">
-          <label for="cfg-openrouter-streaming-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamingTimeout">Streaming attempt timeout (ms)</label>
-          <input type="number" id="cfg-openrouter-streaming-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
-        </div>
-        </div>
-      </details>
 
       <details class="config-section">
         <summary data-i18n="setting.server">Server</summary>

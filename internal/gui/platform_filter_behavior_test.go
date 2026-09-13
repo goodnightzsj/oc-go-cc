@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+
+	"github.com/routatic/proxy/internal/site"
 )
 
 // Execute the shipped filters with a synthetic DOM and network, isolated from
@@ -32,7 +34,17 @@ func runPlatformBehavior(t *testing.T, script string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload, err := json.Marshal(map[string]string{"app": string(app), "page": string(page)})
+	// The expected platform lists come from the registry, so a hidden or renamed
+	// platform cannot leave these scripts asserting the wrong thing.
+	visible := make([]string, 0)
+	for _, d := range site.Visible() {
+		visible = append(visible, d.ID)
+	}
+	all := make([]string, 0)
+	for _, d := range site.All() {
+		all = append(all, d.ID)
+	}
+	payload, err := json.Marshal(map[string]any{"app": string(app), "page": string(page), "visible": visible, "all": all})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,6 +75,9 @@ function node(id) {
 }
 const context = vm.createContext({
   assert, page:input.page, URL, URLSearchParams,
+  // checks() is stringified into the vm, so the registry lists have to be
+  // context globals rather than outer-scope values.
+  visiblePlatforms:input.visible, allPlatforms:input.all,
   document: {getElementById:node,querySelectorAll(){return []},querySelector(){return null},addEventListener(){},documentElement:{},createElement(){return {}}},
   window: {addEventListener(){}}, localStorage:{getItem(){return null}},
   location:{hash:''}, setTimeout(){},clearTimeout(){},setInterval(){},queueMicrotask(){},
@@ -74,12 +89,12 @@ const context = vm.createContext({
 const platformFilterBehaviorScript = platformBehaviorDOMScript + `
 async function checks() {
   const get = id => document.getElementById(id);
-  const providers = ['opencode-go','opencode-zen','aws-bedrock','openrouter','commandcode'];
+  const providers = allPlatforms;
   for (const id of ['overview-provider','perf-provider','analytics-provider','provider-filter']) {
     const select = page.match(new RegExp('<select[^>]*id="' + id + '"[^>]*>([\\s\\S]*?)</select>'));
     assert.ok(select, 'missing platform filter: ' + id);
     const choices = [...select[1].matchAll(/value="([^"]*)"/g)].map(match => match[1]);
-    assert.equal(JSON.stringify(choices), JSON.stringify(['', 'opencode-go','commandcode','opencode-zen','aws-bedrock','openrouter']), 'all five choices plus reset: ' + id);
+    assert.equal(JSON.stringify(choices), JSON.stringify(['', ...visiblePlatforms]), 'every offered platform plus reset: ' + id);
     assert.ok(get(id).listeners.change?.length, 'filter must actually refresh: ' + id);
   }
   for (const id of ['overview-error','perf-error','analytics-error']) {

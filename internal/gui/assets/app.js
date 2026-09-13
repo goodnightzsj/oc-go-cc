@@ -2241,20 +2241,42 @@ function markPollFail() {
 }
 
 /* ── Helpers ───────────────────────────────────────────────────── */
-const PROVIDERS = {
-  'opencode-go': {name: 'OpenCode Go', color: '#818cf8'},
-  'commandcode': {name: 'CommandCode', color: '#22d3ee'},
+// Platform identity lives in Go (internal/site): which platforms exist, what
+// they are called, their order and their visibility. This map holds only what
+// the dashboard adds on top - a colour, and the labels the selectors offer.
+// site_parity_test.go fails if the two lists drift, so hiding a platform is a
+// registry change plus this map, not two independently editable lists.
+//
+// HIDDEN_PLATFORMS keeps the labels for platforms the dashboard no longer
+// offers: history and analytics rows recorded under them must still render a
+// name instead of a raw id.
+const HIDDEN_PLATFORMS = {
   'opencode-zen': {name: 'OpenCode Zen', color: '#34d399'},
   'aws-bedrock': {name: 'AWS Bedrock', color: '#fbbf24'},
   'openrouter': {name: 'OpenRouter', color: '#fb7185'},
 };
 
+const PROVIDERS = {
+  'opencode-go': {name: 'OpenCode Go', color: '#818cf8'},
+  'commandcode': {name: 'CommandCode', color: '#22d3ee'},
+};
+
+function providerInfo(provider) {
+  const id = String(provider || '').replace(/_/g, '-');
+  return PROVIDERS[id] || HIDDEN_PLATFORMS[id] || null;
+}
+
+// Every platform in presentation order, hidden ones included, mirroring
+// site.Order. A row recorded under a platform the dashboard no longer offers
+// must still sort where the registry puts it rather than after every unknown
+// name.
+const PROVIDER_ORDER = [...Object.keys(PROVIDERS), ...Object.keys(HIDDEN_PLATFORMS)];
+
 // Display only: configured routing and fallback chains keep their own order.
 function compareProviderDisplay(a, b) {
-  const providers = Object.keys(PROVIDERS);
   const rank = provider => {
-    const index = providers.indexOf(String(provider || '').replace(/_/g, '-'));
-    return index < 0 ? providers.length : index;
+    const index = PROVIDER_ORDER.indexOf(String(provider || '').replace(/_/g, '-'));
+    return index < 0 ? PROVIDER_ORDER.length : index;
   };
   return rank(a) - rank(b) || String(a || '').localeCompare(String(b || ''));
 }
@@ -2266,11 +2288,13 @@ async function fetchJSON(url, options) {
 }
 
 function providerColor(provider) {
-  return PROVIDERS[String(provider || '').replace(/_/g, '-')]?.color || '#98989d';
+  return providerInfo(provider)?.color || '#98989d';
 }
 
 function providerLabel(provider) {
-  return PROVIDERS[String(provider || '').replace(/_/g, '-')]?.name || provider || t('detail.unknown');
+  // A hidden platform still has a name, so rows recorded under it keep
+  // rendering one instead of falling back to the raw id.
+  return providerInfo(provider)?.name || provider || t('detail.unknown');
 }
 
 function emptyStateContent(titleKey, hintKey) {
@@ -2531,6 +2555,10 @@ let currentProxyConfig = null;
 
 // Map of config field paths to element IDs for loading and saving.
 // Each entry: [jsonPath, elementId, type, transform]
+// Only the platforms the dashboard offers are bindable. Their inputs exist in
+// index.html; a hidden platform has none, so a binding here would name an
+// element that is not on the page. site_parity_test.go holds this to the
+// registry.
 const CONFIG_FIELDS = [
   // Server
   ['host', 'cfg-host', 'string'],
@@ -2548,39 +2576,6 @@ const CONFIG_FIELDS = [
   ['opencode_go.timeout_ms', 'cfg-go-timeout', 'int'],
   ['opencode_go.stream_timeout_ms', 'cfg-go-stream-timeout', 'int'],
   ['opencode_go.streaming_timeout_ms', 'cfg-go-streaming-timeout', 'int'],
-
-  // OpenCode Zen
-  ['opencode_zen.base_url', 'cfg-zen-base-url', 'string'],
-  ['opencode_zen.anthropic_base_url', 'cfg-zen-anthropic-url', 'string'],
-  ['opencode_zen.responses_base_url', 'cfg-zen-responses-url', 'string'],
-  ['opencode_zen.gemini_base_url', 'cfg-zen-gemini-url', 'string'],
-  ['opencode_zen.api_key', 'cfg-zen-api-key', 'string'],
-  ['opencode_zen.api_keys', 'cfg-zen-api-keys', 'keys'],
-  ['opencode_zen.timeout_ms', 'cfg-zen-timeout', 'int'],
-  ['opencode_zen.stream_timeout_ms', 'cfg-zen-stream-timeout', 'int'],
-  ['opencode_zen.streaming_timeout_ms', 'cfg-zen-streaming-timeout', 'int'],
-
-  // AWS Bedrock
-  ['aws_bedrock.base_url', 'cfg-bedrock-base-url', 'string'],
-  ['aws_bedrock.anthropic_base_url', 'cfg-bedrock-anthropic-url', 'string'],
-  ['aws_bedrock.api_key', 'cfg-bedrock-api-key', 'string'],
-  ['aws_bedrock.api_keys', 'cfg-bedrock-api-keys', 'keys'],
-  ['aws_bedrock.project_id', 'cfg-bedrock-project-id', 'string'],
-  ['aws_bedrock.timeout_ms', 'cfg-bedrock-timeout', 'int'],
-  ['aws_bedrock.stream_timeout_ms', 'cfg-bedrock-stream-timeout', 'int'],
-  ['aws_bedrock.streaming_timeout_ms', 'cfg-bedrock-streaming-timeout', 'int'],
-  ['aws_bedrock.billing.enabled', 'cfg-bedrock-billing-enabled', 'bool'],
-  ['aws_bedrock.billing.profile', 'cfg-bedrock-billing-profile', 'string'],
-  ['aws_bedrock.billing.linked_account_id', 'cfg-bedrock-billing-account', 'string'],
-
-  // OpenRouter
-  ['openrouter.base_url', 'cfg-openrouter-base-url', 'string'],
-  ['openrouter.api_key', 'cfg-openrouter-api-key', 'string'],
-  ['openrouter.api_keys', 'cfg-openrouter-api-keys', 'keys'],
-  ['openrouter.management_api_key', 'cfg-openrouter-management-key', 'string'],
-  ['openrouter.timeout_ms', 'cfg-openrouter-timeout', 'int'],
-  ['openrouter.stream_timeout_ms', 'cfg-openrouter-stream-timeout', 'int'],
-  ['openrouter.streaming_timeout_ms', 'cfg-openrouter-streaming-timeout', 'int'],
 
   // CommandCode uses independent credentials and complete native API URLs.
   ['commandcode.base_url', 'cfg-commandcode-base-url', 'string'],

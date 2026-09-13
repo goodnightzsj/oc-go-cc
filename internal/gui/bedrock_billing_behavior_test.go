@@ -89,11 +89,15 @@ async function checks() {
     return {ok:true,json:async()=>config};
   };
   await loadProxyConfig();
-  get('cfg-bedrock-billing-enabled').checked=true;
-  get('cfg-bedrock-billing-profile').value='billing-readonly';
-  get('cfg-bedrock-billing-account').value='123456789012';
   await saveProxyConfig();
-  assert.equal(JSON.stringify(saved),'{"aws_bedrock":{"billing":{"enabled":true,"profile":"billing-readonly","linked_account_id":"123456789012"}}}','billing save must preserve all inference settings');
-  assert.equal(readFieldValue(CONFIG_FIELDS.find(field=>field[0] === 'aws_bedrock.billing.enabled')),undefined);
+  // AWS Bedrock is no longer offered by the dashboard, so it has no form
+  // fields. The save path builds a patch from the fields it knows, and leaving
+  // the platform out of the patch is what preserves the operator's existing AWS
+  // settings: the backend merges the patch onto the config on disk rather than
+  // replacing the file.
+  assert.equal(saved, undefined, 'a platform the dashboard does not offer must not be rewritten: ' + JSON.stringify(saved));
+  for (const prefix of ['aws_bedrock.', 'opencode_zen.', 'openrouter.']) {
+    assert.ok(!CONFIG_FIELDS.some(field => field[0].startsWith(prefix)), 'hidden platform still bound to a form field: ' + prefix);
+  }
 }
 ` + platformBehaviorRunScript

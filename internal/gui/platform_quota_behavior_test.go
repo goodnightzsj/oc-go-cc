@@ -9,7 +9,8 @@ func TestPlatformQuotaBehavior(t *testing.T) {
 const platformQuotaBehaviorScript = platformBehaviorDOMScript + `
 async function checks() {
   const get = id => document.getElementById(id);
-  const providers = ['opencode-go','opencode-zen','aws-bedrock','openrouter','commandcode'];
+  // Only the platforms the dashboard offers can be selected at all.
+  const providers = visiblePlatforms;
   const selectProvider = provider => {get('quota-provider').value=provider; return get('quota-provider').emit('change')};
   const local = provider => ({provider,summary:{total_requests:3,known_requests:2,input_tokens:10,output_tokens:4,cache_read_tokens:2,cache_creation_tokens:1,est_cost_usd:0.25,unknown_cost_requests:1},models:[{provider,model:'shared',requests:3,input_tokens:10,output_tokens:4,cache_read_tokens:2,cache_creation_tokens:1,est_cost_usd:0.25,unknown_cost_requests:1}]});
   const go = {provider:'opencode-go',status:'available',source:'upstream_api',currency:'USD',accounts:[{key_hint:'masked-GO01',report:{plan:'go',weekly:{has_percent:true,used_percent:25,used_dollars:7.5,limit_dollars:30,resets_at:'2030-01-01T00:00:00Z'},fetched_at:'2026-09-10T00:00:00Z'}}],model_limits:{models:[{model:'shared',allowance_usd:60}]},model_usage:[{model:'shared',used_usd:0.25,allowance_usd:60,percent:0.25/60*100,requests:3,unknown_cost_requests:0}],links:[{kind:'docs',url:'https://synthetic.invalid/go/docs'}],fetched_at:'2026-09-10T00:00:00Z'};
@@ -20,7 +21,11 @@ async function checks() {
   const response = raw => {
     const url = new URL(raw,'http://synthetic.invalid');
     const provider = url.searchParams.get('provider');
-    if (!providers.includes(provider)) throw new Error('missing/incorrect provider scope: ' + raw);
+    // The backend and the quota rendering still support every platform; only
+    // the selector is limited to the ones the dashboard offers. The stub
+    // therefore accepts the full set, and the assertions below drive the
+    // hidden platforms' views directly rather than through the selector.
+    if (!allPlatforms.includes(provider)) throw new Error('missing/incorrect provider scope: ' + raw);
     if (url.pathname === '/api/analytics/summary') return {ok:true,json:async()=>local(provider)};
     if (url.pathname !== '/api/quota') throw new Error('unexpected synthetic URL: ' + raw);
     return {ok:true,json:async()=>provider === 'opencode-go' ? go : provider === 'openrouter' ? openrouter : unavailable(provider)};
@@ -29,10 +34,11 @@ async function checks() {
   fetch = normalFetch;
 
   const quotaSelect = page.match(/<select[^>]*id="quota-provider"[^>]*>([\s\S]*?)<\/select>/);
-  assert.equal(JSON.stringify([...quotaSelect[1].matchAll(/value="([^"]*)"/g)].map(match=>match[1])),JSON.stringify(['opencode-go','commandcode','opencode-zen','aws-bedrock','openrouter']));
+  assert.equal(JSON.stringify([...quotaSelect[1].matchAll(/value="([^"]*)"/g)].map(match=>match[1])),JSON.stringify(visiblePlatforms));
   assert.ok(page.includes('id="quota-local-error" hidden role="alert"'));
-  assert.ok(page.includes('type="password" id="cfg-openrouter-management-key"'));
-  assert.ok(CONFIG_FIELDS.some(field=>field[0] === 'openrouter.management_api_key' && field[1] === 'cfg-openrouter-management-key'));
+  // OpenRouter is not offered by the dashboard any more, so its settings form
+  // is gone; its quota support is still covered by the Go-side tests.
+  assert.ok(!page.includes('id="cfg-openrouter-management-key"'), 'hidden platform still has a settings field');
   for (const provider of providers) {
     calls = [];
     await selectProvider(provider);
@@ -41,10 +47,12 @@ async function checks() {
     assert.equal(calls.find(url=>url.pathname === '/api/quota').searchParams.get('refresh'),'1');
     assert.equal(calls.find(url=>url.pathname === '/api/analytics/summary').searchParams.get('days'),'30');
     assert.equal(get('quota-go').hidden,provider !== 'opencode-go');
-    assert.equal(get('quota-openrouter').hidden,provider !== 'openrouter');
-    assert.equal(get('quota-bedrock').hidden,provider !== 'aws-bedrock');
     assert.equal(get('quota-commandcode').hidden,provider !== 'commandcode');
-    assert.equal(get('quota-unavailable').hidden,provider !== 'opencode-zen');
+    // A platform the dashboard no longer offers keeps its quota view in the
+    // markup, but nothing can select it any more.
+    for (const hidden of ['quota-openrouter','quota-bedrock','quota-unavailable']) {
+      assert.equal(get(hidden).hidden,true,'a hidden platform must not show its quota view: ' + hidden);
+    }
     assert.equal(calls.find(url=>url.pathname === '/api/quota').searchParams.has('billing_refresh'),false,'changing provider never initiates a paid query');
     assert.equal(get('quota-local-requests').textContent,'3');
     assert.equal(get('quota-local-tokens').textContent,'17');
@@ -88,6 +96,8 @@ async function checks() {
     assert.equal(calls[0].searchParams.get('provider'),'commandcode');
   }
 
+  // OpenRouter keeps its quota logic and rendering even though the dashboard no
+  // longer offers it, so its view is exercised directly.
   await selectProvider('openrouter');
   let accountHTML = get('quota-openrouter-accounts').innerHTML;
   assert.ok(accountHTML.includes(t('openrouter.noLimit')),'a null key limit must be named as an uncapped key');
@@ -209,10 +219,12 @@ async function checks() {
     return {ok:true,json:async()=>config};
   };
   await loadProxyConfig();
-  const management = CONFIG_FIELDS.find(field=>field[0] === 'openrouter.management_api_key');
-  assert.equal(readFieldValue(management),undefined,'unchanged masked management key must not be saved');
-  get('cfg-openrouter-management-key').value = 'synthetic-management-key';
+  // The management-key field went away with the settings section. What has to
+  // hold now is that a hidden platform is never rewritten: the save path builds
+  // a patch from the fields it knows, and leaving the platform out of the patch
+  // is what preserves whatever the operator already has on disk.
+  assert.ok(!CONFIG_FIELDS.some(field => field[0].startsWith('openrouter.')), 'hidden platform is still bound to a form field');
   await saveProxyConfig();
-  assert.equal(JSON.stringify(saved),'{"openrouter":{"management_api_key":"synthetic-management-key"}}','management edits must not change inference keys or other platforms');
+  assert.equal(saved, undefined, 'a platform the dashboard does not offer must not be rewritten: ' + JSON.stringify(saved));
 }
 ` + platformBehaviorRunScript

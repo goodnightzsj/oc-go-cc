@@ -56,7 +56,7 @@ async function checks() {
     assert.equal(calls.find(url=>url.pathname === '/api/quota').searchParams.has('billing_refresh'),false,'changing provider never initiates a paid query');
     assert.equal(get('quota-local-requests').textContent,'3');
     assert.equal(get('quota-local-tokens').textContent,'17');
-    assert.equal(get('quota-local-cost').textContent,'Known $0.250');
+    assert.equal(get('quota-local-cost').textContent,'Known $0.25');
     assert.equal(get('quota-local-unknown').textContent,'1');
     assert.ok(get('quota-local-model-tbody').innerHTML.includes('<small>' + PROVIDERS[provider].name + '</small>'),'model rows show a readable platform name');
     assert.ok(get('quota-local-model-tbody').innerHTML.includes('data-provider="' + provider + '"'),'readable names must retain the underlying platform identity');

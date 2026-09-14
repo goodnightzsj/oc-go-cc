@@ -100,10 +100,32 @@ vm.runInContext(` + "`" + `
   }
   assert.ok(document.getElementById('provider-filter').listeners.change?.includes(scheduleHistoryRefresh), 'the themed platform picker must refresh history on change');
   assert.equal(fmtAggregateCost({requests: 2, unknown_cost_requests: 2, cost_usd: 0}), '—');
-  assert.equal(fmtAggregateCost({requests: 2, unknown_cost_requests: 1, cost_usd: 0.25}), 'Known $0.250');
+  assert.equal(fmtAggregateCost({requests: 2, unknown_cost_requests: 1, cost_usd: 0.25}), 'Known $0.25');
   assert.equal(fmtAggregateCost({requests: 1, unknown_cost_requests: 0, cost_usd: 0}), '$0.00');
   assert.ok(costCoverageNote({unknown_cost_requests: 3}).includes('3'));
   assert.equal(utcDateInputValue(new Date('2026-09-10T00:30:00+08:00')), '2026-09-09');
+
+  // A real CommandCode row (req-1789357046-14: 12045 in / 26624 cached /
+  // 199 out on deepseek-v4.1-flash, doubled in the peak window) is
+  // 0.004012044. Six places is what the platform's own usage page reports, so
+  // the two can be compared digit for digit; four places showed $0.0040 and
+  // lost the part that reconciles.
+  assert.equal(fmtCost(0.004012044), '$0.004012');
+  // Trailing zeros are kept below a cent, so a column of rows lines up on the
+  // same six places instead of drifting between five and six.
+  assert.equal(fmtCost(0.001339782), '$0.001340');
+  // The official account total comes back with the same precision and must
+  // not be flattened to cents.
+  assert.equal(fmtCost(6.1647660797), '$6.164766');
+  // Two places remain the floor, and trailing zeros are not padded past it.
+  assert.equal(fmtCost(12.3), '$12.30');
+  assert.equal(fmtCost(60), '$60.00');
+  // Half a dollar is money, not a sub-cent figure: two places, not six.
+  assert.equal(fmtCost(0.5), '$0.50');
+  assert.equal(fmtCost(0.02), '$0.02');
+  // Still smaller than six places: a single-token turn must not read as free.
+  assert.equal(fmtCost(0.000000412), '$0.000000412');
+  assert.notEqual(fmtCost(0.0000004), '$0.000000');
 
   document.getElementById('analytics-start').value = '2026-11-01';
   document.getElementById('analytics-end').value = '2026-11-01';

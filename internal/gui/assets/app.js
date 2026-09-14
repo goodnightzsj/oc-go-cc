@@ -2552,16 +2552,25 @@ function fillRecentDailyTrend(points, days) {
 }
 
 // Costs here are often fractions of a cent, so a fixed 2-decimal format
-// collapses real spend to "$0.00". Widen the precision for small amounts
-// and keep the familiar 2 decimals once the total is worth reading.
+// collapses real spend to "$0.00".
+//
+// Sub-cent amounts keep exactly six places, the precision the platform's own
+// usage page reports for a run: a row can then be read against that page digit
+// for digit, and a column of them lines up instead of drifting between five and
+// six as trailing zeros come and go.
+//
+// At a cent and above, money reads as money - two places minimum, never padded
+// out to six, so a $60 total does not become "$60.000000". A charge too small
+// for six places to show at all keeps more of them, so a real amount never
+// renders as free.
 function fmtCost(v) {
   if (v == null || !isFinite(v)) return '—';
   const n = Number(v);
   if (n === 0) return '$0.00';
   const abs = Math.abs(n);
-  if (abs < 0.01) return '$' + n.toFixed(abs < 0.001 ? 5 : 4);
-  if (abs < 1) return '$' + n.toFixed(3);
-  return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (abs < 0.000001) return '$' + n.toFixed(9);
+  if (abs < 0.01) return '$' + n.toFixed(6);
+  return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
 }
 
 // Aggregate amounts are known subtotals, not zero-cost promises for unpriced rows.

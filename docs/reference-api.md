@@ -245,6 +245,56 @@ This covers Claude Code's `tool_reference` (ToolSearch) and an image inside a
 `tool_result`; see [CommandCode 已知限制](commandcode.md) for the trade this
 makes.
 
+### 524 from Cloudflare (2026-09-14)
+
+A `524` is the **edge** giving up, not the proxy returning an error. Cloudflare's
+Proxy Read Timeout is **120 s** and is not raisable below Enterprise; nginx
+behind it allows `client_body_timeout 300s` and `proxy_read_timeout 600s`, so
+the edge is the binding constraint. Cloudflare closes the connection and the
+client sees `origin_response_timeout`, while nginx logs a **`499`** (client
+closed) with an empty body.
+
+**Read `urt` first — it separates two different causes.** `urt = -` means nginx
+never opened a connection upstream, so the time went into receiving the body; a
+populated `urt` means the request reached the proxy and the proxy (or its
+upstream) was slow. Both surface as the same `524` and the same `499`, and the
+fixes are opposite:
+
+| Mode | nginx evidence | Where the 120 s went | Fix |
+| --- | --- | --- | --- |
+| Body-bound | `urt=- uct=- uht=-` | Receiving the request body | Smaller body, or a faster client link |
+| Upstream-bound | `urt` populated, `uht=-` | Proxy held the connection without sending headers | Investigate the proxy/upstream latency |
+
+Observed 2026-09-14, three `499`s out of 5196 requests, all at ~125 s. Only the
+first is confirmed to be the reported `524` — its `cf_ray` matches the client's
+error verbatim — but the other two show the same `499`-at-125 s shape in the
+other mode:
+
+```
+12:21:27 claude-cli  rt=125.008 urt=-      uct=-     uht=-      ← body-bound (the reported 524)
+01:42:42 curl       rt=125.018 urt=91.197  uct=0.001 uht=-      ← upstream-bound
+01:43:56 curl       rt=125.015 urt=91.919  uct=0.001 uht=-      ← upstream-bound
+```
+
+For the body-bound case, `urt=-` is conclusive that this is **not** a proxy
+fault. Its own body size is unknowable from the capture — a request that never
+reached the proxy is never captured — but the surrounding session shows the
+scale: adjacent requests carried **5.04–5.06 MB**, of which ~5.17 MB is the
+`messages` array (1027 messages) and only ~93 KB is `tools`. The `524`'s start
+time (12:19:21, from `rt`) falls exactly in the gap between the previous
+completed request (12:18:14) and the next one (12:22:00), consistent with the
+same session's growing context. `client_max_body_size` is not the limit — it is
+100m, orders of magnitude above what is being sent.
+
+The upstream-bound pair is a separate, unresolved signal: `urt` of ~91 s means
+the proxy held the connection that long before headers (`uht=-`), and RFC-style
+diagnosis would look at the proxy's own routing/transform latency rather than at
+body size. It is not this incident, and no cause is asserted for it here.
+
+The reported error carries `retryable: true`, so a client retry resolves it.
+Above Enterprise, the only structural fix for the body-bound case is sending
+less per request; removing the orange cloud would expose the origin IP.
+
 ## Streaming
 
 Streaming responses use Server-Sent Events (SSE) with Anthropic's event format:

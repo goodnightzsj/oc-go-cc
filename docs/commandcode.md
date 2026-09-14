@@ -192,6 +192,81 @@ for i := range e.Tiers {
 
 `internal/storage/pricing_test.go` 的 cache-overlap 断言因此改成对照当前表计算，并额外断言"不等于扣除缓存前缀的算法"，这样无论价格怎么变，它锁住的都是结构（miss 按 input 全价、hit 按 cache_read 另计），而不是某个快照数值。
 
+#### 官方总成本与逐条之和对不上（2026-09-14 实测）
+
+**平台自己的两个端点给出相差 1.59 倍的两个"总成本"，这是官方口径问题，不是本代理少算。**
+
+`/internal/usage/summary` 报的 `totalCost` 与 `/internal/usage` 逐条 `meta.totalCost` 之和长期不等。同一时刻（2026-09-14T05:15:03Z）取数：
+
+| 口径 | 请求数 | 金额 |
+| --- | --- | --- |
+| 官方 `usage/summary` | 2030 | **$6.570919** |
+| 官方逐条 `usage` 之和 | 2028 | **$4.138456** |
+| 本实例账本 | 2037 | **$4.144409** |
+
+比值稳定在 **1.59**，多次采样不漂移；`/alpha/usage/summary`（面板实际调用的端点）与 `/internal/usage/summary` 数值一致，两者同源。
+
+**逐条是对的，summary 是错的。** 一对一严格匹配（output 相等 + 时间窗 ±120s + 总 input ±3000）取 100 条，双方成本 **delta = 0.000000**；扩大到全期 1978 条，差 **0.10%**。而 summary 与逐条差 37%。
+
+summary 的偏差不能由任何峰谷规则解释：按 4 个 DeepSeek 模型的基准价反推，summary 隐含一个 **1.6944 倍的固定倍率**，而逐条实测的峰谷加权只有 1.0304 倍。扫描 UTC−12…+14 全部偏移与工作日规则，没有一种组合能得到 summary 的数值。
+
+**因此对账必须以逐条为准。** 面板的"本实例 vs 官方"差额块里，官方那一侧读的是 summary，其中约 37% 是平台自身的记账口径差，不代表有请求绕过本代理。
+
+判定峰谷用的是 **UTC 周一至周五**，不是北京时间：
+
+| 请求时刻 (UTC) | 北京时间 | 平台实际倍率 |
+| --- | --- | --- |
+| 03:59:46 | 11:59 | **×2** |
+| 04:00:06 | 12:00 | **×1** |
+
+若平台按北京时间判峰（01–04 CST），UTC 03:59 应为低谷，实际被 ×2 计费。倍率由逐条 `outputCost ÷ (tokensOut × 基准输出价)` 反解，不依赖 token 拆分。
+
+#### 峰谷时间换算成北京时间
+
+窗口按 UTC 发布，北京时间是 UTC+8，**星期几要跟着一起挪**——这正是容易看错的地方：
+
+| 高峰窗口 | UTC | 北京时间（周一至周五） |
+| --- | --- | --- |
+| 第 1 段 | 01:00–04:00 | **09:00–12:00** |
+| 第 2 段 | 06:00–10:00 | **14:00–18:00** |
+
+按北京时间排一整周（倍率 1 为低谷）：
+
+```
+周一至周五   09:00–12:00  峰
+             12:00–14:00  谷   ← 两段换算后不相连,中间空出这一档
+             14:00–18:00  峰
+             18:00–次日09:00  谷
+
+周五 18:00 ─────────────► 周一 09:00   谷(连续 63 小时,即"整个周末半价")
+```
+
+**两个易错点：**
+
+- **中午 12:00–14:00 是低谷。** 两段 UTC 窗口换算到北京时间后并不相连，中间空出两小时——按"09:00–12:00 和 12:00–18:00 连着"理解会多算两小时峰价。
+- **周五 18:00 就进入周末低谷了**，不必等到周六。反过来说，北京周五 18:00 之后到周一 09:00 之前的全部时间都是低谷，包括周五晚上和周一凌晨。
+
+上面的实测边界（UTC 03:59 落峰、04:00 落谷）只在 **UTC 判读**下成立，因此实现与对账一律用 UTC，不要换成本地时间判断。
+
+#### "Run" 不是计费单位（2026-09-14 核实）
+
+Usage 页顶部的 `TOTAL RUNS` 容易被当成配额单位，但**平台的计费单位是 credit（美元价值），run 只是 UI 的计数**。逐页核对 `/docs/resources/usage-limits`、`/docs/resources/pricing-limits`、`/docs/troubleshooting/errors/usage_exceeded` 后确认：文档没有任何一处按 run 计费、限流或折算。
+
+文档中与计量有关的表述全部指向金额，不指向次数：
+
+| 原文（[Pricing & Limits](https://commandcode.ai/docs/resources/pricing-limits)） | 含义 |
+| --- | --- |
+| `Limits are measured in credit value, not request count` | 两个滚动窗口按**金额**计，不按次数 |
+| `Your usage credits are an amount of money, not a number of requests` | 明确否认按次数计量 |
+| `a request over a window is declined` | 限流单位是 request，不是 run |
+| `Because requests cost nothing, credits cannot pace them; the daily count is what does` | 免费模型不计 credit，改用**每日次数**限制（唯一的计数型限制） |
+
+计划表里的 `~15K requests` / `~75K requests` 是**营销口径的估算**，不是硬上限；文档明说 `DeepSeek V4 Flash runs ~42K requests with no cache - ~26K once the typical 50K cache reads are included`，即同一个计划按模型和缓存命中率能跑的次数差一倍以上。
+
+UI 的 `TOTAL RUNS` 与 API 的计数也对不上：同一时刻页面显示 **1929**，`/internal/usage/summary` 报 `totalCount` **2030**，逐条记录 **2028** 条。差异来自平台自己的统计口径（页面计数滞后或按会话去重），不是本代理少记。
+
+**对本项目的结论：无需为 run 增加任何计费逻辑。** 面板按 `cost_usd` 对账的口径与平台的信用计量一致；`peak_multiplier` 只作用于金额，不受 run 计数影响。
+
 ### 2026-09-13 隔离实例实测（Codex 工具往返 + 两个上游协议）
 
 本机 Codex `0.144.3-cometix`、Claude Code `2.1.263` 经 SSH 隧道调用远端新二进制（commit `8133635`）的 loopback 隔离实例，独立配置与独立 DB；生产路由、生产服务和生产 DB 全程未改动。模型为 `deepseek/deepseek-v4-flash` 与 `moonshotai/Kimi-K2.6`。

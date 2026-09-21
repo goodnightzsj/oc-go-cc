@@ -296,7 +296,7 @@ const TRANSLATIONS = {
     'setting.activeSite': 'Active platform',
     'setting.activeSiteUnrestricted': 'Not restricted',
     'setting.activeSiteHint': 'Routes every request through the selected platform.',
-    'setting.activeSiteUnavailable': 'No credential is configured for this platform.',
+    'setting.activeSiteUnavailable': 'Add an API key in Settings first.',
     'setting.activeSiteNotShown': 'Active platform "{site}" is not offered here, so these views show all platforms.',
     'detail.status': 'Status',
     'detail.success': 'Success',
@@ -754,7 +754,7 @@ const TRANSLATIONS = {
     'setting.activeSite': '当前平台',
     'setting.activeSiteUnrestricted': '不限制',
     'setting.activeSiteHint': '所有请求都走选中的平台。',
-    'setting.activeSiteUnavailable': '该平台未配置凭证。',
+    'setting.activeSiteUnavailable': '请先在设置里填写 API 密钥。',
     'setting.activeSiteNotShown': '当前平台「{site}」未在此列出，各视图按全部平台展示。',
     'detail.status': '状态',
     'detail.success': '成功',
@@ -1076,6 +1076,20 @@ window.CustomSelect = {
       item.dataset.index = String(index);
       item.textContent = option.textContent;
       item.disabled = option.disabled;
+      // A disabled choice has to say why. The native title is where that reason
+      // lives, but a title on a disabled button never renders a tooltip, so the
+      // option would read as inert for no visible cause. Copy the title for the
+      // pointer case and append the text so the reason is readable in the list.
+      if (option.title) {
+        item.title = option.title;
+        item.setAttribute('aria-description', option.title);
+        if (option.disabled) {
+          const why = document.createElement('span');
+          why.className = 'theme-select-option-why';
+          why.textContent = option.title;
+          item.append(why);
+        }
+      }
       item.addEventListener('click', () => {
         select.selectedIndex = index;
         select.dispatchEvent(new Event('change', { bubbles: true }));

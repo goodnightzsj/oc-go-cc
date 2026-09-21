@@ -761,6 +761,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: none;
 .theme-select-option:hover,
 .theme-select-option:focus-visible { outline: 0; background: var(--ui-surface-raised); }
 .theme-select-option.selected { color: #fff; background: rgba(129, 140, 248, .18); }
+.theme-select-option:disabled { cursor: not-allowed; opacity: .55; }
+.theme-select-option:disabled:hover { background: transparent; }
+/* The reason a choice is unavailable, shown inline because a title on a
+   disabled button does not render a tooltip. */
+.theme-select-option-why { display: block; margin-top: 2px; font-size: 11px; color: var(--ui-muted); }
 
 input[type="checkbox"]:not(.toggle input) {
   appearance: none;

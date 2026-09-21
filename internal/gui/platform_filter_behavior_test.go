@@ -79,8 +79,13 @@ function node(id) {
     addEventListener(type, handler){(this.listeners[type] ||= []).push(handler)},
     emit(type){return Promise.all((this.listeners[type] || []).map(handler => handler({target:this})))},
     dispatchEvent(event){return Promise.resolve(this.emit(event.type))},
-    setAttribute(){}, querySelectorAll(){return []}, querySelector(){return null}, focus(){},
+    setAttribute(){}, getAttribute(){return null}, addEventListener(type,handler){(this.listeners[type] ||= []).push(handler)},
+    querySelectorAll(){return []}, querySelector(){return null}, focus(){},
     appendChild(child){this.children.push(child)},
+    // CustomSelect wraps the select it enhances, so the node needs somewhere
+    // to be inserted.
+    parentNode: {insertBefore(){}},
+    classList: {add(){},remove(){},toggle(){},contains(){return false}},
   });
   return nodes.get(id);
 }
@@ -89,7 +94,25 @@ const context = vm.createContext({
   // checks() is stringified into the vm, so the registry lists have to be
   // context globals rather than outer-scope values.
   visiblePlatforms:input.visible, allPlatforms:input.all,
-  document: {getElementById:node,querySelectorAll(){return []},querySelector(){return null},addEventListener(){},documentElement:{},createElement(){return {}}},
+  // createElement returns a real-enough element for CustomSelect: it builds the
+  // replacement list out of created nodes, so a stub that returns {} would make
+  // every assertion about that list vacuous.
+  document: {getElementById:node,querySelectorAll(){return []},querySelector(){return null},addEventListener(){},documentElement:{},
+    createElement(tag){
+      const el = {
+        tagName: tag, children: [], attributes: {}, style: {}, className: '', dataset: {},
+        _text: '', get textContent(){return this._text}, set textContent(v){this._text = String(v)},
+        title: '', hidden: false, disabled: false, type: '', tabIndex: 0,
+        setAttribute(k,v){this.attributes[k] = String(v)}, getAttribute(k){return this.attributes[k]},
+        append(...kids){this.children.push(...kids)}, appendChild(kid){this.children.push(kid); return kid},
+        insertBefore(n){this.children.push(n); return n}, replaceChildren(...kids){this.children = kids},
+        addEventListener(){}, removeEventListener(){}, focus(){},
+        querySelectorAll(){return []}, querySelector(){return null},
+        classList: {add(){},remove(){},toggle(){},contains(){return false}},
+      };
+      return el;
+    }},
+  MutationObserver: class { observe(){} disconnect(){} },
   window: {addEventListener(){}}, localStorage:{getItem(){return null}},
   location, history, Event,
   setTimeout(){},clearTimeout(){},setInterval(){},queueMicrotask(){},

@@ -37,6 +37,9 @@ type Server struct {
 	metrics   *metrics.Metrics // stored for Metrics() getter
 	storage   *storage.Database
 	retention *storage.Retention
+	// fallback is stored so the dashboard can read live circuit-breaker state.
+	// The handler owns that state; this is a reference to it, not a copy.
+	fallback *router.FallbackHandler
 }
 
 // NewServer creates a new proxy server.
@@ -168,6 +171,7 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 		metrics:   metrics,
 		storage:   db,
 		retention: retention,
+		fallback:  fallbackHandler,
 	}
 
 	// Register callback to update log level on config reload
@@ -187,6 +191,13 @@ func (s *Server) Metrics() *metrics.Metrics {
 // Storage returns the SQLite storage instance.
 func (s *Server) Storage() *storage.Database {
 	return s.storage
+}
+
+// Fallback returns the fallback handler, whose circuit breakers carry the live
+// per-model health the dashboard reports. The handler remains the sole owner of
+// that state.
+func (s *Server) Fallback() *router.FallbackHandler {
+	return s.fallback
 }
 
 // Start starts the server with graceful shutdown.

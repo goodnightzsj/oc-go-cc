@@ -230,6 +230,12 @@ func costForTokens(provider, model string, in, out, cacheRead, cacheCreate int64
 }
 
 // ProviderBreakdown holds per-provider aggregates.
+//
+// SuccessRate and AvgLatencyMs mirror ModelBreakdown's definitions so a
+// provider row and the model rows beneath it agree: success counts only
+// requests whose outcome is known, and latency averages only requests with a
+// measured duration. Both are zero when nothing qualifying is in the window,
+// which the panel renders as unknown rather than as 0%.
 type ProviderBreakdown struct {
 	Provider            string  `json:"provider"`
 	Requests            int64   `json:"requests"`
@@ -238,6 +244,8 @@ type ProviderBreakdown struct {
 	OutputTokens        int64   `json:"output_tokens"`
 	CacheReadTokens     int64   `json:"cache_read_tokens"`
 	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	AvgLatencyMs        float64 `json:"avg_latency_ms"`
+	SuccessRate         float64 `json:"success_rate"`
 	FallbackRate        float64 `json:"fallback_rate"` // % of known requests that were fallbacks
 	EstCostUSD          float64 `json:"est_cost_usd"`
 	UnknownCostRequests int64   `json:"unknown_cost_requests"`
@@ -309,6 +317,8 @@ func (a *Analytics) ProviderBreakdown(window Window) ([]ProviderBreakdown, error
 			COALESCE(SUM(r.output_tokens), 0) AS output_tokens,
 			COALESCE(SUM(r.cache_read_tokens), 0) AS cache_read_tokens,
 			COALESCE(SUM(r.cache_creation_tokens), 0) AS cache_creation_tokens,
+			COALESCE(AVG(CASE WHEN r.details_known = 1 AND r.duration_ms > 0 AND julianday(r.start_time) >= julianday(?) THEN r.duration_ms END), 0) AS avg_latency_ms,
+			COALESCE(AVG(CASE WHEN r.details_known = 1 AND r.success IN (0, 1) THEN r.success END), 0) AS success_rate,
 			COALESCE(100.0 * AVG(CASE WHEN r.details_known = 1 AND r.success IN (0, 1)
 			                        THEN COALESCE(r.attempt, 1) > 1 END), 0) AS fallback_rate,
 			COALESCE(SUM(r.cost_usd), 0) AS stored_cost_usd,
@@ -320,7 +330,7 @@ func (a *Analytics) ProviderBreakdown(window Window) ([]ProviderBreakdown, error
 				  AND (? = '' OR r.provider = ?)
 				GROUP BY r.provider
 			ORDER BY requests DESC, provider ASC
-		`, window.requested.Format(time.RFC3339Nano), window.end.Format(time.RFC3339Nano), window.trusted.Format(time.RFC3339Nano), window.provider, window.provider)
+		`, window.trusted.Format(time.RFC3339Nano), window.requested.Format(time.RFC3339Nano), window.end.Format(time.RFC3339Nano), window.trusted.Format(time.RFC3339Nano), window.provider, window.provider)
 	if err != nil {
 		return nil, err
 	}
@@ -330,7 +340,8 @@ func (a *Analytics) ProviderBreakdown(window Window) ([]ProviderBreakdown, error
 	for rows.Next() {
 		var row ProviderBreakdown
 		if err := rows.Scan(&row.Provider, &row.Requests, &row.KnownRequests, &row.InputTokens, &row.OutputTokens,
-			&row.CacheReadTokens, &row.CacheCreationTokens, &row.FallbackRate, &row.EstCostUSD, &row.UnknownCostRequests); err != nil {
+			&row.CacheReadTokens, &row.CacheCreationTokens, &row.AvgLatencyMs, &row.SuccessRate,
+			&row.FallbackRate, &row.EstCostUSD, &row.UnknownCostRequests); err != nil {
 			return nil, err
 		}
 		result = append(result, row)

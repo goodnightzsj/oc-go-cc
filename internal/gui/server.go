@@ -75,6 +75,12 @@ type Server struct {
 	modelLimits    *quota.ModelLimits
 	modelLimitsURL []string
 
+	// circuitStates reports the live fallback circuit breakers, keyed by model.
+	// It is injected rather than computed here so the handler that owns that
+	// state stays its only owner; nil means the dashboard omits breaker state
+	// instead of inventing a healthy default.
+	circuitStates func() map[string]string
+
 	storage *storage.Database
 }
 
@@ -89,6 +95,10 @@ type Options struct {
 	CatalogSourceURL string
 	Logger           *slog.Logger
 	Storage          *storage.Database
+	// CircuitStates returns the live circuit-breaker state per model. Omit it
+	// when no fallback handler is wired; the dashboard then reports breaker
+	// state as unknown rather than as closed.
+	CircuitStates func() map[string]string
 }
 
 // New creates a new GUI server.
@@ -105,6 +115,7 @@ func New(opts Options) *Server {
 		catalogDir:       opts.CatalogDir,
 		catalogSourceURL: opts.CatalogSourceURL,
 		logger:           opts.Logger,
+		circuitStates:    opts.CircuitStates,
 
 		storage: opts.Storage,
 	}
@@ -397,6 +408,9 @@ type metricsResponse struct {
 	RequestsSuccess   int64            `json:"requests_success"`
 	RequestsFailed    int64            `json:"requests_failed"`
 	ModelCounts       map[string]int64 `json:"model_counts"`
+	// CircuitBreakers maps a model key to closed/half_open/open. Absent when no
+	// fallback handler is wired, which the dashboard shows as unknown.
+	CircuitBreakers map[string]string `json:"circuit_breakers,omitempty"`
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
@@ -425,6 +439,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		RequestsSuccess:   snap.RequestsSuccess,
 		RequestsFailed:    snap.RequestsFailed,
 		ModelCounts:       snap.ModelCounts,
+	}
+	if s.circuitStates != nil {
+		resp.CircuitBreakers = s.circuitStates()
 	}
 	writeJSON(w, resp)
 }

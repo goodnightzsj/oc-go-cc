@@ -261,6 +261,9 @@ const TRANSLATIONS = {
     'analytics.reasoningNote': 'included in output',
     'analytics.requests': 'Requests',
     'analytics.avgLatency': 'Average latency',
+    'analytics.throughput': 'Tok/s',
+    'analytics.throughputHint': 'Output tokens divided by the whole request duration, so it includes the wait for the first token. Blank when no successful request was measured.',
+    'analytics.showingTop': 'top {n} of {total}',
     'analytics.platformHealth': 'Platform health',
     'analytics.dailySpend': 'Daily cost',
     'analytics.dailySpendNote': '{n} day(s) in this range have no recorded cost; those columns are drawn empty rather than as zero.',
@@ -740,6 +743,9 @@ const TRANSLATIONS = {
     'analytics.reasoningNote': '已包含在输出 Token 中',
     'analytics.requests': '请求数',
     'analytics.avgLatency': '平均延迟',
+    'analytics.throughput': 'Tok/s',
+    'analytics.throughputHint': '输出 token 除以整个请求耗时，因此包含等待首 token 的时间。没有可测量的成功请求时留空。',
+    'analytics.showingTop': '前 {n} / {total}',
     'analytics.platformHealth': '平台健康',
     'analytics.dailySpend': '每日费用',
     'analytics.dailySpendNote': '区间内有 {n} 天没有记录到费用，这些列画成空列而不是零。',
@@ -1710,6 +1716,10 @@ let overviewQuery = '';
 // Upper bound on how many history rows are rendered into the DOM at once.
 // Keeps long-session history tables fast while the count reflects all rows.
 const HISTORY_RENDER_LIMIT = 200;
+// How many model rows a distribution panel ranks before truncating. Matches the
+// history tab's breakdown depth so the same figure is ranked identically in both
+// places, and bounds the panel's height on a many-model instance.
+const MODEL_DISTRIBUTION_LIMIT = 5;
 
 function startPolling() {
   refreshAll();
@@ -2765,6 +2775,17 @@ function fmtAvgCost(v) {
   if (abs < 0.001) return '$' + n.toFixed(4);
   if (abs < 0.01) return '$' + n.toFixed(3);
   return '$' + n.toFixed(2);
+}
+
+// Output tokens per second of wall time. Zero means the window held no
+// measured successful request, which is unknown rather than "0 tok/s", so the
+// column stays blank instead of asserting a standstill.
+function fmtThroughput(v) {
+  const n = Number(v);
+  if (!isFinite(n) || n <= 0) return '—';
+  if (n >= 100) return n.toFixed(0);
+  if (n >= 10) return n.toFixed(1);
+  return n.toFixed(2);
 }
 
 // Aggregate amounts are known subtotals, not zero-cost promises for unpriced rows.
@@ -4493,7 +4514,7 @@ const AnalyticsModule = {
       const el = document.getElementById(id);
       if (el) el.textContent = loading ? '…' : '—';
     });
-    ['analytics-generated','analytics-period-count','analytics-retained-range','kpi-tokens-note','kpi-cost-note','kpi-cache-rate-note'].forEach(id => {
+    ['analytics-generated','analytics-period-count','analytics-retained-range','kpi-tokens-note','kpi-cost-note','kpi-cache-rate-note','provider-distribution-count'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.textContent = '';
     });
@@ -4502,7 +4523,7 @@ const AnalyticsModule = {
       document.getElementById(id).innerHTML = `<div class="empty-state">${message}</div>`;
     });
     document.getElementById('analytics-period-tbody').innerHTML = `<tr><td colspan="9" class="empty-state">${message}</td></tr>`;
-    document.getElementById('analytics-model-tbody').innerHTML = `<tr><td colspan="5" class="empty-state">${message}</td></tr>`;
+    document.getElementById('analytics-model-tbody').innerHTML = `<tr><td colspan="6" class="empty-state">${message}</td></tr>`;
   },
 
   renderKPIs(data) {
@@ -4625,6 +4646,8 @@ const AnalyticsModule = {
       const level = !hasRate ? 'unknown' : rate >= 0.99 ? 'ok' : rate >= 0.95 ? 'warn' : 'crit';
       const meta = [];
       if (latency > 0) meta.push(`${t('analytics.avgLatency')} ${fmtDuration(latency)}`);
+      const tps = fmtThroughput(item.tokens_per_second);
+      if (tps !== '—') meta.push(`${tps} ${t('analytics.throughput')}`);
       meta.push(`${Number(item.requests || 0).toLocaleString()} ${t('analytics.requests')}`);
       // Fallback rate is the share of answered requests the primary model did
       // not serve. It is computed and stored server-side; showing it here is
@@ -4665,7 +4688,20 @@ const AnalyticsModule = {
     const incompleteCost = valueKey === 'cost_usd' && normalized.some(item => Number(item.unknown_cost_requests || 0) > 0);
     const formatValue = value => valueKey === 'cost_usd' ? fmtCost(value)
       : valueKey === 'requests' ? Number(value || 0).toLocaleString() : fmtTok(value);
-    const visible = dimension === 'provider' ? normalized : normalized.slice(0, 12);
+    // Models are capped at the same depth the history tab's breakdown uses, so
+    // the same figure is ranked the same way in both places. The cap is what
+    // bounds this panel: a scrollbar would be pointless here, since the rows it
+    // would reveal are exactly the ones the cap removed.
+    const visible = dimension === 'provider' ? normalized : normalized.slice(0, MODEL_DISTRIBUTION_LIMIT);
+    // A capped list that does not say it is capped reads as the whole set. The
+    // heading states how many rows are shown out of how many exist, so a reader
+    // can tell a complete picture from a truncated one.
+    const count = document.getElementById(`${containerId}-count`);
+    if (count) {
+      count.textContent = normalized.length > visible.length
+        ? t('analytics.showingTop').replace('{n}', String(visible.length)).replace('{total}', String(normalized.length))
+        : '';
+    }
     root.innerHTML = visible.map(item => {
       const rawLabel = dimension === 'model' ? item.model : item.provider;
       const name = !rawLabel || rawLabel === 'unknown' ? t('detail.unknown') : rawLabel;
@@ -4897,8 +4933,13 @@ const AnalyticsModule = {
     body.innerHTML=(models||[]).map(item=>{
       const prompt=Number(item.input_tokens||0)+Number(item.cache_read_tokens||0)+Number(item.cache_creation_tokens||0);
       const rate=prompt>0?Number(item.cache_read_tokens||0)/prompt*100:0;
-      return `<tr data-provider="${this.escapeHtml(item.provider || '')}"><td><code title="${this.escapeHtml(item.model || '')}">${this.escapeHtml(item.model||t('detail.unknown'))}</code><br><small>${this.escapeHtml(providerLabel(item.provider))}</small></td><td>${Number(item.requests||0).toLocaleString()}</td><td>${prompt>0?rate.toFixed(1)+'%':'—'}</td><td>${totalUsageTokens(item).toLocaleString()}</td><td title="${this.escapeHtml(costCoverageNote(item))}">${fmtAggregateCost(item)}</td></tr>`;
-    }).join('') || `<tr><td colspan="5" class="empty-state">${t('analytics.noData')}</td></tr>`;
+      // Throughput is output tokens over the whole request's wall time, so it
+      // includes the wait for the first token. It is left blank rather than
+      // zeroed when nothing measurable was recorded: a model with no measured
+      // success is unknown, not infinitely slow.
+      const tps=fmtThroughput(item.tokens_per_second);
+      return `<tr data-provider="${this.escapeHtml(item.provider || '')}"><td><code title="${this.escapeHtml(item.model || '')}">${this.escapeHtml(item.model||t('detail.unknown'))}</code><br><small>${this.escapeHtml(providerLabel(item.provider))}</small></td><td>${Number(item.requests||0).toLocaleString()}</td><td>${prompt>0?rate.toFixed(1)+'%':'—'}</td><td>${totalUsageTokens(item).toLocaleString()}</td><td title="${this.escapeHtml(t('analytics.throughputHint'))}">${tps}</td><td title="${this.escapeHtml(costCoverageNote(item))}">${fmtAggregateCost(item)}</td></tr>`;
+    }).join('') || `<tr><td colspan="6" class="empty-state">${t('analytics.noData')}</td></tr>`;
   },
 
   renderRetainedRange(summary) {
@@ -5048,7 +5089,7 @@ const QuotaModule = {
       ['quota-local-requests', 'quota-local-tokens', 'quota-local-cost', 'quota-local-unknown'].forEach(id => this.setText(id, this.localLoading ? '…' : '—'));
       this.setText('quota-local-cost-note', '');
       const body = document.getElementById('quota-local-model-tbody');
-      if (body) body.innerHTML = `<tr><td colspan="5" class="empty-state">${t(this.localLoading ? 'data.loading' : 'detail.unavailable')}</td></tr>`;
+      if (body) body.innerHTML = `<tr><td colspan="6" class="empty-state">${t(this.localLoading ? 'data.loading' : 'detail.unavailable')}</td></tr>`;
       return;
     }
     const s = data.summary;

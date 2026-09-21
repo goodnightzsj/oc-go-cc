@@ -105,5 +105,60 @@ async function checks() {
   AnalyticsModule.renderDailySpend([]);
   assert.equal(get('daily-spend').hidden, true, 'the section hides with no days');
   assert.equal(get('daily-spend-bars').innerHTML, '', 'hidden section keeps no bars');
+
+  // --- throughput formatting ---
+  // Zero is the wire encoding of "nothing was measured", so it must not be
+  // printed as a speed. A per-second figure of exactly 0 would claim standstill.
+  assert.equal(fmtThroughput(0), '—', 'no measurement yields a dash, not 0');
+  assert.equal(fmtThroughput(undefined), '—', 'a missing figure yields a dash');
+  assert.equal(fmtThroughput(null), '—', 'a null figure yields a dash');
+  assert.equal(fmtThroughput(NaN), '—', 'a non-numeric figure yields a dash');
+  // Precision narrows as the number grows, so the column stays readable.
+  assert.equal(fmtThroughput(0.5), '0.50');
+  assert.equal(fmtThroughput(42.25), '42.3');
+  assert.equal(fmtThroughput(1234.5), '1235');
+
+  // --- throughput reaches the model table ---
+  AnalyticsModule.renderModelTable([
+    { model: 'glm-5.2', provider: 'opencode-go', requests: 2, tokens_per_second: 42.25 },
+    { model: 'kimi-k2.6', provider: 'opencode-go', requests: 1, tokens_per_second: 0 },
+  ]);
+  html = get('analytics-model-tbody').innerHTML;
+  // Read the cells by column, not by substring: a bare '>0<' also matches the
+  // Total Tokens cell of a row that has no throughput at all, so it would pass
+  // whether or not the throughput column was correct.
+  const rows = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)]
+    .map(match => [...match[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(cell => cell[1]));
+  assert.equal(rows.length, 2, 'both models are listed');
+  assert.ok(rows[0][4].includes('42.3'), 'a measured throughput is shown: ' + rows[0][4]);
+  assert.equal(rows[1][4], '—', 'an unmeasured model shows a dash, not zero: ' + rows[1][4]);
+  // The column exists in the header too, or the cells above would be misaligned.
+  assert.ok(page.includes('data-i18n="analytics.throughput"'), 'the table declares a Tok/s column');
+
+  // --- a truncated distribution says so ---
+  const many = Array.from({ length: 20 }, (_, i) => ({
+    model: 'm' + i, provider: 'opencode-go', requests: 20 - i, total_tokens: 100,
+  }));
+  AnalyticsModule.renderDistribution('overview-model-distribution', many, 'requests', 'model');
+  assert.equal(get('overview-model-distribution-count').textContent,
+    t('analytics.showingTop').replace('{n}', String(MODEL_DISTRIBUTION_LIMIT)).replace('{total}', '20'),
+    'a capped list states how many of how many');
+  assert.equal((get('overview-model-distribution').innerHTML.match(/analytics-distribution-row/g) || []).length,
+    MODEL_DISTRIBUTION_LIMIT, 'the list itself is capped');
+
+  // A complete list must NOT claim to be truncated: an unconditional
+  // "top N of N" would train the reader to ignore the label.
+  AnalyticsModule.renderDistribution('overview-model-distribution', many.slice(0, 5), 'requests', 'model');
+  assert.equal(get('overview-model-distribution-count').textContent, '',
+    'a complete list carries no truncation label');
+
+  // The provider dimension is never capped: platforms are a short, fixed set and
+  // hiding one would misstate where traffic went.
+  AnalyticsModule.renderDistribution('overview-provider-distribution',
+    many.map((m, i) => ({ ...m, provider: 'p' + i, model: undefined })), 'requests', 'provider');
+  assert.equal((get('overview-provider-distribution').innerHTML.match(/analytics-distribution-row/g) || []).length, 20,
+    'every platform is listed, however many there are');
+  assert.equal(get('overview-provider-distribution-count').textContent, '',
+    'an uncapped list carries no truncation label');
 }
 ` + platformBehaviorRunScript

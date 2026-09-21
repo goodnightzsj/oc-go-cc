@@ -284,8 +284,10 @@ vm.runInContext(` + "`" + `
   const manyModels = Array.from({length:13}, (_, index) => ({provider:'commandcode',model:'model-' + index,requests:1,cost_usd:1}));
   AnalyticsModule.renderDistribution('provider-distribution', manyModels, 'cost_usd', 'model');
   const manyModelsHTML = document.getElementById('provider-distribution').innerHTML;
-  assert.equal((manyModelsHTML.match(/analytics-distribution-row/g) || []).length, 12, 'keep the display limit');
-  assert.equal(manyModelsHTML.split(' · 7.7%</small>').length - 1, 12, 'top models must use the total across all models');
+  assert.equal((manyModelsHTML.match(/analytics-distribution-row/g) || []).length, MODEL_DISTRIBUTION_LIMIT, 'keep the display limit');
+  // Every shown row must still carry the share of the FULL total, not of the
+  // capped remainder: 13 models at equal cost is 7.7% each, never 20%.
+  assert.equal(manyModelsHTML.split(' · 7.7%</small>').length - 1, MODEL_DISTRIBUTION_LIMIT, 'top models must use the total across all models');
   renderCompactBreakdown('history-model-breakdown', manyModels.map(item => ({...item,name:item.model})));
   assert.equal(document.getElementById('history-model-breakdown').innerHTML.split('width:7.7%').length - 1, 5, 'history top models must use the full total');
   historyBreakdownMetric = 'tokens';

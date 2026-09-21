@@ -160,5 +160,46 @@ async function checks() {
     'every platform is listed, however many there are');
   assert.equal(get('overview-provider-distribution-count').textContent, '',
     'an uncapped list carries no truncation label');
+
+  // --- a single recorded day ---
+  // One column is a block, not a shape, so the caption carries the figure. The
+  // bar is still drawn, or the date axis would have nothing under it.
+  AnalyticsModule.renderDailySpend([{ date: '2026-09-22', cost_usd: 4.5 }]);
+  html = get('daily-spend-bars').innerHTML;
+  assert.equal((html.match(/class="daily-bar(?: is-empty)?"/g) || []).length, 1, 'the single day is still drawn');
+  assert.ok(get('daily-spend-bars').classList.contains('is-sparse'), 'a one-day range is marked sparse');
+  const single = get('daily-spend-note').textContent;
+  assert.ok(single.includes('4.50'), 'the caption states the single day total: ' + single);
+  assert.ok(single.includes('09-22'), 'the caption names the date: ' + single);
+
+  // The sparse marker must clear when the range is not sparse, or a later
+  // render would keep styling that no longer applies.
+  AnalyticsModule.renderDailySpend([{ date: '2026-09-21', cost_usd: 1 }, { date: '2026-09-22', cost_usd: 2 }]);
+  assert.ok(!get('daily-spend-bars').classList.contains('is-sparse'), 'a multi-day range is not sparse');
+  const multi = get('daily-spend-note').textContent;
+  assert.ok(!multi.includes('4.50'), 'the single-day caption does not survive a re-render: ' + multi);
+
+  // --- price table provenance ---
+  // A live table and the build-time snapshot price a request identically, so
+  // the panel must say which is in use; that distinction is its only purpose.
+  AnalyticsModule.renderPriceTables({ tables: {
+    'commandcode': { rules: 70, seed_rules: 70, live: true, refreshed_at: new Date().toISOString() },
+    'cline-pass': { rules: 15, seed_rules: 15, live: false },
+  }});
+  assert.equal(get('price-tables').hidden, false, 'the panel shows when tables are reported');
+  html = get('price-tables-tbody').innerHTML;
+  assert.ok(html.includes(t('analytics.priceLive')), 'a refreshed table reads as live');
+  assert.ok(html.includes(t('analytics.priceSeed')), 'an unrefreshed table reads as the snapshot');
+  assert.equal((html.match(/price-live/g) || []).length, 1, 'only the refreshed platform is marked live');
+  assert.equal((html.match(/price-seed/g) || []).length, 1, 'only the unrefreshed platform is marked as a snapshot');
+
+  // A live flag without a timestamp is not live: there would be no age to show,
+  // and claiming liveness without one is the failure the panel exists to catch.
+  AnalyticsModule.renderPriceTables({ tables: { 'commandcode': { rules: 70, live: true } } });
+  html = get('price-tables-tbody').innerHTML;
+  assert.ok(!html.includes('price-live'), 'liveness without a refresh time is not claimed');
+
+  AnalyticsModule.renderPriceTables(null);
+  assert.equal(get('price-tables').hidden, true, 'the panel hides when no tables are reported');
 }
 ` + platformBehaviorRunScript

@@ -65,9 +65,17 @@ See [docs/architecture.md](docs/architecture.md) for system design and request f
 
 **Dashboard tabs:** Overview, History, Performance, Fallback, Usage Analytics, Usage & Billing, and Settings.
 
-Overview, History, Performance, and Usage Analytics have independent five-provider filters. Totals, trends, comparisons, and model rows use the selected scope. History CSV exports retain their initial filters even if the selection changes between pages.
+Overview, History, Performance, and Usage Analytics have independent platform filters. Totals, trends, comparisons, and model rows use the selected scope. History CSV exports retain their initial filters even if the selection changes between pages.
 
-The **Usage & Billing** tab separates each provider's local request/token/cost ledger from account data. OpenCode Go retains its 5-hour, weekly, and monthly windows. OpenRouter shows each inference key's cap and UTC usage, with BYOK usage separate; account Credits require the independent `openrouter.management_api_key`. CommandCode uses its own key to query official Alpha credits, subscriptions and usage summary, without browser cookies. Only masked key hints reach the browser; these account results are cached per provider for 30 seconds.
+**Overview** reports requests, tokens, success rate and cost, and pairs each headline figure with a readable rate (`avg 71.5K/req`, `12/min`) so the number carries its own scale. A platform health table gives each platform its success rate, average latency, measured throughput and fallback share, with the circuit-breaker state as a dot. Daily cost is a column chart: a range containing a single day narrows to one column and states that day's amount in the caption, and date labels thin out automatically to the width available rather than overlapping.
+
+**History** filters by platform, status, date range, model, scenario, request type and cost source, and sorts by any column. When a request was routed to a different model, the detail dialog names the client's **requested model** beneath the served one. Rows billed at a platform's peak rate carry a `Peak ×2` badge and are priced at that multiplier. The search box matches the requested model, the served model, provider, scenario and error text.
+
+**Usage Analytics** provides KPIs, per-period and per-model detail tables, token trends and platform distribution. The model table carries measured throughput (Tok/s — output tokens over the whole request, so it includes the wait for the first token; left blank rather than zeroed when nothing was measured). Date ranges are selectable up to 92 days with optional hourly granularity. The model distribution lists the top 5 and marks the heading `top 5 of 19`; the platform distribution lists every platform, because platforms are a short fixed set and hiding one would misstate where traffic went.
+
+The **Price sources** panel states whether each platform's price table came from a live fetch or the build-time snapshot, and when it was last refreshed. The two produce identical-looking cost figures, so the distinction has to be explicit: this project's own embedded snapshot went stale within weeks (OpenCode Go moved its DeepSeek rows, CommandCode repriced four models) while the dashboard showed well-formed numbers computed from retired rates.
+
+The **Usage & Billing** tab separates each provider's local request/token/cost ledger from account data. OpenCode Go retains its 5-hour, weekly, and monthly windows. OpenRouter shows each inference key's cap and UTC usage, with BYOK usage separate; account Credits require the independent `openrouter.management_api_key`. CommandCode uses its own key to query official Alpha credits, subscriptions and usage summary, without browser cookies. ClinePass reads its plan windows with its own key and reports them as percentages of each window against reference rates, not as an amount owed. Only masked key hints reach the browser; these account results are cached per provider for 30 seconds.
 
 AWS Bedrock has a separate [Cost Explorer billing integration](docs/aws-bedrock-billing.md), disabled by default. It requires an explicit account ID and the service's AWS SDK identity. Only the manual billing button initiates paid queries; ordinary refresh reads the same-account, same-UTC-day snapshot. Reported costs cover the listed services over 30 complete UTC days, with currency and estimate flags, not remaining credit.
 
@@ -85,22 +93,32 @@ Open `http://127.0.0.1:3445` in your browser. Use `serve` for proxy-only operati
 
 ### Dashboard Preview
 
-The screenshots below use fixed synthetic demonstration data. They do not contain production requests, account data, or credentials.
+The screenshots below use fixed synthetic demonstration data. They do not contain production requests, account data, or credentials. Regenerate the same dataset with `python3 scripts/make-mock-data.py`.
 
 #### Overview
 
-![Dashboard overview with request and token trends](docs/assets/dashboard-overview.png)
+![Dashboard overview with request trends, token trends and a platform health table](docs/assets/dashboard-overview.png)
 
 #### Request History
 
-![Paginated request history with filters and breakdowns](docs/assets/dashboard-history.png)
+![Paginated request history with filters, breakdowns and peak-billing badges](docs/assets/dashboard-history.png)
+
+#### Request Detail
+
+![Request detail dialog naming the client's requested model alongside the served one](docs/assets/dashboard-request-detail.png)
 
 #### Usage Analytics
 
-![Usage analytics with token trends and platform breakdowns](docs/assets/dashboard-analytics.png)
+![Usage analytics with a throughput column, period details and platform distribution](docs/assets/dashboard-analytics.png)
+
+#### Price Sources
+
+![Panel stating whether each platform's price table is live or the build-time snapshot](docs/assets/dashboard-price-sources.png)
 
 <details>
-<summary>Performance, fallback, and settings</summary>
+<summary>Usage &amp; billing, performance, fallback, and settings</summary>
+
+![Usage and billing view](docs/assets/dashboard-quota.png)
 
 ![Model performance view](docs/assets/dashboard-performance.png)
 

@@ -1112,3 +1112,72 @@ func TestListModels_Empty(t *testing.T) {
 		t.Errorf("expected no models, got %+v", models)
 	}
 }
+
+// A scoped listing must not offer an id the routing chain would drop: the
+// picker entry would fail the moment it is used. This covers the alias sources,
+// whose names say nothing about the platform that serves them, and the catalog.
+func TestListModels_ScopedToActiveSite(t *testing.T) {
+	cfg := &config.Config{
+		ActiveSite: "cline-pass",
+		Models: map[string]config.ModelConfig{
+			"default":     {Provider: "commandcode", ModelID: "deepseek/deepseek-v4-pro"},
+			"local-alias": {Provider: "cline-pass", ModelID: "cline-pass/glm-5.3"},
+		},
+		ModelOverrides: map[string]config.ModelConfig{
+			"claude-opus-4-8":  {Provider: "commandcode", ModelID: "deepseek/deepseek-v4-pro"},
+			"claude-haiku-4-5": {Provider: "cline-pass", ModelID: "cline-pass/kimi-k3"},
+		},
+	}
+
+	router := NewModelRouter(newTestAtomicConfig(cfg))
+	models := router.ListModels(context.Background())
+
+	byID := make(map[string]ModelInfo, len(models))
+	for _, m := range models {
+		byID[m.ID] = m
+	}
+	// The active site's targets stay, whatever the alias is called.
+	for _, want := range []string{"local-alias", "claude-haiku-4-5"} {
+		if _, ok := byID[want]; !ok {
+			t.Errorf("%q is served by the active site but was not listed", want)
+		}
+	}
+	// Another platform's targets go, even under a Claude alias and even as the
+	// default model.
+	for _, unwanted := range []string{"default", "claude-opus-4-8"} {
+		if _, ok := byID[unwanted]; ok {
+			t.Errorf("%q belongs to another platform and must not be listed while cline-pass is active", unwanted)
+		}
+	}
+	for id, info := range byID {
+		if info.Provider != "cline-pass" {
+			t.Errorf("%q was listed with provider %q", id, info.Provider)
+		}
+	}
+
+	// The same config unscoped still lists everything: the filter is the scope,
+	// not a permanent narrowing.
+	unscoped := NewModelRouter(newTestAtomicConfig(&config.Config{
+		Models:         cfg.Models,
+		ModelOverrides: cfg.ModelOverrides,
+	}))
+	if got := len(unscoped.ListModels(context.Background())); got != 4 {
+		t.Errorf("unscoped listing = %d entries, want all 4", got)
+	}
+}
+
+// An underscore spelling is the accepted legacy form of a platform id, and the
+// scope must normalize it the same way routing does.
+func TestListModels_NormalizesActiveSiteSpelling(t *testing.T) {
+	cfg := &config.Config{
+		ActiveSite: "opencode_go",
+		Models: map[string]config.ModelConfig{
+			"go-model":  {Provider: "opencode-go", ModelID: "kimi-k2.6"},
+			"zen-model": {Provider: "opencode-zen", ModelID: "minimax"},
+		},
+	}
+	models := NewModelRouter(newTestAtomicConfig(cfg)).ListModels(context.Background())
+	if len(models) != 1 || models[0].ID != "go-model" {
+		t.Errorf("models = %+v, want only the opencode-go target", models)
+	}
+}

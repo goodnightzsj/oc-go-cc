@@ -95,6 +95,37 @@ GET https://api.cline.bot/api/v1/ai/cline/recommended-models   → 200，无鉴�
 
 **峰谷暂不登记。** 文档页给 DeepSeek 标了 Peak 列，但脚注指向 DeepSeek 官方定价页，**与 CommandCode/OpenCode Go 的 01–04 & 06–10 UTC 不是同一套**。窗口未核实前 `peakSchedules` 不加 `cline-pass` 条目，`PeakMultiplier` 恒为 1、按 Off-peak 平计。**猜一个窗口会产出格式正确、金额错误的成本**——这正是 `history/record.go` 那张表按平台分开存的原因。
 
+### 定时刷新会丢规则（2026-09-22 修复）
+
+`InstallPrices` 原本**整表替换**，而文档页只列它自己宣传的 13 行，seed 的 15 行里有 2 行（`glm-5.3-flash`、`deepseek-v4.1-flash`）来自 models.dev —— 于是**每小时一次的成功刷新会把这两行抹掉**。丢掉一条规则的后果不是报错，是**成本显示为「未知」**，这与"平台没有价格表"给出的答案完全相同，所以表面上什么都看不出来。
+
+这是生产上 cline-pass 全部 66 条请求 `cost_usd` 为 NULL 的直接原因：进程启动 2 秒后日志出现 `prices refreshed provider=cline-pass rules=13`，而 seed 是 15 条。
+
+改为**按 match 合并**（`mergePriceEntries`）：抓到的规则逐条覆盖，只在 seed 里存在的保留。同一缺陷也作用于 CommandCode（`longcat-2.0:free` 已不在 plans 页上）。守卫：`TestRefreshKeepsSeedRulesThePageDoesNotList`（已证实在未修复代码上失败）、`TestRefreshOverridesSeedRateForTheSameModel`（反向：抓到的必须赢过 seed）、`TestMergePriceEntries`。
+
+## 池的区分是模型字符串本身（2026-09-22 实测）
+
+`model` 字段必须是 `modelType/model` 两段式，**前缀就是计费池的选择器**，不是命名空间装饰。实测（同一 key、同一 prompt、交替发送，读 `/users/{id}/balance`）：
+
+| 发送的 model | balance 变化 | five_hour |
+| --- | --- | --- |
+| `cline-pass/deepseek-v4.1-flash` | **0** | 不变 |
+| `deepseek/deepseek-v4.1-flash` | **−305 / 次** | 不变 |
+
+交替四次，只有厂商前缀那两次扣了余额（498459 → 498154 → 497849），订阅前缀那两次完全不扣，且 15 秒静置后无延迟结算。两条路径都返回 200 与同一个 `"model":"deepseek/deepseek-v4.1-flash"`，所以**响应无法区分走了哪个池**——只有账单能。
+
+几个由此确定的事实：
+
+- `deepseek-v4.1-flash` 用厂商前缀调用**不消耗 ClinePass 订阅**，走余额计费。
+- 反过来，`cline-pass/` 前缀不会扣余额，也就是**必须带这个前缀才吃订阅额度**。
+- **余额单位是 1e-6 credit**：`499797` 对上仪表盘显示的 `Credits: 0.5000`。本次实验共扣 1948 单位 ≈ **0.0019 credit**。
+- `cline-free/deepseek-v4.1-flash` 返回 500（免费池对这个模型不可用），`not-a-channel/whatever` 返回 404 `model not found` —— 前缀是会被校验的真实路由键。
+- 裸名 `deepseek-v4.1-flash` 返回 400 `invalid model format. Expected format: modelType/model`。**这条决定了本项目的实现必须保持 `model` 原样透传**：`internal/provider/cline_pass.go` 直接把 `model.ModelID` 发上去，`TestClinePassForwardsModelIDUnchanged` 钉住它。若剥掉前缀，上游会 400。
+
+**不写死渠道。** 用户问的"能否在 payload 里写死 deepseek 渠道"——`cline-pass/` 前缀本身**就是**渠道选择，它已经是写死的（配置里 `model_overrides` 把它固定成 `cline-pass/deepseek-v4.1-flash`）。额外再写一个渠道字段没有可写的位置：payload 里上游认的只有 `model`，响应里没有任何渠道/后端字段（全部 SSE 事件的 key 只有 `type/index/message/delta/usage/content_block`，`message.model` 恒为去掉池前缀的 slug）。
+
+⚠️ 上面的 `deepseek/` 前缀消耗余额是**本次实验造成的真实扣费**（约 0.0019 credit）。个人自用账户上验证，非生产流量。
+
 ## 成本语义：参考消耗，不是账单
 
 ClinePass 是包月，用户**不按参考价付费**。文档页原文：
@@ -109,19 +140,24 @@ ClinePass 是包月，用户**不按参考价付费**。文档页原文：
 
 `GET https://api.cline.bot/api/v1/users/me/plan/usage-limits`，`Authorization: Bearer <同一个 key>`，**不需要 OAuth**。
 
-响应形状（5 个独立第三方项目交叉证实 + [CodexBar](https://github.com/steipete/CodexBar) 参考实现）：
+响应形状此前由 5 个独立第三方项目交叉证实 + [CodexBar](https://github.com/steipete/CodexBar) 参考实现；**2026-09-22 已在真实 key 上直接验证**：
 
 ```json
-{ "success": true,
-  "data": { "limits": [ { "type": "five_hour", "percentUsed": 42.5, "resetsAt": "<ISO8601>" }, … ] } }
+{"data":{"limits":[
+  {"type":"five_hour","percentUsed":1,"resetsAt":"2026-09-21T22:10:02.898904154Z"},
+  {"type":"weekly","percentUsed":0,"resetsAt":"2026-09-28T17:10:02.900798633Z"},
+  {"type":"monthly","percentUsed":0,"resetsAt":"2026-10-21T17:10:02.902781409Z"}]},
+ "success":true}
 ```
 
-`type` ∈ `five_hour` | `weekly` | `monthly`；`percentUsed` 是 0–100 的数字；`resetsAt` 是 ISO8601 字符串（可能为 null）。未知 `type` 跳过而不是报错。
+与本项目 `clinePassLimits` 的解析结构逐字段一致（含纳秒精度 `resetsAt`）。`type` ∈ `five_hour` | `weekly` | `monthly`；未知 `type` 跳过而不是报错。
 
-**未决（需实测）**：
+**仪表盘页面用 cookie 认证，不是 Bearer key。** 从 `app.cline.bot/dashboard/subscription` 抓到的同一请求只带 `cookie`，无 `authorization` 头（页面用 key 直接打会 401）。**但 Bearer key 路径独立可用**——上面的响应即由 key 取得，本项目无需浏览器会话。
 
-- 官方文档说 5 小时是 *rolling*，而 [issue 13707](https://github.com/cline/cline/issues/13707) 的实测显示 `resetsAt` **锚定到首笔计费请求**，weekly/monthly 锚定到账号创建时刻。官方与实测冲突。
-- 因为 `percentUsed` 已是百分比、`resetsAt` 已是时间戳，**这两个分歧都不影响代码骨架**，只影响面板怎么标注（"滚动" vs "固定窗口"）。直接透传即可，不自己推断窗口语义。
+**未决**：
+
+- `percentUsed` 是**整数百分比**（观测 0/1/2），分辨率不足以分辨单次请求的消耗。上面「池的区分」一节因此改用 balance 而非它。
+- [issue 13707](https://github.com/cline/cline/issues/13707) 的"5 小时锚定首笔请求"未复现：实测同一会话内连续调用，`five_hour.resetsAt` 持续漂移（`…02.787` → `…03.462`），与官方 rolling 说法一致。`percentUsed` 已是百分比、`resetsAt` 已是时间戳，**两种语义都不影响代码骨架**，只影响面板标注，故直接透传不自行推断。
 - 企业 REST（`/users/{id}/usages`、`/api/v1/api-keys`）是否对个人 key 开放未验证；本轮不依赖它。
 
 ## 已知风险与未验证项
@@ -141,7 +177,7 @@ ClinePass 是包月，用户**不按参考价付费**。文档页原文：
 
 | 阶段 | 内容 | 关键文件 | 状态 |
 | --- | --- | --- | --- |
-| 0 | 用真 key 实测：非流式、429 形状、`usage-limits` 实值、header 是否必需 | — | **未执行**：没有真实 key。非流式与 header 两条已由第三方实现交叉证实（见「已知风险」），`usage-limits` 的真实数值仍未验证 |
+| 0 | 用真 key 实测：非流式、429 形状、`usage-limits` 实值、header 是否必需 | — | **部分完成（2026-09-22）**。已实测：`usage-limits` 真实响应（见「配额」）、模型前缀即计费池选择器（见「池的区分」）、推理链路端到端跑通（真实 key、`active_site=cline-pass`、200 + 有效 SSE）。仍未实测：429 裸 HTML 的真实形状、header 是否真的必需（`X-CLIENT-TYPE` 缺失时的免费池门控未复现，订阅池未见门控） |
 | 1 | site descriptor + `ClinePassConfig` + loader（env/validate/siteDefaults）+ 两处 CLI 清单 | `internal/site/site.go`、`internal/config/config.go`、`loader.go`、`cmd/routatic-proxy/init_provider.go`、`main.go` | **已完成**。全量测试通过，既有断言未修改 |
 | 2 | provider 实现 + 注册 + 非流式聚合 | `internal/provider/cline_pass.go`、`cline_pass_stream.go`、`internal/server/server.go`、`internal/client/headers.go` | **已完成** |
 | 3 | 目录：显式 URL + 桶选择 | `internal/catalog/site_models.go` | **已完成** |

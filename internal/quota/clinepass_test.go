@@ -29,6 +29,21 @@ func TestClinePassUsageURLKeepsOriginAndRejectsForeignPath(t *testing.T) {
 	}
 }
 
+// clinePassEndpoint derives the endpoint exactly as the quota handler does, so
+// these tests exercise the real handoff: derive once, then fetch the derived
+// value. Passing a base URL straight in would let FetchClinePass and
+// ClinePassUsageURL disagree about what they accept without any test noticing,
+// which is precisely how the panel ended up reporting a credential error
+// against a correctly-derived endpoint.
+func clinePassEndpoint(t *testing.T, base string) string {
+	t.Helper()
+	endpoint, err := ClinePassUsageURL(base + "/api/v1/chat/completions")
+	if err != nil {
+		t.Fatalf("derive endpoint: %v", err)
+	}
+	return endpoint
+}
+
 func clinePassServer(t *testing.T, status int, body string) *httptest.Server {
 	t.Helper()
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +65,7 @@ func TestClinePassParsesNanosecondReset(t *testing.T) {
 		{"type":"weekly","percentUsed":10,"resetsAt":null},
 		{"type":"monthly","percentUsed":3.25}
 	]}}`)
-	report, err := FetchClinePass(context.Background(), page.Client(), page.URL+"/api/v1/chat/completions", "cline-key")
+	report, err := FetchClinePass(context.Background(), page.Client(), clinePassEndpoint(t, page.URL), "cline-key")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +87,7 @@ func TestClinePassKeepsUnknownWindowTypes(t *testing.T) {
 	page := clinePassServer(t, http.StatusOK, `{"success":true,"data":{"limits":[
 		{"type":"daily","percentUsed":7,"resetsAt":"2026-09-08T17:00:44Z"}
 	]}}`)
-	report, err := FetchClinePass(context.Background(), page.Client(), page.URL+"/api/v1/chat/completions", "cline-key")
+	report, err := FetchClinePass(context.Background(), page.Client(), clinePassEndpoint(t, page.URL), "cline-key")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +114,7 @@ func TestClinePassRejectsUnusableResponses(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			page := clinePassServer(t, http.StatusOK, tc.body)
-			_, err := FetchClinePass(context.Background(), page.Client(), page.URL+"/api/v1/chat/completions", "cline-key")
+			_, err := FetchClinePass(context.Background(), page.Client(), clinePassEndpoint(t, page.URL), "cline-key")
 			if tc.wantErr && err == nil {
 				t.Fatal("unusable response was accepted")
 			}
@@ -109,7 +124,7 @@ func TestClinePassRejectsUnusableResponses(t *testing.T) {
 
 func TestClinePassReportsHTTPFailure(t *testing.T) {
 	page := clinePassServer(t, http.StatusTooManyRequests, "Try again in 2h")
-	_, err := FetchClinePass(context.Background(), page.Client(), page.URL+"/api/v1/chat/completions", "cline-key")
+	_, err := FetchClinePass(context.Background(), page.Client(), clinePassEndpoint(t, page.URL), "cline-key")
 	if err == nil || !strings.Contains(err.Error(), "429") {
 		t.Fatalf("error = %v, want an HTTP 429 report", err)
 	}

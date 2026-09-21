@@ -68,19 +68,24 @@ type clinePassLimits struct {
 	} `json:"error"`
 }
 
-// FetchClinePass reads the plan's usage windows.
+// FetchClinePass reads the plan's usage windows from the already-derived
+// endpoint.
+//
+// It takes the resolved URL rather than the base URL, matching every sibling
+// fetcher (Fetch, FetchOpenRouterKey, FetchCommandCode): the caller derives
+// once and caches against the result. Deriving here too meant the derived value
+// was passed back in as if it were a base URL, and ClinePassUsageURL - which
+// only accepts a /api/v1/chat/completions path - rejected its own output. The
+// handler's own derivation had already succeeded, so the panel showed the right
+// endpoint next to a credential error that named a different one.
 //
 // It takes the same API key as inference; no OAuth is involved. The endpoint is
 // undocumented, so it is treated as an unpublished contract: a missing field is
 // an error rather than a zero, but an unknown window type is carried through
 // instead of failing the whole response.
-func FetchClinePass(parent context.Context, client *http.Client, baseURL, apiKey string) (*ClinePassReport, error) {
+func FetchClinePass(parent context.Context, client *http.Client, endpoint, apiKey string) (*ClinePassReport, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, errors.New("no ClinePass API key configured")
-	}
-	endpoint, err := ClinePassUsageURL(baseURL)
-	if err != nil {
-		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(parent, RequestTimeout)
 	defer cancel()

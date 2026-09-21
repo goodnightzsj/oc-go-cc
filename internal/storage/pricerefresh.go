@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -63,6 +64,82 @@ const (
 // a restart re-fetches, and the embedded seed is now accurate enough to serve
 // in the meantime if that fetch fails.
 var priceOverrides atomic.Pointer[map[string][]priceEntry]
+
+// priceRefreshedAt records when each platform's table was last fetched from its
+// publisher. Kept beside priceOverrides because the two answer one question
+// together: "are these figures live, or the build-time snapshot?"
+//
+// This exists because a stale table does not look stale. The project's own
+// history is the argument: the embedded snapshot was wrong within weeks of
+// shipping (OpenCode Go moved its DeepSeek rows, CommandCode repriced four
+// models) and the dashboard showed well-formed numbers from retired rates the
+// whole time. The count of rules cannot reveal that; only the age can.
+var priceRefreshedAt atomic.Pointer[map[string]time.Time]
+
+// priceSeedCounts is the number of rules in each embedded table, so a caller can
+// tell how many rows the live refresh is responsible for.
+//
+// Entries without a Match are not rules: the seed files carry "_comment" header
+// objects, and counting those would overstate the table by two on CommandCode
+// while the lookup ignores them entirely.
+var priceSeedCounts = sync.OnceValue(func() map[string]int {
+	tables, err := rateTables()
+	if err != nil {
+		return map[string]int{}
+	}
+	out := make(map[string]int, len(tables))
+	for name, entries := range tables {
+		rules := 0
+		for _, e := range entries {
+			if e.Match != "" {
+				rules++
+			}
+		}
+		out[name] = rules
+	}
+	return out
+})
+
+// PriceTableState describes one platform's price table: how many rules are
+// installed, how many the embedded seed carries, and when the live refresh last
+// succeeded. A zero RefreshedAt means the seed is in use.
+type PriceTableState struct {
+	Rules       int       `json:"rules"`
+	SeedRules   int       `json:"seed_rules"`
+	RefreshedAt time.Time `json:"refreshed_at,omitempty"`
+	Live        bool      `json:"live"`
+}
+
+// PriceTables reports the installed price table state per platform. Platforms
+// with no published table are absent rather than reported as empty, which would
+// suggest they publish prices and lost them.
+func PriceTables() map[string]PriceTableState {
+	out := map[string]PriceTableState{}
+	seeds := priceSeedCounts()
+	if p := priceOverrides.Load(); p != nil {
+		for name, entries := range *p {
+			// Count rules, not entries: the installed table is the merged result
+			// and also carries the seed files' "_comment" header objects, which
+			// price nothing and must not be reported as rules to a reader
+			// comparing this figure against the seed.
+			rules := 0
+			for _, e := range entries {
+				if e.Match != "" {
+					rules++
+				}
+			}
+			out[name] = PriceTableState{Rules: rules, SeedRules: seeds[name], Live: true}
+		}
+	}
+	if at := priceRefreshedAt.Load(); at != nil {
+		for name, when := range *at {
+			state := out[name]
+			state.RefreshedAt = when
+			out[name] = state
+		}
+	}
+	return out
+}
 
 // tableFor returns the entries to price from: the refreshed table when one has
 // been installed for this platform, otherwise the embedded seed. ok is false
@@ -133,12 +210,25 @@ func InstallPrices(fetched map[string][]priceEntry) {
 			current[k] = v
 		}
 	}
+	// Carry forward the previous timestamps, then stamp only the platforms this
+	// call actually fetched. A platform absent from `fetched` keeps both its
+	// table and its age: it did not refresh, and claiming it did would report a
+	// freshness the data does not have.
+	when := map[string]time.Time{}
+	if at := priceRefreshedAt.Load(); at != nil {
+		for k, v := range *at {
+			when[k] = v
+		}
+	}
+	now := time.Now().UTC()
 	for k, v := range fetched {
 		if len(v) > 0 {
 			current[k] = mergePriceEntries(seeds[k], v)
+			when[k] = now
 		}
 	}
 	priceOverrides.Store(&current)
+	priceRefreshedAt.Store(&when)
 }
 
 // CurrentPrices reports which platforms have a refreshed table installed, and

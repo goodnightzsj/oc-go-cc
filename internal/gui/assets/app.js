@@ -261,11 +261,22 @@ const TRANSLATIONS = {
     'analytics.reasoningNote': 'included in output',
     'analytics.requests': 'Requests',
     'analytics.avgLatency': 'Average latency',
+    'analytics.priceTables': 'Price sources',
+    'analytics.priceTablesNote': 'Cost figures are computed from the rates each platform publishes. A platform below that has not refreshed is still priced from the build-time snapshot, which may be out of date.',
+    'analytics.priceTablesMeta': '{live} of {total} live',
+    'analytics.priceRules': 'Rules',
+    'analytics.priceSourceCol': 'Source',
+    'analytics.priceLive': 'Live',
+    'analytics.priceSeed': 'Snapshot',
+    'analytics.priceSeedHint': 'Priced from the rates embedded at build time; the published table has not been fetched on this run yet.',
+    'analytics.priceUpdated': 'Updated',
+
     'analytics.throughput': 'Tok/s',
     'analytics.throughputHint': 'Output tokens divided by the whole request duration, so it includes the wait for the first token. Blank when no successful request was measured.',
     'analytics.showingTop': 'top {n} of {total}',
     'analytics.platformHealth': 'Platform health',
     'analytics.dailySpend': 'Daily cost',
+    'analytics.dailySpendSingle': 'One day in this range: {date} cost {amount}.',
     'analytics.dailySpendNote': '{n} day(s) in this range have no recorded cost; those columns are drawn empty rather than as zero.',
     'analytics.dailySpendComplete': 'Every day in this range has a recorded cost.',
     'analytics.platformHealthNote': 'Success rate and latency cover requests this instance recorded with a known outcome. Breaker state comes from the live fallback circuit, not from history.',
@@ -300,6 +311,8 @@ const TRANSLATIONS = {
     'detail.requestId': 'Request ID',
     'detail.time': 'Time',
     'detail.model': 'Model',
+    'detail.requestedModel': 'Requested',
+    'detail.reroutedHint': 'The client asked for this model; routing served the one shown above.',
     'detail.provider': 'Provider',
     'detail.scenario': 'Scenario',
     'detail.requestType': 'Request type',
@@ -347,6 +360,14 @@ const TRANSLATIONS = {
     'filter.allProviders': 'All platforms',
     'filter.model': 'Model',
     'filter.provider': 'Provider',
+    'clinepass.accountScope': 'Official plan usage. ClinePass is a flat monthly subscription measured against reference rates, so these are percentages of each window, not an amount owed. Each key is shown separately.',
+    'setting.clinePassHint': 'Chat Completions only · plan usage',
+    'clinepass.keyHint': 'Uses its own Cline API key; global keys are never sent to Cline.',
+    'clinepass.noAnthropic': 'The Cline API publishes no Messages endpoint, so this platform always uses Chat Completions.',
+    'clinepass.quotaHint': 'Reads the plan usage windows with this platform API key. No browser session is required. The endpoint is undocumented, so its fields may change.',
+    'clinepass.subscription': 'Subscription dashboard',
+    'clinepass.docs': 'ClinePass docs',
+
     'filter.scenario': 'Scenario',
     'filter.startDate': 'Start date',
     'filter.endDate': 'End date',
@@ -738,16 +759,26 @@ const TRANSLATIONS = {
     'analytics.inputTokens': '输入 Token',
     'analytics.outputTokens': '输出 Token',
     'analytics.cacheTokens': '缓存 Token',
-    'analytics.cacheTokensLegend': '缓存',
     'analytics.reasoningTokens': '推理 Token',
     'analytics.reasoningNote': '已包含在输出 Token 中',
     'analytics.requests': '请求数',
     'analytics.avgLatency': '平均延迟',
+    'analytics.priceTables': '价格来源',
+    'analytics.priceTablesNote': '费用按各平台公布的价格计算。下表中未刷新过的平台仍使用构建时的快照价格，可能已经过时。',
+    'analytics.priceTablesMeta': '{live} / {total} 已刷新',
+    'analytics.priceRules': '规则数',
+    'analytics.priceSourceCol': '来源',
+    'analytics.priceLive': '实时',
+    'analytics.priceSeed': '快照',
+    'analytics.priceSeedHint': '按构建时内置的价格计算；本次运行尚未抓取平台公布的价格表。',
+    'analytics.priceUpdated': '更新时间',
+
     'analytics.throughput': 'Tok/s',
     'analytics.throughputHint': '输出 token 除以整个请求耗时，因此包含等待首 token 的时间。没有可测量的成功请求时留空。',
     'analytics.showingTop': '前 {n} / {total}',
     'analytics.platformHealth': '平台健康',
     'analytics.dailySpend': '每日费用',
+    'analytics.dailySpendSingle': '区间内只有一天：{date} 花费 {amount}。',
     'analytics.dailySpendNote': '区间内有 {n} 天没有记录到费用，这些列画成空列而不是零。',
     'analytics.dailySpendComplete': '区间内每一天都有费用记录。',
     'analytics.platformHealthNote': '成功率与延迟只统计本实例记录了明确结果的请求。断路器状态来自实时降级电路，不是历史数据。',
@@ -782,6 +813,8 @@ const TRANSLATIONS = {
     'detail.requestId': '请求 ID',
     'detail.time': '请求时间',
     'detail.model': '模型',
+    'detail.requestedModel': '请求的模型',
+    'detail.reroutedHint': '客户端请求的是该模型，实际由上方显示的模型提供服务。',
     'detail.provider': '供应商',
     'detail.scenario': '使用场景',
     'detail.requestType': '请求类型',
@@ -829,6 +862,14 @@ const TRANSLATIONS = {
     'filter.allProviders': '全部平台',
     'filter.model': '模型',
     'filter.provider': '供应商',
+    'clinepass.accountScope': '官方套餐用量。ClinePass 是按月固定订阅、以参考价折算，因此这里是各窗口的百分比，而不是应付金额。每个密钥分别显示。',
+    'setting.clinePassHint': '仅 Chat Completions · 套餐用量',
+    'clinepass.keyHint': '使用本平台自己的 Cline API 密钥；全局密钥不会发送给 Cline。',
+    'clinepass.noAnthropic': 'Cline API 未提供 Messages 端点，因此该平台始终使用 Chat Completions。',
+    'clinepass.quotaHint': '使用本平台 API 密钥读取套餐用量窗口，无需浏览器会话。该端点未公开，字段可能变化。',
+    'clinepass.subscription': '订阅面板',
+    'clinepass.docs': 'ClinePass 文档',
+
     'filter.scenario': '场景',
     'filter.startDate': '开始日期',
     'filter.endDate': '结束日期',
@@ -963,7 +1004,6 @@ const TRANSLATIONS = {
     'modal.importConfirm': '应用此配置？',
     'btn.apply': '应用',
     'btn.cancel': '取消',
-    'tab.logs': '日志',
     'tab.performance': '性能',
   }
 };
@@ -2284,7 +2324,7 @@ function renderHistory() {
       + Number(h.cache_read_tokens || 0) + Number(h.cache_creation_tokens || 0);
     const pm = effectivePeakMultiplier(h);
     const peakMark = pm > 1
-      ? ' <span class="badge badge-peak" title="' + t('history.peakWindow') + '">Peak ×' + pm + '</span>'
+      ? ' <span class="badge badge-peak" title="' + escapeHtml(t('history.peakWindow')) + '">' + escapeHtml(t('detail.peak')) + ' ×' + pm + '</span>'
       : '';
     return `
     <tr data-id="${escapeHtml(rowId)}" tabindex="0" aria-haspopup="dialog" data-provider="${escapeHtml(h.provider || '')}" style="cursor: pointer;">
@@ -3415,6 +3455,7 @@ function showHistoryDetail(record) {
         <div class="detail-context">
           <span>${escapeHtml(record.provider || '—')}</span>
           <span>${escapeHtml(record.scenario || '—')}</span>
+          ${record.requested_model ? `<span class="detail-rerouted" title="${escapeHtml(t('detail.reroutedHint'))}">${escapeHtml(t('detail.requestedModel'))}: ${escapeHtml(record.requested_model)}</span>` : ''}
           <span>${fmtDate(record.start_time)} ${fmtTime(record.start_time)}</span>
         </div>
       </div>
@@ -4469,9 +4510,12 @@ const AnalyticsModule = {
     if (errorEl) errorEl.hidden = true;
 
     try {
-      const [summary, trend] = await Promise.all([
+      const [summary, trend, prices] = await Promise.all([
         fetchJSON(`/api/analytics/summary?${params}`),
-        fetchJSON(`/api/analytics/tokens/trend?${params}`)
+        fetchJSON(`/api/analytics/tokens/trend?${params}`),
+        // Prices are instance state, not window state, but they belong to this
+        // tab. A failure here must not blank the cost figures it explains.
+        fetchJSON('/api/prices').catch(() => null)
       ]);
       if (seq !== this.loadSeq) return;
       if (!summary?.summary || !trend || (trend.trend !== null && !Array.isArray(trend.trend))) {
@@ -4488,6 +4532,7 @@ const AnalyticsModule = {
       this.renderPeriodTable(this.currentTrend);
       this.renderModelTable(summary.models || []);
       this.renderRetainedRange(summary.summary || {});
+      this.renderPriceTables(prices);
       this.ready = true;
       if (genEl) {
         const ts = summary.generated_at ? new Date(summary.generated_at) : new Date();
@@ -4514,7 +4559,7 @@ const AnalyticsModule = {
       const el = document.getElementById(id);
       if (el) el.textContent = loading ? '…' : '—';
     });
-    ['analytics-generated','analytics-period-count','analytics-retained-range','kpi-tokens-note','kpi-cost-note','kpi-cache-rate-note','provider-distribution-count'].forEach(id => {
+    ['analytics-generated','analytics-period-count','analytics-retained-range','kpi-tokens-note','kpi-cost-note','kpi-cache-rate-note','provider-distribution-count','price-tables-meta'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.textContent = '';
     });
@@ -4524,6 +4569,7 @@ const AnalyticsModule = {
     });
     document.getElementById('analytics-period-tbody').innerHTML = `<tr><td colspan="9" class="empty-state">${message}</td></tr>`;
     document.getElementById('analytics-model-tbody').innerHTML = `<tr><td colspan="6" class="empty-state">${message}</td></tr>`;
+    document.getElementById('price-tables').hidden = true;
   },
 
   renderKPIs(data) {
@@ -4597,10 +4643,32 @@ const AnalyticsModule = {
         <span class="daily-bar-label">${this.escapeHtml(label)}</span>
       </div>`;
     }).join('');
+    // A single recorded day has no shape to read - one bar is just a block. The
+    // row is still drawn so the date axis stays honest, but it is marked sparse
+    // and the caption carries the total, which is the figure a reader actually
+    // wants from a one-day range.
+    const recorded = costs.filter(c => c > 0).length;
+    const sparse = items.length === 1;
+    bars.classList.toggle('is-sparse', sparse);
+    // Once columns are too narrow for their value labels, the labels overlap
+    // each other. Which columns those are depends on the panel's width, not on
+    // a row count, so the decision is made from the measured column width: a
+    // count threshold that looks safe at 1440px still collides at 375px.
+    //
+    // The chart is a shape at that density; exact figures stay on the tooltip
+    // and in the period table below, so thinning labels costs no information.
+    // Every Nth column keeps its pair, and N grows as the columns narrow.
+    this.thinDailyLabels(bars, items.length);
     if (note) {
-      note.textContent = emptyDays > 0
-        ? t('analytics.dailySpendNote').replace('{n}', String(emptyDays))
-        : t('analytics.dailySpendComplete');
+      if (sparse && recorded === 1) {
+        note.textContent = t('analytics.dailySpendSingle')
+          .replace('{date}', this.trendLabel(items[0].date))
+          .replace('{amount}', fmtAggregateCost(items[0]));
+      } else if (emptyDays > 0) {
+        note.textContent = t('analytics.dailySpendNote').replace('{n}', String(emptyDays));
+      } else {
+        note.textContent = t('analytics.dailySpendComplete');
+      }
     }
   },
 
@@ -4940,6 +5008,69 @@ const AnalyticsModule = {
       const tps=fmtThroughput(item.tokens_per_second);
       return `<tr data-provider="${this.escapeHtml(item.provider || '')}"><td><code title="${this.escapeHtml(item.model || '')}">${this.escapeHtml(item.model||t('detail.unknown'))}</code><br><small>${this.escapeHtml(providerLabel(item.provider))}</small></td><td>${Number(item.requests||0).toLocaleString()}</td><td>${prompt>0?rate.toFixed(1)+'%':'—'}</td><td>${totalUsageTokens(item).toLocaleString()}</td><td title="${this.escapeHtml(t('analytics.throughputHint'))}">${tps}</td><td title="${this.escapeHtml(costCoverageNote(item))}">${fmtAggregateCost(item)}</td></tr>`;
     }).join('') || `<tr><td colspan="6" class="empty-state">${t('analytics.noData')}</td></tr>`;
+  },
+
+  // Shows where each platform's prices came from and when they were fetched.
+  // A live table and the build-time snapshot produce identical-looking cost
+  // figures, so without this the two are indistinguishable - and a stale
+  // snapshot is exactly the failure this project has already hit once.
+  renderPriceTables(data) {
+    const root = document.getElementById('price-tables');
+    const tbody = document.getElementById('price-tables-tbody');
+    const meta = document.getElementById('price-tables-meta');
+    if (!root || !tbody) return;
+    const tables = data?.tables || {};
+    const names = Object.keys(tables).sort();
+    if (!names.length) {
+      root.hidden = true;
+      tbody.innerHTML = '';
+      if (meta) meta.textContent = '';
+      return;
+    }
+    root.hidden = false;
+    const rows = names.map(name => {
+      const state = tables[name] || {};
+      // The table name is the platform's rate table, which for every platform
+      // here is its site id; fall back to the raw name if a table has no site.
+      const label = PROVIDERS[name]?.name || name;
+      const live = !!state.live && state.refreshed_at;
+      return `<tr data-provider="${this.escapeHtml(name)}">
+        <td>${this.escapeHtml(label)}</td>
+        <td>${Number(state.rules || 0).toLocaleString()}</td>
+        <td>${live ? `<span class="price-live">${this.escapeHtml(t('analytics.priceLive'))}</span>` : `<span class="price-seed" title="${this.escapeHtml(t('analytics.priceSeedHint'))}">${this.escapeHtml(t('analytics.priceSeed'))}</span>`}</td>
+        <td>${live ? this.escapeHtml(fmtAge(Math.max(0, (Date.now() - new Date(state.refreshed_at).getTime()) / 1000))) : '—'}</td>
+      </tr>`;
+    }).join('');
+    tbody.innerHTML = rows;
+    if (meta) {
+      const live = names.filter(n => tables[n]?.live && tables[n]?.refreshed_at).length;
+      meta.textContent = t('analytics.priceTablesMeta').replace('{live}', String(live)).replace('{total}', String(names.length));
+    }
+  },
+
+  // Keeps as many column labels as fit, dropping the rest.
+  //
+  // The widest label in the row sets the step, so a range of "$1.20" keeps more
+  // labels than one of "$12.345". Measured from the rendered DOM because the
+  // panel is responsive and a column's width is not known until layout.
+  thinDailyLabels(bars, count) {
+    const all = [...bars.querySelectorAll('.daily-bar')];
+    if (all.length < 2) return;
+    const widest = all.reduce((max, bar) => {
+      const value = bar.querySelector('.daily-bar-value');
+      return Math.max(max, value ? value.getBoundingClientRect().width : 0);
+    }, 0);
+    const column = all[0]?.getBoundingClientRect().width || 0;
+    // No measurement available (hidden panel, zero-width container) means no
+    // basis for thinning, and leaving every label is the honest default.
+    if (!widest || !column) return;
+    const step = Math.max(1, Math.ceil((widest + 4) / column));
+    if (step === 1) return;
+    all.forEach((bar, index) => {
+      if (index % step === 0) return;
+      bar.querySelector('.daily-bar-value')?.remove();
+      bar.querySelector('.daily-bar-label')?.remove();
+    });
   },
 
   renderRetainedRange(summary) {

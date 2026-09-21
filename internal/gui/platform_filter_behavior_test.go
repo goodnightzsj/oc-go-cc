@@ -170,6 +170,9 @@ async function checks() {
     else if (url.pathname === '/api/analytics/tokens/trend') data = {provider,trend:empty ? null : [{...s,requests:s.total_requests,date:(url.searchParams.get('from') || new Date().toISOString()).slice(0,10)}]};
     else if (url.pathname === '/api/history') data = {items:empty ? [] : [{id:provider || 'all',provider,model:'shared',details_known:true,success:true}],total:empty ? 0 : 1};
     else if (url.pathname === '/api/history/summary') data = {...s,total_tokens:17,success_rows:1};
+    // Price-table provenance is instance state, not window state, so it is
+    // unscoped by provider like the endpoint itself.
+    else if (url.pathname === '/api/prices') data = {tables:{'opencode-go':{rules:53,seed_rules:53,live:true,refreshed_at:new Date().toISOString()}}};
     else throw new Error('unexpected synthetic URL: ' + raw);
     return {ok:true,json:async()=>data};
   };
@@ -200,6 +203,14 @@ async function checks() {
     await get('analytics-provider').emit('change');
     for (const path of ['/api/analytics/summary','/api/analytics/tokens/trend']) assertScope(path,provider);
     for (const url of calls) {
+      // /api/prices describes the instance's price tables, not a time window or
+      // a platform, so it carries neither. Every other call in this load must
+      // be scoped to the requested range.
+      if (url.pathname === '/api/prices') {
+        assert.equal(url.searchParams.get('from'), null, 'price provenance is not window-scoped');
+        assert.equal(url.searchParams.get('provider'), null, 'price provenance is not platform-scoped');
+        continue;
+      }
       assert.equal(url.searchParams.get('from'),'2026-11-01T00:00:00.000Z');
       assert.equal(url.searchParams.get('to'),'2026-11-02T00:00:00.000Z');
       assert.equal(url.searchParams.get('granularity'),'hour');

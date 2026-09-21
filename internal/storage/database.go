@@ -216,6 +216,7 @@ func (d *Database) initSchema(ctx context.Context) error {
 	CREATE TABLE IF NOT EXISTS requests (
 		id TEXT PRIMARY KEY,
 		model TEXT NOT NULL,
+		requested_model TEXT,
 		provider TEXT,
 		scenario TEXT,
 		start_time TIMESTAMP NOT NULL,
@@ -317,6 +318,10 @@ func (d *Database) migrateColumns(ctx context.Context) error {
 		`ALTER TABLE requests ADD COLUMN details_known INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE requests ADD COLUMN usage_trusted INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE requests ADD COLUMN peak_multiplier REAL NOT NULL DEFAULT 1`,
+		// Existing rows keep NULL, meaning "the client asked for the model that
+		// served it, or the request predates the column". Both read as no
+		// reroute, which is the honest answer for a row that never recorded one.
+		`ALTER TABLE requests ADD COLUMN requested_model TEXT`,
 		// Existing rows keep NULL, which reads back as "unknown ceiling" - the
 		// same answer they gave before the column existed. The next catalog sync
 		// fills them in.

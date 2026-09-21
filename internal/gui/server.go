@@ -211,6 +211,7 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 	mux.HandleFunc("/api/proxy/stop", s.handleProxyStop)
 	mux.HandleFunc("/api/catalog/lock", s.handleCatalogLock)
 	mux.HandleFunc("/api/catalog/sync", s.handleCatalogSync)
+	mux.HandleFunc("/api/prices", s.handlePrices)
 	mux.HandleFunc("/api/quota", s.handleQuota)
 	mux.HandleFunc("/api/sites", s.handleSites)
 	mux.HandleFunc("/api/test/send", s.handleTestSend)
@@ -447,8 +448,12 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 }
 
 type historyEntry struct {
-	ID                  string   `json:"id"`
-	Model               string   `json:"model"`
+	ID    string `json:"id"`
+	Model string `json:"model"`
+	// RequestedModel is the model the client named. Omitted when it matched the
+	// served model, so the field's presence is itself the signal that this
+	// request was routed somewhere other than what it asked for.
+	RequestedModel      string   `json:"requested_model,omitempty"`
 	Provider            string   `json:"provider"`
 	Scenario            string   `json:"scenario"`
 	StartTime           string   `json:"start_time"` // RFC3339
@@ -606,6 +611,7 @@ func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 		entry := historyEntry{
 			ID:                  rec.ID,
 			Model:               rec.Model,
+			RequestedModel:      rec.RequestedModel,
 			Provider:            rec.Provider,
 			Scenario:            scenario,
 			StartTime:           rec.StartTime.Format("2006-01-02T15:04:05Z07:00"),
@@ -904,6 +910,23 @@ func (s *Server) handleCatalogLock(w http.ResponseWriter, r *http.Request) {
 		Synced:     true,
 	}
 	writeJSON(w, resp)
+}
+
+// handlePrices reports the provenance of each platform's price table: how many
+// rules are installed, how many come from the build-time seed, and when the
+// live refresh last succeeded. The dashboard uses it to say whether a cost
+// figure was computed from current published rates or from a snapshot that may
+// have moved - a distinction the project has needed since its own seed was
+// found to be stale.
+func (s *Server) handlePrices(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"tables":       storage.PriceTables(),
+		"generated_at": time.Now().UTC(),
+	})
 }
 
 func (s *Server) handleCatalogSync(w http.ResponseWriter, r *http.Request) {

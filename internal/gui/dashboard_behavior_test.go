@@ -91,6 +91,19 @@ vm.runInContext(` + "`" + `
     assert.ok(CONFIG_FIELDS.some(field => field[0] === 'commandcode.' + path), 'missing CommandCode config field: ' + path);
   }
   assert.ok(!CONFIG_FIELDS.some(field => field[0] === 'commandcode.zdr'), 'obsolete CommandCode config field');
+  // Every visible platform's settings block must be bound to the save path.
+  // A block with markup but no CONFIG_FIELDS entry renders fine and silently
+  // drops whatever is typed into it, so the platform can never be given a
+  // credential and never becomes selectable.
+  for (const descriptor of visiblePlatforms) {
+    const key = descriptor.replace(/-/g, '_');
+    assert.ok(CONFIG_FIELDS.some(field => field[0] === key + '.base_url'),
+      'platform settings block is not bound to the save path: ' + descriptor);
+  }
+  for (const path of ['base_url', 'api_key', 'api_keys', 'timeout_ms', 'stream_timeout_ms', 'streaming_timeout_ms']) {
+    assert.ok(CONFIG_FIELDS.some(field => field[0] === 'cline_pass.' + path), 'missing ClinePass config field: ' + path);
+  }
+  assert.ok(!CONFIG_FIELDS.some(field => field[0] === 'cline_pass.anthropic_base_url'), 'ClinePass has no Messages endpoint to configure');
   assert.ok(CONFIG_FIELDS.some(field => field[0] === 'opencode_go.responses_base_url'), 'missing OpenCode Go Responses URL');
   assert.ok(page.includes('id="quota-links"'), 'official platform links need a shared rendering target');
   assert.ok(page.includes('https://api.commandcode.ai/provider/v1/chat/completions'));

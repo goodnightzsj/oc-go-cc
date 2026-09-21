@@ -264,6 +264,7 @@ Press Ctrl+C to stop the server.`,
 					Storage:          srv.Storage(),
 					CatalogDir:       resolveCatalogDir(configPath),
 					CatalogSourceURL: cfg.Catalog.SourceURL,
+					CircuitStates:    srv.Fallback().GetCircuitStates,
 				})
 				guiSrv.SetProxyRunning(true)
 

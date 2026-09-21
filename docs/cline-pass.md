@@ -62,7 +62,33 @@ GET https://api.cline.bot/api/v1/ai/cline/recommended-models   → 200，无鉴�
 
 这是 Cline 自家 SDK 用来填模型选择器的端点（`catalog-cline-recommended.ts:162`），结构是 `{bucket: [{id, name?, description?, tags?}]}`。
 
-**结构缺口**：`catalog/site_models.go:37` 的 `SiteModelsURL` 只会把 API 端点尾部改写成 `/models`（`siteModelPathSuffix` 表 + 后缀校验），表达不了 `recommended-models` 这种路径，而且响应外层还包着四个桶、不是 `{data:[...]}`（`siteModelsResponse`，`site_models.go:61`）。需要给它加一条**显式目录 URL + 桶选择**的登记方式。
+**当初的结构缺口（已解决）**：`SiteModelsURL` 原本只会把 API 端点尾部改写成 `/models`（`siteModelPathSuffix` 表 + 后缀校验），表达不了 `recommended-models` 这种路径，且响应外层包着四个桶、不是 `{data:[...]}`。现在 `cline-pass` 走一条显式登记的路径（`clinePassModelsPath` + `clinePassBucket` 常量），不套后缀改写。
+
+### 能力字段来自 catalog，不是 live roster（2026-09-22 修复）
+
+live roster 的条目**只有 `id/name/description/tags`，没有上下文窗口和输出上限**。这些字段来自 models.dev catalog——但 catalog 把同一批数据**发布两遍**：
+
+| 视图 | 键 | cline-pass 是否在内 |
+| --- | --- | --- |
+| 顶层 `models` | 完整 `provider/model` | ❌ 无（该 map 早于 cline-pass 建立） |
+| `providers[].models` | 裸模型名 | ✅ 15 个 |
+
+`catalog.Load` **只读顶层**，于是 cline-pass 的 15 个模型在列表里可见、却拿不到任何能力数据。`Provider` 结构体当时连 `Models` 字段都没有，嵌套视图在反序列化阶段就被丢弃。
+
+后果不是"数据不全"而是**真实截断**：能力回退到 `modelMetadata[ModelFamily(id)]` 的内置表，而它是通用默认值——
+
+| 模型 | 内置 registry | 平台实际 | 后果 |
+| --- | --- | --- | --- |
+| `deepseek-v4-pro` | 8,192 | 384,000 | 客户端 64000 被 `clampOutputTokens` **压到 8192** |
+| `qwen3.7-max` | 8,192 | 65,536 | 同上 |
+| `mimo-v2.5` | 8,192 | 131,072 | 同上 |
+| `mimo-v2.5-pro` | 16,384 | 131,072 | 同上 |
+| `minimax-m3` | 128,000 | 512,000 | 同上 |
+| `deepseek-v4.1-flash`、`glm-5.3`、`glm-5.3-flash`、`qwen3.8-max`、`muse-spark-1.3-contributor` | **0** | 全有 | 完全无上限可依 |
+
+`clampOutputTokens` 里 `MaxOutputTokens` 只降不升（`capacity.go:83`），所以 registry 的 8192 就是一个客户端无法越过的天花板。
+
+**修复**：`Load` 折叠嵌套视图（顶层优先）、`Provider` 加 `Models` 字段、`max_output_tokens` 落库并一路带到 `ResolvedModel`、`PublishedByActiveSite` 改为从 catalog 取能力而不是假定"列出来的 id 就有已知上限"。实测 catalog 模型集 **368 → 8065**（嵌套视图此前完全没被读取，丢掉的不只 cline-pass），`deepseek-v4-pro` 的 `clamp(64000)` 从 8192 变为 **64000**。
 
 **三个来源条数不一致，且都不是全集**：
 
@@ -154,11 +180,40 @@ ClinePass 是包月，用户**不按参考价付费**。文档页原文：
 
 与本项目 `clinePassLimits` 的解析结构逐字段一致（含纳秒精度 `resetsAt`）。`type` ∈ `five_hour` | `weekly` | `monthly`；未知 `type` 跳过而不是报错。
 
+### 百分比的分母从哪来（2026-09-22 新增）
+
+`percentUsed` 是整数百分比（观测值 0/1/2/5/8），**光有它无法判断"还剩多少"**。分母在另一个端点：
+
+```
+GET /api/v1/users/me/plan   →  data.plan.entitlements.cline_pass.inferenceCapThreshold
+```
+
+```json
+{"last5HoursUsageCostUSDPerUser": 1000000000,
+ "last7daysUsageCostUSDPerUser":  2500000000,
+ "last30daysUsageCostUSDPerUser": 5000000000}
+```
+
+**单位是 1e-8 美元**，与账号 usage 记录里的 `costUsd` 同单位。这个换算不是猜的，有三重实测吻合：
+
+| 验证 | 结果 |
+| --- | --- |
+| 逐条对账 | 12 条 usage 记录的 `costUsd` ÷ 我们按参考费率的估算，**比值恒为 1e8**（误差 <0.005%） |
+| 窗口求和 | `∑costUsd` 折成美元后除以阈值，得 5.322% / 2.129% / 1.064%，`floor` 后正是端点报的 **5 / 2 / 1** |
+| 折成金额 | 三个阈值 = **$10 / $25 / $50** |
+
+所以本轮实测同时确认了：**我们的参考价与 Cline 自己的计费口径精确一致**，以及配额窗口确实是滚动 5 小时（拉到的 498 条记录跨度 1.50 小时，正好是窗口起点到现在）。
+
+**面板不替换百分比。** `percentUsed` 是平台自己算的权威值，保持为主数字；分母只用来补充一行低调的剩余金额（`$9.47 left of $10.00`）。分母缺失时**不渲染金额**——按百分比倒推会编造平台从未给出的数字。
+
+
+
 **仪表盘页面用 cookie 认证，不是 Bearer key。** 从 `app.cline.bot/dashboard/subscription` 抓到的同一请求只带 `cookie`，无 `authorization` 头（页面用 key 直接打会 401）。**但 Bearer key 路径独立可用**——上面的响应即由 key 取得，本项目无需浏览器会话。
+
+**不做的**：`/users/{id}/usages` 虽然逐请求可用（含 `aiInferenceProviderName`、`model_properties_override`），但**只保留当前 5 小时窗口**，日/周/月无法求和。用它做常驻对账既拉不到需要的跨度，又引入分页不稳定（`total` 字段恒为 0）和速率风险，而它本要解决的问题——参考价是否漂移——已由上表的逐条对账一次性验证。故不实现。
 
 **未决**：
 
-- `percentUsed` 是**整数百分比**（观测 0/1/2），分辨率不足以分辨单次请求的消耗。上面「池的区分」一节因此改用 balance 而非它。
 - [issue 13707](https://github.com/cline/cline/issues/13707) 的"5 小时锚定首笔请求"未复现：实测同一会话内连续调用，`five_hour.resetsAt` 持续漂移（`…02.787` → `…03.462`），与官方 rolling 说法一致。`percentUsed` 已是百分比、`resetsAt` 已是时间戳，**两种语义都不影响代码骨架**，只影响面板标注，故直接透传不自行推断。
 - 企业 REST（`/users/{id}/usages`、`/api/v1/api-keys`）是否对个人 key 开放未验证；本轮不依赖它。
 
@@ -172,7 +227,7 @@ ClinePass 是包月，用户**不按参考价付费**。文档页原文：
 | **客户端身份门控** | 缺 `X-CLIENT-TYPE` 会得到 `403 "only available via Cline product surfaces"`（cline2api-workers 实测；Cline 官方 PR 13593 记录了自家 commit-message 路径漏发 header 时的同一 403）。门控针对**免费池**；订阅池（`cline-pass/`）未见门控，但本实现**默认带全套官方 header** | 成本最低的兼容策略；版本号当前不做最小值校验（`0.0.1` 实测可过），全套是为了防上游收紧 |
 | **上游是 Vercel AI Gateway** | **已由实测证实**（2026-09-22）：非法 `provider.sort` 会返回 Vercel 自己的错误 `failed to invoke model 'deepseek/deepseek-v4.1-flash' from Vercel: ... "param":"provider.sort"` | 解释了配额燃烧波动大。响应 `provider_metadata.gateway.routing` 会公布 `finalProvider` 与 `fallbacksAvailable`（15 个候选渠道），但**钉住无效**——见「上游渠道」节 |
 | **ToS 张力** | 官方文档允许第三方调用；ToS §2.2(10) 禁止"非官方技术手段" | 个人自用风险低；**做成多用户/共享/高并发代理会同时踩 §2.2(5)、§7.3(c)(v)、§2.2(7)**。本项目定位是单人自用 |
-| 上下文/输出上限 | 官方文档完全未给；第三方三套数字互相矛盾（`mimo-v2.5` 一套 1,048,576、一套 262,144） | 取 models.dev 值并标注为未验证；不用于任何硬校验 |
+| 上下文/输出上限 | **已解决（2026-09-22）**：模型列表本身仍不带这些字段，改由 catalog 的嵌套视图提供并已落库（见「模型目录」）。此前 registry 默认值把 `deepseek-v4-pro` 的输出上限从 384,000 压到 8,192 | 不再是未验证项；`max_output_tokens` 现在参与 `clampOutputTokens` |
 | `cline-pass` 是否会被 models.dev 调整 | 其 DeepSeek 两行已证有误 | 只当能力字段来源，价格不取它 |
 
 ## 上游渠道（uplink）：网关确实公布了，但钉不住

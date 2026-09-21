@@ -83,13 +83,50 @@ func tableFor(rateTable string) ([]priceEntry, bool) {
 	return entries, ok
 }
 
-// InstallPrices replaces the live price tables. Entries for a platform absent
+// mergePriceEntries overlays a freshly fetched table on its embedded seed. The
+// fetched table wins for every rule it carries; a rule only the seed has
+// survives.
+//
+// Replacing wholesale is what un-prices real models. The ClinePass and
+// CommandCode pages list only the models those pages advertise, while the seeds
+// also carry live-roster models sourced elsewhere (cline-pass/deepseek-v4.1-flash
+// and cline-pass/glm-5.3-flash come from models.dev because the docs page omits
+// them; CommandCode's longcat-2.0:free is no longer on the plans page). A
+// dropped rule does not read as an error - it reads as an unknown cost, the
+// same answer an unpriced platform gives, so the loss stays invisible until
+// someone reads the numbers.
+func mergePriceEntries(seed, fetched []priceEntry) []priceEntry {
+	if len(seed) == 0 {
+		return fetched
+	}
+	present := make(map[string]bool, len(fetched))
+	out := make([]priceEntry, 0, len(seed)+len(fetched))
+	for _, e := range fetched {
+		if e.Match == "" {
+			continue
+		}
+		present[e.Match] = true
+		out = append(out, e)
+	}
+	for _, e := range seed {
+		if e.Match == "" || present[e.Match] {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// InstallPrices installs the refreshed tables. Entries for a platform absent
 // from the map are left as they are, so a refresh that only reached one
-// platform cannot blank the other.
+// platform cannot blank the other; within a platform the fetched rules are
+// merged onto the seed rather than replacing it, for the reason mergePriceEntries
+// documents.
 func InstallPrices(fetched map[string][]priceEntry) {
 	if len(fetched) == 0 {
 		return
 	}
+	seeds, _ := rateTables()
 	current := map[string][]priceEntry{}
 	if p := priceOverrides.Load(); p != nil {
 		for k, v := range *p {
@@ -98,7 +135,7 @@ func InstallPrices(fetched map[string][]priceEntry) {
 	}
 	for k, v := range fetched {
 		if len(v) > 0 {
-			current[k] = v
+			current[k] = mergePriceEntries(seeds[k], v)
 		}
 	}
 	priceOverrides.Store(&current)

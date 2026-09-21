@@ -40,6 +40,18 @@ func TestResolveModelConfig(t *testing.T) {
 			},
 		},
 		{
+			name:  "vendor-prefixed model uses family metadata without changing wire ID",
+			input: ModelConfig{Provider: "commandcode", ModelID: "moonshotai/Kimi-K2.7-Code"},
+			expected: ModelConfig{
+				ModelID:         "moonshotai/Kimi-K2.7-Code",
+				ContextWindow:   256000,
+				MaxOutputTokens: 32768,
+				Vision:          true,
+				ContextMargin:   DefaultContextMargin,
+				SupportsTools:   boolPtr(true),
+			},
+		},
+		{
 			name:  "unknown custom model preserves case",
 			input: ModelConfig{ModelID: "Vendor-Custom-Pro"},
 			expected: ModelConfig{

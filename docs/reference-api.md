@@ -193,6 +193,8 @@ CommandCode returns `source=official_alpha_api`, `currency=USD`, and one `accoun
 
 Zen returns `reason=no_public_account_api`. Bedrock returns `aws_billing_disabled` until explicitly enabled, `aws_billing_refresh_required` without a current snapshot, or `aws_billing_no_data` when AWS returns no matching costs. All five providers' local usage remains independently available through the analytics endpoint. See the [capability matrix](platform-integration-review.md#五平台页面与账户能力).
 
+CommandCode `accounts[].ledger`, when present, contains this instance's `requests`, `known_requests` (known request outcomes, not price coverage), `unknown_cost_requests`, and the known `cost_usd` subtotal for the account's subscription period. Unknown prices must not be displayed as a definite zero. The ledger is omitted when multiple keys prevent per-account attribution or no valid billing period is available.
+
 ### `POST /api/quota?provider=aws-bedrock&billing_refresh=1`
 
 Explicitly queries the official Cost Explorer API. This action may incur AWS API charges; it requires `aws_bedrock.billing.enabled=true`, a validated 12-digit `linked_account_id`, and the service's standard AWS SDK credentials or named `profile`. Inference keys are never used. Cross-origin browser POSTs are rejected with HTTP 403; the paid query via GET, POST without the action flag, or POST for another provider returns HTTP 405.

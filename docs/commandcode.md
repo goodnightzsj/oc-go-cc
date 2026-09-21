@@ -174,7 +174,7 @@ CommandCode 侧另有 `deepseek-v4-flash-vision-exp` 与 3 个模型的价格过
 
 | 平台 | 来源 | 形态 | 备注 |
 | --- | --- | --- | --- |
-| OpenCode Go | `models.dev` → `providers["opencode-go"].models` | 干净 JSON | 就是本项目**已在每日同步**的 catalog；此前 `catalog.Provider` 结构体没有 `Models` 字段，这份数据被直接丢弃 |
+| OpenCode Go | `models.dev` → `providers["opencode-go"].models` | 干净 JSON | 复用本地 catalog，刷新前按 `catalog.max_age_hours`（默认 24 小时）检查并同步；直接读取原始嵌套价格字段 |
 | CommandCode | `commandcode.ai/docs/plans/pro` 页面内嵌 payload | `self.__next_f.push` flight 分片重组 | 它的 API 只给模型 id 不给价格，`/models` 是客户端渲染；内嵌 JSON 是唯一可解析的完整表 |
 
 **分档计价**已建模（`priceTier`，`internal/storage/database.go`）：档位按**整个 prompt** 的 input token 数选取。
@@ -186,7 +186,7 @@ for i := range e.Tiers {
 }
 ```
 
-**刷新**：`storage.PriceRefreshLoop` 每小时一次（`internal/gui/quota.go` 的 `priceRefreshLoop`），与既有的 `limitsLoop`（日刷额度表）同构。单个平台抓取失败时**保留该平台上一份可用表**，不会用空表或部分表覆盖——这正是"格式正确、数值错误"最难发现的地方。抓取失败会打 WARN 日志。
+**刷新**：`start` 与无面板的 `serve` 共用 `storage.PriceRefreshLoop`，启动立即刷新，之后每小时一次；退出时取消并等待刷新结束。`cmd/routatic-proxy/catalog.go` 的 `priceRefreshConfig` 在每轮读取当前配置，按目录来源和有效期同步 OpenCode catalog（`catalog.enabled=false` 时不下载，仍可读取已有本地表）。自动和手动同步在 `catalog.Sync` 串行写入。单个平台同步或抓取失败时**保留该平台上一份可用表**并打 WARN 日志，另一个平台仍独立刷新。
 
 **历史成本不重算**：`cost_usd` 在写入时计算并落库，`BackfillRequestCosts` 的 WHERE 是 `cost_usd IS NULL`，所以改价表只影响新请求。这一点有实证支撑：2026-08-28 的一张真实账单（18355 in / 18176 cache-read / 231 out = 0.00863558）能被子串里的旧价 `0.22/0.007/0.66` **精确复现**，而今天的新价复现不出来——说明价格确实在那之后变过，历史行必须保留各自当时的价。
 

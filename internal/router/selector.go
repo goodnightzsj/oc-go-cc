@@ -30,15 +30,15 @@ type Selector struct {
 
 // NewSelector creates a Selector from an indexed catalog and active config.
 // Providers are enabled when they have an effective API key in the config
-// (either a global key or a provider-specific key) and are not explicitly
-// disabled in the catalog.
+// under their credential policy, belong to the active site (when set), and
+// are not explicitly disabled in the catalog.
 func NewSelector(cat *catalog.IndexedCatalog, cfg *config.Config) *Selector {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
 	enabled := enabledProviders(cfg)
 	for name, p := range cat.Providers {
-		if p.Enabled != nil && !*p.Enabled {
+		if (cfg.ActiveSite != "" && name != cfg.ActiveSite) || (p.Enabled != nil && !*p.Enabled) {
 			delete(enabled, name)
 		}
 	}
@@ -221,7 +221,7 @@ func modelMatches(model catalog.Model, scen config.CostScenario, constraints Sce
 }
 
 // enabledProviders returns the providers that have an effective API key in the
-// active config. A non-empty global API key enables all known providers.
+// active config, including a global-key fallback only where the binding allows it.
 //
 // The provider set comes from the registry, not a list written here: this map
 // used to name four platforms by hand and silently omitted CommandCode, so cost
@@ -230,9 +230,8 @@ func modelMatches(model catalog.Model, scen config.CostScenario, constraints Sce
 // per descriptor cannot drift the same way.
 func enabledProviders(cfg *config.Config) map[string]bool {
 	enabled := make(map[string]bool, len(site.All()))
-	globalKeys := cfg.EffectiveAPIKeys()
 	for _, descriptor := range site.All() {
-		if len(cfg.ProviderAPIKeys(descriptor.ID)) > 0 || len(globalKeys) > 0 {
+		if len(cfg.ProviderAPIKeys(descriptor.ID)) > 0 {
 			enabled[descriptor.ID] = true
 		}
 	}

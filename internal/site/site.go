@@ -28,6 +28,14 @@ const (
 	AWSBedrock  = "aws-bedrock"
 	OpenRouter  = "openrouter"
 	CommandCode = "commandcode"
+	// ClinePass is Cline's flat-rate subscription. The id is the model id's own
+	// prefix, not the vendor name, because platform identity here is the first
+	// segment of a model key: catalog.ProviderFromModelKey splits
+	// "cline-pass/glm-5.3" and the cost selector compares the result for
+	// equality, so an id of "cline" would match none of that platform's models.
+	// Cline's other pools (cline-free, cline-cloud) are separate namespaces and
+	// would each be their own descriptor, sharing this one's config block.
+	ClinePass = "cline-pass"
 )
 
 // Descriptor is one platform's identity.
@@ -72,9 +80,11 @@ var registry = []Descriptor{
 		RateTable: OpenCodeGo, CacheCreationBilledAsInput: true},
 	{ID: CommandCode, DisplayName: "CommandCode", Order: 1, Visible: true,
 		RateTable: CommandCode},
-	{ID: OpenCodeZen, DisplayName: "OpenCode Zen", Order: 2},
-	{ID: AWSBedrock, DisplayName: "AWS Bedrock", Order: 3},
-	{ID: OpenRouter, DisplayName: "OpenRouter", Order: 4},
+	{ID: ClinePass, DisplayName: "ClinePass", Order: 2, Visible: true,
+		RateTable: ClinePass},
+	{ID: OpenCodeZen, DisplayName: "OpenCode Zen", Order: 3},
+	{ID: AWSBedrock, DisplayName: "AWS Bedrock", Order: 4},
+	{ID: OpenRouter, DisplayName: "OpenRouter", Order: 5},
 }
 
 // All returns every descriptor in presentation order. Callers must not assume

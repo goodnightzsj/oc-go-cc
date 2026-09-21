@@ -120,7 +120,8 @@ Press Ctrl+C to stop the server.`,
 				return fmt.Errorf("failed to load config: %w", err)
 			}
 
-			if err := ensureCatalogSynced(cfg, configPath, time.Now().UTC()); err != nil {
+			configPath = config.ResolveConfigPath()
+			if err := ensureCatalogSynced(cmd.Context(), cfg, configPath, time.Now().UTC()); err != nil {
 				return fmt.Errorf("failed to sync catalog: %w", err)
 			}
 
@@ -215,8 +216,16 @@ Press Ctrl+C to stop the server.`,
 			}
 
 			// Context for graceful shutdown.
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx, cancel := context.WithCancel(cmd.Context())
+			pricesDone := make(chan struct{})
+			go func() {
+				defer close(pricesDone)
+				storage.PriceRefreshLoop(ctx, priceRefreshConfig(atomicCfg), nil, logPriceRefresh)
+			}()
+			defer func() {
+				cancel()
+				<-pricesDone
+			}()
 
 			var guiSrv *gui.Server
 			var guiDone <-chan struct{}
@@ -299,6 +308,7 @@ Press Ctrl+C to stop the server.`,
 			}
 
 			// Graceful shutdown.
+			cancel()
 			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer shutdownCancel()
 			_ = srv.Shutdown(shutdownCtx)
@@ -476,7 +486,7 @@ func validateCmd() *cobra.Command {
 			} else if len(keys) == 1 {
 				fmt.Println("  Global API key: configured")
 			}
-			for _, name := range []string{"opencode-go", "commandcode", "opencode-zen", "aws-bedrock", "openrouter"} {
+			for _, name := range []string{"opencode-go", "commandcode", "cline-pass", "opencode-zen", "aws-bedrock", "openrouter"} {
 				if keys := cfg.ProviderAPIKeys(name); len(keys) > 0 {
 					fmt.Printf("  %s: %d key(s) available\n", name, len(keys))
 				}

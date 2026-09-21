@@ -68,6 +68,7 @@ const (
 	ProviderAWSBedrock  = site.AWSBedrock
 	ProviderOpenRouter  = site.OpenRouter
 	ProviderCommandCode = site.CommandCode
+	ProviderClinePass   = site.ClinePass
 )
 
 // APIError represents an HTTP API error returned by an upstream provider.

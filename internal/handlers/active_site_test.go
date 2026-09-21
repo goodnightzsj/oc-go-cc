@@ -43,7 +43,7 @@ func siteConfig(t *testing.T, active string) *config.Config {
 		if r.URL.Path != "/provider/v1/models" {
 			t.Errorf("unexpected upstream path %q", r.URL.Path)
 		}
-		_, _ = io.WriteString(w, `{"data":[{"id":"deepseek/deepseek-v4-flash","name":"DeepSeek V4 Flash"}]}`)
+		_, _ = io.WriteString(w, `{"data":[{"id":"deepseek/deepseek-v4-flash","name":"DeepSeek V4 Flash"},{"id":"moonshotai/Kimi-K2.7-Code","name":"Kimi K2.7 Code"}]}`)
 	}))
 	t.Cleanup(upstream.Close)
 	return &config.Config{
@@ -94,6 +94,52 @@ func TestActiveSitePublishedModelWinsOverConfiguredRemap(t *testing.T) {
 	}
 }
 
+func TestActiveSitePublishedModelsRespectCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		requested     string
+		vision        bool
+		tools         bool
+		inputTokens   int
+		wantPrimary   string
+		wantNoTargets bool
+	}{
+		{"vision fallback", "deepseek/deepseek-v4-flash", true, false, 100, "kimi-k2.6", false},
+		{"output limit", "deepseek/deepseek-v4-flash", false, false, 100, "deepseek/deepseek-v4-flash", false},
+		{"exhausted context", "deepseek/deepseek-v4-flash", false, false, 1000000, "", true},
+		{"tool-less fallback", "deepseek/deepseek-v4-flash", false, true, 100, "deepseek/deepseek-v4-flash", false},
+		{"native vision ID", "moonshotai/Kimi-K2.7-Code", true, false, 100, "moonshotai/Kimi-K2.7-Code", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := siteConfig(t, site.CommandCode)
+			cfg.Models["default"] = config.ModelConfig{
+				Provider: site.CommandCode, ModelID: "kimi-k2.6", MaxTokens: 8192, SupportsTools: boolPtr(false),
+			}
+			h := activeSiteHandler(t, cfg)
+			chain, _, err := h.buildModelChain(context.Background(), tc.requested,
+				[]router.MessageContent{{Role: "user", Content: "hi"}}, tc.inputTokens, false, 64, tc.vision, tc.tools)
+			if tc.wantNoTargets {
+				if err == nil || len(chain) != 0 {
+					t.Fatalf("exhausted models were accepted: chain=%+v err=%v", chain, err)
+				}
+				return
+			}
+			if err != nil || len(chain) == 0 {
+				t.Fatalf("no eligible chain: %+v err=%v", chain, err)
+			}
+			if chain[0].ModelID != tc.wantPrimary {
+				t.Fatalf("primary=%s, want %s", chain[0].ModelID, tc.wantPrimary)
+			}
+			for _, model := range chain {
+				if model.Provider != site.CommandCode || model.MaxTokens != 64 ||
+					(tc.vision && !model.Vision) || (tc.tools && !config.SupportsTools(model)) {
+					t.Fatalf("request constraints bypassed: %+v", model)
+				}
+			}
+		})
+	}
+}
+
 func TestActiveSiteFiltersConfiguredTargets(t *testing.T) {
 	handler := activeSiteHandler(t, siteConfig(t, site.CommandCode))
 	chain, err := chainFor(t, handler, "alias-cc")
@@ -108,6 +154,33 @@ func TestActiveSiteFiltersConfiguredTargets(t *testing.T) {
 		if target.Provider != site.CommandCode {
 			t.Fatalf("a target from another platform survived: %s/%s", target.Provider, target.ModelID)
 		}
+	}
+}
+
+func TestPublishedModelRetainsSameTargetConfiguration(t *testing.T) {
+	for _, source := range []string{"models", "model_overrides", "default"} {
+		t.Run(source, func(t *testing.T) {
+			cfg := siteConfig(t, site.CommandCode)
+			requested := "deepseek/deepseek-v4-flash"
+			model := config.ModelConfig{Provider: site.CommandCode, ModelID: requested, Vision: true, MaxTokens: 32, ContextWindow: 32000}
+			delete(cfg.ModelOverrides, requested)
+			if source == "models" {
+				cfg.Models[requested] = model
+			} else if source == "default" {
+				cfg.Models["default"] = model
+			} else {
+				cfg.ModelOverrides[requested] = model
+			}
+			h := activeSiteHandler(t, cfg)
+			chain, _, err := h.buildModelChain(context.Background(), requested,
+				[]router.MessageContent{{Role: "user", Content: "hi"}}, 100, false, 64, true, false)
+			if err != nil || len(chain) == 0 {
+				t.Fatalf("configured vision capability was lost: chain=%+v err=%v", chain, err)
+			}
+			if chain[0].ModelID != requested || chain[0].MaxTokens != 32 || chain[0].ContextWindow != 32000 {
+				t.Fatalf("same-target configuration was lost: %+v", chain[0])
+			}
+		})
 	}
 }
 

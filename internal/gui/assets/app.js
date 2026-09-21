@@ -196,6 +196,11 @@ const TRANSLATIONS = {
     'commandcode.billing': 'Official billing',
     'commandcode.keys': 'Manage API keys',
     'commandcode.docs': 'Provider API docs',
+    'clinepass.windows': 'Plan usage',
+    'clinepass.window.five_hour': '5-hour window',
+    'clinepass.window.weekly': 'Weekly',
+    'clinepass.window.monthly': 'Monthly',
+    'clinepass.percentNote': 'ClinePass is a flat monthly subscription billed against reference rates, so the platform reports how much of each window is used rather than an amount owed. These percentages are the platform’s own figures.',
     'commandcode.zdr': 'Zero Data Retention (ZDR)',
     'label.chatURL': 'Chat Completions URL',
     'label.messagesURL': 'Anthropic Messages URL',
@@ -648,6 +653,11 @@ const TRANSLATIONS = {
     'commandcode.billing': '官方账单',
     'commandcode.keys': '管理 API 密钥',
     'commandcode.docs': 'Provider API 文档',
+    'clinepass.windows': '套餐用量',
+    'clinepass.window.five_hour': '5 小时窗口',
+    'clinepass.window.weekly': '本周',
+    'clinepass.window.monthly': '本月',
+    'clinepass.percentNote': 'ClinePass 是按参考价折算的包月订阅，因此平台返回的是各窗口的使用比例而非应付金额；此处显示的就是平台自己的数字。',
     'commandcode.zdr': '零数据保留（ZDR）',
     'label.chatURL': 'Chat Completions 完整地址',
     'label.messagesURL': 'Anthropic Messages 完整地址',
@@ -1419,11 +1429,8 @@ function activateTab(name) {
 
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
-    // Activate immediately; hashchange skips the already active page.
-    if (location.hash !== '#' + tab.dataset.tab) {
-      location.hash = tab.dataset.tab;
-    }
     activateTab(tab.dataset.tab);
+    syncViewState();
   });
   tab.addEventListener('keydown', event => {
     const tabs = [...document.querySelectorAll('.tab')];
@@ -1446,8 +1453,7 @@ document.querySelectorAll('.tab').forEach(tab => {
 // of stepping back one page.
 //
 // Several controls drive one concept - the platform filter appears on five tabs
-// - so a key binds a list of element ids. The first non-empty value wins when
-// serialising, and every bound control is set when applying.
+// - so a key binds a list of element ids and a selection updates them together.
 const VIEW_CONTROLS = {
   platform: ['provider-filter', 'overview-provider', 'perf-provider', 'analytics-provider', 'quota-provider'],
   // The history and analytics date ranges are separate keys because they are
@@ -1474,38 +1480,25 @@ const VIEW_CONTROLS = {
 // the hash would be rewritten while it is being read.
 let suppressViewStateSync = false;
 
-// applyActiveSite points every platform selector at the configured site, which
-// is the right default but not an override: a link that names a platform has
-// already chosen one for the view, and re-pointing the selectors would silently
-// discard it. Saving the config clears the pin, because changing the active
-// site is a deliberate change to what the views open on.
-//
-// The pin records which platform the link named, not merely that it named one.
-// A link naming a platform this deployment no longer offers cannot be honoured -
-// the selector has no such option, so the view would open on "all platforms"
-// while the proxy routes to the active site, and that mismatch would persist for
-// the whole session because the pin never expires by itself.
-let viewPlatformPinned = '';
+// null follows the active site; an empty string explicitly selects all
+// platforms. A named platform is a deliberate filter, not a routing change.
+let viewPlatformPinned = null;
 
-// The default each control is measured against. Selects and inputs declare it
-// in markup, which the DOM exposes as defaultValue. The analytics date range
-// does not: it is computed from today when the module initialises, so its value
-// before any URL is applied is the only correct answer, and it is captured once
-// at boot.
+// Capture before restoring the URL. Hidden inputs reflect .value back into
+// .defaultValue, so their live defaultValue cannot serve as a stable baseline.
 const viewDefaults = new Map();
 
 function captureViewDefaults() {
   for (const ids of Object.values(VIEW_CONTROLS)) {
     for (const id of ids) {
       const el = document.getElementById(id);
-      if (el && !el.defaultValue) viewDefaults.set(id, el.value ?? '');
+      if (el) viewDefaults.set(id, el.value ?? '');
     }
   }
 }
 
 function controlIsDefault(id, el) {
-  if (el.defaultValue) return el.value === el.defaultValue;
-  return el.value === (viewDefaults.get(id) ?? '');
+  return el.value === defaultControlValue(id, el);
 }
 
 // A default is only usable when it is actually known. A <select> always has
@@ -1517,7 +1510,37 @@ function controlHasDefault(id, el) {
 }
 
 function defaultControlValue(id, el) {
-  return el.defaultValue || viewDefaults.get(id) || '';
+  if (lastActiveSite && VIEW_CONTROLS.platform.includes(id)
+      && [...el.options].some(option => option.value === lastActiveSite && !option.disabled)) {
+    return lastActiveSite;
+  }
+  return viewDefaults.get(id) ?? el.defaultValue ?? '';
+}
+
+function setViewPlatform(value) {
+  const selects = VIEW_CONTROLS.platform.map(id => document.getElementById(id)).filter(Boolean);
+  if (value && !selects.some(select => [...select.options].some(option => option.value === value && !option.disabled))) {
+    value = null;
+  }
+  viewPlatformPinned = value;
+  const changed = [];
+  const suppressed = suppressViewStateSync;
+  suppressViewStateSync = true;
+  try {
+    for (const select of selects) {
+      const fallback = defaultControlValue(select.id, select);
+      const choice = value ?? fallback;
+      // Statistics offer "all"; account billing still needs a concrete site.
+      const next = [...select.options].some(option => option.value === choice && !option.disabled) ? choice : fallback;
+      if (select.value === next) continue;
+      select.value = next;
+      changed.push(select);
+    }
+    for (const select of changed) select.dispatchEvent(new Event('change', {bubbles: true}));
+  } finally {
+    suppressViewStateSync = suppressed;
+  }
+  window.CustomSelect?.syncAll();
 }
 
 // buildViewHash serialises the current view. A parameter is written only when
@@ -1528,6 +1551,10 @@ function defaultControlValue(id, el) {
 function buildViewHash() {
   const params = new URLSearchParams();
   for (const [key, ids] of Object.entries(VIEW_CONTROLS)) {
+    if (key === 'platform' && viewPlatformPinned !== null) {
+      params.set(key, viewPlatformPinned);
+      continue;
+    }
     for (const id of ids) {
       const el = document.getElementById(id);
       if (el && el.value && !controlIsDefault(id, el)) {
@@ -1561,13 +1588,16 @@ function parseViewHash(hash) {
   return {name: name || 'overview', params: new URLSearchParams(query)};
 }
 
-// applyViewState restores a view from the URL and reports whether it moved
-// history pagination, which has no control of its own to trigger a reload.
+// applyViewState restores the whole view and reports whether history needs
+// reloading, including pagination/sort state that has no control of its own.
 function applyViewState(params) {
-  const before = `${historyPage}|${currentSort.field}|${currentSort.dir}`;
+  const before = historyQueryParams().toString();
   suppressViewStateSync = true;
   try {
+    setViewPlatform(params.has('platform') ? params.get('platform') : null);
+    const changed = [];
     for (const [key, ids] of Object.entries(VIEW_CONTROLS)) {
+      if (key === 'platform') continue;
       for (const id of ids) {
         const el = document.getElementById(id);
         if (!el) continue;
@@ -1578,19 +1608,24 @@ function applyViewState(params) {
           : controlHasDefault(id, el) ? defaultControlValue(id, el) : el.value;
         if (el.value === value) continue;
         el.value = value;
-        // The tab's own handler listens for this; a silent assignment would
-        // leave the filter applied in the URL but not in the data.
-        el.dispatchEvent(new Event('change', {bubbles: true}));
+        changed.push(el);
       }
     }
-    if (params.has('page')) historyPage = Math.max(1, Number(params.get('page')) || 1);
-    if (params.has('sort')) currentSort = {field: params.get('sort'), dir: currentSort.dir};
-    if (params.has('dir')) currentSort = {field: currentSort.field, dir: params.get('dir')};
+    // Apply the whole range before notifying loaders, so neither request sees
+    // a mixture of old and restored bounds.
+    for (const el of changed) {
+      const type = ['history-search', 'model-filter', 'scenario-filter'].includes(el.id) ? 'input' : 'change';
+      el.dispatchEvent(new Event(type, {bubbles: true}));
+    }
+    historyPage = Math.max(1, Number(params.get('page')) || 1);
+    currentSort = {field: params.get('sort') || 'start_time', dir: params.get('dir') || 'desc'};
   } finally {
     suppressViewStateSync = false;
   }
   window.CustomSelect?.syncAll();
-  return `${historyPage}|${currentSort.field}|${currentSort.dir}` !== before;
+  window.HistoryDateRange?.syncFromHidden();
+  syncHistorySort();
+  return historyQueryParams().toString() !== before;
 }
 
 // Respond to back/forward and manual hash edits.
@@ -1910,7 +1945,11 @@ function resetHistoryFilters(refresh = true) {
   window.HistoryDateRange?.syncFromHidden();
   syncAdvancedFilters(false);
   historyPage = 1;
-  if (refresh) refreshHistory();
+  if (refresh) {
+    setViewPlatform('');
+    syncViewState();
+    refreshHistory();
+  }
 }
 
 function syncAdvancedFilters(reveal = true) {
@@ -2457,6 +2496,7 @@ const HIDDEN_PLATFORMS = {
 const PROVIDERS = {
   'opencode-go': {name: 'OpenCode Go', color: '#818cf8'},
   'commandcode': {name: 'CommandCode', color: '#22d3ee'},
+  'cline-pass': {name: 'ClinePass', color: '#f472b6'},
 };
 
 function providerInfo(provider) {
@@ -2510,10 +2550,9 @@ function costSourceLabel(source) {
 
 function viewProviderHistory(provider) {
   resetHistoryFilters(false);
-  document.getElementById('provider-filter').value = provider;
-  window.CustomSelect?.syncAll();
-  location.hash = 'history';
+  setViewPlatform(provider);
   activateTab('history');
+  syncViewState();
 }
 
 function fmt(n) { return n != null ? Number(n).toLocaleString() : '—'; }
@@ -2866,9 +2905,23 @@ async function loadProxyConfig() {
       } else if (type === 'keys') {
         el.value = (val || []).join(', ');
       } else {
+        if (id === 'cfg-active-site') {
+          el.querySelectorAll('option[data-current-site]').forEach(option => option.remove());
+          if (val && ![...el.options].some(option => option.value === val)) {
+            // A hidden but valid stored site must not become an empty form
+            // value and get cleared by an unrelated settings save.
+            const option = document.createElement('option');
+            option.value = val;
+            option.textContent = providerLabel(val);
+            option.disabled = true;
+            option.dataset.currentSite = 'true';
+            el.appendChild(option);
+          }
+        }
         el.value = val || '';
       }
     }
+    window.CustomSelect?.syncAll();
     updateConfigChangeCount();
   } catch (e) {
     console.error('Failed to load proxy config:', e);
@@ -2900,8 +2953,8 @@ function openProviderSettings(provider) {
   if (!PROVIDERS[provider]) return;
   const section = document.querySelector(`[data-settings-provider="${provider}"]`);
   if (!section) return;
-  location.hash = 'settings';
   activateTab('settings');
+  syncViewState();
   section.open = true;
   const picker = document.getElementById('settings-provider-jump');
   if (picker) picker.value = provider;
@@ -2921,12 +2974,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const viewControlIds = new Set(Object.values(VIEW_CONTROLS).flat());
   document.addEventListener('change', event => {
     if (!viewControlIds.has(event.target?.id)) return;
-    // applyActiveSite sets these controls from the active site and dispatches
-    // change so each tab reloads its data. That is the default being applied,
-    // not a choice the reader made, so it must not be written into the link -
-    // otherwise the site default pins itself on first open and every later
-    // platform switch on the server stops reaching this session.
-    if (applyingSiteDefault) return;
+    if (suppressViewStateSync) return;
+    if (VIEW_CONTROLS.platform.includes(event.target.id)) setViewPlatform(event.target.value);
     syncViewState();
   });
   document.getElementById('settings-provider-jump')?.addEventListener('change', event => {
@@ -2934,11 +2983,6 @@ document.addEventListener('DOMContentLoaded', () => {
     queueMicrotask(() => openProviderSettings(provider));
   });
 });
-
-// The dashboard's platform selectors open on the active site. Routing is
-// scoped to one platform, so defaulting the views to a mixed "all platforms"
-// would show mostly history the deployment no longer produces.
-const PLATFORM_SELECTORS = ['overview-provider', 'provider-filter', 'perf-provider', 'analytics-provider', 'quota-provider'];
 
 // applyActiveSite follows a platform switch made anywhere other than this page.
 // The active site is read at boot and after a save, so a change made in the
@@ -2948,57 +2992,25 @@ const PLATFORM_SELECTORS = ['overview-provider', 'provider-filter', 'perf-provid
 // moved, so an unchanged site causes no work.
 const ACTIVE_SITE_POLL_MS = 30000;
 let lastActiveSite = null;
-
-// Set while applyActiveSite applies the site default, so the change events it
-// dispatches reload each tab without being mistaken for a reader's choice.
-let applyingSiteDefault = false;
+let activeSiteLoadSeq = 0;
 
 async function applyActiveSite() {
+  const seq = ++activeSiteLoadSeq;
   let active;
   try {
     active = (await fetchJSON('/api/sites')).active || '';
   } catch (_) {
     return; // leave the selectors as rendered rather than guessing
   }
+  if (seq !== activeSiteLoadSeq) return;
   lastActiveSite = active;
-  if (!active) return;
-  // A link naming a platform still in the list wins; the pin is dropped rather
-  // than obeyed when the platform is gone, so a stale link cannot hold every
-  // view on "all platforms" while routing goes to the active site.
-  if (viewPlatformPinned) {
-    const known = PLATFORM_SELECTORS.some(id => {
-      const select = document.getElementById(id);
-      return select && [...select.options].some(o => o.value === viewPlatformPinned && !o.disabled);
-    });
-    if (known) return;
-    viewPlatformPinned = '';
-  }
-  let moved = false;
-  let offered = false;
-  applyingSiteDefault = true;
-  try {
-    for (const id of PLATFORM_SELECTORS) {
-      const select = document.getElementById(id);
-      if (!select) continue;
-      const option = [...select.options].find(o => o.value === active);
-      // The dashboard only offers visible platforms, but config accepts any
-      // known one, so an active site can be real and unrepresentable here.
-      // Saying nothing would leave the views on all platforms while routing
-      // goes to one of them - a difference the operator cannot see.
-      if (!option || option.disabled) continue;
-      offered = true;
-      if (select.value === active) continue;
-      select.value = active;
-      select.dispatchEvent(new Event('change', {bubbles: true}));
-      moved = true;
-    }
-  } finally {
-    applyingSiteDefault = false;
-  }
+  setViewPlatform(viewPlatformPinned);
+  const offered = VIEW_CONTROLS.platform.some(id => {
+    const select = document.getElementById(id);
+    return select && [...select.options].some(option => option.value === active && !option.disabled);
+  });
   renderActiveSiteNote(offered ? '' : active);
-  // The panels moved with the platform, so the link must follow: it would
-  // otherwise still name the platform this session is no longer showing.
-  if (moved) syncViewState({replace: true});
+  syncViewState({replace: true});
 }
 
 // renderActiveSiteNote shows why the views cannot open on the active platform.
@@ -3032,12 +3044,14 @@ async function applySelectableSites() {
   const selectable = new Map(sites.map(s => [s.id, s.selectable]));
   for (const option of select.options) {
     if (!option.value) continue;
-    const ok = selectable.get(option.value) === true;
+    const ok = selectable.get(option.value) === true && !option.dataset?.currentSite;
     option.disabled = !ok;
-    option.title = ok ? '' : t('setting.activeSiteUnavailable');
+    option.title = option.dataset?.currentSite
+      ? t('setting.activeSiteNotShown').replace('{site}', providerLabel(option.value))
+      : ok ? '' : t('setting.activeSiteUnavailable');
   }
-  // A stored value that is no longer selectable must not look chosen.
-  if (select.value && selectable.get(select.value) !== true) select.value = '';
+  // Disabling choices must not edit the stored setting on the user's behalf.
+  window.CustomSelect?.syncAll();
 }
 
 async function saveProxyConfig() {
@@ -3076,7 +3090,7 @@ async function saveProxyConfig() {
       showSaveStatus(t('status.saveOk'), 'success');
       // Reload the full config from the server to stay in sync.
       await loadProxyConfig();
-      viewPlatformPinned = '';
+      if (Object.hasOwn(patch, 'active_site')) viewPlatformPinned = null;
       // A saved active_site or key change also moves what every other tab is
       // showing: those selectors are set from /api/sites, which until now was
       // only read at page load, so a new platform only took effect after a
@@ -3139,11 +3153,12 @@ function togglePasswordVisibility(id) {
 /* ── History Search ────────────────────────────────────────────── */
 let historyRefreshTimer = null;
 
-function scheduleHistoryRefresh() {
+function scheduleHistoryRefresh(event) {
   syncAdvancedFilters(false);
   historyLoadSeq++;
   historyPage = 1;
   clearHistoryView(true);
+  if (event?.type === 'input') syncViewState({replace: true});
   if (historyRefreshTimer) clearTimeout(historyRefreshTimer);
   historyRefreshTimer = setTimeout(() => {
     historyRefreshTimer = null;
@@ -3169,6 +3184,15 @@ document.getElementById('history-page-size')?.addEventListener('change', event =
 /* ── History Sorting ───────────────────────────────────────────── */
 let currentSort = { field: 'start_time', dir: 'desc' };
 
+function syncHistorySort() {
+  document.querySelectorAll('.history-table .sortable').forEach(header => {
+    const selected = header.dataset.sort === currentSort.field;
+    header.classList.toggle('asc', selected && currentSort.dir === 'asc');
+    header.classList.toggle('desc', selected && currentSort.dir === 'desc');
+    header.setAttribute('aria-sort', selected ? (currentSort.dir === 'asc' ? 'ascending' : 'descending') : 'none');
+  });
+}
+
 // Scope to the History table: .perf-table has its own .sortable headers with a
 // dedicated handler, and an unscoped selector would bind both, so one click
 // would sort Performance and silently clear History's sort state.
@@ -3181,13 +3205,7 @@ document.querySelectorAll('.history-table .sortable').forEach(th => {
       currentSort.field = field;
       currentSort.dir = 'desc';
     }
-    // Update visual indicators and aria-sort (History headers only).
-    document.querySelectorAll('.history-table .sortable').forEach(s => {
-      s.classList.remove('asc', 'desc');
-      s.setAttribute('aria-sort', 'none');
-    });
-    this.classList.add(currentSort.dir);
-    this.setAttribute('aria-sort', currentSort.dir === 'asc' ? 'ascending' : 'descending');
+    syncHistorySort();
     historyPage = 1;
     syncViewState();
     refreshHistory();
@@ -3865,7 +3883,6 @@ queueMicrotask(() => {
   // the baseline its own parameters are measured against.
   captureViewDefaults();
   const {name, params} = parseViewHash(location.hash);
-  viewPlatformPinned = params.get('platform') || '';
   applyViewState(params);
   activateTab(name);
 });
@@ -4109,6 +4126,12 @@ const AnalyticsModule = {
     const refreshBtn = document.getElementById('btn-refresh-analytics');
     if (refreshBtn) refreshBtn.addEventListener('click', () => this.load(true));
     document.getElementById('analytics-provider')?.addEventListener('change', () => this.load(true));
+    for (const id of ['analytics-start', 'analytics-end']) {
+      document.getElementById(id)?.addEventListener('change', () => {
+        this.syncDateRange();
+        this.load(true);
+      });
+    }
     document.getElementById('overview-provider')?.addEventListener('change', refreshOverviewUsage);
     document.getElementById('btn-refresh-overview')?.addEventListener('click', refreshOverviewUsage);
     document.querySelectorAll('#analytics-breakdown-metric button').forEach(button => {
@@ -4218,6 +4241,7 @@ const AnalyticsModule = {
     document.getElementById('analytics-end').value = end.value;
     this.syncDateRange();
     this.closeDateRange();
+    syncViewState();
     this.load(true);
   },
 
@@ -4734,16 +4758,19 @@ const QuotaModule = {
     const isOpenRouter = this.provider === 'openrouter';
     const isBedrock = this.provider === 'aws-bedrock';
     const isCommandCode = this.provider === 'commandcode';
+    const isClinePass = this.provider === 'cline-pass';
     const go = document.getElementById('quota-go');
     const openrouter = document.getElementById('quota-openrouter');
     const bedrock = document.getElementById('quota-bedrock');
     const commandcode = document.getElementById('quota-commandcode');
+    const clinepass = document.getElementById('quota-cline-pass');
     const unavailable = document.getElementById('quota-unavailable');
     if (go) go.hidden = !isGo;
     if (openrouter) openrouter.hidden = !isOpenRouter;
     if (bedrock) bedrock.hidden = !isBedrock;
     if (commandcode) commandcode.hidden = !isCommandCode;
-    if (unavailable) unavailable.hidden = isGo || isOpenRouter || isBedrock || isCommandCode;
+    if (clinepass) clinepass.hidden = !isClinePass;
+    if (unavailable) unavailable.hidden = isGo || isOpenRouter || isBedrock || isCommandCode || isClinePass;
     this.syncRefreshButton();
     const view = this.view?.provider && this.view.provider !== this.provider ? null : this.view;
     const goSummary = document.getElementById('quota-go-summary');
@@ -4782,6 +4809,11 @@ const QuotaModule = {
       }
       if (isCommandCode) {
         this.renderCommandCode(view);
+        this.tickCountdowns();
+        return;
+      }
+      if (isClinePass) {
+        this.renderClinePass(view);
         this.tickCountdowns();
         return;
       }
@@ -4993,14 +5025,62 @@ const QuotaModule = {
     // The account's count and this instance's count describe different things,
     // so they are shown as two blocks with their difference named rather than
     // merged into one number.
-    const ledger = data.ledger ? figures([
-      ['commandcode.ledgerRequests', fmt(data.ledger.requests)],
-      ['commandcode.ledgerCost', fmtCost(data.ledger.cost_usd)],
+    const ledger = account.ledger ? figures([
+      ['commandcode.ledgerRequests', fmt(account.ledger.requests)],
+      ['commandcode.ledgerCost', fmtAggregateCost(account.ledger)],
       ...(usage && usage.totalCount != null
-        ? [['commandcode.ledgerGap', `${fmt(Math.max(0, usage.totalCount - data.ledger.requests))} · ${t('commandcode.ledgerHint')}`]]
+        ? [['commandcode.ledgerGap', `${fmt(Math.max(0, usage.totalCount - account.ledger.requests))} · ${t('commandcode.ledgerHint')}`]]
         : []),
-    ]) : '';
+    ]) + `<p class="page-meta">${escapeHtml(costCoverageNote(account.ledger))}</p>` : '';
     return `<section class="quota-account commandcode-account">${head}<div class="commandcode-panels">${section('commandcode.credits', credits, 'commandcode-credits')}${section('quota.plan', subscription)}${section('commandcode.usageSummary', summary)}${ledger ? section('commandcode.ledger', ledger, 'commandcode-ledger') : ''}</div></section>`;
+  },
+
+  // ClinePass shows percentages, not money: it is a flat monthly plan billed
+  // against reference rates, so the platform reports only how much of each
+  // window is used. There is deliberately no local-ledger block here, unlike
+  // CommandCode: a local cost figure and the platform's percentage would both
+  // be estimates of the same consumption rather than two independent accounts.
+  renderClinePass(view) {
+    const root = document.getElementById('quota-cline-pass-accounts');
+    if (!root) return;
+    if (!view) {
+      root.innerHTML = `<div class="quota-notice">${t(this.loading ? 'data.loading' : 'detail.unavailable')}</div>`;
+    } else if (view.error) {
+      root.innerHTML = `<div class="quota-notice is-error" role="alert">${escapeHtml(view.error)}</div>`;
+    } else if (!view.accounts?.length) {
+      root.innerHTML = `<div class="quota-notice"><strong>${t('quota.noProviderKey').replace('{provider}', 'ClinePass')}</strong><span>${t('quota.noProviderKeyHint')}</span></div>`;
+    } else {
+      root.innerHTML = view.accounts.map(account => this.renderClinePassAccount(account)).join('');
+    }
+  },
+
+  renderClinePassAccount(account) {
+    const head = `<div class="quota-account-head"><span class="quota-key">${t('quota.keyLabel')} <code>${escapeHtml(account.key_hint || '—')}</code></span></div>`;
+    const data = account.cline_pass;
+    const error = message => `<div class="quota-notice is-error" role="alert">${escapeHtml(message)}</div>`;
+    if (account.error || !data) return `<section class="quota-account analytics-section">${head}${error(account.error || t('data.invalid'))}</section>`;
+    const windows = (data.windows || []).map(window => {
+      const percent = Number.isFinite(window.percent_used) ? window.percent_used : null;
+      const level = percent == null ? 'ok' : this.levelOf(percent);
+      const reset = window.resets_at ? new Date(window.resets_at) : null;
+      const deadline = reset && Number.isFinite(reset.getTime()) ? reset.getTime() : null;
+      // The platform names its windows (five_hour, weekly, monthly) and may add
+      // one, so a window with no translated label falls back to the raw type
+      // rather than rendering an empty heading.
+      const label = t('clinepass.window.' + window.type);
+      const name = label === 'clinepass.window.' + window.type ? window.type : label;
+      return `<div class="commandcode-window level-${level}">
+        <div class="commandcode-window-heading"><strong>${escapeHtml(name)}</strong><span>${percent == null ? '—' : `${percent.toFixed(1)}%`}</span></div>
+        ${percent == null ? '' : `<progress max="100" value="${Math.min(100, Math.max(0, percent))}" aria-label="${escapeHtml(name)}"></progress>`}
+        <span class="quota-reset"${deadline == null ? '' : ` data-deadline="${deadline}"`}>${deadline == null ? t('quota.resetUnknown') : ''}</span></div>`;
+    }).join('');
+    return `<section class="quota-account commandcode-account">${head}
+      <div class="commandcode-panels">
+        <section class="commandcode-block commandcode-credits"><h3 class="section-heading">${t('clinepass.windows')}</h3>
+          <div class="commandcode-windows">${windows}</div>
+          <p class="page-meta">${t('clinepass.percentNote')}</p>
+        </section>
+      </div></section>`;
   },
 
   renderAccount(account) {

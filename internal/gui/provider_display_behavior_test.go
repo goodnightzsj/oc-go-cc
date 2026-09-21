@@ -23,7 +23,7 @@ async function checks() {
   equal(['z-custom','aws_bedrock','commandcode','opencode_go','a-custom'].sort(compareProviderDisplay),
     ['opencode_go','commandcode','aws_bedrock','a-custom','z-custom'],'aliases and unknown providers');
 
-  const shuffled = ['z-custom','openrouter','aws-bedrock','commandcode','opencode-zen','opencode-go','a-custom'];
+  const shuffled = ['z-custom','openrouter','aws-bedrock','commandcode','cline-pass','opencode-zen','opencode-go','a-custom'];
   const rows = shuffled.map((provider,index)=>({provider,model:'model-'+index,requests:index+1,input_tokens:index+1,output_tokens:1,cache_read_tokens:0,cache_creation_tokens:0,cost_usd:index+1}));
   const original = JSON.stringify(rows);
   const providerOrder = id => [...document.getElementById(id).innerHTML.matchAll(/data-provider="([^"]+)"/g)].map(match=>match[1]);

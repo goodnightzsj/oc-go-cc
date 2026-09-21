@@ -1,0 +1,127 @@
+[
+  {
+    "_comment": "ClinePass pricing (USD per 1M tokens), transcribed from the Reference pricing table on docs.cline.bot/getting-started/clinepass. Regenerated 2026-09-21. A runtime refresher rewrites this hourly; this baseline is what a failed refresh falls back to."
+  },
+  {
+    "_comment": "This is the platform's own published table and the only complete one it offers: ClinePass is a flat $9.99/month subscription, so these rates are not what the user is charged - they are the reference rates ClinePass measures quota consumption against. That makes them the right basis for this proxy's cost column, which estimates consumption rather than billing."
+  },
+  {
+    "_comment": "Do NOT source this table from models.dev. Its cline-pass provider exists (15 models) and agrees row-for-row on 11 of these 13, but its deepseek-v4-flash and deepseek-v4-pro rows are byte-identical to its own mimo-v2.5 and mimo-v2.5-pro rows - a mapping error, not a peak rate. Taking those two from models.dev would under-price real traffic by ~2x."
+  },
+  {
+    "_comment": "SOURCE SPLIT - 13 of the 15 rules below are transcribed verbatim from the Reference pricing table (the 'Published rows'). The remaining two, glm-5.3-flash and deepseek-v4.1-flash, are NOT on that page: they appear in the live recommended-models roster and are priced here from models.dev, which is a third party. They are marked individually. Re-check them first when the docs page is next revised."
+  },
+  {
+    "_comment": "cline-pass/muse-spark-1.3-contributor also appears in the live roster and has no rule here on purpose: neither source publishes a rate for it, so its cost reports as unknown. A missing rule is not a zero rate - inventing one would show a confident, wrong number."
+  },
+  {
+    "_comment": "Rows carry the platform's own model id (the page's Model ID table gives it as cline-pass/<name>), matched as a substring with longest-match winning. The full id is used rather than the bare name so a rule cannot match a same-named model on another platform and so the seed reads identically to what the live refresher parses off the page. glm-5.3 is a substring of glm-5.3-flash and mimo-v2.5 of mimo-v2.5-pro, which is why the longer id must stay in this table - longest match decides, not row order. Base rates are the Off-peak column; `tiers` replace them once the whole prompt exceeds `size` input tokens, matching the table's own '> 256K tokens' wording."
+  },
+  {
+    "_comment": "DeepSeek V4 Pro/Flash publish a Peak column too (1.32/3.96/0.044 and 0.44/1.32/0.014) but the peak WINDOW is not yet verified: ClinePass footnotes DeepSeek's own pricing page, not the 01-04 & 06-10 UTC windows CommandCode and OpenCode Go use. Until the window is measured against a real key, no peak schedule is registered for this platform, so PeakMultiplier is 1 and these rows bill flat at Off-peak. Registering a guessed window would produce well-formed, wrongly-priced money."
+  },
+  {
+    "match": "cline-pass/glm-5.3-flash",
+    "input": 0.15,
+    "output": 0.5,
+    "cache_read": 0.03,
+    "_source": "models.dev (absent from the docs Reference pricing table)"
+  },
+  {
+    "match": "cline-pass/glm-5.3",
+    "input": 1.4,
+    "output": 4.4,
+    "cache_read": 0.26
+  },
+  {
+    "match": "cline-pass/glm-5.2",
+    "input": 1.4,
+    "output": 4.4,
+    "cache_read": 0.26
+  },
+  {
+    "match": "cline-pass/kimi-k3",
+    "input": 3.0,
+    "output": 15.0,
+    "cache_read": 0.3
+  },
+  {
+    "match": "cline-pass/kimi-k2.7-code",
+    "input": 0.95,
+    "output": 4.0,
+    "cache_read": 0.19
+  },
+  {
+    "match": "cline-pass/kimi-k2.6",
+    "input": 0.95,
+    "output": 4.0,
+    "cache_read": 0.16
+  },
+  {
+    "match": "cline-pass/deepseek-v4-pro",
+    "input": 0.66,
+    "output": 1.98,
+    "cache_read": 0.022
+  },
+  {
+    "match": "cline-pass/deepseek-v4.1-flash",
+    "input": 0.15,
+    "output": 0.6,
+    "cache_read": 0.003,
+    "_source": "models.dev (absent from the docs Reference pricing table)"
+  },
+  {
+    "match": "cline-pass/deepseek-v4-flash",
+    "input": 0.22,
+    "output": 0.66,
+    "cache_read": 0.007
+  },
+  {
+    "match": "cline-pass/mimo-v2.5-pro",
+    "input": 1.74,
+    "output": 3.48,
+    "cache_read": 0.0145
+  },
+  {
+    "match": "cline-pass/mimo-v2.5",
+    "input": 0.14,
+    "output": 0.28,
+    "cache_read": 0.0028
+  },
+  {
+    "match": "cline-pass/minimax-m3",
+    "input": 0.3,
+    "output": 1.2,
+    "cache_read": 0.06
+  },
+  {
+    "match": "cline-pass/qwen3.8-max",
+    "input": 2.0,
+    "output": 6.0,
+    "cache_read": 0.25,
+    "cache_write": 2.5
+  },
+  {
+    "match": "cline-pass/qwen3.7-max",
+    "input": 2.5,
+    "output": 7.5,
+    "cache_read": 0.5,
+    "cache_write": 3.125
+  },
+  {
+    "match": "cline-pass/qwen3.7-plus",
+    "input": 0.4,
+    "output": 1.6,
+    "cache_read": 0.04,
+    "cache_write": 0.5,
+    "tiers": [
+      {
+        "size": 256000,
+        "input": 1.2,
+        "output": 4.8,
+        "cache_read": 0.12,
+        "cache_write": 1.5
+      }
+    ]
+  }
+]

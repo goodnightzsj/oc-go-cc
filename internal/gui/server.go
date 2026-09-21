@@ -60,7 +60,6 @@ type Server struct {
 	catalogSourceURL  string
 	srv               *http.Server
 	logger            *slog.Logger
-	catalogMu         sync.Mutex
 
 	// One cached quota response per platform; each response carries its TTL.
 	quotaMu    sync.Mutex
@@ -173,12 +172,6 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 	// quota page stays current even when nobody opens it; the handler's
 	// ensureModelLimits covers the first request after startup.
 	go s.limitsLoop(ctx)
-
-	// Refresh both platforms' price tables hourly. The build-time snapshot is
-	// what cost estimation falls back to, and it has gone stale before without
-	// anything reporting it, so cost figures are re-based on the published
-	// tables rather than on whatever shipped in the binary.
-	go s.priceRefreshLoop(ctx)
 
 	mux := http.NewServeMux()
 
@@ -907,11 +900,7 @@ func (s *Server) handleCatalogSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Serialize manual syncs so the lock file and on-disk catalog stay consistent.
-	s.catalogMu.Lock()
-	defer s.catalogMu.Unlock()
-
-	lock, err := catalog.Sync(s.catalogSourceURL, s.catalogDir)
+	lock, err := catalog.Sync(r.Context(), s.catalogSourceURL, s.catalogDir)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("catalog sync failed: %v", err), http.StatusInternalServerError)
 		return

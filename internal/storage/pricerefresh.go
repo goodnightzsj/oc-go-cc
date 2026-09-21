@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,6 +42,12 @@ const (
 	// Every plan page that shows the table (goat, pro) carries the same 70 rows
 	// at identical rates, so one is enough.
 	CommandCodePricesURL = "https://commandcode.ai/docs/plans/pro"
+
+	// ClinePassPricesURL is the ClinePass page carrying the Reference pricing
+	// table. It is the platform's own published table and the only complete one
+	// it offers; models.dev also lists this provider but gets two DeepSeek rows
+	// wrong, so it is not a substitute.
+	ClinePassPricesURL = "https://docs.cline.bot/getting-started/clinepass.md"
 
 	// DefaultPriceRefreshInterval matches the published cadence of both pages:
 	// neither has a documented update schedule, and price moves are rare, so an
@@ -392,30 +399,50 @@ func sortTiers(tiers []priceTier) {
 // PriceRefreshConfig is the resolved refresh schedule.
 type PriceRefreshConfig struct {
 	// CatalogPath is the locally synced models.dev catalog the OpenCode Go
-	// prices are read from. Empty disables that half of the refresh.
+	// prices are read from. Empty reports a refresh error for that platform.
 	CatalogPath string
+	// RefreshCatalog updates the local cache before it is read. A failure keeps
+	// the previous OpenCode table without blocking the CommandCode refresh.
+	RefreshCatalog func(context.Context) error
 	// CommandCodeURL is the plan page carrying CommandCode's table.
 	CommandCodeURL string
+	// ClinePassURL is the docs page carrying ClinePass's table.
+	ClinePassURL string
 	// Interval is how long to wait between refreshes.
 	Interval time.Duration
 }
 
-// RefreshPrices fetches both platforms' tables and installs whatever it got.
+// RefreshPrices fetches every platform's table and installs whatever it got.
 // It returns the per-platform outcome so the caller can log what actually
-// changed; a failure for one platform never blocks or clears the other.
+// changed; a failure for one platform never blocks or clears another.
 func RefreshPrices(ctx context.Context, cfg PriceRefreshConfig, client *http.Client) (map[string][]priceEntry, map[string]error) {
 	fetched := map[string][]priceEntry{}
 	errs := map[string]error{}
 
-	if goEntries, err := FetchOpenCodeGoPrices(cfg.CatalogPath); err != nil {
-		errs[site.OpenCodeGo] = err
-	} else {
-		fetched[site.OpenCodeGo] = goEntries
+	if cfg.RefreshCatalog != nil {
+		if err := cfg.RefreshCatalog(ctx); err != nil {
+			errs[site.OpenCodeGo] = err
+		}
+	}
+	if errs[site.OpenCodeGo] == nil {
+		if goEntries, err := FetchOpenCodeGoPrices(cfg.CatalogPath); err != nil {
+			errs[site.OpenCodeGo] = err
+		} else {
+			fetched[site.OpenCodeGo] = goEntries
+		}
 	}
 	if ccEntries, err := FetchCommandCodePrices(ctx, client, cfg.CommandCodeURL); err != nil {
 		errs[site.CommandCode] = err
 	} else {
 		fetched[site.CommandCode] = ccEntries
+	}
+	if clEntries, err := FetchClinePassPrices(ctx, client, cfg.ClinePassURL); err != nil {
+		errs[site.ClinePass] = err
+	} else {
+		fetched[site.ClinePass] = clEntries
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, map[string]error{site.OpenCodeGo: err, site.CommandCode: err, site.ClinePass: err}
 	}
 	InstallPrices(fetched)
 	return fetched, errs
@@ -429,8 +456,11 @@ func PriceRefreshLoop(ctx context.Context, cfg PriceRefreshConfig, client *http.
 		cfg.Interval = DefaultPriceRefreshInterval
 	}
 	run := func() {
+		if ctx.Err() != nil {
+			return
+		}
 		fetched, errs := RefreshPrices(ctx, cfg, client)
-		if onResult == nil {
+		if onResult == nil || ctx.Err() != nil {
 			return
 		}
 		counts := map[string]int{}
@@ -450,4 +480,181 @@ func PriceRefreshLoop(ctx context.Context, cfg PriceRefreshConfig, client *http.
 			run()
 		}
 	}
+}
+
+// clinePriceRowRE matches one Markdown table row, capturing its cells.
+var clinePriceRowRE = regexp.MustCompile(`(?m)^\|(.+)\|\s*$`)
+
+// clinePriceCellsRE pulls the dollar amounts out of a price row, in column
+// order. The page escapes the dollar sign in Markdown ("\$1.40") and writes a
+// dash for a column the model does not bill, so a missing amount is a dash
+// rather than a zero - which is why the count of matches is not the column
+// count.
+var clinePriceNumberRE = regexp.MustCompile(`\$([0-9]+(?:\.[0-9]+)?)`)
+
+// clinePriceIDRE reads a model id out of the Model ID table's second column.
+var clinePriceIDRE = regexp.MustCompile("`(cline-pass/[^`]+)`")
+
+// clinePriceBandRE splits a model label from its context band: "Qwen3.7 Plus
+// (> 256K tokens)" is the model plus a band, "GLM-5.3" is the model alone.
+var clinePriceBandRE = regexp.MustCompile(`(?i)^(.*?)\s*\((≤|>)\s*([0-9.]+\s*[KkMm])\s*tokens?\)\s*$`)
+
+// clinePriceTagRE strips the footnote the page attaches to the DeepSeek rows
+// ("DeepSeek V4 Pro (Off-peak)<sup>1</sup>"). The marker renders as an HTML tag
+// in the page source and as a bare digit once the tag is removed, so both are
+// cleaned - but only after the label's own "(...)" suffix, to keep a model
+// whose name ends in a number from losing it.
+var clinePriceTagRE = regexp.MustCompile(`<[^>]+>`)
+var clinePriceFootnoteRE = regexp.MustCompile(`\)\s*\d+\s*$`)
+
+// clinePricePeakSuffixRE removes the peak qualifier that distinguishes the two
+// rows a peak-priced model gets ("DeepSeek V4 Pro (Off-peak)"), leaving the
+// label the id table actually lists. It is applied after the Peak row is
+// skipped, so what remains to strip is the Off-peak one.
+var clinePricePeakSuffixRE = regexp.MustCompile(`(?i)\s*\((?:off-)?peak\)\s*$`)
+
+// parseClinePassPricePage reads the ClinePass Reference pricing table.
+//
+// The page carries two tables and the join between them is what makes this
+// page a better price source than any mirror: the first maps a display label
+// to the platform's own model id, the second prices that label. Reading the id
+// straight from the page is why nothing here has to guess how "Kimi K2.7 Code"
+// is spelled as an id, and a guessed slug that folded the wrong character would
+// quietly price the wrong model.
+//
+// Two properties of the price table drive the rest:
+//
+//   - Peak and Off-peak are two rows for one model, and the peak window is
+//     unverified. The row this proxy estimates with is Off-peak, because no
+//     peak schedule is registered for this platform: a guessed window would
+//     price real traffic at the wrong multiplier while looking well-formed. The
+//     Peak rows are skipped, not merged into a band.
+//   - A context band is a tier ("Qwen3.7 Plus (> 256K tokens)"), which the tier
+//     model already represents. The "≤" row is the base and the ">" row is the
+//     tier above it.
+//
+// A row that names a model the id table does not list is a parse failure rather
+// than a dropped model: this is the platform's only price source, so a page
+// restructure must surface as an error instead of as missing prices.
+func parseClinePassPricePage(body []byte) ([]priceEntry, error) {
+	ids := map[string]string{}
+	idsDone := false
+	byMatch := map[string]*priceEntry{}
+	var order []string
+
+	for _, row := range clinePriceRowRE.FindAllStringSubmatch(string(body), -1) {
+		cells := strings.Split(row[1], "|")
+		if len(cells) < 2 {
+			continue
+		}
+		label := strings.TrimSpace(clinePriceFootnoteRE.ReplaceAllString(clinePriceTagRE.ReplaceAllString(cells[0], ""), ")"))
+		if label == "" || strings.EqualFold(label, "Model") || strings.HasPrefix(label, "---") {
+			continue
+		}
+		// The id table comes first; it is the only table with a backticked id.
+		if id := clinePriceIDRE.FindStringSubmatch(strings.Join(cells[1:], "|")); id != nil {
+			if !idsDone {
+				ids[strings.ToLower(label)] = id[1]
+			}
+			continue
+		}
+		idsDone = true
+
+		if len(cells) < 5 {
+			continue
+		}
+		lowered := strings.ToLower(label)
+		if strings.Contains(lowered, "peak") && !strings.Contains(lowered, "off-peak") {
+			continue
+		}
+		label = strings.TrimSpace(clinePricePeakSuffixRE.ReplaceAllString(label, ""))
+		base, sign, band := label, "", ""
+		if m := clinePriceBandRE.FindStringSubmatch(label); m != nil {
+			base, sign, band = strings.TrimSpace(m[1]), m[2], m[3]
+		}
+		match, ok := ids[strings.ToLower(base)]
+		if !ok {
+			return nil, fmt.Errorf("price row %q names a model the id table does not list", label)
+		}
+		amounts := clinePriceNumberRE.FindAllStringSubmatch(strings.Join(cells[1:], "|"), -1)
+		if len(amounts) < 2 {
+			return nil, fmt.Errorf("price row %q has no readable input/output rate", label)
+		}
+		rates := make([]float64, 0, len(amounts))
+		for _, a := range amounts {
+			v, err := strconv.ParseFloat(a[1], 64)
+			if err != nil {
+				return nil, fmt.Errorf("price row %q has an unreadable amount %q", label, a[1])
+			}
+			rates = append(rates, v)
+		}
+		entry, ok := byMatch[match]
+		if !ok {
+			entry = &priceEntry{Match: match}
+			byMatch[match] = entry
+			order = append(order, match)
+		}
+		if sign == ">" {
+			// The ">" row is the band above the threshold the "≤" row names, and
+			// the tier model keys on that threshold.
+			bound, ok := tierBoundFromLabel(band)
+			if !ok {
+				return nil, fmt.Errorf("price row %q has an unreadable context band %q", label, band)
+			}
+			tier := priceTier{Size: bound, Input: rates[0], Output: rates[1]}
+			if len(rates) > 2 {
+				tier.CacheRead = rates[2]
+			}
+			if len(rates) > 3 {
+				tier.CacheWrite = rates[3]
+			}
+			entry.Tiers = append(entry.Tiers, tier)
+			sortTiers(entry.Tiers)
+			continue
+		}
+		entry.Input, entry.Output = rates[0], rates[1]
+		if len(rates) > 2 {
+			entry.CacheRead = rates[2]
+		}
+		if len(rates) > 3 {
+			entry.CacheWrite = rates[3]
+		}
+	}
+	if len(order) == 0 {
+		return nil, errors.New("no price rows found on the ClinePass page")
+	}
+	out := make([]priceEntry, 0, len(order))
+	for _, match := range order {
+		out = append(out, *byMatch[match])
+	}
+	return out, nil
+}
+
+// FetchClinePassPrices reads the ClinePass Reference pricing table from the
+// platform's own documentation page.
+func FetchClinePassPrices(ctx context.Context, client *http.Client, url string) ([]priceEntry, error) {
+	if url == "" {
+		url = ClinePassPricesURL
+	}
+	if client == nil {
+		client = &http.Client{Timeout: priceFetchTimeout}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("User-Agent", "routatic-proxy/price-refresh")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch price page: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("price page returned HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxPricePageBytes))
+	if err != nil {
+		return nil, fmt.Errorf("read price page: %w", err)
+	}
+	return parseClinePassPricePage(body)
 }

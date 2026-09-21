@@ -34,6 +34,7 @@ const (
 	defaultOpenRouterBaseURL           = "https://openrouter.ai/api/v1/chat/completions"
 	defaultCommandCodeBaseURL          = "https://api.commandcode.ai/provider/v1/chat/completions"
 	defaultCommandCodeAnthropicBaseURL = "https://api.commandcode.ai/provider/v1/messages"
+	defaultClinePassBaseURL            = "https://api.cline.bot/api/v1/chat/completions"
 )
 
 // envVarPattern matches ${ENV_VAR} placeholders in config values.
@@ -232,6 +233,26 @@ func applyEnvOverrides(cfg *Config) error {
 		cfg.CommandCode.AnthropicBaseURL = v
 	}
 
+	if v := envValue("ROUTATIC_PROXY_CLINE_PASS_API_KEY"); v != "" {
+		cfg.ClinePass.APIKey = v
+		cfg.ClinePass.APIKeys = nil
+	}
+	if v := envValue("ROUTATIC_PROXY_CLINE_PASS_API_KEYS"); v != "" {
+		cfg.ClinePass.APIKeys = parseCommaSeparatedKeys(v)
+		cfg.ClinePass.APIKey = ""
+	}
+	if v := envValue("ROUTATIC_PROXY_CLINE_PASS_URL"); v != "" {
+		cfg.ClinePass.BaseURL = v
+	}
+	// CLINE_API_KEY is the name Cline's own docs and every third-party client
+	// use for this credential, so it is accepted as the last resort rather than
+	// making an operator rename a key they already exported.
+	if cfg.ClinePass.APIKey == "" && len(cfg.ClinePass.APIKeys) == 0 {
+		if v := os.Getenv("CLINE_API_KEY"); v != "" {
+			cfg.ClinePass.APIKey = v
+		}
+	}
+
 	if v := envValue("ROUTATIC_PROXY_HOST"); v != "" {
 		cfg.Host = v
 	}
@@ -309,7 +330,8 @@ func validate(cfg *Config) error {
 	}
 	if len(cfg.EffectiveAPIKeys()) == 0 && len(cfg.OpenCodeGo.EffectiveAPIKeys()) == 0 &&
 		len(cfg.OpenCodeZen.EffectiveAPIKeys()) == 0 && len(cfg.AWSBedrock.EffectiveAPIKeys()) == 0 &&
-		len(cfg.OpenRouter.EffectiveAPIKeys()) == 0 && len(cfg.CommandCode.EffectiveAPIKeys()) == 0 {
+		len(cfg.OpenRouter.EffectiveAPIKeys()) == 0 && len(cfg.CommandCode.EffectiveAPIKeys()) == 0 &&
+		len(cfg.ClinePass.EffectiveAPIKeys()) == 0 {
 		return fmt.Errorf("api_key or api_keys is required (set via config file or ROUTATIC_PROXY_API_KEY env var; OC_GO_CC_API_KEY is still supported)")
 	}
 	if cfg.AnthropicFirst.Enabled {
@@ -381,6 +403,22 @@ func validate(cfg *Config) error {
 	}
 	if cfg.CommandCode.TimeoutMs < 0 || cfg.CommandCode.StreamTimeoutMs < 0 || cfg.CommandCode.StreamingTimeoutMs < 0 {
 		return fmt.Errorf("commandcode timeouts must not be negative")
+	}
+
+	if err := validateSingleAPIKey(cfg.ClinePass.APIKey); err != nil {
+		return fmt.Errorf("cline_pass.api_key: %w", err)
+	}
+	if err := validateAPIKeys(cfg.ClinePass.APIKeys); err != nil {
+		return fmt.Errorf("cline_pass.api_keys: %w", err)
+	}
+	if endpoint := cfg.ClinePass.BaseURL; endpoint != "" { // validate is also used on configs before defaults.
+		u, err := url.Parse(endpoint)
+		if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return fmt.Errorf("cline_pass.base_url must be an absolute http or https URL without credentials or fragment")
+		}
+	}
+	if cfg.ClinePass.TimeoutMs < 0 || cfg.ClinePass.StreamTimeoutMs < 0 || cfg.ClinePass.StreamingTimeoutMs < 0 {
+		return fmt.Errorf("cline_pass timeouts must not be negative")
 	}
 
 	if err := validateOverrideMap("models", cfg.Models); err != nil {
@@ -554,6 +592,12 @@ func validateModelConfig(label string, mc ModelConfig) error {
 	if NormalizeProvider(mc.Provider) == "commandcode" && mc.WireFormat != "" && mc.WireFormat != "auto" && mc.WireFormat != "openai" && mc.WireFormat != "anthropic" {
 		return fmt.Errorf("%s: commandcode supports only openai or anthropic upstream wire formats", label)
 	}
+	// ClinePass publishes no Messages endpoint, so anthropic is not a choice
+	// here: accepting it would send a model to an endpoint that does not exist
+	// and report the gateway's 401 as an auth problem.
+	if NormalizeProvider(mc.Provider) == "cline-pass" && mc.WireFormat != "" && mc.WireFormat != "auto" && mc.WireFormat != "openai" {
+		return fmt.Errorf("%s: cline-pass supports only the openai upstream wire format", label)
+	}
 	return nil
 }
 
@@ -579,6 +623,7 @@ func applySiteDefaults(cfg *Config) {
 		{&cfg.OpenRouter.BaseURL, defaultOpenRouterBaseURL},
 		{&cfg.CommandCode.BaseURL, defaultCommandCodeBaseURL},
 		{&cfg.CommandCode.AnthropicBaseURL, defaultCommandCodeAnthropicBaseURL},
+		{&cfg.ClinePass.BaseURL, defaultClinePassBaseURL},
 	} {
 		if *row.target == "" {
 			*row.target = row.value
@@ -595,6 +640,7 @@ func applySiteDefaults(cfg *Config) {
 		{&cfg.AWSBedrock.TimeoutMs, &cfg.AWSBedrock.StreamTimeoutMs, &cfg.AWSBedrock.StreamingTimeoutMs},
 		{&cfg.OpenRouter.TimeoutMs, &cfg.OpenRouter.StreamTimeoutMs, &cfg.OpenRouter.StreamingTimeoutMs},
 		{&cfg.CommandCode.TimeoutMs, &cfg.CommandCode.StreamTimeoutMs, &cfg.CommandCode.StreamingTimeoutMs},
+		{&cfg.ClinePass.TimeoutMs, &cfg.ClinePass.StreamTimeoutMs, &cfg.ClinePass.StreamingTimeoutMs},
 	} {
 		if *row.timeout == 0 {
 			*row.timeout = defaultTimeoutMs

@@ -31,10 +31,11 @@
 | AWS Bedrock | 同上 | 同上 | 已实现 Cost Explorer 官方服务费用；独立 IAM 身份、显式账户、默认关闭、手动收费查询。保留币种/日期/Estimated，不冒充余额；真实 IAM 授权待验收。[配置与范围](aws-bedrock-billing.md) |
 | OpenRouter | 同上 | 同上 | 已实现 `/key` 每 Key 限额/UTC 用量与独立 Management Key `/credits`；BYOK、Key 限额和账户余额分开，不合计多 Key |
 | CommandCode | 同上 | 同上 | 官方 Alpha 额度、订阅、周期汇总，独立 API Key；美元计价点数不是现金，缺月度总额不推算百分比；Alpha 字段尚非稳定公开合同。[端点与边界](commandcode.md#commandcode-账户查询) |
+| ClinePass | 同上 | 同上 | 官方 plan 三窗口百分比（5 小时 / 周 / 月），与推理同一个 API Key，无需 OAuth；包月订阅按参考价折算，故只报百分比不报金额；端点未公开，字段可能变化。不做本地账本对账（本地成本与平台百分比是同一消耗的两种估算，不是两个独立口径）。[接入边界](cline-pass.md) |
 
 平台状态明确区分已获取、部分失败、未配置、未提供能力和错误；官方数据与本地账本独立加载。只有经过本实例的请求才进入本地统计，不代表账户的全部消费。OpenRouter 管理 Key 必须单独设置 `openrouter.management_api_key` 或 `ROUTATIC_PROXY_OPENROUTER_MANAGEMENT_API_KEY`，不会使用推理 Key 代替，也不推断其与其它 Key 属于同一账户。
 
-一手依据：[OpenRouter Key 用量](https://openrouter.ai/docs/api_reference/limits)、[Credits 的 Management Key 要求](https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits)、[Zen](https://opencode.ai/docs/zen/)、[CommandCode Usage Limits](https://commandcode.ai/docs/resources/usage-limits)、[AWS Cost Explorer 权限](https://docs.aws.amazon.com/cost-management/latest/userguide/ce-api.html)。缺少公开合同或账户权限的部分仍是缺口，不能将本地账本、入口链接或合成测试描述为真实账户接入成功。
+一手依据：[ClinePass](https://docs.cline.bot/getting-started/clinepass)、[OpenRouter Key 用量](https://openrouter.ai/docs/api_reference/limits)、[Credits 的 Management Key 要求](https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits)、[Zen](https://opencode.ai/docs/zen/)、[CommandCode Usage Limits](https://commandcode.ai/docs/resources/usage-limits)、[AWS Cost Explorer 权限](https://docs.aws.amazon.com/cost-management/latest/userguide/ce-api.html)。缺少公开合同或账户权限的部分仍是缺口，不能将本地账本、入口链接或合成测试描述为真实账户接入成功。
 
 ## 上游提交筛选
 

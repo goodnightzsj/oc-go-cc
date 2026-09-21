@@ -65,7 +65,7 @@
         <label for="overview-provider" data-i18n="filter.provider">Provider</label>
         <select class="filter-select" id="overview-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
           <option value="" data-i18n-option="filter.allProviders">All platforms</option>
-          <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option>
+          <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option><option value="cline-pass">ClinePass</option>
         </select>
         <div class="metric-segment range-segment" id="overview-range" role="group" aria-label="Dashboard range">
           <button type="button" data-days="7" class="active" data-i18n="analytics.last7d">Last 7 days</button>
@@ -168,7 +168,7 @@
         </div>
         <select class="filter-select" id="provider-filter" aria-label="Provider" data-i18n-aria-label="filter.provider">
           <option value="" data-i18n-option="filter.allProviders">All platforms</option>
-          <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option>
+          <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option><option value="cline-pass">ClinePass</option>
         </select>
         <select class="filter-select" id="status-filter" aria-label="Filter by status">
           <option value="" data-i18n-option="filter.allStatuses">All statuses</option>
@@ -363,7 +363,7 @@
       <label for="perf-provider" data-i18n="filter.provider">Provider</label>
       <select class="filter-select" id="perf-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
         <option value="" data-i18n-option="filter.allProviders">All platforms</option>
-        <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option>
+        <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option><option value="cline-pass">ClinePass</option>
       </select>
       <select class="filter-select" id="perf-time-range" aria-label="Time range filter">
         <option value="1h" data-i18n="perf.lastHour">Last Hour</option>
@@ -449,7 +449,7 @@
           <label for="analytics-provider" data-i18n="filter.provider">Provider</label>
           <select class="filter-select" id="analytics-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
             <option value="" data-i18n-option="filter.allProviders">All platforms</option>
-            <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option>
+            <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option><option value="cline-pass">ClinePass</option>
           </select>
           <button class="btn btn-small" id="btn-refresh-analytics" data-i18n="analytics.refresh">Refresh</button>
         </div>
@@ -558,7 +558,7 @@
         <div class="page-toolbar analytics-controls">
           <label class="sr-only" for="quota-provider" data-i18n="filter.provider">Provider</label>
           <select class="filter-select" id="quota-provider" aria-label="Provider" data-i18n-aria-label="filter.provider">
-            <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option>
+            <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option><option value="cline-pass">ClinePass</option>
           </select>
           <button type="button" class="btn btn-small" id="quota-open-settings" data-i18n="quota.openSettings">Platform settings</button>
           <button class="btn btn-small btn-icon" id="btn-refresh-quota"><svg width="14" height="14"><use href="#icon-refresh"/></svg><span class="sr-only" data-i18n="quota.refresh">Refresh</span></button>
@@ -610,6 +610,11 @@
       <section id="quota-commandcode" hidden aria-live="polite">
         <p class="quota-disclaimer" data-i18n="commandcode.accountScope">Official Alpha account data · USD-denominated usage credits, not cash or this instance’s ledger. Each key is shown separately; balances are not added together.</p>
         <div id="quota-commandcode-accounts" class="quota-accounts"></div>
+      </section>
+
+      <section id="quota-cline-pass" hidden aria-live="polite">
+        <p class="quota-disclaimer" data-i18n="clinepass.accountScope">Official plan usage · ClinePass is a flat monthly subscription measured against reference rates, so these are percentages of each window, not an amount owed. Each key is shown separately.</p>
+        <div id="quota-cline-pass-accounts" class="quota-accounts"></div>
       </section>
 
       <section id="quota-bedrock" hidden class="analytics-section" aria-live="polite">
@@ -730,11 +735,11 @@
 
     <div class="settings-config-heading"><h2 class="section-heading" data-i18n="section.proxyConfig">Proxy Configuration</h2>
       <label class="sr-only" for="settings-provider-jump" data-i18n="setting.platformJump">Jump to platform</label>
-      <select id="settings-provider-jump" class="filter-select"><option value="" data-i18n-option="setting.platformJump">Jump to platform</option><option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option></select>
+      <select id="settings-provider-jump" class="filter-select"><option value="" data-i18n-option="setting.platformJump">Jump to platform</option><option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option><option value="cline-pass">ClinePass</option></select>
       <label class="sr-only" for="cfg-active-site" data-i18n="setting.activeSite">Active platform</label>
       <select id="cfg-active-site" class="filter-select" aria-describedby="cfg-active-site-hint">
         <option value="" data-i18n-option="setting.activeSiteUnrestricted">Not restricted</option>
-        <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option>
+        <option value="opencode-go">OpenCode Go</option><option value="commandcode">CommandCode</option><option value="cline-pass">ClinePass</option>
       </select>
       <span id="cfg-active-site-hint" class="page-meta" data-i18n="setting.activeSiteHint">Routes every request through the selected platform.</span>
     </div>
@@ -821,6 +826,42 @@
         <p class="text-xs text-[#98989d]" data-i18n="commandcode.quotaHint">Queries the official Alpha account endpoints with this platform’s API key. No browser session is required. Alpha response fields may change.</p>
         <a class="btn btn-small" href="https://commandcode.ai/docs/provider" target="_blank" rel="noopener noreferrer" data-i18n="commandcode.docs">Provider API docs</a>
         <a class="btn btn-small" href="https://commandcode.ai/settings/keys" target="_blank" rel="noopener noreferrer" data-i18n="commandcode.keys">Manage API keys</a>
+        </div>
+      </details>
+
+      <details class="config-section" data-settings-provider="cline-pass">
+        <summary><span class="provider-mark" aria-hidden="true">Cp</span><span class="provider-name">ClinePass</span><span class="provider-capability" data-i18n="setting.clinePassHint">Chat Completions only · plan usage</span></summary>
+        <div class="config-fields">
+        <p class="text-xs text-[#98989d] mb-2" data-i18n="clinepass.keyHint">Uses its own Cline API key; global keys are never sent to Cline.</p>
+        <div class="mb-2">
+          <label for="cfg-cline-pass-base-url" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.chatURL">Chat Completions URL</label>
+          <input type="url" id="cfg-cline-pass-base-url" placeholder="https://api.cline.bot/api/v1/chat/completions" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <p class="text-xs text-[#98989d] mb-2" data-i18n="clinepass.noAnthropic">The Cline API publishes no Messages endpoint, so this platform always uses Chat Completions.</p>
+        <div class="mb-2">
+          <label for="cfg-cline-pass-api-key" class="block text-[11px] font-medium text-[#98989d] mb-0.5">API Key</label>
+          <input type="password" id="cfg-cline-pass-api-key" placeholder="" autocomplete="new-password" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-cline-pass-api-keys" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.apiKeys">API keys (comma-separated, takes precedence over the single key)</label>
+          <input type="password" id="cfg-cline-pass-api-keys" autocomplete="new-password" aria-describedby="api-keys-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-cline-pass-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.requestTimeout">Request timeout (ms)</label>
+          <input type="number" id="cfg-cline-pass-timeout" placeholder="300000" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-cline-pass-stream-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamIdleTimeout">Stream idle timeout (ms)</label>
+          <input type="number" id="cfg-cline-pass-stream-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <div class="mb-2">
+          <label for="cfg-cline-pass-streaming-timeout" class="block text-[11px] font-medium text-[#98989d] mb-0.5" data-i18n="label.streamingTimeout">Streaming attempt timeout (ms)</label>
+          <input type="number" id="cfg-cline-pass-streaming-timeout" min="0" step="1" aria-describedby="provider-timeout-hint" class="w-full px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none focus:border-[#6366f1]">
+        </div>
+        <p class="text-xs text-[#98989d]" data-i18n="clinepass.quotaHint">Reads the plan’s usage windows with this platform’s API key. No browser session is required. The endpoint is undocumented, so its fields may change.</p>
+        <a class="btn btn-small" href="https://app.cline.bot/dashboard/subscription?personal=true" target="_blank" rel="noopener noreferrer" data-i18n="clinepass.subscription">Subscription dashboard</a>
+        <a class="btn btn-small" href="https://docs.cline.bot/getting-started/clinepass" target="_blank" rel="noopener noreferrer" data-i18n="clinepass.docs">ClinePass docs</a>
+        <a class="btn btn-small" href="https://app.cline.bot" target="_blank" rel="noopener noreferrer" data-i18n="commandcode.keys">Manage API keys</a>
         </div>
       </details>
 

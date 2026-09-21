@@ -38,6 +38,14 @@ func Load(path string) (*IndexedCatalog, error) {
 		return nil, err
 	}
 
+	// Fold each provider's nested model map into the top-level one. The catalog
+	// holds the same models twice and neither view is complete: models.dev's
+	// per-provider maps are authoritative for that provider's roster, while the
+	// top-level map is what carries ids for providers it has already indexed.
+	// Reading only the top level drops any provider it does not cover, which is
+	// how cline-pass's capabilities went missing while its models still listed.
+	mergeProviderModels(&catalog)
+
 	idx := &IndexedCatalog{
 		Catalog:        catalog,
 		ProviderModels: make(map[string][]Model, len(catalog.Providers)),
@@ -51,6 +59,28 @@ func Load(path string) (*IndexedCatalog, error) {
 	}
 
 	return idx, nil
+}
+
+// mergeProviderModels copies every provider-nested model into the top-level map
+// under its provider-qualified key, keeping whatever the top level already had
+// for that key. The top level wins because it is the view other code already
+// resolves against; the nested entry only fills ids it does not carry.
+func mergeProviderModels(catalog *Catalog) {
+	if catalog.Models == nil {
+		catalog.Models = make(map[string]Model)
+	}
+	for providerName, provider := range catalog.Providers {
+		for name, model := range provider.Models {
+			key := providerName + "/" + name
+			if _, exists := catalog.Models[key]; exists {
+				continue
+			}
+			if model.ID == "" {
+				model.ID = key
+			}
+			catalog.Models[key] = model
+		}
+	}
 }
 
 func validateCatalog(catalog *Catalog) error {

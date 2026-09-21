@@ -241,6 +241,7 @@ func resolvedModel(provider Provider, modelKey string, model Model) ResolvedMode
 		APIKey:                 provider.APIKey,
 		AnthropicToolsDisabled: provider.AnthropicToolsDisabled,
 		ContextWindow:          model.ContextWindow(),
+		MaxOutputTokens:        model.MaxOutputTokens(),
 		CostInputPerM:          model.CostInputPerM(),
 		CostOutputPerM:         model.CostOutputPerM(),
 		Tools:                  model.SupportsTools(),

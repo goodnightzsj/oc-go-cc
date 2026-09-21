@@ -34,7 +34,13 @@ type ModelRecord struct {
 	ToolCall      bool
 	Vision        bool
 	ContextWindow int64
-	Rates         *Rates
+	// MaxOutputTokens is the model's published output ceiling. It is persisted
+	// separately from ContextWindow because the two answer different questions:
+	// the context window gates whether a request fits, and this gates how much
+	// the model may produce. Dropping it lets a per-request max_tokens through
+	// that the upstream will reject.
+	MaxOutputTokens int64
+	Rates           *Rates
 }
 
 // Provider holds a provider's configuration as loaded from the database.
@@ -91,6 +97,15 @@ type IndexedCatalog struct {
 func (m Model) ContextWindow() int64 {
 	if m.Limit != nil {
 		return m.Limit.Context
+	}
+	return 0
+}
+
+// MaxOutputTokens returns the model's published output ceiling, or 0 if
+// unknown. Zero means "not recorded", never "may not produce output".
+func (m Model) MaxOutputTokens() int64 {
+	if m.Limit != nil {
+		return m.Limit.Output
 	}
 	return 0
 }
@@ -155,9 +170,14 @@ func (r *CatalogRepo) ReplaceBatch(ctx context.Context, providers []ProviderReco
 	for _, m := range models {
 		provider := providerFromModelKey(m.ID)
 		modelName := ModelNameFromKey(m.ID)
-		var costInput, costOutput any
+		var costInput, costOutput, maxOutput any
 		if m.Rates != nil {
 			costInput, costOutput = m.Rates.Input, m.Rates.Output
+		}
+		// Written as NULL rather than 0 when unpublished, so a reader can tell
+		// "no ceiling recorded" from "ceiling is zero".
+		if m.MaxOutputTokens > 0 {
+			maxOutput = m.MaxOutputTokens
 		}
 
 		supportsTools := 1
@@ -174,10 +194,10 @@ func (r *CatalogRepo) ReplaceBatch(ctx context.Context, providers []ProviderReco
 		}
 
 		_, err := tx.ExecContext(ctx, `
-			INSERT OR REPLACE INTO models (id, provider, name, display_name, context_window, cost_input_per_m, cost_output_per_m, supports_tools, supports_vision, supports_reasoning, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM models WHERE id = ?), ?))
+			INSERT OR REPLACE INTO models (id, provider, name, display_name, context_window, max_output_tokens, cost_input_per_m, cost_output_per_m, supports_tools, supports_vision, supports_reasoning, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM models WHERE id = ?), ?))
 		`,
-			m.ID, provider, modelName, m.Name, m.ContextWindow, costInput, costOutput,
+			m.ID, provider, modelName, m.Name, m.ContextWindow, maxOutput, costInput, costOutput,
 			supportsTools, supportsVision, supportsReasoning, m.ID, now)
 		if err != nil {
 			return err
@@ -228,7 +248,7 @@ func (r *CatalogRepo) Load(ctx context.Context) (*IndexedCatalog, error) {
 	}
 
 	rows, err = r.db.DB().QueryContext(ctx, `
-		SELECT id, provider, name, context_window, cost_input_per_m, cost_output_per_m,
+		SELECT id, provider, name, context_window, max_output_tokens, cost_input_per_m, cost_output_per_m,
 		       supports_tools, supports_vision, supports_reasoning
 		FROM models
 	`)
@@ -241,11 +261,11 @@ func (r *CatalogRepo) Load(ctx context.Context) (*IndexedCatalog, error) {
 		var m Model
 		var provider string
 		var displayName string
-		var contextWindow sql.NullInt64
+		var contextWindow, maxOutputTokens sql.NullInt64
 		var costInput, costOutput sql.NullFloat64
 		var supportsTools, supportsVision, supportsReasoning int
 
-		if err := rows.Scan(&m.ID, &provider, &displayName, &contextWindow, &costInput, &costOutput,
+		if err := rows.Scan(&m.ID, &provider, &displayName, &contextWindow, &maxOutputTokens, &costInput, &costOutput,
 			&supportsTools, &supportsVision, &supportsReasoning); err != nil {
 			return nil, err
 		}
@@ -254,8 +274,10 @@ func (r *CatalogRepo) Load(ctx context.Context) (*IndexedCatalog, error) {
 		m.Reasoning = supportsReasoning == 1
 		m.Vision = supportsVision == 1
 
-		if contextWindow.Valid {
-			m.Limit = &Limit{Context: contextWindow.Int64}
+		if contextWindow.Valid || maxOutputTokens.Valid {
+			// A limit carrying only one of the two is still meaningful: the
+			// caller treats a zero as unknown, not as "cannot produce output".
+			m.Limit = &Limit{Context: contextWindow.Int64, Output: maxOutputTokens.Int64}
 		}
 		if costInput.Valid && costOutput.Valid {
 			m.Rates = &Rates{Input: costInput.Float64, Output: costOutput.Float64}

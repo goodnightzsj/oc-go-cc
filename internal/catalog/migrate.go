@@ -127,12 +127,13 @@ func providerToStorageRecord(name string, p Provider) storage.ProviderRecord {
 
 func modelToStorageRecord(key string, m Model) storage.ModelRecord {
 	record := storage.ModelRecord{
-		ID:            key,
-		Name:          m.Name,
-		Reasoning:     m.Reasoning,
-		ToolCall:      m.ToolCall,
-		Vision:        m.SupportsVision(),
-		ContextWindow: m.ContextWindow(),
+		ID:              key,
+		Name:            m.Name,
+		Reasoning:       m.Reasoning,
+		ToolCall:        m.ToolCall,
+		Vision:          m.SupportsVision(),
+		ContextWindow:   m.ContextWindow(),
+		MaxOutputTokens: m.MaxOutputTokens(),
 	}
 	if m.Rates != nil {
 		record.Rates = &storage.Rates{Input: m.Rates.Input, Output: m.Rates.Output}
@@ -154,7 +155,7 @@ func storageModelToCatalogModel(m storage.Model) Model {
 	}
 	model.Modalities.Output = []string{"text"}
 	if m.Limit != nil {
-		model.Limit = &Limit{Context: m.Limit.Context}
+		model.Limit = &Limit{Context: m.Limit.Context, Output: m.Limit.Output}
 	}
 	if m.Rates != nil {
 		model.Rates = &Rates{

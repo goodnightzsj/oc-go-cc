@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -436,10 +438,67 @@ func (s *Server) handleClinePassQuota(w http.ResponseWriter, r *http.Request, cf
 		return
 	}
 	resp.Accounts = fetchQuotaAccounts(r.Context(), resp.Provider, endpoint, keys)
+
+	// Attach the absolute ceilings the plan publishes. They are attached after
+	// the fetch rather than inside it because they come from a second endpoint
+	// and are not part of an account's report: a plan lookup that fails leaves
+	// the percentages intact, which is the part the platform computes.
+	s.attachClinePassLimits(r.Context(), cfg, resp.Accounts)
+
 	resp.Status = quotaStatus(resp)
 	resp.FetchedAt = time.Now().UTC()
 	s.storeQuota(endpoint, keys, resp)
 	writeJSON(w, resp)
+}
+
+// attachClinePassLimits fills each window's LimitUSD from the plan endpoint.
+//
+// The ceilings are per account rather than per key, so this asks once per
+// distinct credential and reuses the answer: every key on the same subscription
+// sees the same caps, and a second lookup would only add a round trip. A failure
+// is logged and leaves the windows percentage-only - the panel renders that
+// case, and losing the supplement must not cost the primary figure.
+func (s *Server) attachClinePassLimits(ctx context.Context, cfg *config.Config, accounts []quotaAccount) {
+	planURL, err := quota.ClinePassPlanURL(cfg.ClinePass.BaseURL)
+	if err != nil {
+		slog.Debug("cline-pass plan endpoint unavailable", "err", err)
+		return
+	}
+	client := &http.Client{Timeout: quota.RequestTimeout}
+	seen := map[string]bool{}
+	for i := range accounts {
+		report := accounts[i].ClinePass
+		if report == nil || len(report.Windows) == 0 {
+			continue
+		}
+		key := accounts[i].KeyHint
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		// The plaintext key is not on the account, so the lookup runs per
+		// account record via the same credential list the fetch used.
+		limits, err := s.clinePassLimitsFor(ctx, client, cfg, planURL, i)
+		if err != nil {
+			slog.Debug("cline-pass plan lookup failed", "err", err)
+			continue
+		}
+		for w := range report.Windows {
+			if limit, ok := limits[report.Windows[w].Type]; ok {
+				report.Windows[w].LimitUSD = limit
+			}
+		}
+	}
+}
+
+// clinePassLimitsFor resolves the credential for one account index and reads
+// its plan ceilings.
+func (s *Server) clinePassLimitsFor(ctx context.Context, client *http.Client, cfg *config.Config, planURL string, index int) (map[string]float64, error) {
+	keys := goQuotaKeys(cfg.ClinePass.EffectiveAPIKeys(), nil)
+	if index >= len(keys) {
+		return nil, errors.New("no credential for this account")
+	}
+	return quota.FetchClinePassPlan(ctx, client, planURL, keys[index])
 }
 
 func quotaStatus(resp quotaResponse) string {

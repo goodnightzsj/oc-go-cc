@@ -201,6 +201,7 @@ const TRANSLATIONS = {
     'clinepass.window.weekly': 'Weekly',
     'clinepass.window.monthly': 'Monthly',
     'clinepass.percentNote': 'ClinePass is a flat monthly subscription billed against reference rates, so the platform reports how much of each window is used rather than an amount owed. These percentages are the platform’s own figures.',
+    'clinepass.remaining': '{left} left of {limit}',
     'commandcode.zdr': 'Zero Data Retention (ZDR)',
     'label.chatURL': 'Chat Completions URL',
     'label.messagesURL': 'Anthropic Messages URL',
@@ -658,6 +659,7 @@ const TRANSLATIONS = {
     'clinepass.window.weekly': '本周',
     'clinepass.window.monthly': '本月',
     'clinepass.percentNote': 'ClinePass 是按参考价折算的包月订阅，因此平台返回的是各窗口的使用比例而非应付金额；此处显示的就是平台自己的数字。',
+    'clinepass.remaining': '剩余 {left} / {limit}',
     'commandcode.zdr': '零数据保留（ZDR）',
     'label.chatURL': 'Chat Completions 完整地址',
     'label.messagesURL': 'Anthropic Messages 完整地址',
@@ -5077,6 +5079,21 @@ const QuotaModule = {
     }
   },
 
+  // The platform's percentage is the figure of record and stays the headline.
+  // The plan endpoint also publishes what each window is a percentage *of*, so
+  // this renders the remaining amount as a quiet supplement underneath. It is
+  // omitted entirely when the plan reported no ceiling rather than guessed from
+  // the percentage, which would invent a number the platform never stated.
+  clinePassAmount(window, percent) {
+    const limit = Number.isFinite(window.limit_usd) ? window.limit_usd : null;
+    if (limit == null || limit <= 0 || percent == null) return '';
+    const left = Math.max(0, limit * (1 - percent / 100));
+    const text = t('clinepass.remaining')
+      .replace('{left}', fmtCost(left))
+      .replace('{limit}', fmtCost(limit));
+    return `<span class="commandcode-window-amount">${escapeHtml(text)}</span>`;
+  },
+
   renderClinePassAccount(account) {
     const head = `<div class="quota-account-head"><span class="quota-key">${t('quota.keyLabel')} <code>${escapeHtml(account.key_hint || '—')}</code></span></div>`;
     const data = account.cline_pass;
@@ -5095,6 +5112,7 @@ const QuotaModule = {
       return `<div class="commandcode-window level-${level}">
         <div class="commandcode-window-heading"><strong>${escapeHtml(name)}</strong><span>${percent == null ? '—' : `${percent.toFixed(1)}%`}</span></div>
         ${percent == null ? '' : `<progress max="100" value="${Math.min(100, Math.max(0, percent))}" aria-label="${escapeHtml(name)}"></progress>`}
+        ${this.clinePassAmount(window, percent)}
         <span class="quota-reset"${deadline == null ? '' : ` data-deadline="${deadline}"`}>${deadline == null ? t('quota.resetUnknown') : ''}</span></div>`;
     }).join('');
     return `<section class="quota-account commandcode-account">${head}

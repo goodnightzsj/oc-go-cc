@@ -122,7 +122,9 @@ GET https://api.cline.bot/api/v1/ai/cline/recommended-models   → 200，无鉴�
 - `cline-free/deepseek-v4.1-flash` 返回 500（免费池对这个模型不可用），`not-a-channel/whatever` 返回 404 `model not found` —— 前缀是会被校验的真实路由键。
 - 裸名 `deepseek-v4.1-flash` 返回 400 `invalid model format. Expected format: modelType/model`。**这条决定了本项目的实现必须保持 `model` 原样透传**：`internal/provider/cline_pass.go` 直接把 `model.ModelID` 发上去，`TestClinePassForwardsModelIDUnchanged` 钉住它。若剥掉前缀，上游会 400。
 
-**不写死渠道。** 用户问的"能否在 payload 里写死 deepseek 渠道"——`cline-pass/` 前缀本身**就是**渠道选择，它已经是写死的（配置里 `model_overrides` 把它固定成 `cline-pass/deepseek-v4.1-flash`）。额外再写一个渠道字段没有可写的位置：payload 里上游认的只有 `model`，响应里没有任何渠道/后端字段（全部 SSE 事件的 key 只有 `type/index/message/delta/usage/content_block`，`message.model` 恒为去掉池前缀的 slug）。
+**不写死渠道。** `cline-pass/` 前缀本身**就是**计费池选择器，它已经是写死的（配置里 `model_overrides` 把它固定成 `cline-pass/deepseek-v4.1-flash`）。上游渠道（`finalProvider`）另有一层，但**钉不住**——见「上游渠道」节。
+
+⚠️ **本文档先前声称"响应里没有任何渠道字段"，那是错的。** 该结论来自一份 compactgate 抓包，它之所以干净，是因为抓的是**经过本项目 transformer 之后**的 SSE，而 `provider_metadata` 在转换中被丢弃；且那次成功调用走的是 **Claude Code 直连 `opencode.9962510.xyz` 的实验路径，根本没经过本项目**（另一份 `api.cline.bot` 直连抓包是 404）。**上游原生响应确实带 `provider_metadata.gateway.routing`**，含 `finalProvider`、15 个 `fallbacksAvailable`、`planningReasoning`；本项目不把它透传（`/v1/messages` 只返回 `id/type/role/content/model/stop_reason/usage`），所以从本项目的输出里看不到它。
 
 ⚠️ 上面的 `deepseek/` 前缀消耗余额是**本次实验造成的真实扣费**（约 0.0019 credit）。个人自用账户上验证，非生产流量。
 
@@ -164,14 +166,90 @@ ClinePass 是包月，用户**不按参考价付费**。文档页原文：
 
 | 项 | 状态 | 影响 |
 | --- | --- | --- |
-| **非流式行为** | **已按「上游只可靠地支持流式」实现**。官方文档给出非流式响应示例，但三个独立客户端（OmniRoute、cline2api-workers、cline-pass-switcher-go）的实测与注释一致相反：`stream:false` 返回空 body 或 `generateText is not implemented`。本实现因此**始终向上游发 `stream:true`**，非流式路径本地聚合 SSE 成完整 JSON（`internal/provider/cline_pass_stream.go`）。客户端拿到的仍是完整文档，不是 SSE | 若上游日后修复非流式，这只是多一次聚合，不需要改契约 |
+| **非流式行为** | 第三方客户端（OmniRoute、cline2api-workers、cline-pass-switcher-go）报告 `stream:false` 返回空 body 或 `generateText is not implemented`。**2026-09-22 实测修正**：`stream:false` 本身可用，500 `empty response content` 的真实成因是 **`max_tokens` 太小被 reasoning 吃光**（`max_tokens=16` 时 8 次里 6 次失败；`max_tokens≥32` 稳定 200）。见「上游渠道」节末的表格。本实现**始终向上游发 `stream:true`** 并本地聚合 SSE，正好绕开该失败模式 | 无需改动：客户端仍拿到完整 JSON。若将来要放开非流式，必须同时确保 `max_tokens` 足够大 |
 | **Anthropic 端点是否存在** | 未能证实。`/api/v1/messages` 返回 401，但**不存在的路径也返回同一个 401**（网关级统一拦截），无法离线区分 | 若无，则 `wire_format` 只能是 `openai`；不影响本设计（已按纯 Chat Completions 设计） |
 | **429 响应体** | 网关层会返回**裸 HTML 429**（非 JSON body），且窗口 code 会漂移（同一分钟内 `5-HOUR` ↔ `WEEKLY` 跳变） | 错误解析必须容忍非 JSON；**熔断与配额判断不得依赖窗口 code** |
 | **客户端身份门控** | 缺 `X-CLIENT-TYPE` 会得到 `403 "only available via Cline product surfaces"`（cline2api-workers 实测；Cline 官方 PR 13593 记录了自家 commit-message 路径漏发 header 时的同一 403）。门控针对**免费池**；订阅池（`cline-pass/`）未见门控，但本实现**默认带全套官方 header** | 成本最低的兼容策略；版本号当前不做最小值校验（`0.0.1` 实测可过），全套是为了防上游收紧 |
-| **上游是 Vercel AI Gateway** | 创始人自述（Reddit，未独立验证），按可用性与价格负载均衡 | 解释了配额燃烧波动大；对本项目实现无影响，写进文档备查 |
+| **上游是 Vercel AI Gateway** | **已由实测证实**（2026-09-22）：非法 `provider.sort` 会返回 Vercel 自己的错误 `failed to invoke model 'deepseek/deepseek-v4.1-flash' from Vercel: ... "param":"provider.sort"` | 解释了配额燃烧波动大。响应 `provider_metadata.gateway.routing` 会公布 `finalProvider` 与 `fallbacksAvailable`（15 个候选渠道），但**钉住无效**——见「上游渠道」节 |
 | **ToS 张力** | 官方文档允许第三方调用；ToS §2.2(10) 禁止"非官方技术手段" | 个人自用风险低；**做成多用户/共享/高并发代理会同时踩 §2.2(5)、§7.3(c)(v)、§2.2(7)**。本项目定位是单人自用 |
 | 上下文/输出上限 | 官方文档完全未给；第三方三套数字互相矛盾（`mimo-v2.5` 一套 1,048,576、一套 262,144） | 取 models.dev 值并标注为未验证；不用于任何硬校验 |
 | `cline-pass` 是否会被 models.dev 调整 | 其 DeepSeek 两行已证有误 | 只当能力字段来源，价格不取它 |
+
+## 上游渠道（uplink）：网关确实公布了，但钉不住
+
+[dsh-cline-pass](https://github.com/yhshzh/dsh-cline-pass)（MIT，dsh 插件，8656 行 JS）实现了完整的「探测 → 校验 → 钉住」链路。它的机制与**在本账户上的实测结果**如下。
+
+### 机制（读代码）
+
+| 步骤 | 实现 | 位置 |
+| --- | --- | --- |
+| 探测 | 发一条 `provider.only: ['__probe__']` 的请求，**故意让路由失败**，从错误文本里刮出网关本可使用的全部 provider | `protocol.js:192` `extractAvailableProviders` |
+| planner 管道 | 错误里刮 `Available providers are: a, b, c` | 同上 |
+| direct 管道 | 解析错误 JSON 的 `error.metadata.available_providers` | 同上 |
+| 钉住 | 往请求体注入 `provider.only=[...]` / `provider.order=[...]` / `provider.sort` | `protocol.js:98` `injectPrefs` |
+| 两种拼写 | direct 用顶层 `provider`；planner（Vercel）用 `providerOptions.gateway` | 同上 |
+| 读回 | 从响应的 `provider_metadata.gateway.routing` 取 `finalProvider`、`fallbacksAvailable`、`planningReasoning` | `protocol.js:42` `parseRouting` |
+| 排他 | 网关忽略 exclude 字段，所以排除被编译成 `only` 白名单 | `protocol.js:106` |
+| 失败学习 | 从错误文本 `Available providers are:` 反推渠道表 | `engine.js:146` |
+
+### 在本账户上的实测：**元数据是真的，钉住是空操作**
+
+`provider_metadata.gateway.routing` **确实存在且信息量很大**（这纠正了本文档先前"响应里没有任何渠道字段"的说法——那个结论来自一份截断的 SSE 抓包，不是全量）：
+
+```json
+{"routing":{"canonicalSlug":"deepseek/deepseek-v4.1-flash",
+  "fallbacksAvailable":["alibaba","baseten","fireworks","runware","relace","particle",
+                        "novita","togetherai","deepinfra","wafer","parasail","gmicloud",
+                        "modal","morph","boundless"],
+  "finalProvider":"deepseek",
+  "planningReasoning":"System credentials planned for: deepseek, alibaba, baseten, ..."}}
+```
+
+但**注入 `provider.only` / `provider.order` / `providerOptions.gateway.only` 全部无效**：
+
+| 测试 | `finalProvider` |
+| --- | --- |
+| 裸调用 ×6 | `alibaba` ×6 |
+| `provider.only=["novita"]` ×6 | **`alibaba` ×6** |
+| `providerOptions.gateway.only=["novita"]` ×6 | **`alibaba` ×6** |
+| `provider.only=["deepseek"]` | `alibaba` |
+| `provider.only=["zzz-nope"]`（不存在的渠道） | `alibaba`，**仍 200** |
+
+`cline-pass/` 前缀的模型上同样：一律 `deepseek`，无视钉住。
+
+**但该字段确实被解析**——`provider.sort` 传一个非法值会得到 Vercel 的 400：
+
+```
+400 {"error":{"message":"Invalid option: expected one of \"cost\"|\"ttft\"|\"tps\"|\"price\"|\"latency\"|\"throughput\"","param":"provider.sort"}}
+```
+
+所以 `provider` 块**到达了 Vercel AI Gateway 并被校验，只是路由没有遵循 `only`**。与本文档早先记录的"上游是 Vercel AI Gateway（创始人自述，未独立验证）"吻合，且这次由错误文本 `failed to invoke model ... from Vercel` 直接证实。
+
+结论：**渠道探测在本账户上不可行**，因为它的前提（不可能的 `only` 会让路由失败并报出渠道全集）不成立——路由忽略 `only`，请求照常成功。插件作者显然是在一个 `only` 生效的环境里开发的（或上游后来改了行为）。第二个探测路径（从错误文本刮 provider 列表）同样落空。
+
+**不实现渠道钉住。** 本项目不引入一个在目标账户上被证明是空操作的功能；渠道由网关自行选择，`fallbacksAvailable` 等字段只用于观测，不进路由决策。
+
+### 与当前模型的关系
+
+| 插件 | 本项目 | 说明 |
+| --- | --- | --- |
+| `catalog.js` 硬编码 **15** 个 `cline-pass/*`（含 `glm-5.2`、`kimi-k2.7-code`、`kimi-k2.6`、`deepseek-v4-flash`） | live roster **12** 个 | 插件的目录是快照；其中 4 个已不在 live `clinePass` 桶里。本项目以 live 为准 |
+| 模型 URI 用 `cline-pass/` 前缀 | 同 | 两边都保留前缀，理由一致：剥掉会被上游 400 |
+| 网关目录拉 `GET {baseURL}/models`（`cline.js:102`） | 拒绝该端点 | 实测 440 条、`cline-pass/*` **为 0**——那是按量计费池。本项目读 `recommended-models` 的 `clinePass` 桶 |
+| 非流式：`chatCompletion` 不带 `stream` | 强制 `stream:true` 后本地聚合 | 见下 |
+
+**非流式结论修正。** 本文档先前写"上游只可靠地支持流式"。实测：`stream:false` **可用**，500 `empty response content` 的真实成因是 `max_tokens` 太小。
+
+| `max_tokens` | `stream:false` 结果 |
+| --- | --- |
+| 8 | 500 `empty response content` |
+| 16 | **不稳定**：8 次里 6 次 500、2 次成功（`completion_tokens=16`，即正好顶满） |
+| 32 | 稳定 200 |
+| 64 / 128 / 256 / 512 | 稳定 200 |
+
+原因不是流式，而是 **reasoning 先吃掉预算**：`max_tokens:16` 且 `stream:true` 时，5 次里有 4 次是 16 个 `reasoning` 分片、**0 个 `content` 分片**——推理把预算耗尽，正文没开始就结束，非流式路径于是报 `empty response content`。deepseek-v4.1-flash 是推理模型，小预算必然先烧在思考上。
+
+**本项目的实现不需要改**：始终向上游发 `stream:true` 并本地聚合，正好绕开了这个失败模式，且客户端拿到的仍是完整 JSON。这条实测把原来的理由（"上游不支持非流式"）修正为更准确的（"上游支持，但小 `max_tokens` 下非流式会把 reasoning 耗尽误报成空响应"）。
 
 ## 接入步骤（照 CommandCode 逐处对照）
 

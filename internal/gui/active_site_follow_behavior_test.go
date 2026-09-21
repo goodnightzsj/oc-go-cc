@@ -36,7 +36,7 @@ async function checks() {
     'a platform the reader chose stays in the link');
 
   // Drop the pin the way a save does, then let the server move the site.
-  viewPlatformPinned = '';
+  viewPlatformPinned = null;
   for (const id of views) get(id).value = 'commandcode';
   sites.active = 'opencode-go';
   await applyActiveSite();
@@ -51,7 +51,7 @@ async function checks() {
   for (const id of views) get(id).value = '';
   sites.active = 'commandcode';
   await applyActiveSite();
-  assert.equal(viewPlatformPinned, '', 'an unrepresentable pin is dropped');
+  assert.equal(viewPlatformPinned, null, 'an unrepresentable pin is dropped');
   for (const id of views) {
     assert.equal(get(id).value, 'commandcode', 'the views follow the site once the stale pin is gone: ' + id);
   }

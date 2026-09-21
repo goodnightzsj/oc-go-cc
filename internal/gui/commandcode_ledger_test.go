@@ -43,6 +43,26 @@ func TestCommandCodeLedgerScopesToTheSubscriptionPeriod(t *testing.T) {
 	if ledger["known_requests"] != float64(1) {
 		t.Errorf("ledger known_requests = %v, want 1", ledger["known_requests"])
 	}
+	if ledger["unknown_cost_requests"] != float64(0) {
+		t.Errorf("ledger unknown_cost_requests = %v, want 0", ledger["unknown_cost_requests"])
+	}
+}
+
+func TestCommandCodeLedgerPreservesUnknownCost(t *testing.T) {
+	srv, db := commandCodeLedgerServer(t, `["synthetic-command-key"]`)
+	err := storage.NewRequests(db).Insert(history.RequestRecord{
+		ID: "unknown-cost", Provider: "commandcode", Model: "synthetic-unpriced-model",
+		StartTime:   time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC),
+		InputTokens: 1000, OutputTokens: 100, Success: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger := commandCodeLedger(t, srv)
+	if ledger["requests"] != float64(1) || ledger["known_requests"] != float64(1) ||
+		ledger["unknown_cost_requests"] != float64(1) || ledger["cost_usd"] != float64(0) {
+		t.Fatalf("unknown cost lost its coverage while preserving known request status: %+v", ledger)
+	}
 }
 
 // Two keys share one local ledger because stored rows carry no key identity, so

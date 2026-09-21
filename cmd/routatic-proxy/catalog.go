@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -89,7 +90,7 @@ func catalogSyncCmd() *cobra.Command {
 			}
 
 			catalogDir := resolveCatalogDir(configPath)
-			lock, err := catalog.Sync(catalogSourceURL, catalogDir)
+			lock, err := catalog.Sync(cmd.Context(), catalogSourceURL, catalogDir)
 			if err != nil {
 				return fmt.Errorf("catalog sync failed: %w", err)
 			}
@@ -145,7 +146,7 @@ func resolveCatalogDir(configPath string) string {
 // and fresh. If the lock file is missing, corrupted, or expired relative to the
 // configured max_age_hours, it re-downloads the catalog from cfg.Catalog.SourceURL.
 // The now parameter makes expiry deterministic in tests.
-func ensureCatalogSynced(cfg *config.Config, configPath string, now time.Time) error {
+func ensureCatalogSynced(ctx context.Context, cfg *config.Config, configPath string, now time.Time) error {
 	if cfg.Catalog.Enabled != nil && !*cfg.Catalog.Enabled {
 		slog.Info("catalog sync disabled, skipping")
 		return nil
@@ -159,20 +160,40 @@ func ensureCatalogSynced(cfg *config.Config, configPath string, now time.Time) e
 
 	catalogDir := resolveCatalogDir(configPath)
 	lock, err := catalog.ReadLock(catalogDir)
-	if err != nil {
-		slog.Info("catalog lock missing or unreadable, syncing", "catalog_dir", catalogDir, "error", err)
-		_, err = catalog.Sync(cfg.Catalog.SourceURL, catalogDir)
-		return err
+	if err == nil {
+		if cfg.Catalog.MaxAgeHours > 0 {
+			lock.TTLHours = cfg.Catalog.MaxAgeHours
+		}
+		_, fileErr := os.Stat(filepath.Join(catalogDir, "catalog.json"))
+		if fileErr == nil && lock.SourceURL == cfg.Catalog.SourceURL && !lock.Expired(now) {
+			slog.Debug("catalog lock fresh, skipping sync", "catalog_dir", catalogDir, "synced_at", lock.SyncedAt)
+			return nil
+		}
 	}
 
-	if lock.Expired(now) {
-		slog.Info("catalog lock expired, syncing", "catalog_dir", catalogDir, "synced_at", lock.SyncedAt)
-		_, err = catalog.Sync(cfg.Catalog.SourceURL, catalogDir)
-		return err
-	}
+	slog.Info("refreshing catalog", "catalog_dir", catalogDir)
+	_, err = catalog.Sync(ctx, cfg.Catalog.SourceURL, catalogDir)
+	return err
+}
 
-	slog.Debug("catalog lock fresh, skipping sync", "catalog_dir", catalogDir, "synced_at", lock.SyncedAt)
-	return nil
+// The proxy owns price refreshes, including headless serve. Read the live
+// catalog policy on every refresh so hot-reloaded settings take effect.
+func priceRefreshConfig(atomicCfg *config.AtomicConfig) storage.PriceRefreshConfig {
+	return storage.PriceRefreshConfig{
+		CatalogPath: filepath.Join(resolveCatalogDir(atomicCfg.Path()), "catalog.json"),
+		RefreshCatalog: func(ctx context.Context) error {
+			return ensureCatalogSynced(ctx, atomicCfg.Get(), atomicCfg.Path(), time.Now().UTC())
+		},
+	}
+}
+
+func logPriceRefresh(counts map[string]int, errs map[string]error) {
+	for provider, err := range errs {
+		slog.Warn("price refresh failed; keeping the previous table", "provider", provider, "error", err)
+	}
+	for provider, n := range counts {
+		slog.Info("prices refreshed", "provider", provider, "rules", n)
+	}
 }
 
 // ensureDatabase ensures the SQLite database exists and is initialized.

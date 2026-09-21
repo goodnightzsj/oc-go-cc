@@ -6,6 +6,32 @@ func TestCommandCodeAccountPresentation(t *testing.T) {
 	runPlatformBehavior(t, commandcodeAccountPresentationScript)
 }
 
+func TestCommandCodeLedgerCostPresentation(t *testing.T) {
+	runPlatformBehavior(t, platformBehaviorDOMScript+`
+async function checks() {
+  for (const lang of ['en', 'zh']) {
+    currentLang = lang;
+    for (const [ledger, expected] of [
+      [{requests:1, known_requests:1, unknown_cost_requests:1, cost_usd:0}, '—'],
+      [{requests:2, known_requests:2, unknown_cost_requests:1, cost_usd:1.25}, t('analytics.knownSubtotal').replace('{value}', '$1.25')],
+      [{requests:1, known_requests:1, unknown_cost_requests:0, cost_usd:0}, '$0.00'],
+    ]) {
+      QuotaModule.provider = 'commandcode';
+      QuotaModule.view = {provider:'commandcode', status:'available', accounts:[{
+        key_hint:'masked-CC01', ledger, commandcode:{usage:{totalCount:3,totalCost:8.5}},
+      }]};
+      QuotaModule.render();
+      const html = document.getElementById('quota-commandcode-accounts').innerHTML;
+      assert.ok(html.includes('commandcode-ledger'), 'the API account.ledger must render');
+      assert.ok(html.includes('<dt>' + t('commandcode.ledgerCost') + '</dt><dd>' + expected + '</dd>'), 'local cost must disclose price coverage');
+      assert.ok(html.includes('<dt>' + t('commandcode.officialCost') + '</dt><dd>$8.50</dd>'), 'official cost stays separate');
+      if (ledger.unknown_cost_requests) assert.ok(html.includes(t('analytics.unknownCosts').replace('{n}', '1')));
+    }
+  }
+}
+`+platformBehaviorRunScript)
+}
+
 const commandcodeAccountPresentationScript = platformBehaviorDOMScript + `
 async function checks() {
   const get = id => document.getElementById(id);

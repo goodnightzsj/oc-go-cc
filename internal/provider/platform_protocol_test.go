@@ -47,7 +47,7 @@ func TestGoExplicitResponsesEndpoint(t *testing.T) {
 }
 
 func TestProviderScopedHeaders(t *testing.T) {
-	for _, name := range []string{"opencode-go", "opencode-zen", "aws-bedrock", "commandcode"} {
+	for _, name := range []string{"opencode-go", "opencode-zen", "aws-bedrock", "commandcode", "cline-pass"} {
 		t.Run(name, func(t *testing.T) {
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				wantUA := "routatic-proxy"
@@ -67,12 +67,29 @@ func TestProviderScopedHeaders(t *testing.T) {
 				if r.Header.Get("Authorization") != "Bearer dedicated-key" {
 					t.Error("dedicated credential not used")
 				}
+				// Cline identifies its own client by this set, so a request
+				// without it is a partial mirror the gateway may reject.
+				if name == "cline-pass" {
+					for header, want := range map[string]string{
+						"X-Client-Type": "cline-sdk", "X-Title": "Cline",
+						"Http-Referer": "https://cline.bot", "X-Is-Multiroot": "false",
+					} {
+						if got := r.Header.Get(header); got != want {
+							t.Errorf("%s = %q, want %q", header, got, want)
+						}
+					}
+					// This platform is stream-only upstream, so even a
+					// non-streaming call arrives here as SSE.
+					_, _ = io.WriteString(w, "data: {\"id\":\"chat-test\",\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n")
+					_, _ = io.WriteString(w, "data: [DONE]\n\n")
+					return
+				}
 				_, _ = io.WriteString(w, `{"id":"chat-test","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":2}}`)
 			}))
 			defer upstream.Close()
-			cfg := &config.Config{APIKey: "global-key", OpenCodeGo: config.OpenCodeGoConfig{APIKey: "dedicated-key", BaseURL: upstream.URL}, OpenCodeZen: config.OpenCodeZenConfig{APIKey: "dedicated-key", BaseURL: upstream.URL}, AWSBedrock: config.AWSBedrockConfig{APIKey: "dedicated-key", BaseURL: upstream.URL}, CommandCode: config.CommandCodeConfig{APIKey: "dedicated-key", BaseURL: upstream.URL}}
+			cfg := &config.Config{APIKey: "global-key", OpenCodeGo: config.OpenCodeGoConfig{APIKey: "dedicated-key", BaseURL: upstream.URL}, OpenCodeZen: config.OpenCodeZenConfig{APIKey: "dedicated-key", BaseURL: upstream.URL}, AWSBedrock: config.AWSBedrockConfig{APIKey: "dedicated-key", BaseURL: upstream.URL}, CommandCode: config.CommandCodeConfig{APIKey: "dedicated-key", BaseURL: upstream.URL}, ClinePass: config.ClinePassConfig{APIKey: "dedicated-key", BaseURL: upstream.URL}}
 			atomic := config.NewAtomicConfig(cfg, "")
-			providers := map[string]core.Provider{"opencode-go": NewOpenCodeGoProvider(atomic, nil), "opencode-zen": NewOpenCodeZenProvider(atomic), "aws-bedrock": NewAWSBedrockProvider(atomic), "commandcode": NewCommandCodeProvider(atomic, nil)}
+			providers := map[string]core.Provider{"opencode-go": NewOpenCodeGoProvider(atomic, nil), "opencode-zen": NewOpenCodeZenProvider(atomic), "aws-bedrock": NewAWSBedrockProvider(atomic), "commandcode": NewCommandCodeProvider(atomic, nil), "cline-pass": NewClinePassProvider(atomic, nil)}
 			ctx := core.WithRequestMetadata(context.Background(), core.RequestMetadata{SessionID: "synthetic-conversation"})
 			_, err := providers[name].Execute(ctx, &types.MessageRequest{Model: "alias", Messages: []types.Message{{Role: "user", Content: json.RawMessage(`"hello"`)}}}, config.ModelConfig{Provider: name, ModelID: "synthetic"})
 			if err != nil {

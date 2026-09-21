@@ -1,6 +1,10 @@
 package config
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/routatic/proxy/internal/models"
+)
 
 const DefaultContextMargin = 8192
 
@@ -71,7 +75,9 @@ func CanonicalModelID(modelID string) string {
 func ResolveModelConfig(model ModelConfig) ModelConfig {
 	model.ModelID = CanonicalModelID(model.ModelID)
 	if model.ModelRef == "" {
-		if meta, ok := modelMetadata[model.ModelID]; ok {
+		// Vendor namespaces differ between platforms; capability lookup must
+		// use the family while the upstream still receives its original ID.
+		if meta, ok := modelMetadata[models.ModelFamily(model.ModelID)]; ok {
 			if model.ContextWindow == 0 {
 				model.ContextWindow = meta.ContextWindow
 			}

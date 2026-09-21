@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -26,6 +27,10 @@ func TestRefreshPricesInstallsBothTables(t *testing.T) {
 	}}}}`)
 
 	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/cline") {
+			_, _ = w.Write([]byte(clinePricePageFixture))
+			return
+		}
 		_, _ = w.Write([]byte(commandCodePage(t, `[
 			{"id":"deepseek/deepseek-v4-flash","inputCost":0.15,"outputCost":0.60,"cacheReadCost":0.003,
 			 "tiers":[{"context":"≤ 256K","rates":{"input":0.15,"output":0.60,"cacheRead":0.003}}]},
@@ -40,6 +45,7 @@ func TestRefreshPricesInstallsBothTables(t *testing.T) {
 	fetched, errs := RefreshPrices(context.Background(), PriceRefreshConfig{
 		CatalogPath:    catalog,
 		CommandCodeURL: page.URL,
+		ClinePassURL:   page.URL + "/cline",
 	}, page.Client())
 
 	if len(errs) != 0 {
@@ -77,10 +83,11 @@ func TestRefreshKeepsGoodTablesWhenOnePlatformFails(t *testing.T) {
 
 	ok1, errs1 := RefreshPrices(context.Background(), PriceRefreshConfig{
 		CatalogPath:    catalog,
-		CommandCodeURL: "http://127.0.0.1:1/nope", // nothing listens here
+		CommandCodeURL: "http://127.0.0.1:1/nope",     // nothing listens here
+		ClinePassURL:   "http://127.0.0.1:1/nope-too", // nor here
 	}, &http.Client{Timeout: 2 * time.Second})
-	if len(errs1) != 1 || errs1[site.CommandCode] == nil {
-		t.Fatalf("want a commandcode error, got %v", errs1)
+	if len(errs1) != 2 || errs1[site.CommandCode] == nil || errs1[site.ClinePass] == nil {
+		t.Fatalf("want commandcode and cline-pass errors, got %v", errs1)
 	}
 	if len(ok1[site.OpenCodeGo]) == 0 {
 		t.Fatal("opencode-go must still refresh when commandcode fails")
@@ -96,6 +103,7 @@ func TestRefreshKeepsGoodTablesWhenOnePlatformFails(t *testing.T) {
 	_, errs2 := RefreshPrices(context.Background(), PriceRefreshConfig{
 		CatalogPath:    bad,
 		CommandCodeURL: "http://127.0.0.1:1/nope",
+		ClinePassURL:   "http://127.0.0.1:1/nope-too",
 	}, &http.Client{Timeout: 2 * time.Second})
 	if errs2[site.OpenCodeGo] == nil {
 		t.Error("a catalog without the provider must be an error, not an empty table")
@@ -126,6 +134,92 @@ func TestPriceFetchersRejectEmptyResults(t *testing.T) {
 	defer empty.Close()
 	if _, err := FetchCommandCodePrices(context.Background(), empty.Client(), empty.URL); err == nil {
 		t.Error("a page with no model payload must be an error, not an empty table")
+	}
+}
+
+func TestPriceRefreshLoopStopsBeforeInstallingAfterCancellation(t *testing.T) {
+	resetPrices(t)
+	path := writeTempCatalog(t, `{"providers":{"opencode-go":{"models":{"cancelled":{"cost":{"input":9,"output":9}}}}}}`)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	PriceRefreshLoop(ctx, PriceRefreshConfig{CatalogPath: path}, nil, nil)
+	if len(CurrentPrices()) != 0 {
+		t.Fatal("cancelled price refresh must not install a new table")
+	}
+}
+
+func TestRefreshPricesSyncsCatalogAndIsolatesSyncFailure(t *testing.T) {
+	resetPrices(t)
+	path := writeTempCatalog(t, `{"providers":{"opencode-go":{"models":{"fresh-model":{"cost":{"input":9,"output":9}}}}}}`)
+	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/cline") {
+			_, _ = w.Write([]byte(clinePricePageFixture))
+			return
+		}
+		_, _ = w.Write([]byte(commandCodePage(t, `[{"id":"fresh-model","inputCost":0.2,"outputCost":0.8}]`)))
+	}))
+	defer page.Close()
+	var syncErr error
+	cfg := PriceRefreshConfig{
+		CatalogPath: path, CommandCodeURL: page.URL, ClinePassURL: page.URL + "/cline",
+		RefreshCatalog: func(ctx context.Context) error {
+			if syncErr != nil {
+				return syncErr
+			}
+			return os.WriteFile(path, []byte(`{"providers":{"opencode-go":{"models":{"fresh-model":{"cost":{"input":0.15,"output":0.6}}}}}}`), 0600)
+		},
+	}
+	if _, errs := RefreshPrices(context.Background(), cfg, page.Client()); len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	assertGoPrice := func() {
+		t.Helper()
+		in, out, _, _, ok := PriceForProviderModel(site.OpenCodeGo, "fresh-model", 0)
+		if !ok || in != 0.15 || out != 0.6 {
+			t.Fatalf("price = %v/%v (known=%v), want synced 0.15/0.6", in, out, ok)
+		}
+	}
+	assertGoPrice()
+	// A failed sync must not label an old file as a successful price refresh.
+	syncErr = errors.New("synthetic catalog sync failure")
+	if err := os.WriteFile(path, []byte(`{"providers":{"opencode-go":{"models":{"fresh-model":{"cost":{"input":9,"output":9}}}}}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fetched, errs := RefreshPrices(context.Background(), cfg, page.Client())
+	if !errors.Is(errs[site.OpenCodeGo], syncErr) || len(fetched[site.OpenCodeGo]) != 0 || len(fetched[site.CommandCode]) != 1 {
+		t.Fatalf("per-platform refresh outcome = %v / %v", fetched, errs)
+	}
+	assertGoPrice()
+}
+
+func TestPriceRefreshLoopRepeatsAndStops(t *testing.T) {
+	resetPrices(t)
+	path := writeTempCatalog(t, `{"providers":{"opencode-go":{"models":{"loop-model":{"cost":{"input":0.15,"output":0.6}}}}}}`)
+	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/cline") {
+			_, _ = w.Write([]byte(clinePricePageFixture))
+			return
+		}
+		_, _ = w.Write([]byte(commandCodePage(t, `[{"id":"loop-model","inputCost":0.2,"outputCost":0.8}]`)))
+	}))
+	defer page.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	preparations, rounds := 0, 0
+	PriceRefreshLoop(ctx, PriceRefreshConfig{
+		CatalogPath: path, CommandCodeURL: page.URL, ClinePassURL: page.URL + "/cline", Interval: time.Millisecond,
+		RefreshCatalog: func(context.Context) error { preparations++; return nil },
+	}, page.Client(), func(counts map[string]int, errs map[string]error) {
+		if len(errs) != 0 || counts[site.OpenCodeGo] != 1 || counts[site.CommandCode] != 1 || counts[site.ClinePass] == 0 {
+			t.Errorf("refresh result: %v / %v", counts, errs)
+		}
+		rounds++
+		if rounds == 2 {
+			cancel()
+		}
+	})
+	if preparations != 2 || rounds != 2 {
+		t.Fatalf("loop prepared %d catalogs and reported %d rounds, want 2 before cancellation", preparations, rounds)
 	}
 }
 

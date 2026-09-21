@@ -37,6 +37,7 @@ type Config struct {
 	OpenCodeZen          OpenCodeZenConfig        `json:"opencode_zen"`
 	OpenRouter           OpenRouterConfig         `json:"openrouter"`
 	CommandCode          CommandCodeConfig        `json:"commandcode"`
+	ClinePass            ClinePassConfig          `json:"cline_pass"`
 	AnthropicFirst       AnthropicFirstConfig     `json:"anthropic_first"`
 	Logging              LoggingConfig            `json:"logging"`
 	Catalog              CatalogConfig            `json:"catalog"`
@@ -259,6 +260,36 @@ func (c *CommandCodeConfig) EffectiveAPIKeys() []string {
 	return nil
 }
 
+// ClinePassConfig holds the Cline API settings for the ClinePass subscription.
+//
+// BaseURL is the complete Chat Completions URL. There is no anthropic_base_url
+// because the Cline API publishes no Messages endpoint: /v1/messages answers
+// 401, and so does a path that does not exist, so the gateway gives no way to
+// tell an absent endpoint from a rejected one. ClinePass models are therefore
+// always sent as Chat Completions.
+//
+// The one config block serves every Cline pool. A second pool (cline-free,
+// cline-cloud) would be a separate site descriptor bound to the same
+// EffectiveAPIKeys, because they share this base URL and this credential.
+type ClinePassConfig struct {
+	BaseURL            string   `json:"base_url"`
+	APIKey             string   `json:"api_key,omitempty"`
+	APIKeys            []string `json:"api_keys,omitempty"`
+	TimeoutMs          int      `json:"timeout_ms"`
+	StreamTimeoutMs    int      `json:"stream_timeout_ms"`
+	StreamingTimeoutMs int      `json:"streaming_timeout_ms,omitempty"`
+}
+
+func (c *ClinePassConfig) EffectiveAPIKeys() []string {
+	if len(c.APIKeys) > 0 {
+		return c.APIKeys
+	}
+	if c.APIKey != "" {
+		return []string{c.APIKey}
+	}
+	return nil
+}
+
 // OpenCodeZenConfig holds the upstream OpenCode Zen API settings.
 type OpenCodeZenConfig struct {
 	BaseURL            string   `json:"base_url"`
@@ -372,15 +403,25 @@ var providerKeySource = map[string]struct {
 	site.AWSBedrock:  {func(c *Config) []string { return c.AWSBedrock.EffectiveAPIKeys() }, true},
 	site.OpenRouter:  {func(c *Config) []string { return c.OpenRouter.EffectiveAPIKeys() }, true},
 	site.CommandCode: {func(c *Config) []string { return c.CommandCode.EffectiveAPIKeys() }, false},
+	site.ClinePass:   {func(c *Config) []string { return c.ClinePass.EffectiveAPIKeys() }, false},
 }
 
 // ProviderModelEndpoint is the configured API endpoint a platform's model list
 // is derived from. Empty means this platform has no model-list endpoint of its
 // own, so its models come from the shared catalog instead.
+//
+// ClinePass returns its BaseURL even though its list is not suffix-derived the
+// way CommandCode's is: the list lives at a fixed sibling path
+// (/api/v1/ai/cline/recommended-models), which SiteModelsURL locates from this
+// endpoint's origin and validates against the known Chat Completions path.
+// Returning "" here would leave SiteModelsURL nothing to validate, and the
+// router would skip the platform's list as "no endpoint".
 func (c *Config) ProviderModelEndpoint(provider string) string {
 	switch site.Normalize(provider) {
 	case site.CommandCode:
 		return c.CommandCode.BaseURL
+	case site.ClinePass:
+		return c.ClinePass.BaseURL
 	default:
 		return ""
 	}
@@ -434,6 +475,9 @@ var providerTimeoutSource = map[string]func(*Config) (request, idle, total int){
 	},
 	site.CommandCode: func(c *Config) (int, int, int) {
 		return c.CommandCode.TimeoutMs, c.CommandCode.StreamTimeoutMs, c.CommandCode.StreamingTimeoutMs
+	},
+	site.ClinePass: func(c *Config) (int, int, int) {
+		return c.ClinePass.TimeoutMs, c.ClinePass.StreamTimeoutMs, c.ClinePass.StreamingTimeoutMs
 	},
 }
 

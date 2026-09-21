@@ -80,6 +80,80 @@ func TestSelectCheapest_SelectsCheapestModel(t *testing.T) {
 	}
 }
 
+func TestSelectCheapestRespectsActiveSite(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		active   string
+		global   []string
+		scenario []string
+		want     string
+	}{
+		{"unrestricted", "", nil, nil, site.OpenCodeGo},
+		{"active OpenRouter", site.OpenRouter, nil, nil, site.OpenRouter},
+		{"active CommandCode", site.CommandCode, nil, nil, site.CommandCode},
+		{"global preference intersects", site.OpenRouter, []string{site.OpenCodeGo}, nil, ""},
+		{"scenario preference intersects", site.OpenRouter, nil, []string{site.OpenCodeGo}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cat := selectorTestCatalog(t)
+			cat.Providers[site.CommandCode] = catalog.Provider{Name: site.CommandCode}
+			cat.Models["commandcode/published"] = catalog.Model{ID: "published", Rates: &catalog.Rates{Input: 10, Output: 10}}
+			cfg := &config.Config{
+				ActiveSite: tc.active, APIKey: "synthetic-global",
+				CommandCode: config.CommandCodeConfig{APIKey: "synthetic-commandcode"},
+				CostRouting: &config.CostRoutingConfig{
+					PreferProviders: tc.global,
+					Scenarios:       map[string]config.CostScenario{"default": {PreferredProviders: tc.scenario}},
+				},
+			}
+			got, err := NewSelector(cat, cfg).SelectCheapest("default", ScenarioConstraints{})
+			if tc.want == "" {
+				if !errors.Is(err, ErrNoCandidateModel) {
+					t.Fatalf("conflicting scope/preferences selected %+v: %v", got, err)
+				}
+				return
+			}
+			if err != nil || got.Provider != tc.want {
+				t.Fatalf("provider=%q, want %q; err=%v", got.Provider, tc.want, err)
+			}
+		})
+	}
+}
+
+func TestSelectCheapestDoesNotEnableKeylessCommandCode(t *testing.T) {
+	cat := selectorTestCatalog(t)
+	cat.Providers[site.CommandCode] = catalog.Provider{Name: site.CommandCode}
+	cat.Models["commandcode/cheap"] = catalog.Model{ID: "cheap", Rates: &catalog.Rates{Input: 0.01, Output: 0.01}}
+	cfg := &config.Config{APIKey: "synthetic-global"}
+	got, err := NewSelector(cat, cfg).SelectCheapest("default", ScenarioConstraints{})
+	if err != nil || got.Provider == site.CommandCode {
+		t.Fatalf("keyless CommandCode must not be selected: %+v err=%v", got, err)
+	}
+	cfg.ActiveSite = site.CommandCode
+	if _, err := NewSelector(cat, cfg).SelectCheapest("default", ScenarioConstraints{}); !errors.Is(err, ErrNoCandidateModel) {
+		t.Fatalf("keyless active site must have no candidates: %v", err)
+	}
+}
+
+func TestCostRoutingRespectsActiveSiteForBothRequestModes(t *testing.T) {
+	cfg := &config.Config{
+		APIKey: "synthetic-global", ActiveSite: site.OpenRouter,
+		Models:      map[string]config.ModelConfig{"default": {Provider: site.OpenRouter, ModelID: "configured"}},
+		CostRouting: &config.CostRoutingConfig{Enabled: true},
+	}
+	r := NewModelRouterWithCatalog(config.NewAtomicConfig(cfg, ""), filepath.Join("testdata", "selector_catalog.json"))
+	for name, route := range map[string]func([]MessageContent, int, string) (RouteResult, error){
+		"non-streaming": r.Route, "streaming": r.RouteForStreaming,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := route([]MessageContent{{Role: "user", Content: "hi"}}, 100, "")
+			if err != nil || got.Primary.Provider != site.OpenRouter {
+				t.Fatalf("cost routing left the active site: %+v err=%v", got, err)
+			}
+		})
+	}
+}
+
 func TestSelectCheapest_FiltersByToolsConstraint(t *testing.T) {
 	cfg := &config.Config{
 		OpenCodeGo: config.OpenCodeGoConfig{APIKey: "go-key"},
@@ -685,12 +759,15 @@ func TestEnabledProvidersCoversEveryConfiguredPlatform(t *testing.T) {
 		t.Error("aws-bedrock has no key configured and must not be enabled")
 	}
 
-	// A global key still enables everything, as it did before.
+	// Only the legacy platforms permit a global-key fallback.
 	global := enabledProviders(&config.Config{APIKey: "global-key"})
-	for _, want := range []string{"opencode-go", "commandcode", "opencode-zen", "aws-bedrock", "openrouter"} {
+	for _, want := range []string{"opencode-go", "opencode-zen", "aws-bedrock", "openrouter"} {
 		if !global[want] {
 			t.Errorf("a global key must enable %s (got %v)", want, global)
 		}
+	}
+	if global[site.CommandCode] {
+		t.Error("CommandCode requires its own key and must not inherit the global key")
 	}
 }
 
@@ -699,10 +776,13 @@ func TestEnabledProvidersCoversEveryConfiguredPlatform(t *testing.T) {
 // stops being selectable. This is the general form of the CommandCode omission
 // above, so a platform added later cannot reintroduce it here.
 func TestEnabledProvidersMatchesRegistryCoverage(t *testing.T) {
-	// A global key enables every platform, so this compares the registry
-	// against itself: any platform missing from the result is one the map
-	// cannot represent.
-	enabled := enabledProviders(&config.Config{APIKey: "global-key"})
+	// A global key covers legacy platforms; CommandCode and ClinePass each have
+	// a dedicated key and must not inherit one.
+	enabled := enabledProviders(&config.Config{
+		APIKey:      "global-key",
+		CommandCode: config.CommandCodeConfig{APIKey: "cc-key"},
+		ClinePass:   config.ClinePassConfig{APIKey: "cp-key"},
+	})
 	for _, d := range site.All() {
 		if !enabled[d.ID] {
 			t.Errorf("platform %q is in the registry but cannot be selected by cost routing", d.ID)

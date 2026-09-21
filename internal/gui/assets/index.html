@@ -79,22 +79,22 @@
     <div class="metric-band metric-grid overview-metrics reference-metrics">
       <div class="metric-cell overview-metric">
         <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="metric.total">Total Requests</div>
-        <div class="text-[26px] font-bold tabular-nums" id="m-total">--</div>
+        <div class="metric-value-row"><div class="text-[26px] font-bold tabular-nums" id="m-total">--</div><span class="metric-avg" id="m-total-avg"></span></div>
         <div class="metric-note" id="m-total-note"></div>
       </div>
       <div class="metric-cell overview-metric">
         <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="analytics.totalTokens">Total Tokens</div>
-        <div class="text-[26px] font-bold tabular-nums" id="m-tokens">--</div>
+        <div class="metric-value-row"><div class="text-[26px] font-bold tabular-nums" id="m-tokens">--</div><span class="metric-avg" id="m-tokens-avg"></span></div>
         <div class="metric-note" id="m-tokens-note"></div>
       </div>
       <div class="metric-cell overview-metric">
         <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="history.successRate">Success rate</div>
-        <div class="text-[26px] font-bold tabular-nums" id="m-success">--</div>
+        <div class="metric-value-row"><div class="text-[26px] font-bold tabular-nums" id="m-success">--</div><span class="metric-avg" id="m-success-avg"></span></div>
         <div class="metric-note" id="m-success-note"></div>
       </div>
       <div class="metric-cell overview-metric">
         <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="analytics.cost">Cost</div>
-        <div class="text-[26px] font-bold tabular-nums" id="m-cost">--</div>
+        <div class="metric-value-row"><div class="text-[26px] font-bold tabular-nums" id="m-cost">--</div><span class="metric-avg" id="m-cost-avg"></span></div>
         <div class="metric-note" id="m-cost-note" data-i18n="analytics.currencyUSD">USD</div>
       </div>
     </div>
@@ -102,8 +102,18 @@
       <div class="metric-cell"><span class="metric-label" data-i18n="analytics.cacheHitShort">Cache hit</span><strong id="m-cache-hit">--</strong><span class="metric-note" id="m-cache-hit-note"></span></div>
       <div class="metric-cell"><span class="metric-label" data-i18n="analytics.throughput">Last-minute throughput</span><strong id="m-throughput">--</strong><span class="metric-note" id="m-throughput-note"></span></div>
     </div>
+    <section class="analytics-section platform-health" id="platform-health" hidden>
+      <div class="section-heading" data-i18n="analytics.platformHealth">Platform health</div>
+      <div class="platform-health-rows" id="platform-health-rows"></div>
+      <p class="page-meta" data-i18n="analytics.platformHealthNote">Success rate and latency cover requests this instance recorded with a known outcome. Breaker state comes from the live fallback circuit, not from history.</p>
+    </section>
     <div class="empty-state ledger-empty" id="overview-empty" hidden><strong data-i18n="data.localEmpty">No retained requests in this view</strong><p data-i18n="data.localEmptyHint">Check the filters and retention policy. An empty local ledger does not mean no platform usage.</p></div>
     <div id="overview-insights">
+    <section class="analytics-section" id="daily-spend">
+      <div class="section-heading" data-i18n="analytics.dailySpend">Daily cost</div>
+      <div class="daily-bars" id="daily-spend-bars"></div>
+      <p class="page-meta" id="daily-spend-note"></p>
+    </section>
     <div class="analytics-chart-grid">
       <section class="analytics-section analytics-trend-section"><div class="section-heading" data-i18n="analytics.requestTrend">Request trend</div><div class="analytics-chart analytics-trend" id="overview-request-trend"></div></section>
       <section class="analytics-section analytics-trend-section"><div class="section-heading" data-i18n="analytics.tokenTrend">Token trend</div><div class="analytics-chart analytics-trend" id="overview-token-trend"></div></section>

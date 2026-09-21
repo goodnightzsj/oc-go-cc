@@ -143,6 +143,12 @@ const TRANSLATIONS = {
     'openrouter.creditsFail': 'Account balance could not be retrieved',
     'openrouter.limit': 'Key spending cap',
     'openrouter.limitRemaining': 'Key cap remaining',
+    'openrouter.runway': 'Key cap lasts',
+    'openrouter.runwayBasis': 'at this month’s spend',
+    'runway.days': '~{n} days',
+    'runway.lessThanDay': 'less than a day',
+    'runway.over999': '999+ days',
+    'runway.depleted': 'exhausted',
     'openrouter.limitReset': 'Key cap reset interval',
     'openrouter.noLimit': 'This key has no spending cap',
     'openrouter.usage': 'OpenRouter usage',
@@ -154,6 +160,7 @@ const TRANSLATIONS = {
     'overview.title': 'Dashboard',
     'analytics.title': 'Usage Analytics',
     'analytics.refresh': 'Refresh',
+    'analytics.autoRefresh': 'auto-refresh {n}s',
     'analytics.autoRefreshOff': 'Auto-refresh: Off',
     'analytics.autoRefresh5s': 'Auto-refresh: 5s',
     'analytics.autoRefresh30s': 'Auto-refresh: 30s',
@@ -254,6 +261,17 @@ const TRANSLATIONS = {
     'analytics.reasoningNote': 'included in output',
     'analytics.requests': 'Requests',
     'analytics.avgLatency': 'Average latency',
+    'analytics.platformHealth': 'Platform health',
+    'analytics.dailySpend': 'Daily cost',
+    'analytics.dailySpendNote': '{n} day(s) in this range have no recorded cost; those columns are drawn empty rather than as zero.',
+    'analytics.dailySpendComplete': 'Every day in this range has a recorded cost.',
+    'analytics.platformHealthNote': 'Success rate and latency cover requests this instance recorded with a known outcome. Breaker state comes from the live fallback circuit, not from history.',
+    'health.breakerClosed': 'Circuit closed',
+    'health.breakerHalf': 'Circuit half-open',
+    'health.breakerOpen': 'Circuit open',
+    'health.breakerUnknown': 'Circuit state unknown',
+    'health.noKnownOutcome': 'no known outcome',
+    'health.fallbackShare': '{v}% fallback',
     'analytics.successRate': 'Success rate',
     'analytics.fallbackRate': 'Fallback rate',
     'history.filteredRequests': 'Filtered requests',
@@ -285,8 +303,8 @@ const TRANSLATIONS = {
     'detail.streaming': 'Streaming',
     'detail.nonStreaming': 'Non-streaming',
     'detail.attempt': 'Attempt',
-    'detail.inputTokens': 'Input',
-    'detail.promptTokens': 'Prompt',
+    'detail.inputTokens': 'Input (raw)',
+    'detail.promptTokens': 'Prompt (raw + cache)',
     'detail.cacheRead': 'Cache read',
     'detail.cacheCreation': 'Cache write',
     'detail.outputTokens': 'Output',
@@ -315,6 +333,8 @@ const TRANSLATIONS = {
     'cmd.gotoSettings': 'Go to Settings',
     'cmd.refreshData': 'Refresh Data',
     'metric.total': 'Total Requests',
+    'metric.avgPerRequest': 'avg {v}/req',
+    'metric.perMinute': '{v}/min',
     'metric.success': 'Success',
     'metric.failed': 'Failed',
     'metric.streamed': 'Streamed',
@@ -601,6 +621,12 @@ const TRANSLATIONS = {
     'openrouter.creditsFail': '账户余额获取失败',
     'openrouter.limit': '密钥消费上限',
     'openrouter.limitRemaining': '密钥剩余额度',
+    'openrouter.runway': '密钥额度可用',
+    'openrouter.runwayBasis': '按本月消耗速度',
+    'runway.days': '约 {n} 天',
+    'runway.lessThanDay': '不足一天',
+    'runway.over999': '999+ 天',
+    'runway.depleted': '已耗尽',
     'openrouter.limitReset': '密钥额度重置周期',
     'openrouter.noLimit': '此密钥未设置消费上限',
     'openrouter.usage': 'OpenRouter 用量',
@@ -612,6 +638,7 @@ const TRANSLATIONS = {
     'overview.title': '仪表盘',
     'analytics.title': '用量分析',
     'analytics.refresh': '刷新',
+    'analytics.autoRefresh': '自动刷新 {n}s',
     'analytics.autoRefreshOff': '自动刷新：关闭',
     'analytics.autoRefresh5s': '自动刷新：5 秒',
     'analytics.autoRefresh30s': '自动刷新：30 秒',
@@ -713,6 +740,17 @@ const TRANSLATIONS = {
     'analytics.reasoningNote': '已包含在输出 Token 中',
     'analytics.requests': '请求数',
     'analytics.avgLatency': '平均延迟',
+    'analytics.platformHealth': '平台健康',
+    'analytics.dailySpend': '每日费用',
+    'analytics.dailySpendNote': '区间内有 {n} 天没有记录到费用，这些列画成空列而不是零。',
+    'analytics.dailySpendComplete': '区间内每一天都有费用记录。',
+    'analytics.platformHealthNote': '成功率与延迟只统计本实例记录了明确结果的请求。断路器状态来自实时降级电路，不是历史数据。',
+    'health.breakerClosed': '电路正常',
+    'health.breakerHalf': '电路半开',
+    'health.breakerOpen': '电路断开',
+    'health.breakerUnknown': '电路状态未知',
+    'health.noKnownOutcome': '无已知结果',
+    'health.fallbackShare': '{v}% 降级',
     'analytics.successRate': '成功率',
     'analytics.fallbackRate': '降级率',
     'history.filteredRequests': '筛选请求数',
@@ -744,8 +782,8 @@ const TRANSLATIONS = {
     'detail.streaming': '流式请求',
     'detail.nonStreaming': '非流式请求',
     'detail.attempt': '尝试次数',
-    'detail.inputTokens': '输入',
-    'detail.promptTokens': 'Prompt',
+    'detail.inputTokens': '输入（原始）',
+    'detail.promptTokens': 'Prompt（原始+缓存）',
     'detail.cacheRead': '缓存读取',
     'detail.cacheCreation': '缓存写入',
     'detail.outputTokens': '输出',
@@ -774,6 +812,8 @@ const TRANSLATIONS = {
     'cmd.gotoSettings': '前往设置',
     'cmd.refreshData': '刷新数据',
     'metric.total': '总请求数',
+    'metric.avgPerRequest': '均 {v}/次',
+    'metric.perMinute': '{v}/分',
     'metric.success': '成功',
     'metric.failed': '失败',
     'metric.streamed': '流式请求',
@@ -1287,6 +1327,9 @@ document.addEventListener('DOMContentLoaded', () => {
 /* global state */
 let allHistory = [];
 let lastModelCounts = {};
+// Live circuit-breaker state per model, from /api/metrics. Null until the first
+// poll answers, so the health row can tell "not fetched yet" from "no breakers".
+let lastCircuitBreakers = null;
 
 /* ── Performance Module ───────────────────────────────────────────── */
 const PerfModule = {
@@ -1758,6 +1801,10 @@ async function refreshServiceStatus() {
     lastModelCounts = d.model_counts || {};
     renderModelList(lastModelCounts);
 
+    // Breaker state rides on the same poll as the model counts. An older proxy
+    // build omits the field, which stays distinct from an empty map.
+    lastCircuitBreakers = d.circuit_breakers || null;
+
     // proxy toggle sync
     const proxyToggle = document.getElementById('toggle-proxy');
     if (proxyToggle && !proxyToggle._changing) proxyToggle.checked = running;
@@ -1840,6 +1887,25 @@ function renderOverviewUsage(data, trend, latency) {
   set('m-cost', fmtAggregateCost(summary));
   set('m-tokens', hasUsageTokens(summary) ? fmtTok(total) : '—');
   set('m-cache-hit', hasUsageTokens(summary) && prompt > 0 ? `${(cacheRead / prompt * 100).toFixed(1)}%` : '—');
+  // A total alone says how much, not whether that is a lot. These subtitles
+  // divide the headline by the request count so the same figure carries its own
+  // scale. Each is omitted when the divisor is zero or the total is unknown -
+  // an average of nothing is not zero, it is unknown.
+  const requests = Number(summary.total_requests || 0);
+  const perRequest = value => requests > 0 ? value / requests : null;
+  const avgToken = perRequest(total);
+  const setAvg = (id, text) => set(id, text || '');
+  if (hasUsageTokens(summary) && avgToken != null) {
+    setAvg('m-tokens-avg', t('metric.avgPerRequest').replace('{v}', fmtTok(avgToken)));
+  } else setAvg('m-tokens-avg', '');
+  const costKnown = Number(summary.unknown_cost_requests || 0) === 0 && Number(summary.est_cost_usd) > 0;
+  const avgCost = costKnown ? perRequest(Number(summary.est_cost_usd)) : null;
+  setAvg('m-cost-avg', avgCost == null ? '' : t('metric.avgPerRequest').replace('{v}', fmtAvgCost(avgCost)));
+  // The request total carries the current rate instead of a per-request figure,
+  // which would always be 1.
+  const rate = Number(lastMinute.total_requests || 0);
+  setAvg('m-total-avg', rate > 0 ? t('metric.perMinute').replace('{v}', fmt(rate)) : '');
+  setAvg('m-success-avg', '');
   set('m-total-note', today.total_requests != null
     ? `${currentLang === 'zh' ? '今日' : 'Today'} (UTC) ${fmt(today.total_requests)} · ${t('data.retained')} ${fmt(retained.total_requests)}`
     : `${overviewDays} ${currentLang === 'zh' ? '天' : 'days'}`);
@@ -1855,7 +1921,10 @@ function renderOverviewUsage(data, trend, latency) {
   const known = Number(summary.known_requests || 0);
   set('m-success', known > 0 && summary.success_rate != null ? `${(Number(summary.success_rate) * 100).toFixed(1)}%` : '—');
   set('m-success-note', t('analytics.knownRecords').replace('{n}', known.toLocaleString()));
-  set('overview-generated', new Date().toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'}));
+  // Says when the figures were taken and how often they refresh, so a reader
+  // can tell a stale panel from a quiet system. The interval is the same 3s the
+  // overview poll actually runs at, not a rounded-down claim.
+  set('overview-generated', `${new Date().toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'})} · ${t('analytics.autoRefresh').replace('{n}', '3')}`);
   set('overview-latency', Number(latency?.avg_latency_ms || 0) > 0
     ? `· ${t('analytics.avgLatency')} ${fmtDuration(latency.avg_latency_ms)}`
     : '');
@@ -1873,6 +1942,8 @@ function renderOverviewUsage(data, trend, latency) {
     : overviewBreakdownMetric === 'tokens' ? 'total_tokens' : 'requests';
   AnalyticsModule.renderDistribution('overview-provider-distribution', withTotal(data.providers), valueKey, 'provider');
   AnalyticsModule.renderDistribution('overview-model-distribution', withTotal(data.models), valueKey, 'model');
+  AnalyticsModule.renderPlatformHealth(data.providers, lastCircuitBreakers);
+  AnalyticsModule.renderDailySpend(trend);
 }
 
 function renderModelList(counts) {
@@ -2545,6 +2616,61 @@ function providerColor(provider) {
   return providerInfo(provider)?.color || '#98989d';
 }
 
+// A breaker is keyed by provider/model, so the provider is the prefix before
+// the first slash. A key with no slash has no platform to attribute it to and
+// is reported as unknown rather than guessed at.
+function providerOfModelKey(key) {
+  const at = String(key || '').indexOf('/');
+  return at < 0 ? '' : String(key).slice(0, at);
+}
+
+// Threshold colours for a success rate: green only when nothing failed, amber
+// for a small tail of failures, red once the tail is large enough to matter.
+// 'unknown' has no colour of its own so a missing measurement never renders as
+// a good one.
+function successColor(level) {
+  if (level === 'ok') return 'var(--ui-green)';
+  if (level === 'warn') return 'var(--ui-amber)';
+  if (level === 'crit') return 'var(--ui-red)';
+  return 'var(--ui-muted)';
+}
+
+// "How many days is this balance good for?" - the one figure a raw balance
+// cannot answer, because the same number is comfortable or alarming depending
+// on the burn rate.
+//
+// Both inputs must come from the same source, or the ratio mixes two accounts:
+// a platform-published balance divided by this instance's ledger would report a
+// runway for traffic the platform never saw. Callers pass the platform's own
+// remainder and its own periodic usage, and the function reports null rather
+// than guessing when either is missing or the platform is not spending.
+//
+// Days are computed against the period the usage covers, so a daily figure and
+// a weekly figure yield the same rate.
+function runwayDays(remaining, periodUsage, periodDays) {
+  // Absent is checked before numeric coercion, because Number(null) is 0 and
+  // would otherwise report an unknown balance as an exhausted one - the
+  // difference between "no data" and "no money".
+  if (remaining == null || periodUsage == null) return null;
+  const left = Number(remaining);
+  const spent = Number(periodUsage);
+  if (!Number.isFinite(left) || !Number.isFinite(spent)) return null;
+  if (left <= 0) return 0;
+  if (spent <= 0 || periodDays <= 0) return null;
+  const perDay = spent / periodDays;
+  if (!(perDay > 0)) return null;
+  return left / perDay;
+}
+
+// Renders a runway as "~12 days" / "<1 day" and nothing at all when unknown.
+function fmtRunway(days) {
+  if (days == null) return '';
+  if (days <= 0) return t('runway.depleted');
+  if (days < 1) return t('runway.lessThanDay');
+  if (days > 999) return t('runway.over999');
+  return t('runway.days').replace('{n}', String(Math.floor(days)));
+}
+
 function providerLabel(provider) {
   // A hidden platform still has a name, so rows recorded under it keep
   // rendering one instead of falling back to the raw id.
@@ -2626,6 +2752,19 @@ function fmtCost(v) {
   if (abs < 0.000001) return '$' + n.toFixed(9);
   if (abs < 0.01) return '$' + n.toFixed(6);
   return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+}
+
+// A per-request average is a derived figure, not a bill, so it is rounded to a
+// readable precision instead of fmtCost's full significant digits: thirteen
+// decimals of an average invite the reader to trust digits that are noise.
+function fmtAvgCost(v) {
+  if (v == null || !isFinite(v)) return '—';
+  const n = Number(v);
+  if (n === 0) return '$0.00';
+  const abs = Math.abs(n);
+  if (abs < 0.001) return '$' + n.toFixed(4);
+  if (abs < 0.01) return '$' + n.toFixed(3);
+  return '$' + n.toFixed(2);
 }
 
 // Aggregate amounts are known subtotals, not zero-cost promises for unpriced rows.
@@ -4404,6 +4543,108 @@ const AnalyticsModule = {
     this.renderDistribution('provider-distribution', withTotal(summary.providers), valueKey, 'provider');
   },
 
+  // A column per day of the range, sized by that day's cost. The shape answers
+  // "which day stood out" in a way a line smooths over, and the value is
+  // printed above each column so the height is not the only way to read it.
+  //
+  // Days with no recorded cost render as empty columns rather than as zero
+  // bars, because a day the proxy never saw is not the same claim as a day that
+  // cost nothing. The note states how many days had no cost at all.
+  renderDailySpend(points) {
+    const root = document.getElementById('daily-spend');
+    const bars = document.getElementById('daily-spend-bars');
+    const note = document.getElementById('daily-spend-note');
+    if (!root || !bars) return;
+    const items = points || [];
+    if (!items.length) {
+      root.hidden = true;
+      bars.innerHTML = '';
+      if (note) note.textContent = '';
+      return;
+    }
+    root.hidden = false;
+    const costs = items.map(p => Number(p.cost_usd || 0));
+    const max = Math.max(...costs, 0);
+    const emptyDays = costs.filter(c => c <= 0).length;
+    bars.innerHTML = items.map((point, index) => {
+      const cost = costs[index];
+      const pct = max > 0 ? Math.max(cost > 0 ? 3 : 0, cost / max * 100) : 0;
+      const label = String(point.date || '').slice(5);
+      return `<div class="daily-bar${cost > 0 ? '' : ' is-empty'}" title="${this.escapeHtml(this.trendLabel(point.date))}: ${this.escapeHtml(fmtAggregateCost(point))}">
+        <span class="daily-bar-value">${cost > 0 ? this.escapeHtml(fmtCost(cost)) : ''}</span>
+        <span class="daily-bar-fill" style="height:${pct.toFixed(1)}%"></span>
+        <span class="daily-bar-label">${this.escapeHtml(label)}</span>
+      </div>`;
+    }).join('');
+    if (note) {
+      note.textContent = emptyDays > 0
+        ? t('analytics.dailySpendNote').replace('{n}', String(emptyDays))
+        : t('analytics.dailySpendComplete');
+    }
+  },
+
+  // One row per platform, pairing the two figures that answer "is this platform
+  // healthy" - success rate and latency - with the live breaker state. The rate
+  // is drawn as a bar so a row can be judged by shape before the number is read.
+  //
+  // Only platforms this instance actually recorded appear: a platform with no
+  // traffic has no rate to report, and inventing 100% for it would be a claim
+  // the data does not support. A rate of 0 over a nonzero sample is a real
+  // measurement and is drawn as such; the "no known outcome" case is called out
+  // in the meta line instead of being folded into the percentage.
+  renderPlatformHealth(providers, breakers) {
+    const root = document.getElementById('platform-health');
+    const rows = document.getElementById('platform-health-rows');
+    if (!root || !rows) return;
+    const items = (providers || []).filter(item => Number(item.requests || 0) > 0);
+    if (!items.length) {
+      root.hidden = true;
+      rows.innerHTML = '';
+      return;
+    }
+    root.hidden = false;
+    const breakerOf = provider => {
+      if (!breakers) return { state: '', label: t('health.breakerUnknown'), className: '' };
+      // Breakers are keyed by provider/model. A provider is only "open" when
+      // one of its own models is: any open breaker marks the platform degraded,
+      // and half-open is reported as recovering rather than healthy.
+      const own = Object.entries(breakers).filter(([key]) => providerOfModelKey(key) === provider);
+      if (!own.length) return { state: '', label: t('health.breakerUnknown'), className: '' };
+      if (own.some(([, state]) => state === 'open')) return { state: 'open', label: t('health.breakerOpen'), className: 'is-crit' };
+      if (own.some(([, state]) => state === 'half_open')) return { state: 'half_open', label: t('health.breakerHalf'), className: 'is-warn' };
+      return { state: 'closed', label: t('health.breakerClosed'), className: 'is-ok' };
+    };
+    rows.innerHTML = items.map(item => {
+      const provider = item.provider || 'unknown';
+      const known = Number(item.known_requests || 0);
+      const rate = Number(item.success_rate || 0);
+      const hasRate = known > 0;
+      const latency = Number(item.avg_latency_ms || 0);
+      const breaker = breakerOf(provider);
+      const pct = hasRate ? (rate * 100) : null;
+      const level = !hasRate ? 'unknown' : rate >= 0.99 ? 'ok' : rate >= 0.95 ? 'warn' : 'crit';
+      const meta = [];
+      if (latency > 0) meta.push(`${t('analytics.avgLatency')} ${fmtDuration(latency)}`);
+      meta.push(`${Number(item.requests || 0).toLocaleString()} ${t('analytics.requests')}`);
+      // Fallback rate is the share of answered requests the primary model did
+      // not serve. It is computed and stored server-side; showing it here is
+      // what makes a rising number visible as a platform degrading rather than
+      // as a run of unrelated failures. Omitted when nothing answered.
+      const fallback = Number(item.fallback_rate || 0);
+      if (known > 0 && fallback > 0) meta.push(t('health.fallbackShare').replace('{v}', fallback.toFixed(0)));
+      if (!hasRate) meta.push(t('health.noKnownOutcome'));
+      return `<div class="platform-health-row" data-provider="${this.escapeHtml(provider)}">
+        <div class="platform-health-name">
+          <span class="status-dot platform-health-breaker ${breaker.className}" title="${this.escapeHtml(breaker.label)}" role="img" aria-label="${this.escapeHtml(breaker.label)}"></span>
+          <span title="${this.escapeHtml(providerLabel(provider))}">${this.escapeHtml(providerLabel(provider))}</span>
+        </div>
+        <div class="platform-health-track"><span style="width:${pct == null ? 0 : Math.max(pct > 0 ? 2 : 0, pct).toFixed(1)}%;--platform-health-color:${successColor(level)}"></span></div>
+        <div class="platform-health-value" style="color:${successColor(level)}">${pct == null ? '—' : pct.toFixed(1) + '%'}</div>
+        <div class="platform-health-meta">${this.escapeHtml(meta.join(' · '))}</div>
+      </div>`;
+    }).join('');
+  },
+
   renderDistribution(containerId, items, valueKey, dimension) {
     const root = document.getElementById(containerId);
     if (!root) return;
@@ -5023,8 +5264,19 @@ const QuotaModule = {
       ['quota.weekly', 'usage_weekly', 'byok_usage_weekly'],
       ['quota.monthly', 'usage_monthly', 'byok_usage_monthly'],
     ];
+    // Balance and burn rate both come from this key's own figures: limit_remaining
+    // is what is left of this key's cap, and usage_monthly is what this key spent.
+    // A key with no cap has no balance to run down, so no runway is shown.
+    const monthlyUsage = Number(data.usage_monthly);
+    const runway = data.limit_remaining !== null && Number.isFinite(monthlyUsage)
+      ? runwayDays(data.limit_remaining, monthlyUsage, 30) : null;
+    const runwayField = runway == null ? [] : [[
+      t('openrouter.runway'),
+      `${fmtRunway(runway)} · ${t('openrouter.runwayBasis')}`,
+    ]];
     return `<section class="quota-account analytics-section">${head}
-      <dl class="quota-figures">${fields.map(([label, value]) => `<div><dt>${t(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl>
+      <dl class="quota-figures">${fields.map(([label, value]) => `<div><dt>${t(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}
+        ${runwayField.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl>
       <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th>${t('analytics.period')}</th><th>${t('openrouter.usage')}</th><th>${t('openrouter.byokUsage')}</th></tr></thead>
         <tbody>${periods.map(([label, usage, byok]) => `<tr><td>${t(label)}</td><td>${fmtCost(data[usage])}</td><td>${fmtCost(data[byok])}</td></tr>`).join('')}</tbody>
       </table></div>

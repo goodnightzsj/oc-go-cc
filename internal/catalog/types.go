@@ -18,6 +18,13 @@ type Provider struct {
 	APIKey                 string `json:"api_key"`
 	Enabled                *bool  `json:"enabled,omitempty"`
 	AnthropicToolsDisabled bool   `json:"anthropic_tools_disabled"`
+
+	// Models is models.dev's per-provider model map. The catalog carries two
+	// views of the same data: a top-level "models" map keyed by the full
+	// provider/model id, and this nested one keyed by the bare name. Neither is
+	// complete - a provider added after the top-level map was built (cline-pass
+	// among them) appears only here - so the loader reads both.
+	Models map[string]Model `json:"models,omitempty"`
 }
 
 // Modalities describes the input/output formats a model supports.
@@ -69,6 +76,16 @@ func (m Model) SupportsVision() bool {
 func (m Model) ContextWindow() int64 {
 	if m.Limit != nil {
 		return m.Limit.Context
+	}
+	return 0
+}
+
+// MaxOutputTokens returns the model's published output ceiling, or 0 if
+// unknown. The zero is "not recorded", never "may not produce output": callers
+// treat it as no ceiling rather than as a cap of nothing.
+func (m Model) MaxOutputTokens() int64 {
+	if m.Limit != nil {
+		return m.Limit.Output
 	}
 	return 0
 }
@@ -132,6 +149,7 @@ type ResolvedModel struct {
 	APIKey                 string  `json:"api_key"`
 	AnthropicToolsDisabled bool    `json:"anthropic_tools_disabled"`
 	ContextWindow          int64   `json:"context_window"`
+	MaxOutputTokens        int64   `json:"max_output_tokens"`
 	CostInputPerM          float64 `json:"cost_input_per_m"`
 	CostOutputPerM         float64 `json:"cost_output_per_m"`
 	Tools                  bool    `json:"tools"`

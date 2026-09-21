@@ -255,7 +255,10 @@ func resolvedModelToConfig(resolved catalog.ResolvedModel) config.ModelConfig {
 		ModelRef:      resolved.CanonicalName,
 		Vision:        resolved.Vision,
 		ContextWindow: int(resolved.ContextWindow),
-		SupportsTools: &supportsTools,
+		// Carried so clampOutputTokens can honour the upstream's real ceiling
+		// instead of clamping a client's request down to the built-in default.
+		MaxOutputTokens: int(resolved.MaxOutputTokens),
+		SupportsTools:   &supportsTools,
 	}
 }
 
@@ -664,6 +667,12 @@ func (r *ModelRouter) ActiveSite() string {
 // publishes this model id. The active site is the authority for its own model
 // names, so a client that picked a model from the listing gets exactly that
 // model - it does not get re-mapped by a configured alias.
+//
+// Capabilities come from the catalog when it knows the model. The site's own
+// listing carries ids only, and the built-in registry is keyed by model family,
+// so a model absent from both would route with no context window and no output
+// ceiling at all. The catalog is the one source that has the platform's real
+// numbers for models it does not otherwise recognize.
 func (r *ModelRouter) PublishedByActiveSite(ctx context.Context, modelID string) (config.ModelConfig, bool) {
 	cfg := r.atomic.Get()
 	active := cfg.ActiveSite
@@ -680,10 +689,34 @@ func (r *ModelRouter) PublishedByActiveSite(ctx context.Context, modelID string)
 					return config.ResolveModelConfig(configured), true
 				}
 			}
+			if resolved, err := r.catalogResolved(ctx, active, m.ID); err == nil {
+				target = resolvedModelToConfig(resolved)
+				// The listing's display name is the platform's own wording for
+				// the model; the catalog's is a mirror's. Keep ours.
+				target.ModelRef = config.ModelKey(target)
+			}
 			return config.ResolveModelConfig(target), true
 		}
 	}
 	return config.ModelConfig{}, false
+}
+
+// catalogResolved resolves a model id through the catalog: first as the active
+// site names it, then by the catalog's own resolution rules.
+//
+// The second attempt matters because a platform's listing uses the platform's
+// namespace while the catalog may file the same upstream model under the
+// vendor's. ResolveShort is what handles that - it searches every provider for
+// a short name and is the same path a client's model string takes.
+func (r *ModelRouter) catalogResolved(ctx context.Context, provider, modelID string) (catalog.ResolvedModel, error) {
+	cat, err := r.catalog(ctx)
+	if err != nil || cat == nil {
+		return catalog.ResolvedModel{}, fmt.Errorf("catalog unavailable")
+	}
+	if resolved, err := cat.Resolve(catalog.Selector{Provider: provider, Model: modelID}); err == nil {
+		return resolved, nil
+	}
+	return cat.ResolveShort(modelID)
 }
 
 // RestrictToActiveSite keeps only the targets belonging to the active site. The

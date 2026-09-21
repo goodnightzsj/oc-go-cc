@@ -129,3 +129,63 @@ func TestClinePassReportsHTTPFailure(t *testing.T) {
 		t.Fatalf("error = %v, want an HTTP 429 report", err)
 	}
 }
+
+// The plan endpoint is what turns a percentage into an amount. Its thresholds
+// arrive in the same 1e-8-dollar unit the account's usage records use, so a
+// wrong divisor would render a $10 window as $0.0000001 or $100,000,000 while
+// looking well-formed.
+func TestClinePassPlanThresholds(t *testing.T) {
+	page := clinePassServer(t, http.StatusOK, `{"success":true,"data":{"plan":{"entitlements":{"cline_pass":{"enabled":true,
+		"inferenceCapThreshold":{"last5HoursUsageCostUSDPerUser":1000000000,"last7daysUsageCostUSDPerUser":2500000000,"last30daysUsageCostUSDPerUser":5000000000}}}}}}`)
+	limits, err := FetchClinePassPlan(context.Background(), page.Client(), page.URL+"/api/v1/users/me/plan", "cline-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for window, want := range map[string]float64{"five_hour": 10, "weekly": 25, "monthly": 50} {
+		if got := limits[window]; got != want {
+			t.Errorf("%s ceiling = %v, want %v", window, got, want)
+		}
+	}
+}
+
+// An absent threshold must not become a zero ceiling: zero renders as "nothing
+// left", which is the opposite of "the plan did not say".
+func TestClinePassPlanRejectsUnusableResponses(t *testing.T) {
+	for _, tc := range []struct{ name, body string }{
+		{"no success flag", `{"data":{"plan":{"entitlements":{"cline_pass":{"enabled":true,"inferenceCapThreshold":{"last5HoursUsageCostUSDPerUser":1}}}}}}`},
+		{"entitlement inactive", `{"success":true,"data":{"plan":{"entitlements":{"cline_pass":{"enabled":false,"inferenceCapThreshold":{"last5HoursUsageCostUSDPerUser":1}}}}}}`},
+		{"no entitlement", `{"success":true,"data":{"plan":{}}}`},
+		{"no thresholds", `{"success":true,"data":{"plan":{"entitlements":{"cline_pass":{"enabled":true}}}}}`},
+		{"zero thresholds", `{"success":true,"data":{"plan":{"entitlements":{"cline_pass":{"enabled":true,"inferenceCapThreshold":{}}}}}}`},
+		{"not json", `<html>gateway</html>`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			page := clinePassServer(t, http.StatusOK, tc.body)
+			limits, err := FetchClinePassPlan(context.Background(), page.Client(), page.URL+"/api/v1/users/me/plan", "cline-key")
+			if err == nil {
+				t.Fatalf("accepted an unusable plan response: %v", limits)
+			}
+		})
+	}
+}
+
+// The plan endpoint is derived from the same base URL as the usage endpoint, so
+// it inherits the same refusal to aim a key at a host that did not ask for it.
+func TestClinePassPlanURLKeepsOriginAndRejectsForeignPath(t *testing.T) {
+	got, err := ClinePassPlanURL("https://api.cline.bot/api/v1/chat/completions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "https://api.cline.bot/api/v1/users/me/plan" {
+		t.Errorf("derived %q", got)
+	}
+	for _, bad := range []string{
+		"https://mirror.internal/v1/chat/completions",
+		"https://api.cline.bot/other",
+		"http://user:pass@api.cline.bot/api/v1/chat/completions",
+	} {
+		if _, err := ClinePassPlanURL(bad); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+}

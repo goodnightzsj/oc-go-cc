@@ -16,7 +16,7 @@ async function checks() {
   const go = {provider:'opencode-go',status:'available',source:'upstream_api',currency:'USD',accounts:[{key_hint:'masked-GO01',report:{plan:'go',weekly:{has_percent:true,used_percent:25,used_dollars:7.5,limit_dollars:30,resets_at:'2030-01-01T00:00:00Z'},fetched_at:'2026-09-10T00:00:00Z'}}],model_limits:{models:[{model:'shared',allowance_usd:60}]},model_usage:[{model:'shared',used_usd:0.25,allowance_usd:60,percent:0.25/60*100,requests:3,unknown_cost_requests:0}],links:[{kind:'docs',url:'https://synthetic.invalid/go/docs'}],fetched_at:'2026-09-10T00:00:00Z'};
   const key = {limit:null,limit_remaining:null,limit_reset:null,usage:12,usage_daily:0,usage_weekly:null,usage_monthly:10,byok_usage:3,byok_usage_daily:1,byok_usage_weekly:null,byok_usage_monthly:2,include_byok_in_limit:false,is_free_tier:false,expires_at:null};
   let openrouter = {provider:'openrouter',status:'partial',source:'official_api',currency:'USD',credits_status:'not_configured',accounts:[{key_hint:'masked-OR01',openrouter:key},{key_hint:'masked-OR02',openrouter:{...key,limit:0,limit_remaining:0,limit_reset:'daily',usage:0,byok_usage:0,include_byok_in_limit:null}},{key_hint:'masked-BAD1',error:'synthetic HTTP 401 <denied>'}],links:[{kind:'billing',url:'https://synthetic.invalid/openrouter/credits'}]};
-  const clinepass = {provider:'cline-pass',status:'available',source:'official_api',accounts:[{key_hint:'masked-CP01',cline_pass:{windows:[{type:'five_hour',percent_used:42.5,resets_at:'2030-01-01T00:00:00Z'},{type:'weekly',percent_used:10},{type:'monthly',percent_used:3.25}]}}],links:[{kind:'usage',url:'https://synthetic.invalid/cline/usage'}],fetched_at:'2026-09-10T00:00:00Z'};
+  const clinepass = {provider:'cline-pass',status:'available',source:'official_api',accounts:[{key_hint:'masked-CP01',cline_pass:{windows:[{type:'five_hour',percent_used:42.5,resets_at:'2030-01-01T00:00:00Z',limit_usd:10},{type:'weekly',percent_used:10,limit_usd:25},{type:'monthly',percent_used:3.25}]}}],links:[{kind:'usage',url:'https://synthetic.invalid/cline/usage'}],fetched_at:'2026-09-10T00:00:00Z'};
   const unavailable = provider => ({provider,status:provider === 'aws-bedrock' || provider === 'commandcode' ? 'not_configured' : 'unavailable',source:provider === 'commandcode' ? 'official_alpha_api' : provider === 'aws-bedrock' ? 'official_api' : 'none',accounts:[],reason:provider === 'aws-bedrock' ? 'aws_billing_disabled' : provider === 'commandcode' ? '' : 'no_public_account_api',links:[{kind:'billing',url:'https://synthetic.invalid/' + provider + '/billing'}]});
   let calls = [];
   const response = raw => {
@@ -82,6 +82,15 @@ async function checks() {
       // amount owed and no local ledger block to reconcile against one.
       assert.ok(get('quota-cline-pass-accounts').innerHTML.includes('42.5%'),'the plan percentage must be shown');
       assert.ok(get('quota-cline-pass-accounts').innerHTML.includes('10.0%'));
+      // The percentage stays the headline; the plan's ceiling adds the amount
+      // it is a percentage of as a secondary line. 42.5% of a $10 window
+      // leaves $5.75, and a window with no published ceiling renders neither
+      // a figure nor a guess.
+      const passHtml = get('quota-cline-pass-accounts').innerHTML;
+      assert.ok(passHtml.includes('$5.75'),'the remaining amount must be shown when the plan publishes a ceiling');
+      assert.ok(passHtml.includes('$22.50'),'10% of a $25 window leaves $22.50, so the weekly figure must render too');
+      const amounts = (passHtml.match(/commandcode-window-amount/g) || []).length;
+      assert.equal(amounts,2,'only the two windows with a published ceiling may render an amount');
       assert.equal(get('quota-source').textContent,t('quota.source.official_api'));
     } else if (provider !== 'openrouter') {
       assert.ok(get('quota-unavailable-note').textContent.includes('No public account quota API'));

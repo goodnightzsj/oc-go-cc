@@ -284,6 +284,7 @@ func (d *Database) initSchema(ctx context.Context) error {
 		name TEXT NOT NULL,
 		display_name TEXT,
 		context_window INTEGER,
+		max_output_tokens INTEGER,
 		cost_input_per_m REAL,
 		cost_output_per_m REAL,
 		supports_tools INTEGER DEFAULT 1,
@@ -316,6 +317,10 @@ func (d *Database) migrateColumns(ctx context.Context) error {
 		`ALTER TABLE requests ADD COLUMN details_known INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE requests ADD COLUMN usage_trusted INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE requests ADD COLUMN peak_multiplier REAL NOT NULL DEFAULT 1`,
+		// Existing rows keep NULL, which reads back as "unknown ceiling" - the
+		// same answer they gave before the column existed. The next catalog sync
+		// fills them in.
+		`ALTER TABLE models ADD COLUMN max_output_tokens INTEGER`,
 	} {
 		if _, err := d.db.ExecContext(ctx, alter); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return fmt.Errorf("%s: %w", alter, err)

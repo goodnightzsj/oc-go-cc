@@ -1104,7 +1104,13 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .usage-chart-scrub:focus { outline: 0; }
 .usage-chart-scrub:focus-visible { stroke: rgba(129,140,248,.9); stroke-width: 1; vector-effect: non-scaling-stroke; }
 
-.analytics-table-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; border: 1px solid var(--ui-line); border-radius: 6px; background: var(--ui-surface); }
+/* Horizontal scroll for wide tables, vertical for long ones. The vertical bound
+   matters because these tables grow with the number of models or periods: a
+   92-day hourly range or a 40-model instance would otherwise push the rest of
+   the page below the fold, which is what makes a dashboard feel unbounded. */
+.analytics-table-scroll { max-width: 100%; max-height: 420px; overflow: auto; overscroll-behavior-inline: contain; border: 1px solid var(--ui-line); border-radius: 6px; background: var(--ui-surface); }
+/* The header must stay readable while the body scrolls under it. */
+.analytics-table thead th { position: sticky; top: 0; z-index: 1; }
 .analytics-table { width: 100%; min-width: 620px; border-collapse: collapse; font-size: 10px; }
 .analytics-table th,
 .analytics-table td { padding: 9px 10px; border-bottom: 1px solid var(--ui-line); text-align: left; white-space: nowrap; font-variant-numeric: tabular-nums; }

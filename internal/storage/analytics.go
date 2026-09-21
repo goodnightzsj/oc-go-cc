@@ -142,8 +142,34 @@ type ModelBreakdown struct {
 	CacheCreationTokens int64   `json:"cache_creation_tokens"`
 	AvgLatencyMs        float64 `json:"avg_latency_ms"`
 	SuccessRate         float64 `json:"success_rate"`
+	TokensPerSecond     float64 `json:"tokens_per_second"`
 	EstCostUSD          float64 `json:"est_cost_usd"` // sum of known stored request costs
 	UnknownCostRequests int64   `json:"unknown_cost_requests"`
+}
+
+// throughputCounters carries the two sums TokensPerSecond is derived from.
+//
+// The rate is SUM(output)/SUM(duration), not the mean of each request's own
+// rate: averaging ratios weights a 200-token reply the same as a 20K-token one,
+// so a run of short requests would drag the reported figure below what the
+// platform actually sustained. Totals keep the long generations' weight.
+type throughputCounters struct {
+	OutputTokens int64
+	DurationMs   int64
+}
+
+// rate converts the counters to tokens per second of wall time. Zero duration
+// means nothing measurable was in the window, which is unknown rather than
+// zero throughput, so the caller reports it as such.
+//
+// This measures the whole request, including time-to-first-token; without a
+// first-token timestamp the generation phase cannot be isolated, so the label
+// must say "per second" and not "generation speed".
+func (c throughputCounters) rate() float64 {
+	if c.DurationMs <= 0 {
+		return 0
+	}
+	return float64(c.OutputTokens) / (float64(c.DurationMs) / 1000.0)
 }
 
 // ModelBreakdown returns usage stats per model for a resolved window.
@@ -163,6 +189,8 @@ func (a *Analytics) ModelBreakdown(window Window) ([]ModelBreakdown, error) {
 			COALESCE(SUM(r.cache_creation_tokens), 0) AS cache_creation_tokens,
 			COALESCE(AVG(CASE WHEN r.details_known = 1 AND r.duration_ms > 0 AND julianday(r.start_time) >= julianday(?) THEN r.duration_ms END), 0) AS avg_latency_ms,
 			COALESCE(AVG(CASE WHEN r.details_known = 1 AND r.success IN (0, 1) THEN r.success END), 0) AS success_rate,
+			COALESCE(SUM(CASE WHEN r.details_known = 1 AND r.success = 1 AND r.duration_ms > 0 AND r.output_tokens > 0 THEN r.output_tokens END), 0) AS tp_tokens,
+			COALESCE(SUM(CASE WHEN r.details_known = 1 AND r.success = 1 AND r.duration_ms > 0 AND r.output_tokens > 0 THEN r.duration_ms END), 0) AS tp_duration_ms,
 			COALESCE(SUM(r.cost_usd), 0) AS stored_cost_usd,
 			COUNT(*) - COUNT(r.cost_usd) AS unknown_cost_requests
 		FROM requests r
@@ -182,6 +210,7 @@ func (a *Analytics) ModelBreakdown(window Window) ([]ModelBreakdown, error) {
 	result := make([]ModelBreakdown, 0)
 	for rows.Next() {
 		var mb ModelBreakdown
+		var tp throughputCounters
 		if err := rows.Scan(
 			&mb.Model,
 			&mb.Provider,
@@ -193,11 +222,14 @@ func (a *Analytics) ModelBreakdown(window Window) ([]ModelBreakdown, error) {
 			&mb.CacheCreationTokens,
 			&mb.AvgLatencyMs,
 			&mb.SuccessRate,
+			&tp.OutputTokens,
+			&tp.DurationMs,
 			&mb.EstCostUSD,
 			&mb.UnknownCostRequests,
 		); err != nil {
 			return nil, err
 		}
+		mb.TokensPerSecond = tp.rate()
 		result = append(result, mb)
 	}
 	return result, rows.Err()
@@ -246,6 +278,7 @@ type ProviderBreakdown struct {
 	CacheCreationTokens int64   `json:"cache_creation_tokens"`
 	AvgLatencyMs        float64 `json:"avg_latency_ms"`
 	SuccessRate         float64 `json:"success_rate"`
+	TokensPerSecond     float64 `json:"tokens_per_second"`
 	FallbackRate        float64 `json:"fallback_rate"` // % of known requests that were fallbacks
 	EstCostUSD          float64 `json:"est_cost_usd"`
 	UnknownCostRequests int64   `json:"unknown_cost_requests"`
@@ -319,6 +352,8 @@ func (a *Analytics) ProviderBreakdown(window Window) ([]ProviderBreakdown, error
 			COALESCE(SUM(r.cache_creation_tokens), 0) AS cache_creation_tokens,
 			COALESCE(AVG(CASE WHEN r.details_known = 1 AND r.duration_ms > 0 AND julianday(r.start_time) >= julianday(?) THEN r.duration_ms END), 0) AS avg_latency_ms,
 			COALESCE(AVG(CASE WHEN r.details_known = 1 AND r.success IN (0, 1) THEN r.success END), 0) AS success_rate,
+			COALESCE(SUM(CASE WHEN r.details_known = 1 AND r.success = 1 AND r.duration_ms > 0 AND r.output_tokens > 0 THEN r.output_tokens END), 0) AS tp_tokens,
+			COALESCE(SUM(CASE WHEN r.details_known = 1 AND r.success = 1 AND r.duration_ms > 0 AND r.output_tokens > 0 THEN r.duration_ms END), 0) AS tp_duration_ms,
 			COALESCE(100.0 * AVG(CASE WHEN r.details_known = 1 AND r.success IN (0, 1)
 			                        THEN COALESCE(r.attempt, 1) > 1 END), 0) AS fallback_rate,
 			COALESCE(SUM(r.cost_usd), 0) AS stored_cost_usd,
@@ -339,11 +374,13 @@ func (a *Analytics) ProviderBreakdown(window Window) ([]ProviderBreakdown, error
 	result := make([]ProviderBreakdown, 0)
 	for rows.Next() {
 		var row ProviderBreakdown
+		var tp throughputCounters
 		if err := rows.Scan(&row.Provider, &row.Requests, &row.KnownRequests, &row.InputTokens, &row.OutputTokens,
 			&row.CacheReadTokens, &row.CacheCreationTokens, &row.AvgLatencyMs, &row.SuccessRate,
-			&row.FallbackRate, &row.EstCostUSD, &row.UnknownCostRequests); err != nil {
+			&tp.OutputTokens, &tp.DurationMs, &row.FallbackRate, &row.EstCostUSD, &row.UnknownCostRequests); err != nil {
 			return nil, err
 		}
+		row.TokensPerSecond = tp.rate()
 		result = append(result, row)
 	}
 	return result, rows.Err()

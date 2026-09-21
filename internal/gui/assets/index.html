@@ -127,8 +127,8 @@
       </div>
     </div>
     <div class="analytics-comparison-grid">
-      <section class="analytics-section"><div class="section-heading" data-i18n="analytics.byProvider">Platform distribution</div><div class="analytics-distribution" id="overview-provider-distribution"></div></section>
-      <section class="analytics-section"><div class="section-heading" data-i18n="analytics.byModel">Model distribution</div><div class="analytics-distribution" id="overview-model-distribution"></div></section>
+      <section class="analytics-section"><div class="section-heading"><span data-i18n="analytics.byProvider">Platform distribution</span><span class="section-meta" id="overview-provider-distribution-count"></span></div><div class="analytics-distribution" id="overview-provider-distribution"></div></section>
+      <section class="analytics-section"><div class="section-heading"><span data-i18n="analytics.byModel">Model distribution</span><span class="section-meta" id="overview-model-distribution-count"></span></div><div class="analytics-distribution" id="overview-model-distribution"></div></section>
     </div>
     </div>
     <div id="model-list" hidden></div>
@@ -544,10 +544,10 @@
       <div class="analytics-comparison-grid">
         <section class="analytics-section">
           <div class="section-heading" data-i18n="analytics.modelDetails">Model details</div>
-          <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th data-i18n="filter.model">Model</th><th data-i18n="analytics.requests">Requests</th><th data-i18n="analytics.cacheHitShort">Cache hit</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="analytics.cost">Cost</th></tr></thead><tbody id="analytics-model-tbody"></tbody></table></div>
+          <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th data-i18n="filter.model">Model</th><th data-i18n="analytics.requests">Requests</th><th data-i18n="analytics.cacheHitShort">Cache hit</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="analytics.throughput">Tok/s</th><th data-i18n="analytics.cost">Cost</th></tr></thead><tbody id="analytics-model-tbody"></tbody></table></div>
         </section>
         <section class="analytics-section">
-          <div class="section-heading" data-i18n="analytics.byProvider">Platform distribution</div>
+          <div class="section-heading"><span data-i18n="analytics.byProvider">Platform distribution</span><span class="section-meta" id="provider-distribution-count"></span></div>
           <div class="analytics-distribution" id="provider-distribution"></div>
         </section>
       </div>
@@ -656,7 +656,7 @@
           <div class="metric-cell"><div class="metric-label" data-i18n="history.filteredCost">Recorded cost</div><div class="metric-value" id="quota-local-cost">--</div><div class="metric-note" id="quota-local-cost-note"></div></div>
           <div class="metric-cell"><div class="metric-label" data-i18n="quota.unknownCosts">Requests with unknown cost</div><div class="metric-value" id="quota-local-unknown">--</div></div>
         </div>
-        <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th data-i18n="th.modelPlatform">Model / Platform</th><th data-i18n="analytics.requests">Requests</th><th data-i18n="analytics.cacheHitShort">Cache hit</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="analytics.cost">Cost</th></tr></thead><tbody id="quota-local-model-tbody"></tbody></table></div>
+        <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th data-i18n="th.modelPlatform">Model / Platform</th><th data-i18n="analytics.requests">Requests</th><th data-i18n="analytics.cacheHitShort">Cache hit</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="analytics.throughput">Tok/s</th><th data-i18n="analytics.cost">Cost</th></tr></thead><tbody id="quota-local-model-tbody"></tbody></table></div>
       </section>
     </div>
   </div>

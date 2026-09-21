@@ -68,6 +68,19 @@ const history = {replaceState(_state, _title, url) {
 }};
 // The router dispatches change events at controls it restores from the URL.
 const Event = class { constructor(type, init) { this.type = type; Object.assign(this, init || {}); } };
+// A class list that actually records state. The earlier stub answered contains()
+// with a constant false, which made every assertion about a class vacuous - a
+// test could not tell a toggled class from a missing one.
+function classListOf() {
+  const set = new Set();
+  return {
+    add(...names){names.forEach(n => set.add(n))},
+    remove(...names){names.forEach(n => set.delete(n))},
+    toggle(name, force){const on = force === undefined ? !set.has(name) : !!force; on ? set.add(name) : set.delete(name); return on},
+    contains(name){return set.has(name)},
+    _set: set,
+  };
+}
 const vm = require('node:vm');
 const input = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
 const nodes = new Map();
@@ -75,7 +88,7 @@ function node(id) {
   if (!nodes.has(id)) nodes.set(id, {
     _value: '', get value(){return this._value}, set value(value){this._value = String(value)},
     id, innerHTML: '', textContent: '', hidden: true, dataset: {}, style: {}, listeners: {}, children: [], options: [],
-    classList: {add(){},remove(){},toggle(){},contains(){return false}},
+    classList: classListOf(),
     addEventListener(type, handler){(this.listeners[type] ||= []).push(handler)},
     emit(type){return Promise.all((this.listeners[type] || []).map(handler => handler({target:this})))},
     dispatchEvent(event){return Promise.resolve(this.emit(event.type))},
@@ -85,7 +98,6 @@ function node(id) {
     // CustomSelect wraps the select it enhances, so the node needs somewhere
     // to be inserted.
     parentNode: {insertBefore(){}},
-    classList: {add(){},remove(){},toggle(){},contains(){return false}},
   });
   return nodes.get(id);
 }
@@ -108,7 +120,7 @@ const context = vm.createContext({
         insertBefore(n){this.children.push(n); return n}, replaceChildren(...kids){this.children = kids},
         addEventListener(){}, removeEventListener(){}, focus(){},
         querySelectorAll(){return []}, querySelector(){return null},
-        classList: {add(){},remove(){},toggle(){},contains(){return false}},
+        classList: classListOf(),
       };
       return el;
     }},

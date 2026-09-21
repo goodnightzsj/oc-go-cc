@@ -68,8 +68,12 @@ func TestRefreshPricesInstallsBothTables(t *testing.T) {
 	}
 	// A tier from the refreshed page must be live too.
 	_, _, _, _, _ = PriceForProviderModel(site.CommandCode, "grok-4.6", 300_000)
-	if got := CurrentPrices()[site.CommandCode]; got != 2 {
-		t.Errorf("CurrentPrices report = %d, want 2", got)
+	// The installed table is the fetched rules plus whatever seed rules this page
+	// omits, so the count is at least the fetched two. What survives alongside
+	// them is asserted concretely by TestRefreshKeepsSeedRulesThePageDoesNotList;
+	// asserting the exact total here would restate the merge rather than check it.
+	if got := CurrentPrices()[site.CommandCode]; got < 2 {
+		t.Errorf("CurrentPrices report = %d, want at least the 2 fetched rules", got)
 	}
 }
 
@@ -284,4 +288,84 @@ func commandCodePage(t *testing.T, modelsArray string) string {
 		t.Fatal(err)
 	}
 	return `<script>self.__next_f.push([1,` + string(encoded) + `])</script>`
+}
+
+// A refreshed page is not the whole story. Both platform pages list only the
+// models they advertise, while the seeds also carry live-roster models sourced
+// elsewhere, so a wholesale replacement silently un-prices real traffic: the
+// cost column reads "unknown", which is the same answer an unpriced platform
+// gives and therefore looks like nothing is wrong.
+//
+// Measured against the live pages on 2026-09-22: the ClinePass page yields 13
+// rules to the seed's 15 (cline-pass/deepseek-v4.1-flash and
+// cline-pass/glm-5.3-flash are models.dev-sourced), and the CommandCode page
+// drops longcat-2.0:free.
+func TestRefreshKeepsSeedRulesThePageDoesNotList(t *testing.T) {
+	resetPrices(t)
+
+	// A page that carries only one of the two models the seed prices.
+	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`
+| Model             | Model ID                       |
+| ----------------- | ------------------------------ |
+| GLM-5.3           | ` + "`cline-pass/glm-5.3`" + `           |
+
+## Reference pricing
+
+| Model    | Input  | Output  | Cached Read | Cached Write |
+| -------- | ------ | ------- | ----------- | ------------ |
+| GLM-5.3  | \$1.40 | \$4.40  | \$0.26      | -            |
+`))
+	}))
+	defer page.Close()
+
+	// Install a refresh for this platform alone, as RefreshPrices would.
+	fetched, err := FetchClinePassPrices(context.Background(), page.Client(), page.URL)
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	InstallPrices(map[string][]priceEntry{site.ClinePass: fetched})
+
+	// The page's own rule is live...
+	if _, _, _, _, ok := PriceForProviderModel(site.ClinePass, "cline-pass/glm-5.3", 0); !ok {
+		t.Error("the refreshed rule must be priced")
+	}
+	// ...and a seed-only rule that the page omits must survive the install.
+	if _, _, _, _, ok := PriceForProviderModel(site.ClinePass, "cline-pass/deepseek-v4.1-flash", 1000); !ok {
+		t.Error("a seed-only rule was dropped by the refresh: this model now reports an unknown cost")
+	}
+}
+
+// A fetched rule must win over the seed's value for the same model, or a price
+// change on the platform would never take effect.
+func TestRefreshOverridesSeedRateForTheSameModel(t *testing.T) {
+	resetPrices(t)
+	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`
+| Model             | Model ID                       |
+| ----------------- | ------------------------------ |
+| GLM-5.3           | ` + "`cline-pass/glm-5.3`" + `           |
+
+## Reference pricing
+
+| Model    | Input   | Output  | Cached Read | Cached Write |
+| -------- | ------- | ------- | ----------- | ------------ |
+| GLM-5.3  | \$9.99  | \$19.99 | \$0.26      | -            |
+`))
+	}))
+	defer page.Close()
+
+	fetched, err := FetchClinePassPrices(context.Background(), page.Client(), page.URL)
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	InstallPrices(map[string][]priceEntry{site.ClinePass: fetched})
+
+	in, out, _, _, ok := PriceForProviderModel(site.ClinePass, "cline-pass/glm-5.3", 0)
+	if !ok {
+		t.Fatal("glm-5.3 is not priced after a refresh")
+	}
+	if in != 9.99 || out != 19.99 {
+		t.Errorf("rates = %v/%v, want the fetched 9.99/19.99: the seed overrode the live page", in, out)
+	}
 }

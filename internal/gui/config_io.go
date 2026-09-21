@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/site"
 )
 
 // sensitiveKeyFragments are matched case-insensitively as substrings of a JSON
@@ -183,9 +184,7 @@ func (s *Server) updateProxyConfig(patch map[string]json.RawMessage, apply bool)
 	for field, value := range patch {
 		// Settings sends partial provider/connection objects. Routing maps and
 		// arrays are full replacements, so removed entries stay removed.
-		switch field {
-		case "opencode_go", "opencode_zen", "aws_bedrock", "openrouter",
-			"commandcode", "anthropic_first", "logging", "catalog", "storage":
+		if isPartialProviderBlock(field) {
 			value, err = mergeConfigSettings(merged[field], value)
 			if err != nil {
 				return nil, fmt.Errorf("failed to merge %s: %w", field, err)
@@ -209,6 +208,25 @@ func (s *Server) updateProxyConfig(patch map[string]json.RawMessage, apply bool)
 		s.atomicCfg.ApplyLoaded(cfg)
 	}
 	return cfg, nil
+}
+
+// isPartialProviderBlock reports whether a top-level config key holds an object
+// the Settings tab patches field by field.
+//
+// Every platform's block belongs here. A block left out is written wholesale,
+// so a patch carrying only the fields the user touched replaces the whole
+// object and silently drops the rest of that platform's configuration - the
+// platform keeps its markup in the form and loses its settings on save.
+//
+// The platform entries are derived from the registry rather than listed, so a
+// new platform cannot be added without its block being mergeable.
+func isPartialProviderBlock(field string) bool {
+	switch field {
+	case "anthropic_first", "logging", "catalog", "storage":
+		return true
+	}
+	_, known := site.Lookup(field)
+	return known
 }
 
 func mergeConfigSettings(current, patch json.RawMessage) (json.RawMessage, error) {

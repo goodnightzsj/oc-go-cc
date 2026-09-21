@@ -38,9 +38,17 @@ routatic-proxy start -b
 
 **仪表盘标签页：** 概览、历史请求、性能、降级策略、用量分析、用量与账单、设置。
 
-概览、历史、性能和用量分析均可独立筛选五个平台；趋势、模型明细、汇总和比较使用相同平台范围。历史 CSV 导出固定开始时的筛选条件，不受分页期间切换平台影响。
+概览、历史、性能和用量分析均可独立筛选平台；趋势、模型明细、汇总和比较使用相同平台范围。历史 CSV 导出固定开始时的筛选条件，不受分页期间切换平台影响。
 
-**用量与账单** 为五个平台分别展示本实例的请求、Token、费用已知小计和缺价记录。账户数据另行查询：OpenCode Go 保留三个限额窗口（5 小时滚动 / 本周 / 本月）；OpenRouter 查询每个推理 Key 的额度与 UTC 用量，并使用独立的 `openrouter.management_api_key` 查询账户 Credits，BYOK 用量单独显示。CommandCode 使用自己的 Key 查询官方 Alpha 点数、订阅与用量汇总，无需浏览器 Cookie。密钥仅以掩码展示；上述账户结果按平台缓存 30 秒。
+**概览** 给出请求、Token、成功率与费用，并在每张统计卡主值下附带可读的速率（`均 71.5K/次`、`12/分`）。平台健康表按平台给出成功率、平均延迟、实测吞吐与降级占比，断路状态以圆点标注。每日费用以柱状图呈现：区间内只有一天时收窄为单柱并在说明中点出该日金额，日期标签按可用宽度自动稀疏，避免重叠。
+
+**历史请求** 支持按平台、状态、时间、模型、使用场景、请求类型和费用来源筛选，并按任意列排序。被路由到其他模型时，详情弹窗在服务模型下方标出客户端**请求的模型**。命中 deepseek 工作日高峰时段（UTC 01-04 / 06-10）的记录带 `高峰 ×2` 角标，费用按 ×2 计算。日志可通过搜索框按请求模型、服务模型、供应商、场景和错误信息检索。
+
+**用量分析** 提供 KPI、按周期与按模型的明细表、Token 趋势和平台分布。模型明细表含每模型实测吞吐（Tok/s，为输出 Token 除以整个请求耗时，因此含等待首 token 的时间；无可测量样本时留空而非显示 0）。可自定义起止日期（最长 92 天，支持小时粒度）。模型分布只列前 5 名并在标题标出 `前 5 / 19`，平台分布则全部列出——平台是固定短集合，隐藏一个就等于谎报流量去向。
+
+**价格来源** 面板说明每个平台的价格表来自实时抓取还是构建时快照，以及最近一次抓取时间。两者算出的费用在界面上完全一致，因此必须显式区分：本项目自身就遇到过内置快照数周内失效的情况（OpenCode Go 调整了 DeepSeek 价格、CommandCode 重新定价了四个模型），期间面板一直用已作废的费率显示着格式工整的数字。
+
+**用量与账单** 为各平台分别展示本实例的请求、Token、费用已知小计和缺价记录。账户数据另行查询：OpenCode Go 保留三个限额窗口（5 小时滚动 / 本周 / 本月）；OpenRouter 查询每个推理 Key 的额度与 UTC 用量，并使用独立的 `openrouter.management_api_key` 查询账户 Credits，BYOK 用量单独显示。CommandCode 使用自己的 Key 查询官方 Alpha 点数、订阅与用量汇总，无需浏览器 Cookie。ClinePass 使用自己的 Key 读取套餐窗口，按参考价折算为百分比而非应付金额。密钥仅以掩码展示；上述账户结果按平台缓存 30 秒。
 
 AWS Bedrock 已接入 [Cost Explorer 独立账单查询](docs/aws-bedrock-billing.md)：默认关闭，需显式账户 ID 和服务进程的独立 AWS SDK 身份；仅手动按钮发起收费查询，普通刷新只读取同账户、同 UTC 日的缓存。展示最近 30 个完整 UTC 日内已列明服务的费用、币种与预估标记，不当作剩余额度。
 
@@ -48,28 +56,38 @@ Go 模型额度来自 [Go 文档](https://opencode.ai/docs/zh-cn/go)，分模型
 
 未知价格显示 `—`，部分已知费用明确标注“已知”小计与未知记录数，不当作免费。用量分析的日期/时间桶和概览“今日”边界使用 UTC；历史日期筛选和单条时间使用浏览器本地时区。设置按平台折叠定位，排序和降级链调整支持键盘，并保留浅深主题及手机布局。
 
-以下截图使用固定的合成演示数据，不包含生产请求、账户数据或凭证。
+以下截图使用固定的合成演示数据，不包含生产请求、账户数据或凭证。可用 `python3 scripts/make-mock-data.py` 重新生成同数据集并复现这些截图。
 
 #### 概览
 
-![包含请求趋势和 Token 趋势的仪表盘概览](docs/assets/dashboard-overview.png)
+![包含请求趋势、Token 趋势与平台健康表的仪表盘概览](docs/zh/assets/dashboard-overview.png)
 
 #### 历史请求
 
-![包含筛选和分布统计的分页历史请求](docs/assets/dashboard-history.png)
+![包含筛选、分布统计与高峰计费角标的分页历史请求](docs/zh/assets/dashboard-history.png)
+
+#### 请求详情
+
+![标出客户端请求模型与实际服务模型的请求详情弹窗](docs/zh/assets/dashboard-request-detail.png)
 
 #### 用量分析
 
-![包含 Token 趋势和平台分布的用量分析](docs/assets/dashboard-analytics.png)
+![包含吞吐列、周期明细与平台分布的用量分析](docs/zh/assets/dashboard-analytics.png)
+
+#### 价格来源
+
+![说明各平台价格表来自实时抓取还是构建时快照](docs/zh/assets/dashboard-price-sources.png)
 
 <details>
-<summary>性能、降级策略和设置</summary>
+<summary>用量与账单、性能、降级策略和设置</summary>
 
-![模型性能页面](docs/assets/dashboard-performance.png)
+![用量与账单页面](docs/zh/assets/dashboard-quota.png)
 
-![降级策略编辑器](docs/assets/dashboard-fallback.png)
+![模型性能页面](docs/zh/assets/dashboard-performance.png)
 
-![代理设置页面](docs/assets/dashboard-settings.png)
+![降级策略编辑器](docs/zh/assets/dashboard-fallback.png)
+
+![代理设置页面](docs/zh/assets/dashboard-settings.png)
 
 </details>
 

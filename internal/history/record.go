@@ -2,6 +2,7 @@
 package history
 
 import (
+	"strings"
 	"time"
 
 	"github.com/routatic/proxy/internal/models"
@@ -12,6 +13,7 @@ import (
 type RequestRecord struct {
 	ID                  string        // unique request ID
 	Model               string        // actual upstream model used (e.g. "kimi-k2.6")
+	RequestedModel      string        // model the client asked for, when it differs from Model
 	Provider            string        // provider name (e.g. "opencode-go")
 	Scenario            string        // routing scenario (e.g. "default", "complex")
 	StartTime           time.Time     // when the request started
@@ -33,6 +35,24 @@ type RequestRecord struct {
 	// PeakMultiplier is the billing multiplier applied by the upstream
 	// (1 = off-peak base rate, 2 = deepseek weekday peak). 0 means unspecified.
 	PeakMultiplier float64 `json:"peak_multiplier"`
+}
+
+// RequestedModelDiffers reports whether the client asked for a model other than
+// the one that served the request, which is what makes the pair worth storing.
+//
+// A client that sends a Claude model id (claude-sonnet-4-5) to a proxy that
+// routes on scenarios always differs, but a request routed to the exact model it
+// named does not. Storing equality would fill the column with the same string
+// twice and make "was this rerouted?" unanswerable without comparing anyway.
+//
+// Comparison is case-insensitive and whitespace-trimmed because model ids are
+// matched that way elsewhere; a difference in case is not a reroute.
+func RequestedModelDiffers(requested, served string) bool {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return false
+	}
+	return !strings.EqualFold(requested, strings.TrimSpace(served))
 }
 
 // peakModelFamilies is the set of model families the peak-pricing platforms

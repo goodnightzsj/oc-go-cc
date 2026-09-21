@@ -62,18 +62,48 @@
 .trend-hit:focus { outline: 0; stroke: var(--ui-indigo); stroke-width: 1; }
 
 /* ── Modal ────────────────────────────────────────────────── */
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100; opacity: 0; visibility: hidden; transition: opacity 0.2s, visibility 0.2s; }
+/* Two elements share .modal-overlay: #history-modal is a <dialog>, so the
+   browser paints ::backdrop behind it, and #test-modal is a plain <div>, which
+   gets no backdrop at all.
+
+   Giving the *dialog* an opaque background composites two masks - 40% black
+   over 40% black paints 64% - which reads as a flat grey wash rather than a
+   scrim. So the dialog stays transparent and the mask is painted once, by
+   ::backdrop; the non-dialog variant paints its own, since nothing else will.
+
+   The scrim is deliberately light. The panel already separates itself with a
+   large elevation shadow and a strong border, so the mask only needs to recede
+   the page, not black it out. Heavier masks were the reason the light theme
+   looked muddy: a grey veil over a near-white page flattens everything. */
+.modal-overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 100; opacity: 0; visibility: hidden; transition: opacity 0.2s, visibility 0.2s; }
+/* Non-dialog overlays have no ::backdrop to fall back on. */
+div.modal-overlay { background: var(--ui-scrim, rgba(6, 11, 21, 0.32)); }
 .modal-overlay.visible { opacity: 1; visibility: visible; }
 dialog.modal-overlay:not([open]) { display: none; }
-dialog.modal-overlay[open] { opacity: 1; visibility: visible; border: 0; padding: 0; color: inherit; }
-dialog.modal-overlay::backdrop { background: rgba(0,0,0,0.5); }
-.modal-content { background: var(--ui-surface); border-radius: 10px; width: 90%; max-width: 500px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 2px 8px rgba(0,0,0,0.3); transform: scale(0.95); transition: transform 0.2s; }
-.modal-overlay.visible .modal-content { transform: scale(1); }
-.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--ui-line); }
+dialog.modal-overlay[open] { opacity: 1; visibility: visible; border: 0; padding: 0; color: inherit; background: transparent; }
+/* The scrim is a token rather than a computed tint: it must darken in both
+   themes, and a value mixed from --ui-bg would brighten the page in light mode. */
+dialog.modal-overlay::backdrop {
+  background: var(--ui-scrim, rgba(6, 11, 21, 0.55));
+  backdrop-filter: blur(2px) saturate(0.9);
+  -webkit-backdrop-filter: blur(2px) saturate(0.9);
+}
+/* A blurred backdrop is decoration; honouring the reduced-motion preference
+   means dropping it rather than animating it more slowly. */
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay { transition: none; }
+  .modal-content { transition: none; }
+  dialog.modal-overlay::backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+.modal-content { background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: 12px; width: 90%; max-width: 520px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 18px 48px rgba(0,0,0,0.28), 0 2px 8px rgba(0,0,0,0.16); transform: scale(0.96) translateY(6px); transition: transform 0.2s ease; }
+.modal-overlay.visible .modal-content { transform: scale(1) translateY(0); }
+.modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--ui-line); background: var(--ui-surface-raised); }
 .modal-title { font-size: 14px; font-weight: 600; }
-.modal-close { background: none; border: none; padding: 8px; cursor: pointer; color: var(--ui-muted); border-radius: 4px; }
-.modal-close:hover { background: var(--ui-surface-raised); }
-.modal-body { padding: 16px; overflow-y: auto; flex: 1; }
+.modal-subtitle { margin-top: 3px; color: var(--ui-muted); font-size: 11px; }
+.modal-close { flex: 0 0 auto; background: none; border: none; padding: 8px; cursor: pointer; color: var(--ui-muted); border-radius: 6px; }
+.modal-close:hover { background: var(--ui-line); color: var(--ui-text); }
+.modal-close:focus-visible { outline: 2px solid var(--ui-action); outline-offset: 1px; }
+.modal-body { padding: 18px; overflow-y: auto; flex: 1; }
 
 /* ── Status Dot ───────────────────────────────────────────── */
 .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ui-muted); transition: background 0.3s; }
@@ -314,6 +344,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: none;
   --ui-surface-raised: #1e2a3a;
   --ui-line: #2c394d;
   --ui-line-strong: #61718a;
+  /* The scrim behind a modal. Always dark, in both themes: a mask's job
+     is to recede the page, and a light-themed scrim built from --ui-bg
+     would brighten the content it is meant to push back. */
+  --ui-scrim: rgba(6, 11, 21, 0.42);
   --ui-text: #edf1f8;
   --ui-muted: #afbdd0;
   --ui-indigo: #a5b4fc;
@@ -659,7 +693,13 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: none;
 .daily-bars {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
+  /* Tracks grow to fill the row but stop at a readable bar width, and the row
+     centres whatever is left. Without the cap a one-day range draws a single
+     bar the full width of the panel, which reads as a filled block rather than
+     as a quantity. The cap is above the width a 7-day range already gets, so
+     the common view is unchanged; only sparse ranges move. */
+  grid-auto-columns: minmax(0, 160px);
+  justify-content: center;
   align-items: end;
   gap: 3px;
   height: 120px;
@@ -674,6 +714,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: none;
   background: var(--ui-indigo);
   transition: height .24s ease;
 }
+/* A single recorded day is better read as a number than as one bar. The row
+   still draws it so the axis stays legible, and the caption states the total. */
+.daily-bars.is-sparse .daily-bar-fill { opacity: .85; }
 .daily-bar.is-empty .daily-bar-fill { background: var(--ui-surface-raised); }
 .daily-bar-label { color: var(--ui-muted); font-size: 9px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 @media (max-width: 560px) {
@@ -970,33 +1013,43 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
   width: min(720px, calc(100vw - 28px));
   max-width: 720px;
   max-height: min(84vh, 760px);
+  /* Matches .modal-content's radius so the two dialogs do not sit at different
+     corner radii on the same screen. The border stays stronger than the base
+     one because this panel is large and needs its edge defined against the
+     scrim. */
   border: 1px solid var(--ui-line-strong);
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--ui-surface);
-  box-shadow: 0 22px 64px rgba(0, 0, 0, .52);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .45), 0 2px 10px rgba(0, 0, 0, .2);
 }
-.history-detail-content .modal-header { padding: 16px 18px; border-color: var(--ui-line); }
+.history-detail-content .modal-header { padding: 16px 20px; border-color: var(--ui-line); }
 .modal-subtitle { margin: 3px 0 0; color: var(--ui-muted); font-size: 11px; }
 .history-detail-content .modal-body { padding: 0; }
-.detail-summary { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 16px 18px; border-bottom: 1px solid var(--ui-line); }
-.detail-model { margin-bottom: 5px; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
+.detail-summary { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 20px; border-bottom: 1px solid var(--ui-line); }
+.detail-model { margin-bottom: 6px; font-size: 16px; font-weight: 650; overflow-wrap: anywhere; }
 .detail-context { display: flex; flex-wrap: wrap; gap: 6px 12px; color: var(--ui-muted); font-size: 11px; }
+/* A reroute is a fact about the request, not a warning: the proxy doing its job
+   is not an error. Marked with the info colour so it reads as context rather
+   than as something that went wrong. */
+.detail-rerouted { padding: 1px 6px; border-radius: 4px; color: var(--ui-text); background: var(--ui-surface-raised); border: 1px dashed var(--ui-line); cursor: help; }
 .detail-outcome { flex: 0 0 auto; text-align: right; }
-.detail-cost { display: block; margin-bottom: 5px; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.detail-cost { display: block; margin-bottom: 6px; font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .detail-status { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; }
 .detail-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ui-red); }
 .detail-status.success { color: var(--ui-green); }
 .detail-status.success::before { background: var(--ui-green); }
 .detail-status.unknown { color: var(--ui-muted); }
 .detail-status.unknown::before { background: var(--ui-muted); }
-.detail-token-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-bottom: 1px solid var(--ui-line); }
-.detail-token { min-width: 0; padding: 12px; border-right: 1px solid var(--ui-line); }
-.detail-token:last-child { border-right: 0; }
-.detail-token span { display: block; margin-bottom: 3px; color: var(--ui-muted); font-size: 10px; }
+/* The token split is one dataset, so it is drawn as one panel rather than five
+   bordered cells: the dividers separate readings within a figure, not figures
+   from each other. */
+.detail-token-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; margin: 16px 20px; border: 1px solid var(--ui-line); border-radius: 8px; background: var(--ui-line); overflow: hidden; }
+.detail-token { min-width: 0; padding: 12px 14px; background: var(--ui-surface-raised); }
+.detail-token span { display: block; margin-bottom: 4px; color: var(--ui-muted); font-size: 10px; }
 .detail-token strong { display: block; overflow: hidden; font-size: 14px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; }
-.detail-metadata { padding: 8px 18px 14px; }
-.detail-row { padding: 8px 0; border-color: var(--ui-line); }
-.detail-error { margin: 0 18px 18px; padding: 10px 12px; border-left: 3px solid var(--ui-red); border-radius: 4px; color: var(--ui-red); background: rgba(251, 113, 133, .08); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.detail-metadata { padding: 0 20px 18px; }
+.detail-row { padding: 9px 0; border-color: var(--ui-line); }
+.detail-error { margin: 0 20px 18px; padding: 10px 12px; border-left: 3px solid var(--ui-red); border-radius: 4px; color: var(--ui-red); background: rgba(251, 113, 133, .08); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .analytics-breakdown-toolbar { margin-top: 2px; border-top: 1px solid var(--ui-line); }
 .analytics-breakdown-toolbar + .analytics-comparison-grid .analytics-section { border-top: 0; }
@@ -1014,10 +1067,10 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
   .history-summary-metrics > div:nth-child(-n+2) { border-bottom: 1px solid var(--ui-line); }
   .detail-summary { flex-direction: column; }
   .detail-outcome { text-align: left; }
+  /* The grid's 1px gap + background is what draws the dividers now, so the
+     reflow only has to change the column count: no per-cell borders to unwind. */
   .detail-token-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .detail-token { border-bottom: 1px solid var(--ui-line); }
-  .detail-token:nth-child(2n) { border-right: 0; }
-  .detail-token:last-child { grid-column: 1 / -1; border-bottom: 0; }
+  .detail-token:last-child { grid-column: 1 / -1; }
   .insight-toolbar { align-items: flex-start; flex-direction: column; }
   .metric-segment { width: 100%; }
   .metric-segment button { flex: 1; }
@@ -1120,6 +1173,12 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .analytics-table tbody tr:hover td { background: var(--ui-surface-raised); }
 .analytics-table code { display: inline-block; max-width: 260px; overflow: hidden; color: var(--ui-text); font-size: 10px; text-overflow: ellipsis; vertical-align: bottom; }
 .usage-detail-table { min-width: 900px; }
+/* A live price table and the build-time snapshot price a request identically,
+   so the two are told apart by colour and by a word, never by the number. */
+.price-live { color: var(--ui-green); font-weight: 600; }
+/* The snapshot still prices correctly, but it is a claim with a shelf life, so
+   it is marked as needing attention rather than as good. */
+.price-seed { color: var(--ui-amber); font-weight: 600; cursor: help; }
 .analytics-retained-range { display: block; margin: 2px 0 8px; color: var(--ui-muted); font-size: 9px; text-align: right; font-variant-numeric: tabular-nums; }
 
 .history-model-cell { display: grid; gap: 2px; min-width: 140px; max-width: 220px; }
@@ -1350,6 +1409,7 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
     --ui-input: #fdfdff;
     --ui-line: #d5dce7;
     --ui-line-strong: #8794a7;
+    --ui-scrim: rgba(11, 18, 32, 0.16);
     --ui-text: #172235;
     --ui-muted: #526178;
     --ui-indigo: #4f46e5;
@@ -1370,6 +1430,7 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
   --ui-input: #fdfdff;
   --ui-line: #d5dce7;
   --ui-line-strong: #8794a7;
+  --ui-scrim: rgba(11, 18, 32, 0.16);
   --ui-text: #172235;
   --ui-muted: #526178;
   --ui-indigo: #4f46e5;

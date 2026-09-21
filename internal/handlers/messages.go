@@ -662,6 +662,9 @@ func (h *MessagesHandler) handleStreaming(
 	requestID string,
 ) {
 	clientCtx := r.Context()
+	// The model the client named, recorded alongside the one that served it so a
+	// rerouted request can be told apart from a passthrough after the fact.
+	requestedModel := anthropicReq.Model
 
 	rw := &responseWriter{ResponseWriter: w}
 
@@ -723,6 +726,7 @@ func (h *MessagesHandler) handleStreaming(
 			rec := history.RequestRecord{
 				ID:                  requestID,
 				Model:               model.ModelID,
+				RequestedModel:      requestedModel,
 				Provider:            providerName,
 				Scenario:            string(scenario),
 				StartTime:           streamStart,
@@ -762,6 +766,7 @@ func (h *MessagesHandler) handleStreaming(
 			rec := history.RequestRecord{
 				ID:                  requestID,
 				Model:               model.ModelID,
+				RequestedModel:      requestedModel,
 				Provider:            providerName,
 				Scenario:            string(scenario),
 				StartTime:           streamStart,
@@ -1011,6 +1016,8 @@ func (h *MessagesHandler) handleNonStreaming(
 ) {
 	ctx := r.Context()
 	startTime := time.Now()
+	// See handleStreaming: kept for the same reason, from the same source.
+	requestedModel := anthropicReq.Model
 
 	result, responseBody, err := h.fallbackHandler.ExecuteWithFallback(
 		ctx,
@@ -1074,6 +1081,7 @@ func (h *MessagesHandler) handleNonStreaming(
 	rec := history.RequestRecord{
 		ID:                  requestID,
 		Model:               result.ModelID,
+		RequestedModel:      requestedModel,
 		Provider:            result.Provider,
 		Scenario:            string(scenario),
 		StartTime:           startTime,

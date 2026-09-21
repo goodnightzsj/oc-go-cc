@@ -34,7 +34,12 @@ async function checks() {
     }
   }
   AnalyticsModule.renderDistribution('model-distribution-test',rows,'requests','model');
-  equal(providerOrder('model-distribution-test'),[...shuffled].reverse(),'model ranking must still follow the selected metric');
+  // The model dimension is capped (MODEL_DISTRIBUTION_LIMIT), so the ranking is
+  // asserted on the rows that are shown: they must be the top N by the selected
+  // metric, in order. A wrong sort still fails here; only the tail is dropped.
+  equal(providerOrder('model-distribution-test'),[...shuffled].reverse().slice(0,MODEL_DISTRIBUTION_LIMIT),'model ranking must still follow the selected metric');
+  assert.ok(MODEL_DISTRIBUTION_LIMIT < shuffled.length,
+    'this fixture must exceed the cap, or it would not exercise truncation');
   assert.equal(JSON.stringify(rows),original,'rendering must not mutate source data');
   historyBreakdownMetric = 'cost';
   renderHistorySummary({providers:rows.map(row=>({...row,name:row.provider,provider:undefined,tokens:row.input_tokens}))});

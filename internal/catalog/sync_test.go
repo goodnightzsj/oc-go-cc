@@ -1,15 +1,19 @@
 package catalog
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestSync(t *testing.T) {
@@ -48,7 +52,7 @@ func TestSync(t *testing.T) {
 			defer server.Close()
 
 			destDir := t.TempDir()
-			lock, err := Sync(server.URL, destDir)
+			lock, err := Sync(context.Background(), server.URL, destDir)
 
 			if tc.wantErr {
 				if err == nil {
@@ -126,7 +130,7 @@ func TestSyncOversized(t *testing.T) {
 	defer server.Close()
 
 	destDir := t.TempDir()
-	_, err := Sync(server.URL, destDir)
+	_, err := Sync(context.Background(), server.URL, destDir)
 	if err == nil {
 		t.Fatalf("expected error for oversized response, got nil")
 	}
@@ -146,7 +150,7 @@ func TestSyncNonOKStatus(t *testing.T) {
 	defer server.Close()
 
 	destDir := t.TempDir()
-	_, err := Sync(server.URL, destDir)
+	_, err := Sync(context.Background(), server.URL, destDir)
 	if err == nil {
 		t.Fatalf("expected error for non-OK status, got nil")
 	}
@@ -163,7 +167,7 @@ func TestSyncMissingModels(t *testing.T) {
 	defer server.Close()
 
 	destDir := t.TempDir()
-	_, err := Sync(server.URL, destDir)
+	_, err := Sync(context.Background(), server.URL, destDir)
 	if err == nil {
 		t.Fatalf("expected error for missing models object, got nil")
 	}
@@ -181,11 +185,82 @@ func TestSyncCreatesDestDir(t *testing.T) {
 
 	base := t.TempDir()
 	destDir := filepath.Join(base, "nested", "catalog")
-	_, err := Sync(server.URL, destDir)
+	_, err := Sync(context.Background(), server.URL, destDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(destDir, catalogFileName)); err != nil {
 		t.Fatalf("expected catalog file: %v", err)
+	}
+}
+
+func TestSyncCancellationPreservesExistingCatalog(t *testing.T) {
+	started := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+	}))
+	defer upstream.Close()
+	dir := t.TempDir()
+	path := filepath.Join(dir, catalogFileName)
+	previous := []byte(`{"previous":true}`)
+	if err := os.WriteFile(path, previous, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := Sync(ctx, upstream.URL, dir)
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("catalog fetch did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("sync cancellation = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("catalog sync ignored cancellation")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != string(previous) {
+		t.Fatalf("cancelled sync replaced the previous catalog: %q, %v", data, err)
+	}
+}
+
+func TestConcurrentSyncKeepsCatalogAndLockPaired(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"models":{"opencode-go/m":{"id":%q}},"providers":{"opencode-go":{}}}`, r.URL.Path)
+	}))
+	defer upstream.Close()
+	dir := t.TempDir()
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := Sync(context.Background(), fmt.Sprintf("%s/%d", upstream.URL, i), dir); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	data, err := os.ReadFile(filepath.Join(dir, catalogFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, err := ReadLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	if lock.SHA256 != hex.EncodeToString(sum[:]) || lock.Bytes != int64(len(data)) {
+		t.Fatalf("catalog and lock came from different syncs: %+v", lock)
 	}
 }

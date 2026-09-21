@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,8 +12,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
+
+// ponytail: syncs are infrequent; use per-directory locks if this ever serves many catalogs.
+var syncMu sync.Mutex
 
 const (
 	catalogFileName = "catalog.json"
@@ -30,19 +35,25 @@ type envelope struct {
 
 // Sync downloads the models.dev catalog from sourceURL, validates its shape,
 // writes it atomically to destDir/catalog.json, and persists a lock file.
-func Sync(sourceURL, destDir string) (*Lock, error) {
+func Sync(ctx context.Context, sourceURL, destDir string) (*Lock, error) {
 	if sourceURL == "" {
 		return nil, fmt.Errorf("source URL is required")
 	}
 	if destDir == "" {
 		return nil, fmt.Errorf("destination directory is required")
 	}
+	// Automatic and manual syncs share the catalog/lock temp files.
+	syncMu.Lock()
+	defer syncMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return nil, fmt.Errorf("create destination directory: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodGet, sourceURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}

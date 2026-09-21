@@ -55,6 +55,13 @@ var providerPresets = map[string]ProviderPreset{
 		BaseURL:     "https://api.commandcode.ai/provider/v1/chat/completions",
 		Generator:   getCommandCodeConfig,
 	},
+	"cline-pass": {
+		Name:        "ClinePass",
+		EnvVarName:  "ROUTATIC_PROXY_CLINE_PASS_API_KEY",
+		Description: "ClinePass subscription - $9.99/month, 13 open coding models over the OpenAI-compatible Cline API",
+		BaseURL:     "https://api.cline.bot/api/v1/chat/completions",
+		Generator:   getClinePassConfig,
+	},
 }
 
 // getProviderConfig returns a config template optimized for a specific provider.
@@ -414,6 +421,45 @@ func getCommandCodeConfig() string {
     "stream_timeout_ms": 60000,
     "streaming_timeout_ms": 600000,
     "zero_data_retention": false
+  },
+  "catalog": { "enabled": false },
+  "logging": { "level": "info", "requests": true }
+}
+`
+}
+
+// getClinePassConfig returns a config optimized for the ClinePass subscription.
+//
+// No anthropic endpoint is listed because the Cline API publishes none. The
+// model ids carry ClinePass's own cline-pass/ prefix: that prefix is how the
+// platform's pools are told apart, and it is also what the catalog-derived
+// provider name comes from, so stripping it here would detach these targets
+// from every lookup that keys on it.
+func getClinePassConfig() string {
+	return `{
+  "host": "127.0.0.1",
+  "port": 3456,
+  "hot_reload": false,
+  "enable_streaming_scenario_routing": true,
+  "respect_requested_model": false,
+  "models": {
+    "default": { "provider": "cline-pass", "model_id": "cline-pass/glm-5.3", "max_tokens": 8192 }
+  },
+  "model_overrides": {
+    "cline-pass": { "provider": "cline-pass", "model_id": "cline-pass/glm-5.3", "max_tokens": 8192 },
+    "cline-pass/glm-5.3": { "provider": "cline-pass", "model_id": "cline-pass/glm-5.3", "max_tokens": 8192 },
+    "cline-pass/deepseek-v4.1-flash": { "provider": "cline-pass", "model_id": "cline-pass/deepseek-v4.1-flash", "max_tokens": 8192 }
+  },
+  "model_family_overrides": {
+    "claude": { "provider": "cline-pass", "model_id": "cline-pass/glm-5.3", "max_tokens": 8192 }
+  },
+  "cline_pass": {
+    "base_url": "https://api.cline.bot/api/v1/chat/completions",
+    "api_key": "${ROUTATIC_PROXY_CLINE_PASS_API_KEY}",
+    "api_keys": [],
+    "timeout_ms": 300000,
+    "stream_timeout_ms": 60000,
+    "streaming_timeout_ms": 600000
   },
   "catalog": { "enabled": false },
   "logging": { "level": "info", "requests": true }

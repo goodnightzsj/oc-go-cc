@@ -133,11 +133,19 @@ func (w *responseWriter) observeSSE(b []byte) error {
 }
 
 func (w *responseWriter) observeSSEEvent() error {
+	// Usage also carries non-integer metadata. Only token counts are ours to
+	// parse; pointers preserve the distinction between omitted and zero deltas.
+	type tokenUsage struct {
+		InputTokens              *int `json:"input_tokens"`
+		OutputTokens             *int `json:"output_tokens"`
+		CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
+		CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
+	}
 	var event struct {
-		Type    string         `json:"type"`
-		Usage   map[string]int `json:"usage"`
+		Type    string     `json:"type"`
+		Usage   tokenUsage `json:"usage"`
 		Message struct {
-			Usage map[string]int `json:"usage"`
+			Usage tokenUsage `json:"usage"`
 		} `json:"message"`
 	}
 	data := w.sseData
@@ -161,17 +169,17 @@ func (w *responseWriter) observeSSEEvent() error {
 	if event.Type == "message_start" {
 		usage = event.Message.Usage
 	}
-	for field, value := range usage {
-		switch field {
-		case "input_tokens":
-			w.usage.inputTokens = value
-		case "output_tokens":
-			w.usage.outputTokens = value
-		case "cache_read_input_tokens":
-			w.usage.cacheReadInputTokens = value
-		case "cache_creation_input_tokens":
-			w.usage.cacheCreationInputTokens = value
-		}
+	if usage.InputTokens != nil {
+		w.usage.inputTokens = *usage.InputTokens
+	}
+	if usage.OutputTokens != nil {
+		w.usage.outputTokens = *usage.OutputTokens
+	}
+	if usage.CacheReadInputTokens != nil {
+		w.usage.cacheReadInputTokens = *usage.CacheReadInputTokens
+	}
+	if usage.CacheCreationInputTokens != nil {
+		w.usage.cacheCreationInputTokens = *usage.CacheCreationInputTokens
 	}
 	return nil
 }
@@ -551,19 +559,15 @@ func (h *MessagesHandler) buildModelChain(
 	// This runs before the override lookup on purpose: the listing is what the
 	// client chose from, and re-mapping its choice through a configured alias
 	// would send the request somewhere the client did not ask for.
-	if published, ok := h.modelRouter.PublishedByActiveSite(ctx, requestedModel); ok {
-		primary := config.ModelConfig{Provider: h.modelRouter.ActiveSite(), ModelID: published}
-		primary = config.ResolveModelConfig(primary)
+	if primary, ok := h.modelRouter.PublishedByActiveSite(ctx, requestedModel); ok {
 		// The scenario chain stays as a safety net, but only within the active
 		// site: falling back to another platform is what the scope exists to
 		// prevent.
 		fallbacks, _ := h.routeOnce(routerMessages, tokenCount, "", isStreaming)
 		net := router.RestrictToActiveSite(h.modelRouter.ActiveSite(), fallbacks.GetModelChain())
-		result := router.RouteResult{Primary: primary, Scenario: router.ScenarioOverride}
-		return appendUniqueModels([]config.ModelConfig{primary}, net), result, nil
-	}
-
-	if requestedModel != "" {
+		result = router.RouteResult{Primary: primary, Scenario: router.ScenarioOverride}
+		chain = appendUniqueModels([]config.ModelConfig{primary}, net)
+	} else if requestedModel != "" {
 		overrideResult, ok := h.modelRouter.RouteWithOverride(requestedModel)
 		if !ok {
 			overrideResult, ok = h.modelRouter.RouteWithFamilyOverride(requestedModel)

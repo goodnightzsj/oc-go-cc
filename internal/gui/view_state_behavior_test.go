@@ -13,6 +13,9 @@ func TestViewStateRoundTripsThroughTheHash(t *testing.T) {
 const viewStateScript = platformBehaviorDOMScript + `
 async function checks() {
   const get = id => document.getElementById(id);
+  for (const id of VIEW_CONTROLS.platform) {
+    get(id).options = ['', ...visiblePlatforms].map(value => ({value, disabled:false}));
+  }
 
   // Serialise: the tab, the filters, and the two pieces of state that are
   // variables rather than controls.

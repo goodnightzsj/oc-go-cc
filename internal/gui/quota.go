@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -39,6 +38,7 @@ type quotaAccount struct {
 	Report      *quota.Report            `json:"report,omitempty"`
 	OpenRouter  *quota.OpenRouterKey     `json:"openrouter,omitempty"`
 	CommandCode *quota.CommandCodeReport `json:"commandcode,omitempty"`
+	ClinePass   *quota.ClinePassReport   `json:"cline_pass,omitempty"`
 	Error       string                   `json:"error,omitempty"`
 
 	// Ledger is this instance's own record for the same billing period, set
@@ -51,9 +51,10 @@ type quotaAccount struct {
 
 // quotaLedger is a local-ledger total for one billing period.
 type quotaLedger struct {
-	Requests      int64   `json:"requests"`
-	KnownRequests int64   `json:"known_requests"`
-	CostUSD       float64 `json:"cost_usd"`
+	Requests            int64   `json:"requests"`
+	KnownRequests       int64   `json:"known_requests"`
+	UnknownCostRequests int64   `json:"unknown_cost_requests"`
+	CostUSD             float64 `json:"cost_usd"`
 }
 
 type quotaLink struct {
@@ -183,6 +184,11 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 		resp.Source, resp.Currency = "official_alpha_api", "USD"
 		resp.Links = []quotaLink{{Kind: "usage", URL: "https://commandcode.ai/usage"}, {Kind: "billing", URL: "https://commandcode.ai/billing"}, {Kind: "keys", URL: "https://commandcode.ai/settings/keys"}}
 		s.handleCommandCodeQuota(w, r, cfg, resp)
+		return
+	case "cline-pass":
+		resp.Source, resp.Currency = "official_api", ""
+		resp.Links = []quotaLink{{Kind: "usage", URL: "https://app.cline.bot/dashboard/subscription?personal=true"}, {Kind: "keys", URL: "https://app.cline.bot"}, {Kind: "docs", URL: "https://docs.cline.bot/getting-started/clinepass"}}
+		s.handleClinePassQuota(w, r, cfg, resp)
 		return
 	case "aws-bedrock":
 		resp.Links = []quotaLink{{Kind: "billing", URL: "https://console.aws.amazon.com/billing/home"}, {Kind: "docs", URL: "https://docs.aws.amazon.com/cost-management/latest/userguide/ce-api.html"}}
@@ -396,11 +402,44 @@ func (s *Server) attachCommandCodeLedger(accounts []quotaAccount) {
 		if b.Provider == site.CommandCode {
 			ledger.Requests = b.Requests
 			ledger.KnownRequests = b.KnownRequests
+			ledger.UnknownCostRequests = b.UnknownCostRequests
 			ledger.CostUSD = b.EstCostUSD
 			break
 		}
 	}
 	accounts[0].Ledger = ledger
+}
+
+// handleClinePassQuota reports the subscription's three usage windows.
+//
+// There is no ledger side to this one, unlike CommandCode's: ClinePass is a
+// flat monthly plan billed against reference rates, so a local "cost" column
+// and an official one would be two estimates of the same consumption rather
+// than two independent accounts. The percentage the platform reports is the
+// authoritative figure and the only one shown.
+func (s *Server) handleClinePassQuota(w http.ResponseWriter, r *http.Request, cfg *config.Config, resp quotaResponse) {
+	keys := goQuotaKeys(cfg.ClinePass.EffectiveAPIKeys(), nil)
+	if len(keys) == 0 {
+		resp.Status = "not_configured"
+		writeJSON(w, resp)
+		return
+	}
+	endpoint, err := quota.ClinePassUsageURL(cfg.ClinePass.BaseURL)
+	if err != nil {
+		resp.Status, resp.Error = "error", err.Error()
+		writeJSON(w, resp)
+		return
+	}
+	resp.Endpoint = endpoint
+	if cached := s.cachedQuota(resp.Provider, endpoint, keys, r.URL.Query().Get("refresh") == "1"); cached != nil {
+		writeJSON(w, *cached)
+		return
+	}
+	resp.Accounts = fetchQuotaAccounts(r.Context(), resp.Provider, endpoint, keys)
+	resp.Status = quotaStatus(resp)
+	resp.FetchedAt = time.Now().UTC()
+	s.storeQuota(endpoint, keys, resp)
+	writeJSON(w, resp)
 }
 
 func quotaStatus(resp quotaResponse) string {
@@ -413,6 +452,11 @@ func quotaStatus(resp quotaResponse) string {
 		} else if report := account.CommandCode; report != nil {
 			available++
 			if report.CreditsError != "" || report.SubscriptionError != "" || report.UsageError != "" {
+				failed++
+			}
+		} else if report := account.ClinePass; report != nil {
+			available++
+			if report.Error != "" {
 				failed++
 			}
 		}
@@ -459,6 +503,8 @@ func fetchQuotaAccounts(parent context.Context, provider, endpoint string, keys 
 				accounts[i].OpenRouter, err = quota.FetchOpenRouterKey(ctx, client, endpoint, key)
 			case "commandcode":
 				accounts[i].CommandCode, err = quota.FetchCommandCode(ctx, client, endpoint, key)
+			case "cline-pass":
+				accounts[i].ClinePass, err = quota.FetchClinePass(ctx, client, endpoint, key)
 			default:
 				accounts[i].Report, err = quota.Fetch(ctx, client, endpoint, key)
 			}
@@ -540,31 +586,6 @@ func (s *Server) limitsLoop(ctx context.Context) {
 			s.ensureModelLimits(context.Background())
 		}
 	}
-}
-
-// priceRefreshLoop keeps the cost-estimation tables current. It reads the
-// OpenCode Go table out of the already-synced models.dev catalog and scrapes
-// CommandCode's plan page for the other; a platform whose fetch fails keeps
-// whatever table it already had, so a broken page degrades to the last known
-// prices rather than to no prices at all.
-func (s *Server) priceRefreshLoop(ctx context.Context) {
-	cfg := storage.PriceRefreshConfig{
-		CatalogPath: filepath.Join(s.catalogDir, "catalog.json"),
-		Interval:    storage.DefaultPriceRefreshInterval,
-	}
-	if s.catalogDir == "" {
-		cfg.CatalogPath = "" // the fetch reports this rather than guessing a path
-	}
-	storage.PriceRefreshLoop(ctx, cfg, &http.Client{Timeout: 30 * time.Second},
-		func(counts map[string]int, errs map[string]error) {
-			for provider, err := range errs {
-				s.logger.Warn("price refresh failed; keeping the previous table",
-					"provider", provider, "error", err)
-			}
-			for provider, n := range counts {
-				s.logger.Info("prices refreshed", "provider", provider, "rules", n)
-			}
-		})
 }
 
 // monthlyModelUsage builds the console-style per-model usage rows for the

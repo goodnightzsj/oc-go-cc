@@ -30,7 +30,7 @@ func (p *fragmentedAnthropicProvider) Stream(context.Context, *types.MessageRequ
 }
 
 func TestNativeAnthropicStreamPreservesInitialAndTerminalUsage(t *testing.T) {
-	const body = "event: message_start\r\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":0,\"cache_read_input_tokens\":90,\"cache_creation_input_tokens\":3}}}\r\n\r\n" +
+	const body = "event: message_start\r\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":0,\"cache_read_input_tokens\":90,\"cache_creation_input_tokens\":3,\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_5m_input_tokens\":3},\"server_tool_use\":{\"web_search_requests\":0}}}}\r\n\r\n" +
 		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"usage input_tokens: 999\"}}\n\n" +
 		"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":7}}\n\n" +
 		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
@@ -63,6 +63,44 @@ func TestNativeAnthropicStreamPreservesInitialAndTerminalUsage(t *testing.T) {
 	r := rows[0]
 	if r.InputTokens != 11 || r.OutputTokens != 7 || r.CacheReadTokens != 90 || r.CacheCreationTokens != 3 {
 		t.Fatalf("usage = input %d output %d cache %d/%d; want 11/7/90/3", r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheCreationTokens)
+	}
+}
+
+func TestNativeAnthropicUsageUpdatesOnlyPresentFields(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		usage   string
+		output  int
+		invalid bool
+	}{
+		{"omitted", `{"service_tier":"standard","server_tool_use":{"web_search_requests":0}}`, 7, false},
+		{"zero", `{"output_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":3}}`, 0, false},
+		{"invalid tokens", `{"output_tokens":"seven"}`, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			rw := &responseWriter{ResponseWriter: recorder}
+			rw.SetPartialUsage(11, 7, 90, 3)
+			body := "data: {\"type\":\"message_delta\",\"usage\":" + tc.usage + "}\n\n" +
+				"data: {\"type\":\"message_stop\"}\n\n"
+			_, err := io.WriteString(rw, body)
+			if tc.invalid {
+				if err == nil || rw.finish() == nil {
+					t.Fatal("invalid token count must fail both writing and stream completion")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := rw.finish(); err != nil {
+				t.Fatal(err)
+			}
+			if recorder.Body.String() != body || rw.usage.inputTokens != 11 || rw.usage.outputTokens != tc.output ||
+				rw.usage.cacheReadInputTokens != 90 || rw.usage.cacheCreationInputTokens != 3 {
+				t.Fatalf("native bytes or accumulated usage changed: body=%s usage=%+v", recorder.Body.String(), rw.usage)
+			}
+		})
 	}
 }
 

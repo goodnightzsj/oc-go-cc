@@ -16,6 +16,7 @@ async function checks() {
   const go = {provider:'opencode-go',status:'available',source:'upstream_api',currency:'USD',accounts:[{key_hint:'masked-GO01',report:{plan:'go',weekly:{has_percent:true,used_percent:25,used_dollars:7.5,limit_dollars:30,resets_at:'2030-01-01T00:00:00Z'},fetched_at:'2026-09-10T00:00:00Z'}}],model_limits:{models:[{model:'shared',allowance_usd:60}]},model_usage:[{model:'shared',used_usd:0.25,allowance_usd:60,percent:0.25/60*100,requests:3,unknown_cost_requests:0}],links:[{kind:'docs',url:'https://synthetic.invalid/go/docs'}],fetched_at:'2026-09-10T00:00:00Z'};
   const key = {limit:null,limit_remaining:null,limit_reset:null,usage:12,usage_daily:0,usage_weekly:null,usage_monthly:10,byok_usage:3,byok_usage_daily:1,byok_usage_weekly:null,byok_usage_monthly:2,include_byok_in_limit:false,is_free_tier:false,expires_at:null};
   let openrouter = {provider:'openrouter',status:'partial',source:'official_api',currency:'USD',credits_status:'not_configured',accounts:[{key_hint:'masked-OR01',openrouter:key},{key_hint:'masked-OR02',openrouter:{...key,limit:0,limit_remaining:0,limit_reset:'daily',usage:0,byok_usage:0,include_byok_in_limit:null}},{key_hint:'masked-BAD1',error:'synthetic HTTP 401 <denied>'}],links:[{kind:'billing',url:'https://synthetic.invalid/openrouter/credits'}]};
+  const clinepass = {provider:'cline-pass',status:'available',source:'official_api',accounts:[{key_hint:'masked-CP01',cline_pass:{windows:[{type:'five_hour',percent_used:42.5,resets_at:'2030-01-01T00:00:00Z'},{type:'weekly',percent_used:10},{type:'monthly',percent_used:3.25}]}}],links:[{kind:'usage',url:'https://synthetic.invalid/cline/usage'}],fetched_at:'2026-09-10T00:00:00Z'};
   const unavailable = provider => ({provider,status:provider === 'aws-bedrock' || provider === 'commandcode' ? 'not_configured' : 'unavailable',source:provider === 'commandcode' ? 'official_alpha_api' : provider === 'aws-bedrock' ? 'official_api' : 'none',accounts:[],reason:provider === 'aws-bedrock' ? 'aws_billing_disabled' : provider === 'commandcode' ? '' : 'no_public_account_api',links:[{kind:'billing',url:'https://synthetic.invalid/' + provider + '/billing'}]});
   let calls = [];
   const response = raw => {
@@ -28,7 +29,7 @@ async function checks() {
     if (!allPlatforms.includes(provider)) throw new Error('missing/incorrect provider scope: ' + raw);
     if (url.pathname === '/api/analytics/summary') return {ok:true,json:async()=>local(provider)};
     if (url.pathname !== '/api/quota') throw new Error('unexpected synthetic URL: ' + raw);
-    return {ok:true,json:async()=>provider === 'opencode-go' ? go : provider === 'openrouter' ? openrouter : unavailable(provider)};
+    return {ok:true,json:async()=>provider === 'opencode-go' ? go : provider === 'cline-pass' ? clinepass : provider === 'openrouter' ? openrouter : unavailable(provider)};
   };
   const normalFetch = async raw => {calls.push(new URL(raw,'http://synthetic.invalid')); return response(raw)};
   fetch = normalFetch;
@@ -48,6 +49,7 @@ async function checks() {
     assert.equal(calls.find(url=>url.pathname === '/api/analytics/summary').searchParams.get('days'),'30');
     assert.equal(get('quota-go').hidden,provider !== 'opencode-go');
     assert.equal(get('quota-commandcode').hidden,provider !== 'commandcode');
+    assert.equal(get('quota-cline-pass').hidden,provider !== 'cline-pass');
     // A platform the dashboard no longer offers keeps its quota view in the
     // markup, but nothing can select it any more.
     for (const hidden of ['quota-openrouter','quota-bedrock','quota-unavailable']) {
@@ -75,6 +77,12 @@ async function checks() {
     } else if (provider === 'commandcode') {
       assert.ok(get('quota-commandcode-accounts').innerHTML.includes('CommandCode'));
       assert.equal(get('quota-source').textContent,t('quota.source.official_alpha_api'));
+    } else if (provider === 'cline-pass') {
+      // Percentages only: ClinePass is a flat plan, so there is no official
+      // amount owed and no local ledger block to reconcile against one.
+      assert.ok(get('quota-cline-pass-accounts').innerHTML.includes('42.5%'),'the plan percentage must be shown');
+      assert.ok(get('quota-cline-pass-accounts').innerHTML.includes('10.0%'));
+      assert.equal(get('quota-source').textContent,t('quota.source.official_api'));
     } else if (provider !== 'openrouter') {
       assert.ok(get('quota-unavailable-note').textContent.includes('No public account quota API'));
       assert.equal(get('quota-source').textContent,t('quota.source.none'));
@@ -93,7 +101,8 @@ async function checks() {
     assert.equal(calls.length,1,'changing the local period must not refetch account data');
     assert.equal(calls[0].pathname,'/api/analytics/summary');
     assert.equal(calls[0].searchParams.get('days'),days);
-    assert.equal(calls[0].searchParams.get('provider'),'commandcode');
+    // The scope is whatever the loop left selected, not a particular platform.
+    assert.equal(calls[0].searchParams.get('provider'),providers[providers.length-1]);
   }
 
   // OpenRouter keeps its quota logic and rendering even though the dashboard no

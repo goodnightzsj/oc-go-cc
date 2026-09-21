@@ -606,21 +606,30 @@ func (r *ModelRouter) ActiveSite() string {
 	return r.atomic.Get().ActiveSite
 }
 
-// PublishedByActiveSite returns the active site and true when that site
+// PublishedByActiveSite returns the configured target and true when that site
 // publishes this model id. The active site is the authority for its own model
 // names, so a client that picked a model from the listing gets exactly that
 // model - it does not get re-mapped by a configured alias.
-func (r *ModelRouter) PublishedByActiveSite(ctx context.Context, modelID string) (string, bool) {
-	active := r.ActiveSite()
+func (r *ModelRouter) PublishedByActiveSite(ctx context.Context, modelID string) (config.ModelConfig, bool) {
+	cfg := r.atomic.Get()
+	active := cfg.ActiveSite
 	if active == "" || strings.TrimSpace(modelID) == "" {
-		return "", false
+		return config.ModelConfig{}, false
 	}
 	for _, m := range r.siteModels(ctx) {
 		if m.Provider == active && m.ID == modelID {
-			return m.ID, true
+			target := config.ModelConfig{Provider: active, ModelID: m.ID}
+			// Keep explicit capabilities/limits only for this exact target.
+			// An alias that remaps its name to another model or site still loses.
+			for _, configured := range []config.ModelConfig{cfg.ModelOverrides[modelID], cfg.Models[modelID], cfg.Models["default"]} {
+				if config.ModelKey(configured) == config.ModelKey(target) {
+					return config.ResolveModelConfig(configured), true
+				}
+			}
+			return config.ResolveModelConfig(target), true
 		}
 	}
-	return "", false
+	return config.ModelConfig{}, false
 }
 
 // RestrictToActiveSite keeps only the targets belonging to the active site. The

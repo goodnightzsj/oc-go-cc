@@ -74,7 +74,7 @@ const nodes = new Map();
 function node(id) {
   if (!nodes.has(id)) nodes.set(id, {
     _value: '', get value(){return this._value}, set value(value){this._value = String(value)},
-    innerHTML: '', textContent: '', hidden: true, dataset: {}, style: {}, listeners: {}, children: [],
+    id, innerHTML: '', textContent: '', hidden: true, dataset: {}, style: {}, listeners: {}, children: [], options: [],
     classList: {add(){},remove(){},toggle(){},contains(){return false}},
     addEventListener(type, handler){(this.listeners[type] ||= []).push(handler)},
     emit(type){return Promise.all((this.listeners[type] || []).map(handler => handler({target:this})))},
@@ -179,7 +179,7 @@ async function checks() {
     assert.equal(calls[0].searchParams.get('range'),'24h');
     assert.equal(PerfModule.sortField,'avg_ms');
     assert.equal(PerfModule.sortDir,'asc');
-    assert.equal(PerfModule.data.length, provider ? 1 : 5);
+    assert.equal(PerfModule.data.length, provider ? 1 : providers.length);
   }
   overviewDays = 90;
   calls = [];

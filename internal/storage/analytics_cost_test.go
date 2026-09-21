@@ -239,6 +239,21 @@ func TestGetProviderBreakdown_CostIsRealAndMatchesModels(t *testing.T) {
 		t.Errorf("opencode-go token totals = %+v", goProvider)
 	}
 
+	// Success rate and latency are what the dashboard's platform-health row
+	// reports, so they must agree with the model rows for the same window: a
+	// provider whose models average 50% cannot read as 100%.
+	if goProvider.KnownRequests != 2 {
+		t.Errorf("opencode-go known requests = %d, want 2", goProvider.KnownRequests)
+	}
+	// Both fixture rows succeeded, so the provider rate is a full 1.0 and not a
+	// zero default that would render as a red 0% on the dashboard.
+	if math.Abs(goProvider.SuccessRate-1.0) > 1e-9 {
+		t.Errorf("opencode-go success rate = %v, want 1", goProvider.SuccessRate)
+	}
+	if byName["opencode-zen"].SuccessRate != 1.0 {
+		t.Errorf("opencode-zen success rate = %v, want 1", byName["opencode-zen"].SuccessRate)
+	}
+
 	// Fallback rate: one of two opencode-go requests had attempt > 1.
 	if got := goProvider.FallbackRate; math.Abs(got-50.0) > 1e-9 {
 		t.Errorf("opencode-go fallback rate = %v, want 50", got)

@@ -1391,6 +1391,7 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
 .quota-account > .quota-figures { grid-area: auto; }
 .quota-figures dd { max-width: 68%; text-align: right; font-size: .8125rem; }
 .quota-badge.is-crit { color: var(--ui-red); background: color-mix(in srgb, var(--ui-red) 12%, transparent); }
+.quota-badge.is-warn { color: var(--ui-amber); background: color-mix(in srgb, var(--ui-amber) 12%, transparent); }
 .commandcode-account { display: block; padding: 12px 0; }
 .commandcode-account > .quota-account-head { margin-bottom: 12px; }
 .commandcode-panels { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 20px; align-items: start; }

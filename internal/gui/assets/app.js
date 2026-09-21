@@ -4146,6 +4146,9 @@ const AnalyticsModule = {
   currentView: null,
   currentTrend: [],
   seriesVisibility: {},
+  // The last points and drawing width each chart was rendered with, keyed by
+  // container id, so a resize can redraw only the charts whose width moved.
+  chartData: {},
 
   init() {
     const refreshBtn = document.getElementById('btn-refresh-analytics');
@@ -4188,6 +4191,14 @@ const AnalyticsModule = {
       });
     });
     this.initDateRange();
+    // Charts are drawn against their container's measured width, so a viewport
+    // change invalidates them. Debounced because a drag fires continuously and
+    // each redraw rebuilds the SVG.
+    let resizeTimer = 0;
+    window.addEventListener('resize', () => {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => { resizeTimer = 0; this.redrawCharts(); }, 150);
+    });
   },
 
   initDateRange() {
@@ -4466,6 +4477,37 @@ const AnalyticsModule = {
     return date.slice(5);
   },
 
+  // The chart's viewBox is its drawing space, and the SVG is stretched to the
+  // container by `width: 100%`. A fixed viewBox therefore scales everything
+  // inside it - including the axis text, which is why a 10px label rendered at
+  // 4.3px in a half-width tile and 10.3px in the full-width one. Sizing the
+  // drawing space to the container keeps that scale at 1, so a declared font
+  // size is the size the reader sees at every width.
+  //
+  // A container that reports no width - a hidden tab, or a test DOM without
+  // layout - falls back to the width these charts were previously pinned to, so
+  // an unmeasurable container still renders a valid chart rather than a
+  // collapsed one. The next real render measures properly.
+  chartWidth(container) {
+    const measured = container?.clientWidth;
+    return Number.isFinite(measured) && measured > 0 ? Math.round(measured) : 720;
+  },
+
+  // A resize changes the drawing width the viewBox was built for, so the stored
+  // geometry goes stale. Redraw only the charts whose width actually moved. A
+  // hidden tab measures 0 and is skipped: it is redrawn when its tab is shown,
+  // and treating 0 as a real width would collapse the chart to the floor while
+  // nobody is looking at it.
+  redrawCharts() {
+    for (const [containerId, saved] of Object.entries(this.chartData)) {
+      const root = document.getElementById(containerId);
+      if (!root || !(root.clientWidth > 0)) continue;
+      if (root.clientWidth === saved.width) continue;
+      if (saved.kind === 'request') this.renderRequestTrend(saved.points, containerId);
+      else this.renderTokenLines(saved.points, containerId);
+    }
+  },
+
   chartGrid(points, width, height, inset, max, formatValue) {
     const plotW = width - inset.left - inset.right;
     const plotH = height - inset.top - inset.bottom;
@@ -4515,6 +4557,7 @@ const AnalyticsModule = {
     const root = document.getElementById(containerId);
     if (!root) return;
     if (!points.length || points.every(point => Number(point.requests || 0) === 0 && Number(point.error_requests || 0) === 0)) {
+      delete this.chartData[containerId];
       root.innerHTML = `<div class="empty-state">${t('analytics.noTrend')}</div>`;
       return;
     }
@@ -4523,7 +4566,9 @@ const AnalyticsModule = {
       {key:'error_requests',label:t('analytics.knownErrors'),className:'is-errors',color:'#fb7185'},
     ];
     const visible = this.visibleChartSeries(containerId, series);
-    const width=720, height=236, inset={top:16,right:18,bottom:32,left:52};
+    const height=236, inset={top:16,right:18,bottom:32,left:52};
+    const width=this.chartWidth(root);
+    this.chartData[containerId] = {kind: 'request', points, width};
     const max = Math.max(1, ...visible.flatMap(item => points.map(point => Number(point[item.key] || 0))));
     const chart = this.chartGrid(points, width, height, inset, max, value => fmtTok(Math.round(value)));
     const lines = visible.map(item => `<polyline class="usage-chart-line ${item.className}" points="${points.map((point,index) => `${chart.x(index)},${chart.y(point[item.key])}`).join(' ')}"></polyline>`).join('');
@@ -4548,6 +4593,7 @@ const AnalyticsModule = {
     const root = document.getElementById(containerId);
     if (!root) return;
     if (!points.length || points.every(point => totalUsageTokens(point) === 0)) {
+      delete this.chartData[containerId];
       root.innerHTML = `<div class="empty-state">${t('analytics.noTrend')}</div>`;
       return;
     }
@@ -4561,7 +4607,9 @@ const AnalyticsModule = {
     const visible = this.visibleChartSeries(containerId, series);
     const visibleTokens = visible.filter(item => !item.rate);
     const showRate = visible.some(item => item.rate);
-    const width=720, height=252, inset={top:18,right:50,bottom:32,left:56};
+    const height=252, inset={top:18,right:50,bottom:32,left:56};
+    const width=this.chartWidth(root);
+    this.chartData[containerId] = {kind: 'token', points, width};
     const max = Math.max(1, ...visibleTokens.flatMap(item => points.map(point => Number(point[item.key]||0))));
     const chart = this.chartGrid(points,width,height,inset,max,value=>fmtTok(Math.round(value)));
     const rateY = value => inset.top + (1 - Number(value||0)/100) * chart.plotH;

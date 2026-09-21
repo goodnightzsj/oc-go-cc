@@ -2833,6 +2833,15 @@ const CONFIG_FIELDS = [
   ['commandcode.streaming_timeout_ms', 'cfg-commandcode-streaming-timeout', 'int'],
   ['commandcode.zero_data_retention', 'cfg-commandcode-zdr', 'bool'],
 
+  // ClinePass. No anthropic_base_url: the Cline API publishes no Messages
+  // endpoint, so there is nothing to point one at.
+  ['cline_pass.base_url', 'cfg-cline-pass-base-url', 'string'],
+  ['cline_pass.api_key', 'cfg-cline-pass-api-key', 'string'],
+  ['cline_pass.api_keys', 'cfg-cline-pass-api-keys', 'keys'],
+  ['cline_pass.timeout_ms', 'cfg-cline-pass-timeout', 'int'],
+  ['cline_pass.stream_timeout_ms', 'cfg-cline-pass-stream-timeout', 'int'],
+  ['cline_pass.streaming_timeout_ms', 'cfg-cline-pass-streaming-timeout', 'int'],
+
   // Logging
   // Routing scope. The option list carries the visible platforms; which of
   // them this deployment can actually use comes from /api/sites, because the

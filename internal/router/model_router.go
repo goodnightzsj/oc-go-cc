@@ -31,9 +31,10 @@ type ModelRouter struct {
 	catErr      error
 	catCache    time.Time
 
-	siteMu    sync.Mutex
-	siteCache []catalog.SiteModel
-	siteAt    time.Time
+	siteMu          sync.Mutex
+	siteCache       []catalog.SiteModel
+	siteAt          time.Time
+	siteCacheActive string
 }
 
 // siteModelsTTL bounds how often a platform's own model list is re-read. The
@@ -51,22 +52,47 @@ const siteModelsFailureTTL = time.Minute
 // request.
 var siteModelsClient = &http.Client{Timeout: 10 * time.Second}
 
-// siteModels returns the models each configured platform publishes on its own
-// API. CommandCode is the reason this exists: it is absent from the models.dev
+// activeSiteScope returns the platform the model listing is restricted to, or
+// "" when routing is unrestricted.
+//
+// The value is the normalized id, so it compares directly against what
+// NormalizeProvider yields for a target's provider - the same comparison
+// RestrictToActiveSite makes on the routing chain. Deriving both from one
+// helper is what keeps the listing and routing from disagreeing: a model the
+// listing offers but the chain drops is a picker entry that fails on use.
+func activeSiteScope(cfg *config.Config) string {
+	if cfg == nil || strings.TrimSpace(cfg.ActiveSite) == "" {
+		return ""
+	}
+	return site.Normalize(cfg.ActiveSite)
+}
+
+// siteModels returns the models a platform publishes on its own API.
+// CommandCode is the reason this exists: it is absent from the models.dev
 // catalog, so without it the model listing offered nothing for that platform
 // and a client switching to it saw an empty picker.
 //
+// When routing is scoped to one platform, only that platform is asked. The
+// others cannot serve a request in that state, so fetching them would spend a
+// round trip per platform to fill a picker with entries that fail on use.
+//
 // A platform is only asked when it has credentials and a derivable endpoint,
 // and a failure is logged rather than returned: this feeds a listing, and one
-// unreachable platform must not empty the whole answer. The site-scoped view
-// that will make a failure fatal arrives with the active-site work.
+// unreachable platform must not empty the whole answer.
 func (r *ModelRouter) siteModels(ctx context.Context) []catalog.SiteModel {
 	r.siteMu.Lock()
 	defer r.siteMu.Unlock()
 
+	cfg := r.atomic.Get()
+	active := activeSiteScope(cfg)
 	ttl := siteModelsTTL
 	if r.siteCache == nil {
 		ttl = siteModelsFailureTTL
+	}
+	// The cache holds one platform's list under a scope, so a change of active
+	// site must re-read rather than serve the previous platform's models.
+	if r.siteCacheActive != active {
+		r.siteCache, r.siteAt = nil, time.Time{}
 	}
 	if r.siteCache != nil || !r.siteAt.IsZero() {
 		if time.Since(r.siteAt) < ttl {
@@ -74,9 +100,8 @@ func (r *ModelRouter) siteModels(ctx context.Context) []catalog.SiteModel {
 		}
 	}
 
-	cfg := r.atomic.Get()
 	var out []catalog.SiteModel
-	for _, descriptor := range site.Visible() {
+	for _, descriptor := range scopedDescriptors(active) {
 		if len(cfg.ProviderAPIKeys(descriptor.ID)) == 0 {
 			continue
 		}
@@ -93,8 +118,24 @@ func (r *ModelRouter) siteModels(ctx context.Context) []catalog.SiteModel {
 		}
 		out = append(out, models...)
 	}
-	r.siteCache, r.siteAt = out, time.Now()
+	r.siteCache, r.siteAt, r.siteCacheActive = out, time.Now(), active
 	return out
+}
+
+// scopedDescriptors lists the platforms whose published models belong in the
+// listing: every visible one when routing is unrestricted, otherwise exactly
+// the active platform. Lookup rather than a visible-only scan so a platform
+// hidden from the dashboard still reports its models while it is the active
+// site - routing does not consult visibility, and the listing must not
+// contradict it.
+func scopedDescriptors(active string) []site.Descriptor {
+	if active == "" {
+		return site.Visible()
+	}
+	if descriptor, ok := site.Lookup(active); ok {
+		return []site.Descriptor{descriptor}
+	}
+	return nil
 }
 
 func NewModelRouter(atomic *config.AtomicConfig) *ModelRouter {
@@ -466,14 +507,27 @@ type ModelInfo struct {
 // Any of these is a valid value for the request "model" field, so surfacing
 // all of them lets a picker present every route the proxy understands.
 //
+// When the config scopes routing to one platform, the listing is scoped the
+// same way: offering an id that RestrictToActiveSite would drop creates a
+// picker entry that fails when used, which is worse than not offering it.
+// The alias sources are filtered by their resolved target rather than by their
+// name, because an alias is a client-facing label - "claude-opus-4-8" says
+// nothing about which platform serves it.
+//
 // ctx bounds the catalog load; when the caller (e.g. an HTTP handler) cancels
 // it, an in-flight catalog read is abandoned rather than churning to completion.
 func (r *ModelRouter) ListModels(ctx context.Context) []ModelInfo {
 	cfg := r.atomic.Get()
+	active := activeSiteScope(cfg)
 	seen := make(map[string]ModelInfo)
 
 	add := func(id, name, provider string) {
 		if id == "" {
+			return
+		}
+		// A scoped listing drops every other platform, including the catalog
+		// entries: they name models the active site cannot serve.
+		if active != "" && site.Normalize(provider) != active {
 			return
 		}
 		existing, ok := seen[id]

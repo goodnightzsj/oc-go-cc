@@ -325,6 +325,8 @@ const TRANSLATIONS = {
     'detail.cacheCreation': 'Cache write',
     'detail.outputTokens': 'Output',
     'detail.duration': 'Duration',
+    'timing.gradedByRate': 'Graded by throughput ({tps} tok/s) rather than elapsed time, so a long answer is not marked slow for being long',
+    'timing.gradedByTime': 'Graded by elapsed time; too few output tokens for a rate to be meaningful',
     'detail.billingWindow': 'Billing window',
     'detail.peak': 'Peak',
     'detail.offPeak': 'Off-peak',
@@ -827,6 +829,8 @@ const TRANSLATIONS = {
     'detail.cacheCreation': '缓存写入',
     'detail.outputTokens': '输出',
     'detail.duration': '耗时',
+    'timing.gradedByRate': '按吞吐（{tps} tok/s）而非耗时判断——长回答不会因为长就被判慢',
+    'timing.gradedByTime': '按耗时判断；输出 token 过少，速率无意义',
     'detail.billingWindow': '计费时段',
     'detail.peak': '高峰',
     'detail.offPeak': '非高峰',
@@ -2315,13 +2319,13 @@ function renderHistory() {
       : '';
     return `
     <tr data-id="${escapeHtml(rowId)}" tabindex="0" aria-haspopup="dialog" data-provider="${escapeHtml(h.provider || '')}" style="cursor: pointer;">
-      <td><time class="history-timestamp" datetime="${escapeHtml(h.start_time || '')}">${fmtTime(h.start_time)}<small>${fmtDate(h.start_time)}</small></time>${peakMark}</td>
+      <td><time class="history-timestamp" datetime="${escapeHtml(h.start_time || '')}" title="${escapeHtml(h.start_time || '')}">${fmtRelativeTime(h.start_time)}<small>${fmtDate(h.start_time)}</small></time>${peakMark}</td>
       <td><div class="history-status-stack">${detailsKnown ? `<span class="badge ${h.success ? 'badge-success' : 'badge-error'}" title="${h.success ? t('badge.success') : t('badge.fail')}">${h.success ? t('badge.success') : t('badge.fail')}</span>` : `<span class="badge badge-unknown" title="${t('detail.unknown')}">${t('detail.unknown')}</span>`}<small class="history-stream-state">${streamLabel}</small></div></td>
       <td><div class="history-model-cell"><strong title="${escapeHtml(h.model)}">${escapeHtml(h.model) || '—'}</strong><small>${escapeHtml(providerLabel(h.provider))}</small></div></td>
       <td><span class="badge badge-scene" title="${t('detail.scenario')}: ${escapeHtml(h.scenario) || '—'}">${escapeHtml(h.scenario) || '—'}</span></td>
       <td><button type="button" class="history-token-trigger" data-token-id="${escapeHtml(rowId)}" aria-label="${t('detail.title')}">${totalTokens.toLocaleString()}</button><br><small>${tokenSplit}</small></td>
       <td>${cost}<br><small>${costSourceLabel(h.cost_source)}</small></td>
-      <td>${detailsKnown ? fmtDuration(h.duration_ms) : '—'}</td>
+      <td>${detailsKnown ? gradeDuration(h, fmtDuration(h.duration_ms)) : '—'}</td>
     </tr>
   `}).join('');
 
@@ -2813,6 +2817,79 @@ function fmtThroughput(v) {
   if (n >= 100) return n.toFixed(0);
   if (n >= 10) return n.toFixed(1);
   return n.toFixed(2);
+}
+
+// A request's own throughput, or null when nothing was measured. Shared by the
+// duration cell's grading and the detail dialog so the two cannot disagree
+// about the same row.
+function requestThroughput(record) {
+  const ms = Number(record && record.duration_ms);
+  const out = Number(record && record.output_tokens);
+  if (!(ms > 0) || !(out > 0)) return null;
+  return out / (ms / 1000);
+}
+
+// Grade a duration by what it says about the upstream, not by how long the
+// answer was.
+//
+// A ten-second response that produced 4,000 tokens is fast; a ten-second
+// response that produced 40 is not. Colouring on elapsed time alone marks the
+// first one slow, so the grade uses throughput whenever the completion is long
+// enough for the ratio to mean anything, and falls back to wall-clock only
+// below that - a handful of tokens divided by any duration is noise, and the
+// ratio would report absurd speeds for a one-token reply.
+//
+// The thresholds are absolute rather than relative to this machine's history on
+// purpose: "30 tok/s is healthy" is a fact about the upstream, whereas a
+// percentile would make a slow week look normal.
+const SLOW_COMPLETION_TOKENS = 100;   // below this, grade on seconds
+const TPS_GOOD = 30;                  // >= 30 tok/s reads as fine
+const TPS_OK = 15;                    // >= 15 is workable, below is a problem
+const SECONDS_GOOD = 10;
+const SECONDS_OK = 30;
+
+function gradeDuration(record, text) {
+  const ms = Number(record && record.duration_ms);
+  if (!(ms > 0)) return escapeHtml(text);
+  const tps = requestThroughput(record);
+  let level;
+  if (tps != null && Number(record.output_tokens) >= SLOW_COMPLETION_TOKENS) {
+    level = tps >= TPS_GOOD ? 'good' : (tps >= TPS_OK ? 'ok' : 'slow');
+  } else {
+    const seconds = ms / 1000;
+    level = seconds < SECONDS_GOOD ? 'good' : (seconds < SECONDS_OK ? 'ok' : 'slow');
+  }
+  const title = tps == null
+    ? t('timing.gradedByTime')
+    : t('timing.gradedByRate').replace('{tps}', fmtThroughput(tps));
+  return `<span class="timing timing-${level}" title="${escapeHtml(title)}">${escapeHtml(text)}</span>`;
+}
+
+// Relative time with the absolute stamp kept in the tooltip and in the
+// element's datetime attribute. A log table is read to answer "how long ago was
+// that", and an absolute clock forces the reader to do the subtraction; the
+// tooltip keeps the exact value one hover away for when precision matters.
+//
+// Built per call rather than cached at load: the locale has to follow the
+// language the user selects, and a formatter captured at script load would keep
+// phrasing Chinese rows in English after a switch. Intl is universally present
+// in the browsers this dashboard targets, but the lookup is guarded so a
+// missing implementation degrades to the absolute clock instead of throwing.
+function fmtRelativeTime(iso) {
+  if (!iso) return '—';
+  const then = new Date(iso);
+  if (!Number.isFinite(then.getTime())) return '—';
+  if (typeof Intl === 'undefined' || !Intl.RelativeTimeFormat) return fmtTime(iso);
+  const seconds = (then.getTime() - Date.now()) / 1000;
+  const format = new Intl.RelativeTimeFormat(currentLang === 'zh' ? 'zh-CN' : 'en', {numeric: 'auto'});
+  // Past the ~4-day mark the reader is better served by the date, so only the
+  // recent window is phrased relatively.
+  const abs = Math.abs(seconds);
+  if (abs < 45) return format.format(Math.round(seconds), 'second');
+  if (abs < 3600) return format.format(Math.round(seconds / 60), 'minute');
+  if (abs < 86400) return format.format(Math.round(seconds / 3600), 'hour');
+  if (abs < 345600) return format.format(Math.round(seconds / 86400), 'day');
+  return fmtDate(iso);
 }
 
 // Aggregate amounts are known subtotals, not zero-cost promises for unpriced rows.
@@ -3439,9 +3516,7 @@ function showHistoryDetail(record) {
   // wall time, so it includes the wait for the first token), which is what
   // makes one row's figure checkable against the model's average. Null when the
   // request cannot support a rate, so the row is omitted rather than showing 0.
-  const tpsOfRow = detailsKnown && record.success && Number(record.duration_ms) > 0 && Number(record.output_tokens) > 0
-    ? Number(record.output_tokens) / (Number(record.duration_ms) / 1000)
-    : null;
+  const tpsOfRow = detailsKnown && record.success ? requestThroughput(record) : null;
   const statusLabel = detailsKnown ? (record.success ? t('detail.success') : t('detail.failed')) : t('detail.unknown');
   modalBody.innerHTML = `
     <div class="detail-summary">
@@ -3472,7 +3547,7 @@ function showHistoryDetail(record) {
       <div class="detail-row"><span class="detail-label">${t('detail.billingWindow')}</span><span class="detail-value">${billingWindowLabel(record)}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.requestType')}</span><span class="detail-value">${detailsKnown ? t(record.streaming ? 'detail.streaming' : 'detail.nonStreaming') : t('detail.unavailable')}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.attempt')}</span><span class="detail-value">${detailsKnown ? (record.attempt || 1) : t('detail.unavailable')}</span></div>
-      <div class="detail-row"><span class="detail-label">${t('detail.duration')}</span><span class="detail-value">${detailsKnown ? fmtDuration(record.duration_ms) : t('detail.unavailable')}</span></div>
+      <div class="detail-row"><span class="detail-label">${t('detail.duration')}</span><span class="detail-value">${detailsKnown ? gradeDuration(record, fmtDuration(record.duration_ms)) : t('detail.unavailable')}</span></div>
       ${tpsOfRow == null ? '' : `<div class="detail-row"><span class="detail-label">${t('analytics.throughput')}</span><span class="detail-value" title="${escapeHtml(t('analytics.throughputHint'))}">${fmtThroughput(tpsOfRow)}</span></div>`}
     </div>
     ${record.error_msg ? `<div class="detail-error"><strong>${t('detail.error')}</strong><br>${escapeHtml(record.error_msg)}</div>` : ''}

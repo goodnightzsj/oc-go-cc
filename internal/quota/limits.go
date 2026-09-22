@@ -2,9 +2,11 @@ package quota
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"html"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -50,12 +52,46 @@ func FetchModelLimits(ctx context.Context, client *http.Client, urls ...string) 
 		if err == nil {
 			return lim, nil
 		}
+		// A page that was served but not understood is a different event from
+		// one that could not be fetched, and only the first is worth a warning.
+		// A fetch failure is what the fallback exists for. A parse failure means
+		// the fallback is hiding a layout change - which is exactly how the zh
+		// page stopped being read: it renamed its allowance column, every zh
+		// parse failed, the en page answered instead, and the output stayed
+		// correct and identical-looking, so nothing ever reported it.
+		//
+		// This warning is the whole guard. It is logged rather than surfaced
+		// because there is nothing for a caller to do about it: the remaining
+		// sources are still tried, and the result is either right or absent.
+		var unparsable *unparsablePageError
+		if errors.As(err, &unparsable) {
+			slog.Warn("docs page was served but its allowance table could not be read; trying the next source",
+				"url", url, "error", unparsable.err)
+		}
 		lastErr = err
 	}
 	return nil, lastErr
 }
 
+// unparsablePageError marks a page that answered successfully but whose
+// allowance table could not be extracted from the body. It exists so the
+// caller can tell that apart from a transport or status failure; see the
+// warning in FetchModelLimits for why the distinction matters.
+type unparsablePageError struct {
+	url string
+	err error
+}
+
+func (e *unparsablePageError) Error() string { return fmt.Sprintf("docs %s: %v", e.url, e.err) }
+func (e *unparsablePageError) Unwrap() error { return e.err }
+
 func fetchModelLimitsFrom(ctx context.Context, client *http.Client, url string) (*ModelLimits, error) {
+	// Fall back to a default client rather than dereferencing nil. Every caller
+	// passes one today; this is here so the next one cannot panic, matching
+	// history's fetchers.
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -74,7 +110,8 @@ func fetchModelLimitsFrom(ctx context.Context, client *http.Client, url string) 
 	}
 	models, err := ParseModelLimits(body)
 	if err != nil {
-		return nil, fmt.Errorf("docs %s: %w", url, err)
+		// The body arrived; only the table could not be read out of it.
+		return nil, &unparsablePageError{url: url, err: err}
 	}
 	return &ModelLimits{URL: url, FetchedAt: time.Now().UTC(), Models: models}, nil
 }
@@ -85,11 +122,25 @@ var (
 	htmlCellRE  = regexp.MustCompile(`(?s)<t[dh][^>]*>(.*?)</t[dh]>`)
 )
 
-// ParseModelLimits extracts the usage-allowance table from a Go docs page.
-// The table is located by a header cell containing a limit keyword (使用额度 /
-// Allowance / Limit); the model name is the first column, the allowance is
-// the matching cell of each row, formatted like "$60" (a "-" or missing value
-// skips the row).
+// ParseModelLimits extracts the per-model allowance table from a Go docs page.
+// The table is located by a header cell containing a limit keyword (限制 /
+// 额度 / Allowance / Limit / Usage); the model name is the first column, the
+// allowance is the matching cell of each row, formatted like "$60" (a "-" or
+// missing value skips the row).
+//
+// This table is a cross-check, not the source of truth for what a plan has
+// left. The account's own 5-hour / weekly / monthly usage is - see the quota
+// handler - and it is what the dashboard treats as authoritative. The table
+// only supplies the per-model share used to break that total down, so a row
+// this parser cannot read costs a breakdown, never a spend figure.
+//
+// The Chinese header is 每月限制 (Monthly limit). An earlier revision matched
+// 额度 ("allowance") only, which the page stopped using, so every zh parse
+// failed silently and the fetch fell through to the English page - correct
+// output, wrong page, and invisible because the fallback exists for a genuine
+// layout change. Both spellings are matched now. A promotion can also render
+// into this cell ("$15 $604x · ..."), in which case the row is skipped rather
+// than misread: leniency here would round a multiplier up into an allowance.
 func ParseModelLimits(body []byte) ([]ModelLimit, error) {
 	for _, table := range htmlTableRE.FindAllStringSubmatch(string(body), -1) {
 		rows := htmlRowRE.FindAllStringSubmatch(table[1], -1)
@@ -100,6 +151,7 @@ func ParseModelLimits(body []byte) ([]ModelLimit, error) {
 		allowIdx := -1
 		for i, cell := range header {
 			if strings.Contains(strings.ToLower(cell), "allowance") ||
+				strings.Contains(cell, "限制") ||
 				strings.Contains(cell, "额度") ||
 				strings.Contains(strings.ToLower(cell), "usage") ||
 				strings.Contains(strings.ToLower(cell), "limit") {

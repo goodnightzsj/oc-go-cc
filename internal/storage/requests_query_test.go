@@ -3,12 +3,76 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/routatic/proxy/internal/history"
 )
 
+// The history table's "Tokens" column shows the four-part sum (input + output +
+// cache read + cache creation) and sorts by that same figure. It used to sort by
+// prompt_tokens, which excludes output, so a row with a small prompt and a large
+// answer displayed a large total and sorted among the small ones.
+//
+// The fixture is built so that inserting, prompt and total orderings each pick a
+// different row first. That is the whole point: with the sort key deleted the
+// query falls back to the default ordering (julianday(start_time)), so a fixture
+// whose time order happens to match its total order would pass with the fix
+// absent - a test that cannot fail. Four rows:
+//
+//	row   prompt = in+cr+cc   total = prompt+out   start_time
+//	a     30                  30                   t+4h
+//	b      5                  35                   t+2h
+//	c    100                 110                   t+1h
+//	d     12                  12                   t+3h
+//
+// Ascending prompt -> b,d,a,c. Ascending total -> d,a,b,c. Ascending time ->
+// c,b,d,a. Distinct, so each failure names the ordering that actually ran.
+func TestHistoryTokensColumnSortsByTheTotalItDisplays(t *testing.T) {
+	db := newCostTestDB(t)
+	repo := NewRequests(db)
+	base := time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC)
+	for _, rec := range []history.RequestRecord{
+		{ID: "a", Model: "model-a", StartTime: base.Add(4 * time.Hour), InputTokens: 10, CacheReadTokens: 20, Success: true},
+		{ID: "b", Model: "model-b", StartTime: base.Add(2 * time.Hour), InputTokens: 5, OutputTokens: 30, Success: true},
+		{ID: "c", Model: "model-c", StartTime: base.Add(time.Hour), InputTokens: 100, OutputTokens: 10, Success: true},
+		{ID: "d", Model: "model-d", StartTime: base.Add(3 * time.Hour), CacheCreationTokens: 12, Success: true},
+	} {
+		if err := repo.Insert(rec); err != nil {
+			t.Fatalf("insert %s: %v", rec.ID, err)
+		}
+	}
+	ordered := func(sortBy string) string {
+		t.Helper()
+		rows, _, err := repo.Query(RequestQuery{Page: 1, PageSize: 10, SortBy: sortBy, SortOrder: "asc"})
+		if err != nil {
+			t.Fatalf("sort by %s: %v", sortBy, err)
+		}
+		ids := make([]string, 0, len(rows))
+		for _, r := range rows {
+			ids = append(ids, r.ID)
+		}
+		return strings.Join(ids, "")
+	}
+	if got := ordered("total_tokens"); got != "dabc" {
+		t.Errorf("ascending total_tokens = %q, want dabc (totals 12,30,35,110)", got)
+	}
+	// The old key still exists and still means the prompt figure, so a caller
+	// wanting the input-only ordering is not silently handed the total.
+	if got := ordered("prompt_tokens"); got != "bdac" {
+		t.Errorf("ascending prompt_tokens = %q, want bdac (prompts 5,12,30,100)", got)
+	}
+	// An unknown key falls to the default time ordering; asserting it keeps the
+	// three orderings distinguishable, which is what makes the two above mean
+	// something rather than passing on a coincidence.
+	if got := ordered("not_a_column"); got != "cbda" {
+		t.Errorf("unknown sort key = %q, want the default time order cbda", got)
+	}
+}
+
+// TestRequestsQueryFiltersAndSortsFullDataset covers the filters and the sort
+// keys the history page does not use.
 func TestRequestsQueryFiltersAndSortsFullDataset(t *testing.T) {
 	db := newCostTestDB(t)
 	repo := NewRequests(db)

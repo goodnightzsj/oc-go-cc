@@ -78,10 +78,30 @@ var peakModelFamilies = map[string]bool{
 type PeakWindow struct{ Start, End int }
 
 // peakSchedule is one platform's published peak-pricing rule.
+//
+// excludesHolidays is per platform because the platforms do not agree on it,
+// and the difference is in what each one states about itself:
+//
+//   - DeepSeek publishes the rule and states the exemption: "Peak hours are
+//     01:00 - 04:00 and 06:00 - 10:00 UTC, Monday through Friday, excluding
+//     Chinese public holidays. All other hours are off-peak, including weekends
+//     and Chinese public holidays in full."
+//   - ClinePass states no window of its own; its table footnotes that page, so
+//     the rule it inherits is the one that carries the exemption.
+//   - OpenCode Go states the window without the exemption ("...Monday through
+//     Friday; all other hours, including weekends, are Off-Peak") but links
+//     that very sentence to DeepSeek's pricing page. The link is read here as
+//     inheriting the rule it points at, which is conservative: a holiday is
+//     priced off-peak. If Go is ever observed billing a holiday at peak, this
+//     is the one bool to flip.
+//   - CommandCode states the full rule itself and never references DeepSeek:
+//     "Peak runs Monday to Friday only, so it is never charged at the weekend."
+//     No exemption is stated, so none is applied, and its holidays bill at peak.
 type peakSchedule struct {
-	models     map[string]bool
-	windows    []PeakWindow
-	multiplier float64
+	models           map[string]bool
+	windows          []PeakWindow
+	multiplier       float64
+	excludesHolidays bool
 }
 
 // peakSchedules is each platform's published peak-pricing rule: which models it
@@ -95,35 +115,46 @@ type peakSchedule struct {
 // platform instead of silently moving the other one's money too.
 //
 // Sources, all re-verified 2026-09-22 against the live pages:
-//   - opencode.ai/docs/zh-cn/go - "DeepSeek V4.1 Flash / V4 Pro / V4 Flash /
-//     V4 Flash Vision Exp: Peak 时段为周一至周五的 01:00-04:00 和 06:00-10:00
-//     UTC；其他所有时段（包括周末）均为 Off-Peak."
+//   - opencode.ai/docs/go (en) and /docs/zh-cn/go, which agree verbatim - "Peak
+//     hours are 01:00-04:00 and 06:00-10:00 UTC, Monday through Friday; all
+//     other hours, including weekends, are Off-Peak." The same sentence's
+//     "Learn more" link points at DeepSeek's pricing page; see
+//     peakSchedule.excludesHolidays for why that is read as inheriting the
+//     exemption. (The zh-tw page omits the sentence entirely while still
+//     publishing both price columns, so a missing sentence on one locale is not
+//     evidence a rule is absent.)
 //   - commandcode.ai/models - those same four rows carry the peak sub-line
-//     "Off-peak shown (17h/day) · peak $X / $Y 01–04 & 06–10 UTC, Mon–Fri".
+//     "Off-peak shown (17h/day) · peak $X / $Y 01–04 & 06–10 UTC, Mon–Fri", and
+//     the model page states it out in full. No page on the site links to
+//     DeepSeek, so nothing is inherited.
 //   - api-docs.deepseek.com/quick_start/pricing - "Off-peak rates are half of
 //     the peak rates. Peak hours are 01:00 - 04:00 and 06:00 - 10:00 UTC,
-//     Monday through Friday, excluding Chinese public holidays." ClinePass's
-//     page footnotes DeepSeek's pricing page for its two DeepSeek rows, so this
-//     is the window that governs them. All three platforms therefore share one
-//     window today, and each still states it separately for the reason above.
+//     Monday through Friday, excluding Chinese public holidays." The zh-cn page
+//     states the same window in Beijing time (09:00-12:00 and 14:00-18:00),
+//     which is the conversion this table relies on. ClinePass's page footnotes
+//     this page for its two DeepSeek rows, so this is the window that governs
+//     them. All three platforms therefore share one window today, and each
+//     still states it separately for the reason above.
 //
-// Chinese public holidays are excluded by DeepSeek's rule and are NOT modelled
-// here: the holiday calendar is not published as data, and a lookup table that
-// goes stale would move money on the days it is wrong. Peak is therefore
-// over-applied on those handful of weekdays. That is a known, bounded
-// inaccuracy in the conservative direction - it can over-price, never
-// under-price - and it is recorded rather than hidden. ponytail: add a holiday
-// table only if the error is ever observed to matter.
+// Chinese public holidays are exempt for the platforms whose rule says so; see
+// peakSchedule.excludesHolidays for which, and why. The calendar comes from
+// holidays.go, which is seeded from the embedded copy at startup and refreshed
+// daily - a holiday is never guessed at from a table that could have gone
+// stale, and a failed refresh keeps the previous calendar rather than
+// collapsing to "no holidays", which would silently restore the over-billing.
 var peakSchedules = map[string]peakSchedule{
 	"opencode-go": {
-		models:     peakModelFamilies,
-		windows:    []PeakWindow{{1, 4}, {6, 10}},
-		multiplier: 2,
+		models:           peakModelFamilies,
+		windows:          []PeakWindow{{1, 4}, {6, 10}},
+		multiplier:       2,
+		excludesHolidays: true,
 	},
 	"commandcode": {
 		models:     peakModelFamilies,
 		windows:    []PeakWindow{{1, 4}, {6, 10}},
 		multiplier: 2,
+		// No exemption: CommandCode states its own rule and does not reference
+		// DeepSeek's, so its holidays bill at peak.
 	},
 	// ClinePass's pricing table carries a Peak column for its two DeepSeek rows,
 	// so it belongs here for the same reason the other two do. The window is the
@@ -150,6 +181,9 @@ var peakSchedules = map[string]peakSchedule{
 		},
 		windows:    []PeakWindow{{1, 4}, {6, 10}},
 		multiplier: 2,
+		// The page this table comes from footnotes DeepSeek's pricing page for
+		// these rows, so it inherits the exemption along with the hours.
+		excludesHolidays: true,
 	},
 }
 
@@ -203,6 +237,11 @@ func ProviderPeakMultiplier(provider, model string, t time.Time) float64 {
 	}
 	utc := t.UTC()
 	if wd := utc.Weekday(); wd == time.Saturday || wd == time.Sunday {
+		return 1
+	}
+	// Holidays exempt the whole day, not just the peak windows: the rule puts
+	// them entirely off-peak.
+	if schedule.excludesHolidays && IsChineseHoliday(utc) {
 		return 1
 	}
 	hour := utc.Hour()

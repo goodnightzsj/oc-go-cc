@@ -20,6 +20,7 @@ import (
 	"github.com/routatic/proxy/internal/daemon"
 	"github.com/routatic/proxy/internal/debug"
 	"github.com/routatic/proxy/internal/gui"
+	"github.com/routatic/proxy/internal/history"
 	"github.com/routatic/proxy/internal/server"
 	"github.com/routatic/proxy/internal/storage"
 	"github.com/spf13/cobra"
@@ -222,9 +223,19 @@ Press Ctrl+C to stop the server.`,
 				defer close(pricesDone)
 				storage.PriceRefreshLoop(ctx, priceRefreshConfig(atomicCfg), nil, logPriceRefresh)
 			}()
+			// The holiday calendar decides peak pricing on Chinese public
+			// holidays, so it has to be current before the first request is
+			// priced. The embedded seed answers from the moment the process
+			// starts; this replaces it with the live source and keeps it fresh.
+			holidaysDone := make(chan struct{})
+			go func() {
+				defer close(holidaysDone)
+				history.HolidayRefreshLoop(ctx, history.DefaultHolidayRefreshInterval, nil, logHolidayRefresh)
+			}()
 			defer func() {
 				cancel()
 				<-pricesDone
+				<-holidaysDone
 			}()
 
 			var guiSrv *gui.Server

@@ -123,7 +123,11 @@ live roster 的条目**只有 `id/name/description/tags`，没有上下文窗口
 
 因此 `peakSchedules` 已加入 `cline-pass` 条目（×2，同窗口）。覆盖模型为 `deepseek-v4-flash`、`deepseek-v4.1-flash`、`deepseek-v4-pro`——**两个 Flash 拼写都要列**，因为文档页那一行叫 "DeepSeek V4 Flash"，而 live roster 供的是 `cline-pass/deepseek-v4.1-flash` 且没有普通 v4-flash；DeepSeek 官方页把两者接起来（*"the legacy names deepseek-v4-flash ... are still accepted, but the corresponding models have been retired, their requests are served by the DeepSeek-V4.1-Flash model and billed at the Flash price"*）。
 
-中国法定节假日 DeepSeek 规则里排除，**本项目未建模**：节假日日历没有可用的数据源，维护一张会过期的表反而会在它错的日子里移动金额。后果是那几天会被多算 peak——**方向是保守的（只会多算、不会少算）**，且已记录在 `peakSchedules` 注释里，不隐藏。
+中国法定节假日**已建模**（2026-09-22 补）。日历取自 [NateScarlet/holiday-cn](https://github.com/NateScarlet/holiday-cn)（每日抓取国务院公告，MIT，带 `papers` 溯源字段），运行时逐日拉取、24h 刷新，另内嵌一份种子到二进制里兜底。抓取失败保留上一份、绝不清空——清空会把节假日变回工作日，正好是这次要修的错。
+
+**豁免按平台分列**（`peakSchedule.excludesHolidays`），依据是各平台对自己的表述：DeepSeek 官方页写明排除；ClinePass 脚注该页，随之继承；OpenCode Go 自己那句窗口没写豁免，但它的 "Learn more" 指向**同一张页面**，按继承处理（保守方向）；**CommandCode 自己写全了规则且全站不引用 DeepSeek，因此不豁免，节假日照计高峰**。
+
+调休补班日对判定无影响：高峰条件是周一~周五，而调休补班永远是把周末变成工作日，`weekday` 仍非 Mon–Fri。2007–2026 全部 138 个调休上班日中落在周一~周五的只有 1 个（2020-02-03，疫情延期通知里的"正常上班"日，本就不是假日）。
 
 **未登记的代价**：在此修正前，cline-pass 全部请求按 Off-peak 平计。本实例恰好跑 `cline-pass/deepseek-v4.1-flash`，正是被漏掉 peak 率的那个模型，于是高峰时段既不显示角标、费用也少算一半。
 

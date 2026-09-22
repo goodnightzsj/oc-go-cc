@@ -196,6 +196,18 @@ func logPriceRefresh(counts map[string]int, errs map[string]error) {
 	}
 }
 
+// logHolidayRefresh reports the calendar refresh. A failure is a warning, not an
+// error: the previous calendar - or the embedded seed, on a cold start - stays
+// in place, so the worst case is a holiday priced at peak for one day.
+func logHolidayRefresh(days int, err error) {
+	if err != nil {
+		slog.Warn("holiday calendar refresh failed; keeping the previous calendar",
+			"days", days, "error", err)
+		return
+	}
+	slog.Info("holiday calendar refreshed", "days", days)
+}
+
 // ensureDatabase ensures the SQLite database exists and is initialized.
 // It creates the database directory and schema if missing.
 func ensureDatabase() error {

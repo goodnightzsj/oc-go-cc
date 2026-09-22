@@ -488,14 +488,25 @@ func (r *Requests) costForRecord(ctx context.Context, rec history.RequestRecord)
 	if provider == "" {
 		provider = "opencode-go"
 	}
+	// The prompt size decides which band applies, and it has to be the same
+	// figure the tier's threshold is written against: the whole prompt, cache
+	// reads and writes included. models.dev words its condition as "total prompt
+	// tokens", so a request is compared against that and not against the fresh
+	// input alone - which would put a cache-heavy request in the cheaper band
+	// while the upstream billed the dearer one.
 	var modelsInputPerM, modelsOutputPerM sql.NullFloat64
+	var tiersJSON sql.NullString
 	err := r.db.DB().QueryRowContext(ctx, `
-		SELECT cost_input_per_m, cost_output_per_m
+		SELECT cost_input_per_m, cost_output_per_m, cost_tiers
 		FROM models
 		WHERE provider = ? AND name = ?
-	`, provider, rec.Model).Scan(&modelsInputPerM, &modelsOutputPerM)
+	`, provider, rec.Model).Scan(&modelsInputPerM, &modelsOutputPerM, &tiersJSON)
 	if err != nil && err != sql.ErrNoRows {
 		return sql.NullFloat64{}, "", err
+	}
+	if band := tierRatesFor(decodeTiers(tiersJSON), promptTokensOf(rec)); band != nil {
+		modelsInputPerM = sql.NullFloat64{Float64: band.Input, Valid: true}
+		modelsOutputPerM = sql.NullFloat64{Float64: band.Output, Valid: true}
 	}
 	reqTime := rec.StartTime
 	if reqTime.IsZero() {
@@ -513,6 +524,13 @@ func (r *Requests) costForRecord(ctx context.Context, rec history.RequestRecord)
 		return sql.NullFloat64{}, "", nil
 	}
 	return sql.NullFloat64{Float64: cost, Valid: true}, CostSourceEstimated, nil
+}
+
+// promptTokens is the whole prompt the upstream saw: fresh input plus both
+// cache classes. It is the figure a long-context threshold is written against,
+// so tier selection and the threshold must agree on it.
+func promptTokensOf(rec history.RequestRecord) int64 {
+	return int64(rec.InputTokens) + int64(rec.CacheReadTokens) + int64(rec.CacheCreationTokens)
 }
 
 func boolToInt(b bool) int {

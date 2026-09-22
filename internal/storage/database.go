@@ -326,6 +326,13 @@ func (d *Database) migrateColumns(ctx context.Context) error {
 		// same answer they gave before the column existed. The next catalog sync
 		// fills them in.
 		`ALTER TABLE models ADD COLUMN max_output_tokens INTEGER`,
+		// Long-context price bands, as a JSON array. A column rather than a
+		// table because the bands are only ever read with their model, never
+		// queried across models, and a join for a handful of rows would cost
+		// more than the JSON does. Existing rows keep NULL, which reads back as
+		// "no tiers" - the same answer they gave before the column existed, and
+		// the next catalog sync fills in the ones that have them.
+		`ALTER TABLE models ADD COLUMN cost_tiers TEXT`,
 	} {
 		if _, err := d.db.ExecContext(ctx, alter); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return fmt.Errorf("%s: %w", alter, err)

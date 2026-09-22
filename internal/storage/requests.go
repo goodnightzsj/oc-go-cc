@@ -337,6 +337,13 @@ func requestSortColumn(field string) string {
 		return "LOWER(COALESCE(provider, ''))"
 	case "scenario":
 		return "LOWER(COALESCE(scenario, ''))"
+	case "total_tokens":
+		// The column the history table labels "Tokens" shows the four-part sum,
+		// output included. Sorting it by prompt_tokens - the three-part input
+		// figure - made the header and the cell disagree: a row with a small
+		// prompt and a large answer displayed a big total and sorted near the
+		// bottom. The column is sorted by what it displays.
+		return "COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) + COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0)"
 	case "prompt_tokens":
 		return "COALESCE(input_tokens, 0) + COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0)"
 	case "output_tokens":

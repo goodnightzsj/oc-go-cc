@@ -306,7 +306,7 @@ const TRANSLATIONS = {
     'history.perPage': 'Rows per page',
     'history.streaming': 'Streaming',
     'history.nonStreaming': 'Non-streaming',
-    'history.peakWindow': 'Billed at 2x (deepseek weekday peak UTC 01-04/06-10)',
+    'history.peakWindow': 'Billed at this platform\'s peak rate for the hour of the request; the badge shows the multiplier',
     'filter.dateRange': 'Date range',
     'filter.today': 'Today',
     'filter.clear': 'Clear',
@@ -819,7 +819,7 @@ const TRANSLATIONS = {
     'history.perPage': '每页',
     'history.streaming': '流式',
     'history.nonStreaming': '非流式',
-    'history.peakWindow': '2 倍计费时段（deepseek 工作日高峰 UTC 01-04/06-10）',
+    'history.peakWindow': '按请求时刻所在平台的峰时费率计费，倍率见徽标',
     'filter.dateRange': '日期范围',
     'filter.today': '今天',
     'filter.clear': '清除',
@@ -1441,6 +1441,29 @@ let lastModelCounts = {};
 let lastCircuitBreakers = null;
 
 /* ── Performance Module ───────────────────────────────────────────── */
+
+// The one place a known-sample success rate becomes a level. The Perf table and
+// the Overview platform health strip banded the same quantity with their own
+// copies of the thresholds, and the table contradicted itself within one row:
+// its cell text called 92% an error while its health dot called it "ok". The
+// thresholds now live here once.
+//
+// The two surfaces then map onto different vocabularies on purpose, and that is
+// a design choice rather than a leftover: the table's dot resolves four levels
+// (good/ok/warn/bad) because it sits next to the exact percentage, while the
+// strip resolves three colours (ok/warn/crit) as a glanceable health signal.
+// Each mapping below reproduces what its own surface already drew, so this
+// change removes the duplicated literals without repainting anything.
+function successLevel(pct) {
+  if (pct == null || !Number.isFinite(Number(pct))) return { text: '', dot: 'unknown', level: 'unknown' };
+  const p = Number(pct);
+  if (p >= 99) return { text: 'success-rate', dot: 'good', level: 'ok' };
+  if (p >= 95) return { text: '', dot: 'ok', level: 'warn' };
+  if (p >= 90) return { text: 'error-rate', dot: 'ok', level: 'crit' };
+  if (p >= 70) return { text: 'error-rate', dot: 'warn', level: 'crit' };
+  return { text: 'error-rate', dot: 'bad', level: 'crit' };
+}
+
 const PerfModule = {
   data: null,
   loadSeq: 0,
@@ -1542,18 +1565,17 @@ const PerfModule = {
     tbody.innerHTML = sorted.map(row => {
       const known = row.success != null && row.failed != null ? Number(row.success) + Number(row.failed) : 0;
       const successRate = known > 0 ? (row.success / known * 100).toFixed(1) : null;
-      const successClass = successRate == null ? '' : successRate >= 99 ? 'success-rate' : (successRate >= 95 ? '' : 'error-rate');
       const latency = value => row.count > 0 ? fmt(value) : '—';
       return `
         <tr data-provider="${escapeHtml(row.provider || '')}">
           <td class="perf-model">${escapeHtml(row.model)}<br><small>${escapeHtml(providerLabel(row.provider))}</small></td>
           <td>${fmt(row.count)}</td>
-          <td class="${successClass}" title="${escapeHtml(t('perf.knownSamples').replace('{n}', known.toLocaleString()))}">${successRate == null ? '—' : successRate + '%'}</td>
-          <td><span class="success-dot success-${successRate == null ? 'unknown' : (successRate >= 99 ? 'good' : (successRate >= 90 ? 'ok' : (successRate >= 70 ? 'warn' : 'bad')))}" role="img" aria-label="${escapeHtml(t('perf.healthLabel'))}"></span></td>
+          <td class="${successLevel(successRate).text}">${successRate == null ? '—' : successRate + '%'}</td>
           <td class="${this.getLatencyClass(row.avg_ms)}">${latency(row.avg_ms)}</td>
           <td class="${this.getLatencyClass(row.p50_ms)}">${latency(row.p50_ms)}</td>
           <td class="${this.getLatencyClass(row.p90_ms)}">${latency(row.p90_ms)}</td>
           <td class="${this.getLatencyClass(row.p99_ms)}">${latency(row.p99_ms)}</td>
+          <td><span class="success-dot success-${successLevel(successRate).dot}" role="img" aria-label="${escapeHtml(t('perf.healthLabel'))}"></span></td>
         </tr>
       `;
     }).join('');
@@ -4887,7 +4909,7 @@ const AnalyticsModule = {
       const latency = Number(item.avg_latency_ms || 0);
       const breaker = breakerOf(provider);
       const pct = hasRate ? (rate * 100) : null;
-      const level = !hasRate ? 'unknown' : rate >= 0.99 ? 'ok' : rate >= 0.95 ? 'warn' : 'crit';
+      const level = !hasRate ? 'unknown' : successLevel(rate * 100).level;
       const meta = [];
       if (latency > 0) meta.push(`${t('analytics.avgLatency')} ${fmtDuration(latency)}`);
       const tps = fmtThroughput(item.tokens_per_second);

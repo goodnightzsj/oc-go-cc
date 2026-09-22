@@ -2,7 +2,7 @@
 
 设计定稿：2026-09-13。状态：**阶段 0–5 已实施**。
 
-已实施：`internal/site` 注册表与重复清单收敛（0/1，零行为变化）；面板只保留 `opencode-go` 与 `commandcode`，隐藏项保留代码与历史（2）；站点自有模型目录接入，修好 `/v1/models` 对 CommandCode 返回 0 项（3）；`active_site` 作用域 + 目录优先解析 + 面板选择器（4）。
+已实施：`internal/site` 注册表与重复清单收敛（0/1，零行为变化）；面板按各站点的 `Visible` 过滤，隐藏项保留代码与历史（2）；站点自有模型目录接入，修好 `/v1/models` 对 CommandCode 返回 0 项（3）；`active_site` 作用域 + 目录优先解析 + 面板选择器（4）。
 
 阶段 5 的核查结果与预期不同，记录如下以免重做：`provider/*.go` 已无任何按平台名的分支（0 处 `switch provider`），`loader.go` 与 `storage/pricing.go` 已在阶段 1 收敛，`client/opencode.go` 按 §9 保持原样。**真正的遗漏在 §2 清单之外**：`internal/router/selector.go` 的 `enabledProviders` 自带一份四平台名单（Go/Zen/Bedrock/OpenRouter），漏掉 CommandCode——于是成本路由下 CommandCode 无论配了多少 key 都不会被选中。已改为遍历 `site.All()` 并向 `config.ProviderAPIKeys` 逐个取凭证，配 `TestEnabledProvidersMatchesRegistryCoverage` 守卫，形态与 config 的 `TestProviderKeySourceCoversRegistry` 一致。
 
@@ -18,7 +18,7 @@
 
 - 一个站点（上游平台）的身份、凭证、端点、协议适配、计费规则、账户接口、模型目录收敛到**一个描述符**；新增站点不改其他包。
 - 面板可切换「当前站点」，切换后 `/v1/models` 自动变为该站点的真实模型列表，客户端无需感知。
-- 前端只保留 `opencode-go` 与 `commandcode`，其余站点隐藏但代码与历史数据保留。
+- 前端按各站点描述符的 `Visible` 决定是否出现在选择器里，隐藏的站点只是不进选择器，代码与历史数据保留。**可见集合是注册表的一个取值，不是本设计的一部分**：它随接入的站点变化，当前是 `opencode-go`、`commandcode`、`cline-pass` 三个（`internal/site/site.go` 的 `registry` 是唯一权威，此处只是快照）。设计只保证"加站点不改其他包"，不保证某个特定集合长期不变。
 
 **非目标**
 
@@ -171,7 +171,7 @@ type Site struct {
 
 ## 9. 阶段 5 的一处反例：`client.getEndpoint` 不应清理
 
-`internal/client/opencode.go` 的 `getEndpoint` 按平台分支返回端点，其中 Go / Zen / Bedrock 三个分支看起来是死代码——这四个平台都有 `core.Provider` 适配器并已在 registry 注册，handler 只在 registry 查不到时才落到这个客户端。
+`internal/client/opencode.go` 的 `getEndpoint` 按平台分支返回端点，其中 Go / Zen / Bedrock 三个分支看起来是死代码——注册表里已有 `core.Provider` 适配器的平台都在 registry 注册了，handler 只在 registry 查不到时才落到这个客户端。
 
 **但它们是可达的**：`MessagesHandler` 的 `providerRegistry` 允许为 nil（`messages.go` 的 `if h.providerRegistry != nil`），此时所有平台都走这条路径。实际删掉后 `TestHandleStreaming_GoAnthropicModel_FallsThroughOnError` 与 `TestHandleStreaming_PerModelTimeoutFallback` 立即失败，已回退。
 

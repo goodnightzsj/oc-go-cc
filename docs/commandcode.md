@@ -124,14 +124,17 @@ supports_websockets = false
 
 ### 峰谷计费（2026-09-14 全站遍历核实）
 
-两个平台目前使用**同一套峰谷规则**，但这是各自文档的结论，不是共享常量：高峰为周一至周五的 01:00-04:00 与 06:00-10:00 UTC，其余（含周末）为 Off-Peak，倍率 2。
+三个平台目前使用**同一套峰谷规则**，但这是各自文档的结论，不是共享常量：高峰为周一至周五的 01:00-04:00 与 06:00-10:00 UTC，其余（含周末）为 Off-Peak，倍率 2。
 
 | 平台 | 出处 | 原文 |
 | --- | --- | --- |
 | OpenCode Go | [Go 文档](https://opencode.ai/docs/zh-cn/go) 价格表脚注 | `DeepSeek V4.1 Flash / V4 Pro / V4 Flash / V4 Flash Vision Exp: Peak 时段为周一至周五的 01:00-04:00 和 06:00-10:00 UTC；其他所有时段（包括周末）均为 Off-Peak.` |
 | CommandCode | [GOAT 计划文档](https://commandcode.ai/docs/plans/goat) 与 [/models](https://commandcode.ai/models) 行内标注 | `Off-peak shown (17h/day) · peak $X / $Y 01–04 & 06–10 UTC, Mon–Fri` |
+| ClinePass | [ClinePass 定价页](https://docs.cline.bot/getting-started/clinepass.md) Peak 列脚注 | 脚注指向 DeepSeek 官方定价页，继承其窗口与节假日豁免（详见 [ClinePass 接入指南](cline-pass.md)） |
 
-**覆盖的模型：两家完全相同，就是那 4 个 DeepSeek。** 这一点由 2026-09-14 的全站遍历确认：把两个站点的 sitemap 全部抓下来，逐页找峰谷标注，只有 OpenCode 的 `go` 页与 CommandCode 的 `/models` 页出现，且都只覆盖这 4 个。
+**覆盖的模型：三家都是各自表里那几行 DeepSeek。** OpenCode Go 与 CommandCode 由 2026-09-14 的全站遍历确认（把两个站点的 sitemap 全部抓下来，逐页找峰谷标注，只有 OpenCode 的 `go` 页与 CommandCode 的 `/models` 页出现，且都只覆盖这 4 个）；ClinePass 于 2026-09-22 补登记。
+
+以上只是当前取值。**权威在 `internal/history/record.go` 的 `peakSchedules`**——规则是**每 rule 自带** `models`/`windows`/`multiplier`/`allDays`，不是每平台一条，所以同一平台的模型可以在窗口方向、倍率、适用星期上各不相同（OpenRouter 的 `tencent/hy3` 就是 ×1.6 且每天 00-16 UTC）。`site.Descriptor.PeakPriced` 声明"该平台有峰谷"，与 `peakSchedules` 里是否有条目互为守卫。
 
 判定**不按家族整体匹配**，而是显式列出，因为三个方向的误判都会产生格式正确、数值错误的成本：
 
@@ -148,9 +151,9 @@ supports_websockets = false
 | `deepseek-v4-flash-vision-exp` | $0.15 / $0.60 | $0.30 / $1.20 |
 | `deepseek-v4-pro` | $0.66 / $1.98 | $1.32 / $3.96 |
 
-**判定入口**是 `history.ProviderPeakMultiplier`（`internal/history/record.go`）。时段与倍率按平台存放于 `peakSchedules`，不是共享一份：即便今天两家相同，任一平台改窗口或加模型时，这里必须是一行只影响该平台的改动，而不是静默地连另一家的钱一起改。存储层、费用估算、面板与回填共用这一处；`internal/models.ModelFamily` 把 `deepseek/deepseek-v4-flash` 与 `deepseek-v4-flash` 归一到同一族名。
+**判定入口**是 `history.ProviderPeakMultiplier`（`internal/history/record.go`）。时段与倍率按平台存放于 `peakSchedules`，不是共享一份：即便今天三家相同，任一平台改窗口或加模型时，这里必须是一行只影响该平台的改动，而不是静默地连别家的钱一起改。存储层、费用估算、面板与回填共用这一处；`internal/models.ModelFamily` 把 `deepseek/deepseek-v4-flash` 与 `deepseek-v4-flash` 归一到同一族名。
 
-面板有自己的副本（`PEAK_SCHEDULES`，`internal/gui/assets/app.js`），因为回填尚未覆盖的行也要能显示徽章。`TestPeakSchedulesMatchTheBackend`（`internal/gui/peak_parity_test.go`）断言两份不得漂移——前端漏列一个模型时该行会渲染成非高峰，而这一差异在页面上看不出任何异常，只有对账时才会发现。
+**面板不再自算峰谷**。早期版本在前端维护了一份 `PEAK_SCHEDULES` 副本，并靠 `TestPeakSchedulesMatchTheBackend` 防漂移；该副本已删除，`effectivePeakMultiplier`（`internal/gui/assets/app.js:2349`）现在只读存储列 `peak_multiplier`。原因是前端拿不到节假日日历，自算必然与后端分歧。两条测试守住这个方向：`TestDashboardDoesNotReDerivePeakPricing` 禁止 `PEAK_SCHEDULES` 复活，`TestEffectivePeakMultiplierReadsOnlyTheStoredColumn` 禁止 `start_time`/`Date(`/`provider`/`model` 进入该函数（`internal/gui/peak_parity_test.go:16`、`:39`）。**代价是回填未覆盖的行没有徽章**——存储列的权威补齐由 `storage.BackfillPeakMultipliers` 在启动时完成。
 
 `commandcode.ai/models` 与 `/pricing` 只显示 Off-peak 单价（模型页以 `+1` 标注按模型的 deal），峰谷标注出现在 `/models` 行的 tooltip 与 `aria-label`（`<模型> input: $X during peak hours, ...`），GOAT 文档页亦同；只查 Models 端点会得出「没有峰谷」的错误结论。
 
@@ -180,7 +183,7 @@ CommandCode 侧另有 `deepseek-v4-flash-vision-exp` 与 3 个模型的价格过
 **分档计价**已建模（`priceTier`，`internal/storage/database.go`）：档位按**整个 prompt** 的 input token 数选取。
 
 ```go
-// 档位阈值是"高于此值才生效"，与两家文档措辞一致（Qwen3.7 Plus (> 256K tokens)）
+// 档位阈值是"高于此值才生效"，与平台文档措辞一致（Qwen3.7 Plus (> 256K tokens)）
 for i := range e.Tiers {
     if t := &e.Tiers[i]; inputTokens > t.Size && t.Size > best { ... }
 }
@@ -300,7 +303,7 @@ UI 的 `TOTAL RUNS` 与 API 的计数也对不上：同一时刻页面显示 **1
 
 ### 日志与账户数据来源
 
-- 五个平台的配置、路由健康、历史、性能和模型费用按平台归属；概览、历史、性能、分析可分别筛选平台，相同模型 ID 不再跨平台串账。套餐页另有平台独立的本实例请求、Token、费用及缺价统计，详见[五平台能力矩阵](platform-integration-review.md#五平台页面与账户能力)。
+- 各平台的配置、路由健康、历史、性能和模型费用按平台归属；概览、历史、性能、分析可分别筛选平台，相同模型 ID 不再跨平台串账。套餐页另有平台独立的本实例请求、Token、费用及缺价统计。平台集合以 `internal/site/site.go` 的 `registry` 为准（当前 6 个 descriptor、3 个 `Visible`），不在此列举；本轮接入时的能力矩阵见[五平台页面与账户能力](platform-integration-review.md#五平台页面与账户能力)。
 - 价格缺失时显示 `—`，混合已知/未知金额显示“已知”小计及未知记录数。平台账单、代理估算和未知费用不能互相替代；峰谷倍率只作用于其所属平台。
 - CommandCode 账户数据使用经 Edge 页面和真实 API Key 核实的官方 Alpha 只读接口，不需要浏览器 Cookie。保留 [Usage](https://commandcode.ai/usage)、[Billing](https://commandcode.ai/billing) 和 [API Keys](https://commandcode.ai/settings/keys) 入口；Alpha 不是稳定公开合同，字段可能变化，不能套用 Go 配额。
 - 官方 Provider API 文档当前说明除 Go 外的方案有 API 访问能力；账户的实际授权仍以上游为准。`401`/`403`/ZDR `422` 应检查密钥、套餐和模型能力，不通过私有 CLI 仿装规避。

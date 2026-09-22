@@ -119,7 +119,13 @@ live roster 的条目**只有 `id/name/description/tags`，没有上下文窗口
 
 **来源分层必须留在文件里**（`_source` 字段）：13 行来自文档页，`glm-5.3-flash` 与 `deepseek-v4.1-flash` 两行**不在文档页**、取自 models.dev（第三方）。`muse-spark-1.3-contributor` 在 live roster 里但两源都没有费率，**故意不写规则**——缺规则会报 unknown，而缺规则不等于零价，编一个会显示一个自信的错误数字。
 
-**峰谷暂不登记。** 文档页给 DeepSeek 标了 Peak 列，但脚注指向 DeepSeek 官方定价页，**与 CommandCode/OpenCode Go 的 01–04 & 06–10 UTC 不是同一套**。窗口未核实前 `peakSchedules` 不加 `cline-pass` 条目，`PeakMultiplier` 恒为 1、按 Off-peak 平计。**猜一个窗口会产出格式正确、金额错误的成本**——这正是 `history/record.go` 那张表按平台分开存的原因。
+**峰谷已登记（2026-09-22 修正）。** 文档页给 DeepSeek 两行标了 Peak 列，脚注指向 DeepSeek 官方定价页。**从这里可以读出窗口**：该页原文 *"Peak hours are 01:00 - 04:00 and 06:00 - 10:00 UTC, Monday through Friday, excluding Chinese public holidays"* —— **与 CommandCode / OpenCode Go 是同一套**。此前本节写"不是同一套、窗口未核实"，那是把"脚注指向别处"误读成了"规则不同"，而脚注指向的正是能给出窗口的那一页。
+
+因此 `peakSchedules` 已加入 `cline-pass` 条目（×2，同窗口）。覆盖模型为 `deepseek-v4-flash`、`deepseek-v4.1-flash`、`deepseek-v4-pro`——**两个 Flash 拼写都要列**，因为文档页那一行叫 "DeepSeek V4 Flash"，而 live roster 供的是 `cline-pass/deepseek-v4.1-flash` 且没有普通 v4-flash；DeepSeek 官方页把两者接起来（*"the legacy names deepseek-v4-flash ... are still accepted, but the corresponding models have been retired, their requests are served by the DeepSeek-V4.1-Flash model and billed at the Flash price"*）。
+
+中国法定节假日 DeepSeek 规则里排除，**本项目未建模**：节假日日历没有可用的数据源，维护一张会过期的表反而会在它错的日子里移动金额。后果是那几天会被多算 peak——**方向是保守的（只会多算、不会少算）**，且已记录在 `peakSchedules` 注释里，不隐藏。
+
+**未登记的代价**：在此修正前，cline-pass 全部请求按 Off-peak 平计。本实例恰好跑 `cline-pass/deepseek-v4.1-flash`，正是被漏掉 peak 率的那个模型，于是高峰时段既不显示角标、费用也少算一半。
 
 ### 定时刷新会丢规则（2026-09-22 修复）
 

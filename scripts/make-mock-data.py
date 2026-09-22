@@ -75,16 +75,27 @@ PLATFORMS = {
 }
 
 # The platforms that bill a peak rate for the deepseek families, and the window
-# they bill it in (weekday UTC 01-04 and 06-10, matching
-# history.peakSchedules). Generating rows inside and outside the window keeps the
-# History tab's Peak badge present in every screenshot.
+# they bill it in (weekday UTC 01-04 and 06-10, matching history.peakSchedules).
+# Generating rows inside and outside the window keeps the History tab's Peak
+# badge present in every screenshot.
+#
+# Per platform, like the backend table: each platform covers the models its own
+# pricing table gives a peak column, and ClinePass's set is narrower. Both Flash
+# spellings are listed for it because its table names the row "DeepSeek V4
+# Flash" while its roster serves deepseek-v4.1-flash.
 PEAK_FAMILIES = {"deepseek-v4.1-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"}
+CLINE_PEAK_FAMILIES = {"deepseek-v4.1-flash", "deepseek-v4-flash", "deepseek-v4-pro"}
+PEAK_COVERAGE = {
+    "opencode-go": PEAK_FAMILIES,
+    "commandcode": PEAK_FAMILIES,
+    "cline-pass": CLINE_PEAK_FAMILIES,
+}
 PEAK_WINDOWS = ((1, 4), (6, 10))
 
 
-def peak_multiplier(model: str, when: datetime.datetime) -> float:
-    family = model.split("/")[-1]
-    if family not in PEAK_FAMILIES:
+def peak_multiplier(provider: str, model: str, when: datetime.datetime) -> float:
+    covered = PEAK_COVERAGE.get(provider)
+    if not covered or model.split("/")[-1] not in covered:
         return 1.0
     if when.weekday() >= 5:  # Saturday/Sunday are off-peak
         return 1.0
@@ -125,7 +136,7 @@ def build_requests(rng: random.Random, days: int, today: datetime.date):
                 day.year, day.month, day.day, hour, rng.randint(0, 59), rng.randint(0, 59),
                 tzinfo=datetime.timezone.utc,
             )
-            mult = peak_multiplier(model, when)
+            mult = peak_multiplier(provider, model, when)
 
             # Whole-request duration: the generation phase plus a first-token
             # allowance, which is why measured throughput lands a little under

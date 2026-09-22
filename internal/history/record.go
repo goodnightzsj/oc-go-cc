@@ -94,12 +94,26 @@ type peakSchedule struct {
 // window or adds a model, this table must make that a one-line change to that
 // platform instead of silently moving the other one's money too.
 //
-// Sources, both re-verified 2026-09-14 against the live pages:
+// Sources, all re-verified 2026-09-22 against the live pages:
 //   - opencode.ai/docs/zh-cn/go - "DeepSeek V4.1 Flash / V4 Pro / V4 Flash /
 //     V4 Flash Vision Exp: Peak 时段为周一至周五的 01:00-04:00 和 06:00-10:00
 //     UTC；其他所有时段（包括周末）均为 Off-Peak."
 //   - commandcode.ai/models - those same four rows carry the peak sub-line
 //     "Off-peak shown (17h/day) · peak $X / $Y 01–04 & 06–10 UTC, Mon–Fri".
+//   - api-docs.deepseek.com/quick_start/pricing - "Off-peak rates are half of
+//     the peak rates. Peak hours are 01:00 - 04:00 and 06:00 - 10:00 UTC,
+//     Monday through Friday, excluding Chinese public holidays." ClinePass's
+//     page footnotes DeepSeek's pricing page for its two DeepSeek rows, so this
+//     is the window that governs them. All three platforms therefore share one
+//     window today, and each still states it separately for the reason above.
+//
+// Chinese public holidays are excluded by DeepSeek's rule and are NOT modelled
+// here: the holiday calendar is not published as data, and a lookup table that
+// goes stale would move money on the days it is wrong. Peak is therefore
+// over-applied on those handful of weekdays. That is a known, bounded
+// inaccuracy in the conservative direction - it can over-price, never
+// under-price - and it is recorded rather than hidden. ponytail: add a holiday
+// table only if the error is ever observed to matter.
 var peakSchedules = map[string]peakSchedule{
 	"opencode-go": {
 		models:     peakModelFamilies,
@@ -108,6 +122,32 @@ var peakSchedules = map[string]peakSchedule{
 	},
 	"commandcode": {
 		models:     peakModelFamilies,
+		windows:    []PeakWindow{{1, 4}, {6, 10}},
+		multiplier: 2,
+	},
+	// ClinePass's pricing table carries a Peak column for its two DeepSeek rows,
+	// so it belongs here for the same reason the other two do. The window is the
+	// same one: its table footnotes DeepSeek's pricing page, and that page states
+	// "Peak hours are 01:00 - 04:00 and 06:00 - 10:00 UTC, Monday through Friday,
+	// excluding Chinese public holidays" - the same hours CommandCode and OpenCode
+	// Go publish. An earlier comment here claimed the window was unknown and
+	// unverified; it was verifiable from the source ClinePass itself cites.
+	//
+	// The covered set needs both DeepSeek Flash spellings, and that is not
+	// belt-and-braces. ClinePass's table names the row "DeepSeek V4 Flash", while
+	// its live roster serves cline-pass/deepseek-v4.1-flash and has no plain
+	// v4-flash at all. DeepSeek's own page resolves the two names - "the legacy
+	// names deepseek-v4-flash ... are still accepted, but the corresponding models
+	// have been retired, their requests are served by the DeepSeek-V4.1-Flash
+	// model and billed at the Flash price" - so the table's single Flash row
+	// describes the model this instance actually serves, under its other name.
+	// Both are listed because either spelling may arrive on a record.
+	"cline-pass": {
+		models: map[string]bool{
+			"deepseek-v4-flash":   true,
+			"deepseek-v4.1-flash": true,
+			"deepseek-v4-pro":     true,
+		},
 		windows:    []PeakWindow{{1, 4}, {6, 10}},
 		multiplier: 2,
 	},

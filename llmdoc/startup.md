@@ -28,7 +28,7 @@ ssh root@23.80.89.173
 cd /root/oc-go-cc && git pull origin main && bash scripts/prod-deploy.sh
 ```
 
-部署会重启 systemd 服务，期间本地 AI 短暂断连；用 `curl -fsS http://127.0.0.1:3456/health` 验证。面板/历史 DB：`/root/.local/share/routatic-proxy/data.db`；配置：`/root/.config/oc-go-cc/config.json`（env 插值 `OC_GO_CC_API_KEY`）。
+部署会重启 systemd 服务，期间本地 AI 短暂断连；用 `curl -fsS http://127.0.0.1:3456/health` 验证。面板/历史 DB：`/root/.local/share/routatic-proxy/data.db`；配置默认 `/root/.config/routatic-proxy/config.json`（env 插值 `ROUTATIC_PROXY_API_KEY`）。旧路径 `/root/.config/oc-go-cc/config.json`（`internal/config/loader.go:17`）与旧变量名 `OC_GO_CC_*`（`loader.go:63-72` 的 `legacyEnvNames`）仍作回退兼容。
 
 ## 关键约束速查
 

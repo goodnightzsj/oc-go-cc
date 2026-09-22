@@ -37,7 +37,7 @@
 
 ## 相关配置
 
-- `debug_capture`：`logging.debug_capture`（`internal/config/config.go:236`），默认关闭；当前远端开启且 `max_files=20`（≈1GB 上限），`redact_api_keys: true`；捕获文件在 capture 目录按 50MB 轮转。
+- `debug_capture`：`logging.debug_capture`（`internal/config/config.go:324`），默认关闭；当前远端开启且 `max_files=20`（≈1GB 上限），`redact_api_keys: true`；捕获文件在 capture 目录按 50MB 轮转。
 - 部署方式：`ssh root@23.80.89.173` → `cd /root/oc-go-cc && git pull origin main && bash scripts/prod-deploy.sh`（release 目录 + 软链 current + systemd `oc-go-cc.service`）。
 
 ## 成本估算公式（当前） 
@@ -58,12 +58,13 @@
 - 教训：debug_capture 文件轮转（max_files 20 × 50MB）在流量峰值下几分钟即滚动，**回填/取证前应先拷贝 capture 目录**；usage 页服务端默认只渲染 50 条（早前窗口曾一次渲染 600 条——平台行为变化，翻页机制须用 CDP 实测）。
 ## Peak 定价验证与徽章现算（2026-08-27 增补）
 
-- **平台峰值窗口实测边界**：逐条对比平台 `cost` 与 off-peak 公式（in×0.22 + cr×0.007 + out×0.66）——UTC 09:59:57 行 ×2.0，UTC 10:00:17 行 ×1.0。**窗口为 `[06:00, 10:00) UTC` 左闭右开**，与 `history.PeakMultiplier`（`internal/history/record.go:41`）和 `TestPeakMultiplier` 断言一致。
+- **平台峰值窗口实测边界**：逐条对比平台 `cost` 与 off-peak 公式（in×0.22 + cr×0.007 + out×0.66）——UTC 09:59:57 行 ×2.0，UTC 10:00:17 行 ×1.0。**窗口为 `[01:00, 04:00)` 与 `[06:00, 10:00) UTC 两段，左闭右开**（`internal/history/record.go:224`/`:233`/`:262`/`:306` 的 `[]PeakWindow{{1, 4}, {6, 10}}`），与 `TestPeakMultiplier`（`internal/storage/pricing_test.go:12`）断言一致。（`record.go:41` 是 `RequestRecord.PeakMultiplier float64` 字段声明；函数 `history.PeakMultiplier` 在 `record.go:321`。）
 - **`costMultiplier: 2` 是 lite 计划固定标记，与 Peak 无关**：平台记录 `enrichment: {"plan":"lite","costMultiplier":2}` 恒为 2（`/tmp/platform_keep.json` 全量验证），**不计入 `cost` 字段**；`cost` 本身已是 peak 后最终值，对账直接 `units/1e8` 即可。
-- **徽章前端现算**（commit `17f663f`）：`effectivePeakMultiplier()` 按 `start_time + model` 前端判定 deepseek 工作日高峰，回填行不再依赖存储的 `peak_multiplier` 列（回填路径从不写该列，此前导致回填行集体丢徽章）。特效：存储值 >1 优先，避免平台记账时刻与 start_time 在边界（±秒级）判定分歧时徽章消失。
+- **徽章前端现算**（commit `17f663f`）——**已被取代，仅作历史记录**：当时 `effectivePeakMultiplier()` 按 `start_time + model` 前端判定 deepseek 工作日高峰，回填行不再依赖存储的 `peak_multiplier` 列（回填路径从不写该列，此前导致回填行集体丢徽章）。**前端现算现已整体删除**（提交 `e026e50` / `efe47aa` 删除了 `PEAK_SCHEDULES`）：`internal/gui/assets/app.js:2349` 的 `effectivePeakMultiplier` 现在只读存储列（`return stored > 1 ? stored : 1;`），`internal/gui/peak_parity_test.go` 明确禁止 `start_time`/`Date(`/`provider`/`model` 进入该函数——注释写明 "the browser has no holiday calendar"（节假日日历在前端不可得）。只有存储列是权威，两条守卫是 `TestDashboardDoesNotReDerivePeakPricing` 与 `TestEffectivePeakMultiplierReadsOnlyTheStoredColumn`。
 - **2026-09-13 补上存储列**：前端现算只是兜底，存储列本身仍是错的——导入的 4224 行全部停在 schema 默认 1.0，其中 1313 行按规则应为 2.0，而 API、详情弹窗、分析与导出读的都是该列。现由 `storage.BackfillPeakMultipliers`（`internal/storage/database.go`）在启动时用 `history.ProviderPeakMultiplier` 同一套规则补齐，只抬高不降低（平台记账时钟与 `start_time` 在窗口边界可能差几秒，冲突时以平台为准）。生产 dry-run 与实测均为 761 → 2074，行数不变。
 - **判定只有一处**：`history.ProviderPeakMultiplier` 是平台峰谷的唯一所有者，`requests.peakMultiplierForRecord` 曾另有一份 `provider != "opencode-go" 就返回 1` 的短路判断，会把 CommandCode 的峰值吞掉，已删除。
-- **CommandCode 也有峰谷**，窗口与 Go 相同（UTC 01-04、06-10，周一至周五，×2），但模型集合按 [GOAT 文档](https://commandcode.ai/docs/plans/goat) 逐个列出而非按家族匹配（`deepseek/deepseek-v4-flash-fast` 不带该标注）。`commandcode.ai/models` 与 `/pricing` 只显示 Off-Peak 价，只看这两处会误判为「无峰谷」。
+- **CommandCode 也有峰谷**，窗口与 Go 相同（UTC 01-04、06-10，周一至周五，×2），模型集合由函数 `deepseekPeakFamilies()`（`internal/history/record.go:79`）给出而非按家族子串匹配（`deepseek/deepseek-v4-flash-fast` 不带该标注）。用函数而非共享 map 值，是因为每个平台的条目必须拥有自己的集合（注释在 `record.go:74-78`）。`commandcode.ai/models` 与 `/pricing` 只显示 Off-Peak 价，只看这两处会误判为「无峰谷」。
+- **`peakSchedules` 现覆盖 4 个平台**（`opencode-go` / `commandcode` / `cline-pass` / `openrouter`，`internal/history/record.go:219-317`），且规则形态从"每平台一条"改为"**每 rule 自带** `models`/`windows`/`multiplier`/`allDays`"（`record.go:100-109`、`record.go:153-156`）。平台级窗口无法同时表达 OpenRouter 的 `tencent/hy3`（×1.6、每天 00-16 UTC）与 DeepSeek 对（×2、工作日）——方向与倍率都不同。OpenRouter 的规则是 **per-model 转写**（models.dev 不携带 `overrides`，运行时无处可读），详见 `docs/openrouter.md`。
 - **遗留时区 bug 修复**：9 行回填插入行 `start_time` 原存 UTC `+00:00`（回填脚本未转时区），按日统计错位 8 小时；已转 `+08:00`（备份 `backup-20260827-tzfix.db`，远端 `~/.local/share/routatic-proxy/`）。
 - **2026-08-26/27 对账结论**：双方同时存在的行逐行成本差异为 0（1493+ 行精确到 1e-8）；8-26 远端 $4.9977 vs 平台 $4.9939（差 2 条平台未列出的记录 `$0.0015`），8-27 差异全为记账时差（平台 usage 页数据滞后约 5 分钟）。
 

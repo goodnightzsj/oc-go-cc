@@ -85,19 +85,46 @@ PLATFORMS = {
 # Flash" while its roster serves deepseek-v4.1-flash.
 PEAK_FAMILIES = {"deepseek-v4.1-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"}
 CLINE_PEAK_FAMILIES = {"deepseek-v4.1-flash", "deepseek-v4-flash", "deepseek-v4-pro"}
+
+# excludes_holidays mirrors peakSchedule.excludesHolidays: OpenCode Go and
+# ClinePass inherit DeepSeek's exemption, CommandCode states its own rule
+# without one. Getting this wrong here is invisible in a way the Go table's
+# equivalent is not - it would put a Peak badge on a holiday row in the README
+# screenshot, where the backend prices that row off-peak.
 PEAK_COVERAGE = {
-    "opencode-go": PEAK_FAMILIES,
-    "commandcode": PEAK_FAMILIES,
-    "cline-pass": CLINE_PEAK_FAMILIES,
+    "opencode-go": (PEAK_FAMILIES, True),
+    "commandcode": (PEAK_FAMILIES, False),
+    "cline-pass": (CLINE_PEAK_FAMILIES, True),
 }
 PEAK_WINDOWS = ((1, 4), (6, 10))
 
 
+def load_holidays() -> set:
+    """Chinese public holidays, read from the seed baked into the binary.
+
+    Reusing the shipped seed rather than the network keeps this generator
+    offline and keeps the two in step: a mock showing a badge the binary would
+    not is the one failure this function exists to prevent.
+    """
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "..", "internal", "history", "seed_holidays_cn.json")
+    with open(path, encoding="utf-8") as handle:
+        return {d["date"] for d in json.load(handle)["days"] if d["isOffDay"]}
+
+
+HOLIDAYS = load_holidays()
+
+
 def peak_multiplier(provider: str, model: str, when: datetime.datetime) -> float:
-    covered = PEAK_COVERAGE.get(provider)
-    if not covered or model.split("/")[-1] not in covered:
+    entry = PEAK_COVERAGE.get(provider)
+    if not entry:
+        return 1.0
+    covered, excludes_holidays = entry
+    if model.split("/")[-1] not in covered:
         return 1.0
     if when.weekday() >= 5:  # Saturday/Sunday are off-peak
+        return 1.0
+    if excludes_holidays and when.date().isoformat() in HOLIDAYS:
         return 1.0
     return 2.0 if any(lo <= when.hour < hi for lo, hi in PEAK_WINDOWS) else 1.0
 

@@ -2250,48 +2250,19 @@ function renderHistoryPager() {
   syncViewState({replace: true});
 }
 
-// Each platform's published peak-pricing rule, mirroring history.peakSchedules
-// (internal/history/record.go) - the Go side owns the answer and
-// TestPeakSchedulesMatchTheBackend keeps this mirror honest.
+// The peak multiplier as billed, read from the record the backend wrote.
 //
-// Every platform names its covered models row by row in its own pricing table,
-// so the set is listed rather than matched by substring: the older
-// deepseek-v3/r1/chat families, the "fast" variant and the dated snapshots all
-// carry a single rate and must stay off-peak.
-//
-// ClinePass publishes a Peak column for its two DeepSeek rows, so it mirrors
-// the backend entry - including both Flash spellings, because its table names
-// the row "DeepSeek V4 Flash" while its roster serves deepseek-v4.1-flash (the
-// backend comment carries the source for that).
-const PEAK_FAMILIES = ['deepseek-v4.1-flash', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp', 'deepseek-v4-pro'];
-const PEAK_SCHEDULES = {
-  'opencode-go': {models: PEAK_FAMILIES, windows: [[1, 4], [6, 10]], multiplier: 2},
-  commandcode: {models: PEAK_FAMILIES, windows: [[1, 4], [6, 10]], multiplier: 2},
-  'cline-pass': {models: ['deepseek-v4.1-flash', 'deepseek-v4-flash', 'deepseek-v4-pro'], windows: [[1, 4], [6, 10]], multiplier: 2},
-};
-
-// Derive the peak multiplier from provider + model + start_time, matching
-// history.ProviderPeakMultiplier (weekday UTC 01-04 / 06-10). Used in place of
-// the stored column so a row the backfill has not reached still shows the
-// badge; an explicit stored multiplier > 1 wins, because the platform's billing
-// clock can sit a second or two from our start_time at a window boundary.
+// This used to re-derive the multiplier from provider + model + start_time,
+// mirroring history.peakSchedules, so a row the backfill had not reached would
+// still show its badge. That mirror cannot exist any more: the schedule carries
+// a Chinese public holiday calendar that the browser has no copy of, so on a
+// holiday weekday the derivation says peak while the billed multiplier is
+// off-peak - a badge on a row that was not charged for it. The stored column is
+// the authority; both the live insert path and the startup backfill fill it for
+// every row, so there is nothing left for a fallback to cover.
 function effectivePeakMultiplier(h) {
   const stored = Number(h.peak_multiplier);
-  if (stored > 1) return stored;
-  // An empty provider keeps the pre-provider-column reading, like the backend:
-  // opencode-go is the platform a blank provider means.
-  const provider = String(h.provider || '').replace(/_/g, '-') || 'opencode-go';
-  const schedule = PEAK_SCHEDULES[provider];
-  if (!schedule) return 1;
-  const model = String(h.model || '').toLowerCase().split('/').pop();
-  if (schedule.models.indexOf(model) < 0) return 1;
-  const t = new Date(h.start_time);
-  if (isNaN(t.getTime())) return 1;
-  const day = t.getUTCDay();
-  if (day === 0 || day === 6) return 1;
-  const hour = t.getUTCHours();
-  const inWindow = schedule.windows.some(w => hour >= w[0] && hour < w[1]);
-  return inWindow ? schedule.multiplier : 1;
+  return stored > 1 ? stored : 1;
 }
 
 // Peak or off-peak as billed, for the request detail view.

@@ -186,15 +186,18 @@ vm.runInContext(` + "`" + `
   assert.equal(FallbackModule.chains.default[1].wire_format, 'anthropic');
   assert.equal(FallbackModule.chains.default[1].max_tokens, 4096);
   assert.equal(configModelKey({provider:'opencode_go',model_id:'shared'}), configModelKey(go));
-  // CommandCode peak-prices only the models it publishes with a peak sub-line,
-  // on the same window as OpenCode Go.
-  assert.equal(effectivePeakMultiplier({provider:'commandcode',model:'deepseek',start_time:'2026-09-07T02:00:00Z'}),1);
-  assert.equal(effectivePeakMultiplier({provider:'commandcode',model:'deepseek/deepseek-v4-flash',start_time:'2026-09-07T02:00:00Z'}),2);
-  assert.equal(effectivePeakMultiplier({provider:'commandcode',model:'deepseek/deepseek-v4-pro',start_time:'2026-09-07T08:30:00Z'}),2);
-  assert.equal(effectivePeakMultiplier({provider:'commandcode',model:'deepseek/deepseek-v4-flash-fast',start_time:'2026-09-07T02:00:00Z'}),1);
-  assert.equal(effectivePeakMultiplier({provider:'commandcode',model:'deepseek/deepseek-v4-flash',start_time:'2026-09-12T02:00:00Z'}),1);
-  assert.equal(effectivePeakMultiplier({provider:'commandcode',model:'deepseek/deepseek-v4-flash',start_time:'2026-09-07T12:00:00Z'}),1);
-  assert.equal(billingWindowLabel({provider:'opencode-go',model:'deepseek-v4-pro',start_time:'2026-09-07T02:00:00Z'}), t('detail.peak') + ' \u00d72');
+  // The peak multiplier is the backend's figure, read straight off the record:
+  // the browser no longer re-derives it, because the schedule carries a Chinese
+  // public holiday calendar it has no copy of. A row the backend billed off-peak
+  // must stay off-peak here whatever its provider, model and time say.
+  assert.equal(effectivePeakMultiplier({provider:'commandcode',model:'deepseek/deepseek-v4-pro',start_time:'2026-09-07T02:00:00Z',peak_multiplier:2}),2);
+  assert.equal(effectivePeakMultiplier({provider:'opencode-go',model:'deepseek-v4-pro',start_time:'2026-09-07T02:00:00Z',peak_multiplier:2}),2);
+  // 2026-05-01 is a Chinese public holiday inside the peak window: the backend
+  // stores 1 for it, and the badge must not appear.
+  assert.equal(effectivePeakMultiplier({provider:'opencode-go',model:'deepseek-v4-pro',start_time:'2026-05-01T02:00:00Z',peak_multiplier:1}),1);
+  assert.equal(effectivePeakMultiplier({provider:'opencode-go',model:'deepseek-v4-pro',start_time:'2026-09-07T02:00:00Z'}),1,'an absent multiplier is off-peak, not a re-derivation');
+  assert.equal(billingWindowLabel({provider:'opencode-go',model:'deepseek-v4-pro',start_time:'2026-09-07T02:00:00Z',peak_multiplier:2}), t('detail.peak') + ' \u00d72');
+  assert.equal(billingWindowLabel({provider:'opencode-go',model:'deepseek-v4-pro',start_time:'2026-05-01T02:00:00Z',peak_multiplier:1}), t('detail.offPeak'));
 
   const unknownRecord = {id:'unknown', provider:'commandcode', model:'shared', details_known:false, success:false, streaming:false, duration_ms:0, attempt:0};
   allHistory = [unknownRecord];

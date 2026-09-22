@@ -173,6 +173,8 @@ const TRANSLATIONS = {
     'analytics.currencyUSD': 'USD',
     'analytics.unknownCosts': '{n} requests with unknown cost; totals include known costs only',
     'analytics.knownSubtotal': 'Known {value}',
+    'analytics.otherSeries': 'Other',
+    'analytics.seriesTotal': 'Total',
     'analytics.utc': 'Analytics dates and time buckets use UTC',
     'label.apiKeys': 'API keys (comma-separated, takes precedence over the single key)',
     'label.apiKeysHint': 'Replace the entire list to edit masked keys, or clear it to use the single key. Environment overrides still take precedence.',
@@ -462,6 +464,8 @@ const TRANSLATIONS = {
     'perf.th.p50': 'P50',
     'perf.th.p90': 'P90',
     'perf.th.p99': 'P99',
+    'perf.th.health': 'Health',
+    'perf.healthLabel': 'Success-rate health',
     'perf.empty': 'No performance data',
     'setting.backup': 'Backup Configuration',
     'setting.backupDesc': 'Export current config as JSON file',
@@ -677,6 +681,8 @@ const TRANSLATIONS = {
     'analytics.currencyUSD': '美元（USD）',
     'analytics.unknownCosts': '{n} 条请求费用未知；合计只包含已知费用',
     'analytics.knownSubtotal': '已知 {value}',
+    'analytics.otherSeries': '其他',
+    'analytics.seriesTotal': '合计',
     'analytics.utc': '用量分析的日期与时间桶统一使用 UTC',
     'label.apiKeys': 'API Keys（逗号分隔，优先于单个密钥）',
     'label.apiKeysHint': '修改已脱敏的密钥时请替换完整列表；清空列表后使用单个密钥。环境变量覆盖仍然优先。',
@@ -989,6 +995,8 @@ const TRANSLATIONS = {
     'perf.th.p50': 'P50',
     'perf.th.p90': 'P90',
     'perf.th.p99': 'P99',
+    'perf.th.health': '健康度',
+    'perf.healthLabel': '成功率健康度',
     'perf.empty': '暂无性能数据',
     'setting.backup': '备份配置',
     'setting.backupDesc': '导出当前配置为 JSON 文件',
@@ -1461,7 +1469,7 @@ const PerfModule = {
 
     if (!this.data || this.data.length === 0) {
       const key = this.data ? 'empty.noData' : this.error ? 'detail.unavailable' : 'data.loading';
-      tbody.innerHTML = '<tr><td colspan="7" class="empty-state">' + (this.data ? emptyStateContent(key, 'perf.emptyHint') : t(key)) + '</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" class="empty-state">' + (this.data ? emptyStateContent(key, 'perf.emptyHint') : t(key)) + '</td></tr>';
       return;
     }
 
@@ -1490,6 +1498,7 @@ const PerfModule = {
           <td class="perf-model">${escapeHtml(row.model)}<br><small>${escapeHtml(providerLabel(row.provider))}</small></td>
           <td>${fmt(row.count)}</td>
           <td class="${successClass}" title="${escapeHtml(t('perf.knownSamples').replace('{n}', known.toLocaleString()))}">${successRate == null ? '—' : successRate + '%'}</td>
+          <td><span class="success-dot success-${successRate == null ? 'unknown' : (successRate >= 99 ? 'good' : (successRate >= 90 ? 'ok' : (successRate >= 70 ? 'warn' : 'bad')))}" role="img" aria-label="${escapeHtml(t('perf.healthLabel'))}"></span></td>
           <td class="${this.getLatencyClass(row.avg_ms)}">${latency(row.avg_ms)}</td>
           <td class="${this.getLatencyClass(row.p50_ms)}">${latency(row.p50_ms)}</td>
           <td class="${this.getLatencyClass(row.p90_ms)}">${latency(row.p90_ms)}</td>
@@ -2916,6 +2925,51 @@ function chartTooltipMarkup(title, rows, footer) {
   const tail = (footer || []).length ? `<div class="tip-footer">${footer.map(row => `
     <div><span>${escapeHtml(row.label)}</span><strong>${escapeHtml(row.value)}</strong></div>`).join('')}</div>` : '';
   return `<div class="tip-title">${escapeHtml(title)}</div><div class="tip-body">${body}</div>${tail}`;
+}
+
+// Shape a tooltip's series so the reader can answer "what made this bucket
+// big" without reading twenty rows.
+//
+// Three problems, one pass. Unsorted, the rows appear in whatever order the
+// series were built, so the largest contributor can sit at the bottom of the
+// list. Past a threshold the tail is a long column of near-identical small
+// numbers that hides the ones that matter, so it collapses into a single
+// "Other" row whose total is still accounted for. And a stacked chart's rows
+// are only useful against their sum, which the reader should not have to add
+// up themselves.
+//
+// The total is computed from the values as given rather than from a separate
+// query, so it can never disagree with the rows above it.
+const TOOLTIP_MAX_SERIES = 8;
+
+// Every displayed value is formatted here, from the numeric `n`, so the rows,
+// the collapsed bucket and the total cannot end up formatted differently - an
+// earlier revision formatted only the bucket and passed the rows through, which
+// put "1,200" beside "800" for the same quantity.
+function tooltipSeries(rows, options) {
+  const opts = options || {};
+  const format = opts.format || (v => v.toLocaleString());
+  const numeric = (rows || []).map(row => ({...row, n: Number(row.n ?? row.value ?? 0)}));
+  const sorted = numeric.slice().sort((a, b) => b.n - a.n);
+  const shown = sorted.slice(0, TOOLTIP_MAX_SERIES).map(row => ({...row, value: format(row.n)}));
+  const hidden = sorted.slice(TOOLTIP_MAX_SERIES);
+  if (hidden.length) {
+    const sum = hidden.reduce((acc, row) => acc + row.n, 0);
+    shown.push({
+      label: (opts.otherLabel || 'Other') + ' (' + hidden.length + ')',
+      // Reuse the muted colour rather than inventing one: the bucket is not a
+      // series the chart draws.
+      color: 'var(--ui-muted)',
+      value: format(sum),
+      n: sum,
+    });
+  }
+  const total = sorted.reduce((acc, row) => acc + row.n, 0);
+  const footer = (opts.footer || []).slice();
+  if (opts.totalLabel && sorted.length > 1) {
+    footer.push({label: opts.totalLabel, value: format(total)});
+  }
+  return {rows: shown, footer, total};
 }
 
 function bindPlotTooltip(root, tip, options) {
@@ -5000,7 +5054,13 @@ const AnalyticsModule = {
       markersForIndex: index => visible.map(item => ({x:chart.x(index),y:chart.y(points[index][item.key])})),
       contentForIndex: index => {
       const point=points[index];
-      return chartTooltipMarkup(this.trendLabel(point.date), visible.map(item => ({label:item.label,value:Number(point[item.key]||0).toLocaleString(),color:item.color})), [{label:t('analytics.cost'),value:fmtAggregateCost(point)}]);
+      // Sorted, tail-collapsed and totalled: this is the chart where a model
+      // count can run past what a tooltip should list.
+      const shaped = tooltipSeries(
+        visible.map(item => ({label:item.label, n:Number(point[item.key]||0), color:item.color})),
+        {otherLabel: t('analytics.otherSeries'), totalLabel: t('analytics.seriesTotal'), format: v => v.toLocaleString()});
+      return chartTooltipMarkup(this.trendLabel(point.date), shaped.rows,
+        shaped.footer.concat([{label:t('analytics.cost'),value:fmtAggregateCost(point)}]));
       },
     });
   },
@@ -5053,7 +5113,13 @@ const AnalyticsModule = {
         {label:t('analytics.cost'),value:fmtAggregateCost(point)},
       ];
       if (showRate) footer.unshift({label:t('analytics.cacheHitShort'),value:`${rate(point).toFixed(1)}%`});
-      return chartTooltipMarkup(this.trendLabel(point.date),visibleTokens.map(item=>({label:item.label,value:Number(point[item.key]||0).toLocaleString(),color:item.color})),footer);
+      // Sorted and totalled for the same reason as the requests chart. Only
+      // four token classes exist, so nothing collapses here - the cap is far
+      // above the series count on purpose.
+      const shaped = tooltipSeries(
+        visibleTokens.map(item=>({label:item.label,n:Number(point[item.key]||0),color:item.color})),
+        {otherLabel: t('analytics.otherSeries'), totalLabel: t('analytics.seriesTotal'), format: v => v.toLocaleString()});
+      return chartTooltipMarkup(this.trendLabel(point.date), shaped.rows, shaped.footer.concat(footer));
       },
     });
   },

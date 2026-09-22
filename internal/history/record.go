@@ -300,8 +300,8 @@ var peakSchedules = map[string]peakSchedule{
 		rules: []peakRule{
 			{
 				models: map[string]bool{
-					"deepseek-v4.1-flash":   true,
-					"deepseek-v4-pro-0813":  true,
+					"deepseek-v4.1-flash":  true,
+					"deepseek-v4-pro-0813": true,
 				},
 				windows:    []PeakWindow{{1, 4}, {6, 10}},
 				multiplier: 2,

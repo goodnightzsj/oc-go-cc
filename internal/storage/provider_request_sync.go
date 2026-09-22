@@ -10,6 +10,8 @@ import (
 	"math"
 	"slices"
 	"time"
+
+	"github.com/routatic/proxy/internal/history"
 )
 
 const providerUsageTarget = "opencode-go"
@@ -334,12 +336,21 @@ func applyProviderRequestSync(ctx context.Context, tx *sql.Tx, providerRows []pr
 			INSERT INTO requests (
 				id, model, provider, scenario, start_time, duration_ms,
 				input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-				cost_usd, cost_source, details_known, usage_trusted, streaming, success, error_msg, attempt, created_at
-			) VALUES (?, ?, ?, 'override', ?, 0, ?, ?, ?, ?, ?, ?, 0, 1, 0, 0, '', 1, ?)`,
+				cost_usd, cost_source, details_known, usage_trusted, streaming, success, error_msg, attempt, created_at,
+				peak_multiplier
+			) VALUES (?, ?, ?, 'override', ?, 0, ?, ?, ?, ?, ?, ?, 0, 1, 0, 0, '', 1, ?, ?)`,
 			requestIDs[providerIndex], row.Model, providerUsageTarget, row.Time.UTC().Format(time.RFC3339Nano),
 			row.InputTokens, row.OutputTokens, row.CacheReadTokens,
 			row.CacheWrite5mTokens+row.CacheWrite1hTokens, row.costUSD(), CostSourceProvider,
-			row.snapshotAt.UTC().Format(time.RFC3339Nano))
+			row.snapshotAt.UTC().Format(time.RFC3339Nano),
+			// The column's DEFAULT is 1, which would book a peak-billed request at
+			// the off-peak rate until the next service start ran the backfill -
+			// and then quietly change the number. This path had been the one
+			// insert that skipped it, because it hand-writes its column list
+			// instead of going through peakMultiplierForRecord, which every other
+			// writer uses. Provider-synced rows are OpenCode Go's own billing
+			// records, i.e. exactly the traffic that carries a peak rate.
+			history.ProviderPeakMultiplier(providerUsageTarget, row.Model, row.Time))
 		if err != nil {
 			return err
 		}

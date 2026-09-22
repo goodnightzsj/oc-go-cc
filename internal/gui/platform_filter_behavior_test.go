@@ -109,7 +109,7 @@ const context = vm.createContext({
   // createElement returns a real-enough element for CustomSelect: it builds the
   // replacement list out of created nodes, so a stub that returns {} would make
   // every assertion about that list vacuous.
-  document: {getElementById:node,querySelectorAll(){return []},querySelector(){return null},addEventListener(){},documentElement:{},
+  document: {getElementById:node,querySelectorAll(){return []},querySelector(){return null},addEventListener(){},documentElement:{dataset:{},lang:''},
     createElement(tag){
       const el = {
         tagName: tag, children: [], attributes: {}, style: {}, className: '', dataset: {},
@@ -125,7 +125,15 @@ const context = vm.createContext({
       return el;
     }},
   MutationObserver: class { observe(){} disconnect(){} },
-  window: {addEventListener(){}}, localStorage:{getItem(){return null}},
+  window: {addEventListener(){}},
+  // A working store, not just getItem: the theme control writes, deletes and
+  // reads back, and a stub that only answers getItem made its cycle untestable
+  // here rather than failing loudly.
+  localStorage:(() => { const store = new Map(); return {
+    getItem: k => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: k => store.delete(k),
+  }; })(),
   location, history, Event,
   setTimeout(){},clearTimeout(){},setInterval(){},queueMicrotask(){},
   fetch:async()=>({ok:false,status:503,text:async()=> 'synthetic unavailable response'}),

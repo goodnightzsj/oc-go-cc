@@ -10,6 +10,11 @@ const TRANSLATIONS = {
     'shell.skip': 'Skip to content',
     'theme.light': 'Switch to light theme',
     'theme.dark': 'Switch to dark theme',
+    'theme.system': 'Follow the system',
+    'theme.modeSystem': 'following the system',
+    'theme.modeLight': 'pinned light',
+    'theme.modeDark': 'pinned dark',
+    'theme.described': 'Theme: {mode}. {next}.',
     'overview.description': 'Traffic, recorded cost and service health at a glance.',
     'analytics.description': 'Explore token composition, recorded costs and activity over time.',
     'quota.description': 'Account limits and subscriptions, with the local ledger kept separate.',
@@ -519,6 +524,11 @@ const TRANSLATIONS = {
     'shell.skip': '跳转到主要内容',
     'theme.light': '切换为浅色主题',
     'theme.dark': '切换为深色主题',
+    'theme.system': '切换为跟随系统',
+    'theme.modeSystem': '跟随系统',
+    'theme.modeLight': '已锁定浅色',
+    'theme.modeDark': '已锁定深色',
+    'theme.described': '当前：{mode}。{next}。',
     'overview.description': '快速了解请求流量、已记录费用与服务状态。',
     'analytics.description': '按时段查看 Token 组成、已记录费用与调用趋势。',
     'quota.description': '账户额度与订阅集中展示，本实例账本独立核对。',
@@ -1083,28 +1093,69 @@ document.addEventListener('DOMContentLoaded', () => {
   if (exportBtn) exportBtn.addEventListener('click', exportHistoryCSV);
 });
 
-function syncThemeControl() {
-  const key = getComputedStyle(document.documentElement).colorScheme === 'light' ? 'theme.dark' : 'theme.light';
-  const button = document.getElementById('btn-theme-toggle');
-  button.setAttribute('data-i18n-aria-label', key);
-  button.setAttribute('aria-label', t(key));
-  const label = document.getElementById('theme-action');
-  label.dataset.i18n = key;
-  label.textContent = t(key);
+// Theme has three states, not two: following the system, or pinned light/dark.
+//
+// Two states was a dead end - the first toggle wrote a value, and from then on
+// the page ignored the system for good, with no way back short of clearing site
+// data. "Follow the system" is the default and has to stay reachable, so the
+// absent key *is* that state and the cycle returns to it.
+//
+// What the button points at next is spelled out in the title, because an
+// icon-only control cannot show which of three states it is in.
+const THEME_KEY = 'routatic-proxy-theme';
+const THEME_SYSTEM = 'system';
+
+function themeMode() {
+  const saved = localStorage.getItem(THEME_KEY);
+  return saved === 'light' || saved === 'dark' ? saved : THEME_SYSTEM;
 }
 
-function toggleTheme() {
-  const theme = getComputedStyle(document.documentElement).colorScheme === 'light' ? 'dark' : 'light';
-  document.documentElement.dataset.theme = theme;
-  localStorage.setItem('routatic-proxy-theme', theme);
+// What the page is actually showing. In system mode there is deliberately no
+// data-theme attribute, so the CSS media query decides and a system change
+// repaints without JavaScript running at all.
+function applyThemeMode() {
+  const mode = themeMode();
+  if (mode === THEME_SYSTEM) delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = mode;
   syncThemeControl();
+}
+
+function cycleTheme() {
+  const mode = themeMode();
+  const next = mode === THEME_SYSTEM ? 'light' : (mode === 'light' ? 'dark' : THEME_SYSTEM);
+  if (next === THEME_SYSTEM) localStorage.removeItem(THEME_KEY);
+  else localStorage.setItem(THEME_KEY, next);
+  applyThemeMode();
+}
+
+function syncThemeControl() {
+  const mode = themeMode();
+  const showing = getComputedStyle(document.documentElement).colorScheme === 'light' ? 'light' : 'dark';
+  const next = mode === THEME_SYSTEM ? 'light' : (mode === 'light' ? 'dark' : THEME_SYSTEM);
+  const modeLabel = mode === THEME_SYSTEM ? t('theme.modeSystem') : (mode === 'light' ? t('theme.modeLight') : t('theme.modeDark'));
+  const nextLabel = next === THEME_SYSTEM ? t('theme.system')
+    : (next === 'light' ? t('theme.light') : t('theme.dark'));
+  const button = document.getElementById('btn-theme-toggle');
+  // Stated as "now / next" because three states cannot be shown by an icon that
+  // has two drawings.
+  const described = t('theme.described').replace('{mode}', modeLabel).replace('{next}', nextLabel);
+  button.setAttribute('data-theme-mode', mode);
+  button.setAttribute('title', described);
+  button.setAttribute('aria-label', described);
+  // The label span keeps the plain action, so the visible text stays short.
+  const label = document.getElementById('theme-action');
+  label.dataset.i18n = next === THEME_SYSTEM ? 'theme.system' : (next === 'light' ? 'theme.light' : 'theme.dark');
+  label.textContent = nextLabel;
+  // A hairline marker shows the pinned state at a glance; the icon alone cannot.
+  document.documentElement.dataset.themeMode = mode;
+  document.documentElement.dataset.themeShown = showing;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  const saved = localStorage.getItem('routatic-proxy-theme');
-  if (saved === 'light' || saved === 'dark') document.documentElement.dataset.theme = saved;
-  syncThemeControl();
-  document.getElementById('btn-theme-toggle').addEventListener('click', toggleTheme);
+  applyThemeMode();
+  document.getElementById('btn-theme-toggle').addEventListener('click', cycleTheme);
+  // In system mode the CSS query already repaints; this only refreshes the
+  // button's own wording so it does not describe the state the user just left.
   window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', syncThemeControl);
 });
 

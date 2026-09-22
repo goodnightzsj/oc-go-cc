@@ -2254,14 +2254,20 @@ function renderHistoryPager() {
 // (internal/history/record.go) - the Go side owns the answer and
 // TestPeakSchedulesMatchTheBackend keeps this mirror honest.
 //
-// Both platforms name their covered models row by row in their pricing table,
+// Every platform names its covered models row by row in its own pricing table,
 // so the set is listed rather than matched by substring: the older
 // deepseek-v3/r1/chat families, the "fast" variant and the dated snapshots all
 // carry a single rate and must stay off-peak.
+//
+// ClinePass publishes a Peak column for its two DeepSeek rows, so it mirrors
+// the backend entry - including both Flash spellings, because its table names
+// the row "DeepSeek V4 Flash" while its roster serves deepseek-v4.1-flash (the
+// backend comment carries the source for that).
 const PEAK_FAMILIES = ['deepseek-v4.1-flash', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp', 'deepseek-v4-pro'];
 const PEAK_SCHEDULES = {
   'opencode-go': {models: PEAK_FAMILIES, windows: [[1, 4], [6, 10]], multiplier: 2},
   commandcode: {models: PEAK_FAMILIES, windows: [[1, 4], [6, 10]], multiplier: 2},
+  'cline-pass': {models: ['deepseek-v4.1-flash', 'deepseek-v4-flash', 'deepseek-v4-pro'], windows: [[1, 4], [6, 10]], multiplier: 2},
 };
 
 // Derive the peak multiplier from provider + model + start_time, matching

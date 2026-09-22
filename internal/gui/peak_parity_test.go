@@ -17,13 +17,19 @@ import (
 // The frontend copy is the dangerous one to drift: a model added to the backend
 // but not here renders as off-peak, and the row looks perfectly well-formed, so
 // the difference is invisible until someone compares a bill.
+//
+// Each platform lists its own models, because a platform's covered set is
+// whatever its own pricing table gives a peak column - which differs between
+// them. The pattern accepts either a named list (PEAK_FAMILIES) or an inline
+// array, so a platform with a narrower set is expressible.
 var (
 	peakFamiliesRe = regexp.MustCompile(`(?s)const PEAK_FAMILIES = \[(.*?)\];`)
-	peakScheduleRe = regexp.MustCompile(`'?([a-z0-9-]+)'?:\s*\{models:\s*PEAK_FAMILIES,\s*windows:\s*(\[\[.*?\]\])[^}]*multiplier:\s*([0-9.]+)\}`)
+	peakScheduleRe = regexp.MustCompile(`'?([a-z0-9-]+)'?:\s*\{models:\s*(PEAK_FAMILIES|\[[^\]]*\]),\s*windows:\s*(\[\[.*?\]\])[^}]*multiplier:\s*([0-9.]+)\}`)
 	peakFamilyItem = regexp.MustCompile(`'([^']+)'`)
 )
 
 func jsPeakSchedule(t *testing.T) (families []string, schedules map[string]struct {
+	models     []string
 	windows    [][2]int
 	multiplier float64
 }) {
@@ -39,19 +45,29 @@ func jsPeakSchedule(t *testing.T) (families []string, schedules map[string]struc
 	}
 
 	schedules = map[string]struct {
+		models     []string
 		windows    [][2]int
 		multiplier float64
 	}{}
 	pairRe := regexp.MustCompile(`\[(\d+),\s*(\d+)\]`)
 	for _, m := range peakScheduleRe.FindAllStringSubmatch(app, -1) {
 		var h struct {
+			models     []string
 			windows    [][2]int
 			multiplier float64
 		}
-		for _, p := range pairRe.FindAllStringSubmatch(m[2], -1) {
+		modelSrc := m[2]
+		if modelSrc == "PEAK_FAMILIES" {
+			h.models = families
+		} else {
+			for _, mm := range peakFamilyItem.FindAllStringSubmatch(modelSrc, -1) {
+				h.models = append(h.models, mm[1])
+			}
+		}
+		for _, p := range pairRe.FindAllStringSubmatch(m[3], -1) {
 			h.windows = append(h.windows, [2]int{atoi(p[1]), atoi(p[2])})
 		}
-		h.multiplier = atof(m[3])
+		h.multiplier = atof(m[4])
 		schedules[m[1]] = h
 	}
 	return families, schedules
@@ -83,13 +99,13 @@ func atof(s string) float64 {
 	return whole + frac
 }
 
-// The two schedules must cover the same platforms and the same window hours:
-// they answer the same question about the same money.
+// The two schedules must cover the same platforms, the same window hours and
+// the same models: they answer the same question about the same money.
 func TestPeakSchedulesMatchTheBackend(t *testing.T) {
 	families, schedules := jsPeakSchedule(t)
 
-	// Every family the frontend lists must be peak-priced by the backend, and
-	// every family the backend covers must be listed here.
+	// PEAK_FAMILIES is the shared list; every entry must be peak-priced by the
+	// backend under a platform that uses that list.
 	inside := time.Date(2026, 9, 7, 2, 0, 0, 0, time.UTC) // Monday 02:00 UTC
 	for _, family := range families {
 		if got := history.ProviderPeakMultiplier("opencode-go", family, inside); got <= 1 {
@@ -102,8 +118,8 @@ func TestPeakSchedulesMatchTheBackend(t *testing.T) {
 		}
 	}
 
-	// Only the platforms that actually publish peak pricing may appear, and
-	// each must use the backend's window and multiplier.
+	// Only the platforms that actually publish peak pricing may appear, and each
+	// must use the backend's window, multiplier and covered models.
 	for provider, s := range schedules {
 		wantWindow, wantMul := history.PeakSchedule(provider)
 		if wantMul <= 1 {
@@ -120,6 +136,19 @@ func TestPeakSchedulesMatchTheBackend(t *testing.T) {
 		for i, w := range wantWindow {
 			if s.windows[i] != [2]int{w.Start, w.End} {
 				t.Errorf("%s window %d: app.js %v, backend [%d,%d)", provider, i, s.windows[i], w.Start, w.End)
+			}
+		}
+		// The covered set must match too, in both directions: a model the
+		// frontend omits renders off-peak while the backend prices it at peak,
+		// and one it adds would show a badge the backend never charges for.
+		for _, model := range s.models {
+			if got := history.ProviderPeakMultiplier(provider, model, inside); got <= 1 {
+				t.Errorf("app.js peak-prices %s/%s but the backend does not", provider, model)
+			}
+		}
+		for model := range history.PeakModelFamilies() {
+			if history.ProviderPeakMultiplier(provider, model, inside) > 1 && !contains(s.models, model) {
+				t.Errorf("backend peak-prices %s/%s but app.js does not list it, so its rows render off-peak", provider, model)
 			}
 		}
 	}

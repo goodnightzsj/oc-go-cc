@@ -3,7 +3,10 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -41,6 +44,7 @@ type ModelRecord struct {
 	// that the upstream will reject.
 	MaxOutputTokens int64
 	Rates           *Rates
+	Tiers           []PromptTier
 }
 
 // Provider holds a provider's configuration as loaded from the database.
@@ -79,6 +83,21 @@ type Model struct {
 	Modalities Modalities
 	Limit      *Limit
 	Rates      *Rates
+	// Tiers are the long-context price bands, ordered by ascending threshold.
+	// They live beside Rates because they are the same kind of fact - what a
+	// token costs - conditioned on how many tokens there are. A model with no
+	// tiers is flat-rated, which is different from one whose tiers failed to
+	// load, so the empty slice and the nil slice are not distinguished here but
+	// the flag below is.
+	Tiers []PromptTier
+}
+
+// PromptTier is one long-context band, as stored.
+type PromptTier struct {
+	MinPromptTokens int64   `json:"min_prompt_tokens"`
+	Input           float64 `json:"input"`
+	Output          float64 `json:"output"`
+	CacheRead       float64 `json:"cache_read,omitempty"`
 }
 
 // Catalog holds the parsed provider and model maps as loaded from the database.
@@ -194,11 +213,11 @@ func (r *CatalogRepo) ReplaceBatch(ctx context.Context, providers []ProviderReco
 		}
 
 		_, err := tx.ExecContext(ctx, `
-			INSERT OR REPLACE INTO models (id, provider, name, display_name, context_window, max_output_tokens, cost_input_per_m, cost_output_per_m, supports_tools, supports_vision, supports_reasoning, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM models WHERE id = ?), ?))
+			INSERT OR REPLACE INTO models (id, provider, name, display_name, context_window, max_output_tokens, cost_input_per_m, cost_output_per_m, cost_tiers, supports_tools, supports_vision, supports_reasoning, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM models WHERE id = ?), ?))
 		`,
 			m.ID, provider, modelName, m.Name, m.ContextWindow, maxOutput, costInput, costOutput,
-			supportsTools, supportsVision, supportsReasoning, m.ID, now)
+			encodeTiers(m.Tiers), supportsTools, supportsVision, supportsReasoning, m.ID, now)
 		if err != nil {
 			return err
 		}
@@ -248,7 +267,7 @@ func (r *CatalogRepo) Load(ctx context.Context) (*IndexedCatalog, error) {
 	}
 
 	rows, err = r.db.DB().QueryContext(ctx, `
-		SELECT id, provider, name, context_window, max_output_tokens, cost_input_per_m, cost_output_per_m,
+		SELECT id, provider, name, context_window, max_output_tokens, cost_input_per_m, cost_output_per_m, cost_tiers,
 		       supports_tools, supports_vision, supports_reasoning
 		FROM models
 	`)
@@ -263,9 +282,10 @@ func (r *CatalogRepo) Load(ctx context.Context) (*IndexedCatalog, error) {
 		var displayName string
 		var contextWindow, maxOutputTokens sql.NullInt64
 		var costInput, costOutput sql.NullFloat64
+		var tiersJSON sql.NullString
 		var supportsTools, supportsVision, supportsReasoning int
 
-		if err := rows.Scan(&m.ID, &provider, &displayName, &contextWindow, &maxOutputTokens, &costInput, &costOutput,
+		if err := rows.Scan(&m.ID, &provider, &displayName, &contextWindow, &maxOutputTokens, &costInput, &costOutput, &tiersJSON,
 			&supportsTools, &supportsVision, &supportsReasoning); err != nil {
 			return nil, err
 		}
@@ -282,6 +302,7 @@ func (r *CatalogRepo) Load(ctx context.Context) (*IndexedCatalog, error) {
 		if costInput.Valid && costOutput.Valid {
 			m.Rates = &Rates{Input: costInput.Float64, Output: costOutput.Float64}
 		}
+		m.Tiers = decodeTiers(tiersJSON)
 
 		if m.Vision {
 			m.Modalities.Input = []string{"text", "image"}
@@ -407,4 +428,58 @@ func ModelNameFromKey(key string) string {
 		return key
 	}
 	return name
+}
+
+// encodeTiers stores the bands as JSON, or NULL when there are none. NULL and
+// "[]" both decode to no tiers; NULL is written so a flat-rated model is
+// distinguishable in the file from one that was never synced with this column.
+func encodeTiers(tiers []PromptTier) any {
+	if len(tiers) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(tiers)
+	if err != nil {
+		// Unreachable for this shape, and a silently dropped tier is a wrong
+		// price rather than a missing one, so fail loudly instead.
+		panic(fmt.Sprintf("encode prompt tiers: %v", err))
+	}
+	return string(raw)
+}
+
+// decodeTiers reads the bands back. A malformed value yields no tiers rather
+// than an error: the caller is a pricing path, and the honest answer for "the
+// bands could not be read" is the base rate, which is what no tiers means.
+// Storing a corrupt value is guarded at the write, not the read.
+func decodeTiers(raw sql.NullString) []PromptTier {
+	if !raw.Valid || raw.String == "" {
+		return nil
+	}
+	var out []PromptTier
+	if err := json.Unmarshal([]byte(raw.String), &out); err != nil {
+		slog.Warn("model cost tiers are unreadable; pricing at the base rate", "error", err)
+		return nil
+	}
+	return out
+}
+
+// tierRatesFor returns the band that applies to a prompt of this size, or nil
+// when no band does.
+//
+// A band applies strictly above its threshold, matching how models.dev words
+// the condition, and the highest applicable threshold wins. The prompt size
+// passed in must be the whole prompt - fresh input plus cache reads plus cache
+// writes - because that is the quantity the published threshold is written
+// against.
+func tierRatesFor(tiers []PromptTier, promptTokens int64) *PromptTier {
+	var best *PromptTier
+	for i := range tiers {
+		t := &tiers[i]
+		if t.MinPromptTokens <= 0 || promptTokens <= t.MinPromptTokens {
+			continue
+		}
+		if best == nil || t.MinPromptTokens > best.MinPromptTokens {
+			best = t
+		}
+	}
+	return best
 }

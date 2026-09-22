@@ -138,6 +138,11 @@ func modelToStorageRecord(key string, m Model) storage.ModelRecord {
 	if r := m.Rates(); r != nil {
 		record.Rates = &storage.Rates{Input: r.Input, Output: r.Output}
 	}
+	for _, t := range m.PromptTiers() {
+		record.Tiers = append(record.Tiers, storage.PromptTier{
+			MinPromptTokens: t.MinPromptTokens, Input: t.Input, Output: t.Output, CacheRead: t.CacheRead,
+		})
+	}
 	return record
 }
 
@@ -158,7 +163,14 @@ func storageModelToCatalogModel(m storage.Model) Model {
 		model.Limit = &Limit{Context: m.Limit.Context, Output: m.Limit.Output}
 	}
 	if m.Rates != nil {
-		model.Cost = &Cost{Input: m.Rates.Input, Output: m.Rates.Output}
+		cost := &Cost{Input: m.Rates.Input, Output: m.Rates.Output}
+		for _, t := range m.Tiers {
+			cost.Overrides = append(cost.Overrides, CostOverride{
+				MinPromptTokens: t.MinPromptTokens, Prompt: t.Input, Completion: t.Output,
+				InputCacheRead: t.CacheRead,
+			})
+		}
+		model.Cost = cost
 	}
 	return model
 }

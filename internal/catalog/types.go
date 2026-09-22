@@ -67,6 +67,46 @@ type Rates struct {
 type Cost struct {
 	Input  float64 `json:"input"`
 	Output float64 `json:"output"`
+	// Overrides carries the conditional prices models.dev publishes alongside
+	// the base rate. It is not read from models.dev today - that source omits
+	// the field entirely - but the shape is stated here because OpenRouter's own
+	// endpoint is where it comes from, and because parsing it is what keeps a
+	// time-window override from being mistaken for a tier.
+	Overrides []CostOverride `json:"overrides,omitempty"`
+}
+
+// CostOverride is one conditional price from a `cost.overrides` array.
+//
+// Two kinds arrive, distinguished by which condition is set: a long-context
+// tier (`MinPromptTokens`) and a time window (`UTCDays`, `UTCStart`, `UTCEnd`).
+// Only the first is applied to a price; see Tiers for why the second is not.
+type CostOverride struct {
+	// MinPromptTokens conditions the override on prompt size, making it a tier.
+	MinPromptTokens int64 `json:"min_prompt_tokens,omitempty"`
+
+	// The time-window form. Parsed rather than ignored, because the alternative
+	// is worse than doing nothing: an override whose condition goes unread
+	// becomes an unconditional one, and every request is billed at whichever
+	// band happened to be listed.
+	UTCDays  []string `json:"utc_days,omitempty"`
+	UTCStart *int     `json:"utc_start,omitempty"`
+	UTCEnd   *int     `json:"utc_end,omitempty"`
+
+	Prompt         float64 `json:"prompt,omitempty"`
+	Completion     float64 `json:"completion,omitempty"`
+	InputCacheRead float64 `json:"input_cache_read,omitempty"`
+}
+
+// IsTier reports whether this override is a prompt-size threshold rather than a
+// time window. An override carrying neither condition is not a tier: applying
+// it unconditionally would replace every request's price.
+func (o CostOverride) IsTier() bool {
+	return o.MinPromptTokens > 0 && !o.IsTimeWindow()
+}
+
+// IsTimeWindow reports whether this override is conditioned on the clock.
+func (o CostOverride) IsTimeWindow() bool {
+	return len(o.UTCDays) > 0 || o.UTCStart != nil || o.UTCEnd != nil
 }
 
 // Model describes a model available through one or more providers.
@@ -89,6 +129,87 @@ func (m Model) Rates() *Rates {
 		return nil
 	}
 	return &Rates{Input: m.Cost.Input, Output: m.Cost.Output}
+}
+
+// RatesAt returns the rates that apply to a request of the given prompt size,
+// falling back to the base rates when no tier covers it.
+//
+// A tier applies strictly above its threshold, which is how models.dev words it
+// ("Condition: applies when total prompt tokens are strictly greater than this
+// threshold"), and the highest applicable threshold wins. Applying the wrong
+// direction here is a factor-of-two error on exactly the largest requests, the
+// ones a tier exists to price.
+//
+// Time-window overrides are skipped rather than applied. models.dev does not
+// publish them, OpenRouter's own two time-windowed models express windows that
+// history.peakSchedules cannot represent (per-model multipliers, and one running
+// in the opposite direction from DeepSeek's), and guessing a window from a
+// payload that also carries weekday names would be inventing a rule. Skipping
+// leaves such a model priced at its listed base rate, which is the cheaper band
+// for both known cases - under-billing, stated in docs/openrouter.md, rather
+// than a coin flip.
+func (m Model) RatesAt(promptTokens int64) *Rates {
+	if m.Cost == nil {
+		return nil
+	}
+	best := int64(-1)
+	var chosen *CostOverride
+	for i := range m.Cost.Overrides {
+		o := &m.Cost.Overrides[i]
+		if !o.IsTier() {
+			continue
+		}
+		if promptTokens > o.MinPromptTokens && o.MinPromptTokens > best {
+			best, chosen = o.MinPromptTokens, o
+		}
+	}
+	if chosen == nil {
+		return m.Rates()
+	}
+	// Each field falls back to the base independently: an override that omits a
+	// cache rate means "unchanged", not "free".
+	out := &Rates{Input: chosen.Prompt, Output: chosen.Completion}
+	if out.Input == 0 {
+		out.Input = m.Cost.Input
+	}
+	if out.Output == 0 {
+		out.Output = m.Cost.Output
+	}
+	return out
+}
+
+// PromptTiers returns the model's long-context thresholds in ascending order,
+// for storage and for reporting which bands a model has.
+func (m Model) PromptTiers() []PromptTier {
+	if m.Cost == nil {
+		return nil
+	}
+	out := make([]PromptTier, 0, len(m.Cost.Overrides))
+	for _, o := range m.Cost.Overrides {
+		if !o.IsTier() {
+			continue
+		}
+		t := PromptTier{MinPromptTokens: o.MinPromptTokens, Input: o.Prompt, Output: o.Completion}
+		if o.InputCacheRead != 0 {
+			t.CacheRead = o.InputCacheRead
+		}
+		out = append(out, t)
+	}
+	slices.SortFunc(out, func(a, b PromptTier) int {
+		return int(a.MinPromptTokens - b.MinPromptTokens)
+	})
+	return out
+}
+
+// PromptTier is one long-context price band, in this package's own vocabulary.
+// Named for the condition rather than "tier" so a caller cannot confuse it with
+// a time window, which is the other thing the same array carries.
+type PromptTier struct {
+	// MinPromptTokens is the threshold the band applies strictly above.
+	MinPromptTokens int64   `json:"min_prompt_tokens"`
+	Input           float64 `json:"input"`
+	Output          float64 `json:"output"`
+	CacheRead       float64 `json:"cache_read,omitempty"`
 }
 
 // DisplayName returns the model's display name.

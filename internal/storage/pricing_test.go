@@ -113,6 +113,45 @@ func TestParseRequestTime(t *testing.T) {
 	}
 }
 
+// OpenRouter's hy3 is the first peak rule in this codebase whose multiplier is
+// not a whole number, and a fractional multiplier is the one value that could
+// survive rule evaluation and still be lost on the way to a stored cost - a
+// table typed as "peak means double", a rounding step, an int cast. The rule
+// itself is covered by history's TestOpenRouterPeakMatchesThePublishedOverrides;
+// this drives the same hour through the pricing path that actually writes
+// cost_usd, so 1.6 has to be carried by the money, not just by the rule.
+//
+// OpenRouter is priced from the catalog, so rates arrive as arguments here
+// rather than from a platform table; any pair works, and the assertion is
+// against the off-peak cost of the same tokens.
+func TestOpenRouterFractionalPeakSurvivesTheCostPath(t *testing.T) {
+	in := sql.NullFloat64{Float64: 0.0825, Valid: true} // hy3's catalog input rate
+	out := sql.NullFloat64{Float64: 0.33, Valid: true}  // and its output rate
+	const tokens = 1_000_000
+
+	// Monday 03:00Z and Sunday 09:00Z are both inside 0000-1600, which hy3 bills
+	// every day of the week; Monday 20:00Z is outside it.
+	cost := func(at time.Time) float64 {
+		got, ok := costForProviderTokensAt("openrouter", "tencent/hy3", tokens, tokens, 0, 0, in, out, at)
+		if !ok {
+			t.Fatalf("openrouter/tencent-hy3 must be priced at %v", at)
+		}
+		return got
+	}
+	offPeak := cost(time.Date(2026, 9, 7, 20, 0, 0, 0, time.UTC))
+	if math.Abs(offPeak-(1_000_000*0.0825+1_000_000*0.33)/1e6) > 1e-12 {
+		t.Fatalf("off-peak cost %v is not 1M in plus 1M out at the given rates", offPeak)
+	}
+	for _, stamp := range []time.Time{
+		time.Date(2026, 9, 7, 3, 0, 0, 0, time.UTC), // Monday, inside
+		time.Date(2026, 9, 6, 9, 0, 0, 0, time.UTC), // Sunday, inside: no day condition
+	} {
+		if got := cost(stamp); math.Abs(got-1.6*offPeak) > 1e-12 {
+			t.Errorf("cost at %v = %v, want 1.6×off-peak %v", stamp, got, 1.6*offPeak)
+		}
+	}
+}
+
 // CommandCode prints the peak sub-line on individual model rows rather than
 // covering a whole family, so the covered set has to be exactly what it
 // publishes - a substring match would wrongly peak-price the variants that are

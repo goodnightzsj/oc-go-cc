@@ -129,7 +129,7 @@ def peak_multiplier(provider: str, model: str, when: datetime.datetime) -> float
     return 2.0 if any(lo <= when.hour < hi for lo, hi in PEAK_WINDOWS) else 1.0
 
 
-def build_requests(rng: random.Random, days: int, today: datetime.date):
+def build_requests(rng: random.Random, days: int, today: datetime.date, now_utc: datetime.datetime):
     """Yield one dict per synthetic request across the last `days` days."""
     platforms = [(p, cfg["weight"]) for p, cfg in PLATFORMS.items()]
     names = [p for p, _ in platforms]
@@ -158,9 +158,22 @@ def build_requests(rng: random.Random, days: int, today: datetime.date):
             cache_read = rng.randint(20000, 180000) if big else rng.randint(0, 24000)
             cache_create = rng.randint(2000, 22000) if rng.random() < 0.35 else 0
 
-            hour = rng.randint(0, 23)
+            # The anchor day is capped at the current UTC time so no row is dated
+            # in the future. The History column phrases recent stamps relatively,
+            # and a row reading "12 hours from now" is a data bug that reads as a
+            # rendering one - it is the first thing anyone notices in a
+            # screenshot. Capping the hour alone is not enough: the generated
+            # minute can still land past the current one.
+            last_hour = now_utc.hour if day == today else 23
+            hour = rng.randint(0, max(0, last_hour))
+            minute, second = rng.randint(0, 59), rng.randint(0, 59)
+            if day == today and hour == now_utc.hour:
+                # Same hour: stay inside the elapsed part of it.
+                minute = rng.randint(0, max(0, now_utc.minute))
+                if minute == now_utc.minute:
+                    second = rng.randint(0, max(0, now_utc.second))
             when = datetime.datetime(
-                day.year, day.month, day.day, hour, rng.randint(0, 59), rng.randint(0, 59),
+                day.year, day.month, day.day, hour, minute, second,
                 tzinfo=datetime.timezone.utc,
             )
             mult = peak_multiplier(provider, model, when)
@@ -231,7 +244,10 @@ def main() -> int:
         CREATE INDEX idx_requests_start_time ON requests(start_time);
     """)
 
-    rows = list(build_requests(rng, args.days, anchor))
+    # Only the anchor day can contain the future, and only when it is today;
+    # the fixed anchor is in the past and is unaffected.
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    rows = list(build_requests(rng, args.days, anchor, now_utc))
     # A handful of rows the importer would write: usage known, timing never
     # observed locally. These are what exercise the "unknown throughput" path.
     for i in range(6):

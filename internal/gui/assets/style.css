@@ -184,6 +184,13 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
 .badge-error { background: rgba(255,69,58,0.15); color: var(--ui-red); }
 .badge-unknown { background: rgba(154,163,173,.12); color: var(--ui-muted); }
 .badge-peak { background:#b45309; color:#fff; }
+
+/* Duration grading. Colour carries the judgement, so the three levels are also
+   named in a title attribute and never rely on hue alone. */
+.timing { font-variant-numeric: tabular-nums; }
+.timing-good { color: var(--ui-green); }
+.timing-ok { color: var(--ui-amber); }
+.timing-slow { color: var(--ui-red); }
 .badge-scene { background: var(--ui-surface-raised); color: var(--ui-muted); }
 
 /* ── Filter Select ────────────────────────────────────────── */

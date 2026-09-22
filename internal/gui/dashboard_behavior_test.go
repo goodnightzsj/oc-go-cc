@@ -199,6 +199,28 @@ vm.runInContext(` + "`" + `
   assert.equal(billingWindowLabel({provider:'opencode-go',model:'deepseek-v4-pro',start_time:'2026-09-07T02:00:00Z',peak_multiplier:2}), t('detail.peak') + ' \u00d72');
   assert.equal(billingWindowLabel({provider:'opencode-go',model:'deepseek-v4-pro',start_time:'2026-05-01T02:00:00Z',peak_multiplier:1}), t('detail.offPeak'));
 
+  // Duration is graded by throughput, not by elapsed time: a long answer must
+  // not read as slow just for being long. 200 output tokens over 2s is 100
+  // tok/s (good) even though 20s elsewhere would be graded slow.
+  const fast = {duration_ms:2000, output_tokens:200, success:true};
+  const slowSameLength = {duration_ms:20000, output_tokens:200, success:true};
+  assert.ok(gradeDuration(fast, '2.0 s').includes('timing-good'));
+  assert.ok(gradeDuration(slowSameLength, '20.0 s').includes('timing-slow'));
+  // Below 100 output tokens the ratio is noise, so it grades on seconds: 4
+  // tokens in 2s is 2 tok/s and would be "slow" by rate, but the sample cannot
+  // support that claim.
+  assert.ok(gradeDuration({duration_ms:2000, output_tokens:4}, '2.0 s').includes('timing-good'), 'a short completion must grade on time, not on a meaningless rate');
+  assert.equal(requestThroughput({duration_ms:0, output_tokens:500}), null);
+  assert.equal(gradeDuration({duration_ms:0, output_tokens:0}, '—').includes('timing'), false, 'an unmeasured duration is not graded');
+
+  // Relative time is used for recent stamps with the absolute value kept in the
+  // title, and falls back to the date once "N days ago" stops being useful.
+  const recent = fmtRelativeTime(new Date(Date.now() - 120000).toISOString());
+  assert.ok(/minute|分钟/.test(recent), 'two minutes ago must read relatively, got ' + recent);
+  assert.equal(fmtRelativeTime(''), '—');
+  const ancient = fmtRelativeTime('2020-01-02T03:04:05Z');
+  assert.ok(ancient.includes('2020'), 'a stamp years old must fall back to the date, got ' + ancient);
+
   const unknownRecord = {id:'unknown', provider:'commandcode', model:'shared', details_known:false, success:false, streaming:false, duration_ms:0, attempt:0};
   allHistory = [unknownRecord];
   renderHistory();

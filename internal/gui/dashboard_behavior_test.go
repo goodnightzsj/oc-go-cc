@@ -287,6 +287,31 @@ vm.runInContext(` + "`" + `
   // Every row carries the extra cell; a header without one misaligns the table.
   assert.equal((perfHTML.match(/<td/g) || []).length, 24, 'three rows of eight cells');
 
+  // The health dot must be the LAST cell the row emits, because that is where
+  // the header puts its column. It used to be emitted fourth, which pushed the
+  // dot under "Avg (ms)" and shifted every latency figure one column left - so
+  // the table read P99 under "Health" and real numbers under the wrong headings.
+  // Counting the cells (above) cannot see that; only the position can.
+  //
+  // Asserted by cell index rather than by class or field name: the latency cells
+  // carry only a threshold class, and the health cell an aria-label, so a
+  // rendered row has no string tying a cell to its column. The header half of
+  // this pairing is TestPerformanceHeaderEndsWithHealth in Go, where index.html
+  // is readable; together they pin the row to the header, and neither alone is
+  // enough.
+  // Split on the opening tag so each segment carries that cell's content: the
+  // health cell's own <td> has no attributes, so matching tags alone cannot see
+  // which cell holds the dot.
+  const perfCells = perfHTML.slice(0, perfHTML.indexOf('</tr>')).split('<td').slice(1);
+  assert.equal(perfCells.length, 8, 'a Performance row must carry eight cells');
+  assert.ok(perfCells[0].includes('perf-model'), 'cell 1 must be the model (column: Model)');
+  for (const i of [3, 4, 5, 6]) {
+    assert.ok(!perfCells[i].includes('success-dot'),
+      'cell ' + (i + 1) + ' must be a latency figure under Avg/P50/P90/P99, not the health dot');
+  }
+  assert.ok(perfCells[7].includes('success-dot'),
+    'cell 8 must be the health dot, because the header puts Health last; got ' + perfCells[7]);
+
   // Theme has three states and the cycle must return to "follow the system".
   // With only two, the first toggle wrote a value and the page ignored the
   // system from then on, with no way back but clearing site data.

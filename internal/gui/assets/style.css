@@ -66,36 +66,55 @@
    browser paints ::backdrop behind it, and #test-modal is a plain <div>, which
    gets no backdrop at all.
 
-   Giving the *dialog* an opaque background composites two masks - 40% black
-   over 40% black paints 64% - which reads as a flat grey wash rather than a
-   scrim. So the dialog stays transparent and the mask is painted once, by
-   ::backdrop; the non-dialog variant paints its own, since nothing else will.
+   The mask is one rounded, inset, frosted sheet, and the tint rides on it.
 
-   The scrim is deliberately light. The panel already separates itself with a
-   large elevation shadow and a strong border, so the mask only needs to recede
-   the page, not black it out. Heavier masks were the reason the light theme
-   looked muddy: a grey veil over a near-white page flattens everything. */
-.modal-overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 100; opacity: 0; visibility: hidden; transition: opacity 0.2s, visibility 0.2s; }
-/* Non-dialog overlays have no ::backdrop to fall back on. */
-div.modal-overlay { background: var(--ui-scrim, rgba(6, 11, 21, 0.32)); }
+   Why not the tint on ::backdrop: ::backdrop is a browser-painted full-viewport
+   layer that cannot be inset, rounded or bordered - a solid-colour probe fills
+   all four screen corners. Tinting it and then frosting an inset layer on top
+   gives a mask with no visible shape at all: the band outside the inset and the
+   area inside it are tinted identically, so the rounded corner is painted the
+   same colour as the rectangle around it and reads as a plain full-bleed veil.
+   Measured, both regions came out at the same value (-28.0 light / -24.3 dark).
+
+   Tinting the shaped layer instead is what makes the shape real: the 22px band
+   keeps the page's own colour, so the corner is legible. Nothing else may paint
+   a tint, or that band would be filled in again and the corner would vanish. */
+.modal-overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 100; opacity: 0; visibility: hidden; transition: opacity 0.22s ease, visibility 0.22s; }
+/* Non-dialog overlays have no ::backdrop, so the shaped layer is their only
+   mask - it carries the tint for both variants. */
+.modal-overlay::before {
+  content: "";
+  position: absolute;
+  inset: 22px;
+  border-radius: 18px;
+  background: var(--ui-scrim, rgba(0, 0, 0, 0.6));
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+}
 .modal-overlay.visible { opacity: 1; visibility: visible; }
 dialog.modal-overlay:not([open]) { display: none; }
-dialog.modal-overlay[open] { opacity: 1; visibility: visible; border: 0; padding: 0; color: inherit; background: transparent; }
-/* The scrim is a token rather than a computed tint: it must darken in both
-   themes, and a value mixed from --ui-bg would brighten the page in light mode. */
-dialog.modal-overlay::backdrop {
-  background: var(--ui-scrim, rgba(6, 11, 21, 0.55));
-  backdrop-filter: blur(2px) saturate(0.9);
-  -webkit-backdrop-filter: blur(2px) saturate(0.9);
+/* A <dialog> shrink-wraps to its content and centres itself with `margin: auto`,
+   so its box is the panel's size, not the viewport. A mask painted by ::before
+   would then be inset *inside the panel* and hidden behind it. Stretching the
+   dialog to the viewport is what makes ::before a real mask; the flex centring
+   above still places the panel. */
+dialog.modal-overlay[open] {
+  opacity: 1; visibility: visible; border: 0; padding: 0; color: inherit; background: transparent;
+  width: auto; height: auto; max-width: none; max-height: none; margin: 0;
 }
-/* A blurred backdrop is decoration; honouring the reduced-motion preference
-   means dropping it rather than animating it more slowly. */
+/* Transparent on purpose: the tint belongs to the shaped layer above, and a
+   second tint here would darken the band that makes the shape readable. */
+dialog.modal-overlay::backdrop { background: transparent; }
+/* Frosting is decoration; honouring the reduced-motion preference means
+   dropping it rather than animating it more slowly. The tint stays, so the
+   separation survives without the blur. */
 @media (prefers-reduced-motion: reduce) {
   .modal-overlay { transition: none; }
   .modal-content { transition: none; }
-  dialog.modal-overlay::backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .modal-overlay::before { backdrop-filter: none; -webkit-backdrop-filter: none; }
 }
-.modal-content { background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: 12px; width: 90%; max-width: 520px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 18px 48px rgba(0,0,0,0.28), 0 2px 8px rgba(0,0,0,0.16); transform: scale(0.96) translateY(6px); transition: transform 0.2s ease; }
+/* Above the mask layer. */
+.modal-content { position: relative; z-index: 1; background: var(--ui-surface); border: 1px solid var(--ui-line-strong); border-radius: 14px; width: 90%; max-width: 520px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,0.34), 0 4px 14px rgba(0,0,0,0.18); transform: scale(0.96) translateY(6px); transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.3, 1); }
 .modal-overlay.visible .modal-content { transform: scale(1) translateY(0); }
 .modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--ui-line); background: var(--ui-surface-raised); }
 .modal-title { font-size: 14px; font-weight: 600; }
@@ -344,10 +363,19 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: none;
   --ui-surface-raised: #1e2a3a;
   --ui-line: #2c394d;
   --ui-line-strong: #61718a;
-  /* The scrim behind a modal. Always dark, in both themes: a mask's job
-     is to recede the page, and a light-themed scrim built from --ui-bg
-     would brighten the content it is meant to push back. */
-  --ui-scrim: rgba(6, 11, 21, 0.42);
+  /* The tint behind a modal. It is near-black in both themes, but the two
+     values differ by more than the theme difference suggests, because a tint's
+     reach depends on the ground it covers rather than on its own alpha.
+     Measured against each theme's own --ui-bg:
+       light (#f4f6fa, avg 247): 0.12 of #0b1220 lands at avg 220 - a 27-step drop
+       dark  (#101622, avg  24): the ground is already dark, so 0.12 would land
+                                 at avg 21 and read as no mask at all. Pure black
+                                 is the ceiling and it only reaches avg 0 - a
+                                 24-step drop. Matching the light theme's effect
+                                 therefore needs the alpha near its maximum.
+     An equal alpha in both themes is what produced the original bug: the mask
+     was plainly visible in light and invisible in dark. */
+  --ui-scrim: rgba(0, 0, 0, 0.82);
   --ui-text: #edf1f8;
   --ui-muted: #afbdd0;
   --ui-indigo: #a5b4fc;
@@ -1014,13 +1042,11 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
   max-width: 720px;
   max-height: min(84vh, 760px);
   /* Matches .modal-content's radius so the two dialogs do not sit at different
-     corner radii on the same screen. The border stays stronger than the base
-     one because this panel is large and needs its edge defined against the
-     scrim. */
+     corner radii on the same screen. */
   border: 1px solid var(--ui-line-strong);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--ui-surface);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, .45), 0 2px 10px rgba(0, 0, 0, .2);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, .5), 0 4px 14px rgba(0, 0, 0, .24);
 }
 .history-detail-content .modal-header { padding: 16px 20px; border-color: var(--ui-line); }
 .modal-subtitle { margin: 3px 0 0; color: var(--ui-muted); font-size: 11px; }
@@ -1164,7 +1190,16 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .analytics-table-scroll { max-width: 100%; max-height: 420px; overflow: auto; overscroll-behavior-inline: contain; border: 1px solid var(--ui-line); border-radius: 6px; background: var(--ui-surface); }
 /* The header must stay readable while the body scrolls under it. */
 .analytics-table thead th { position: sticky; top: 0; z-index: 1; }
-.analytics-table { width: 100%; min-width: 620px; border-collapse: collapse; font-size: 10px; }
+/* No blanket min-width: the same table class is used both full-width (period
+   details, the quota ledger) and inside a half-width comparison column (model
+   details). A shared 620px floor forced a horizontal scrollbar on the narrow
+   one, which is the panel the model table lives in.
+   The model cell is the last source of width. Its text is nowrap like every
+   other cell - correct for figures, wrong for a name as long as
+   "cline-pass/deepseek-v4.1-flash" - so the 260px cap plus nowrap held the
+   table at 643px inside a 548px column. Letting only that cell wrap is what
+   removes the scrollbar without shrinking any other column. */
+.analytics-table { width: 100%; border-collapse: collapse; font-size: 10px; }
 .analytics-table th,
 .analytics-table td { padding: 9px 10px; border-bottom: 1px solid var(--ui-line); text-align: left; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .analytics-table th { color: var(--ui-muted); background: var(--ui-surface-raised); font-size: 9px; font-weight: 700; }
@@ -1172,6 +1207,10 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .analytics-table tbody tr:last-child td { border-bottom: 0; }
 .analytics-table tbody tr:hover td { background: var(--ui-surface-raised); }
 .analytics-table code { display: inline-block; max-width: 260px; overflow: hidden; color: var(--ui-text); font-size: 10px; text-overflow: ellipsis; vertical-align: bottom; }
+/* A model name may wrap; it is the one cell whose content is a word rather than
+   a figure, and it is the only thing that pushed the table past its column. */
+.analytics-table td code,
+.analytics-table td small { white-space: normal; overflow-wrap: anywhere; }
 .usage-detail-table { min-width: 900px; }
 /* A live price table and the build-time snapshot price a request identically,
    so the two are told apart by colour and by a word, never by the number. */
@@ -1409,7 +1448,7 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
     --ui-input: #fdfdff;
     --ui-line: #d5dce7;
     --ui-line-strong: #8794a7;
-    --ui-scrim: rgba(11, 18, 32, 0.16);
+    --ui-scrim: rgba(11, 18, 32, 0.12);
     --ui-text: #172235;
     --ui-muted: #526178;
     --ui-indigo: #4f46e5;
@@ -1430,7 +1469,7 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
   --ui-input: #fdfdff;
   --ui-line: #d5dce7;
   --ui-line-strong: #8794a7;
-  --ui-scrim: rgba(11, 18, 32, 0.16);
+  --ui-scrim: rgba(11, 18, 32, 0.12);
   --ui-text: #172235;
   --ui-muted: #526178;
   --ui-indigo: #4f46e5;

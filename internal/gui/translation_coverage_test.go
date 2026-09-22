@@ -60,6 +60,41 @@ func TestEveryTranslationKeyIsDefined(t *testing.T) {
 	}
 }
 
+// TestNoTranslationKeyIsDefinedTwice guards a silent-failure mode that no other
+// check here can see: two entries with the same key in one table. The later
+// entry wins at runtime, so the earlier one is dead - and because both keys are
+// "defined", the missing-key and parity tests both pass.
+//
+// It shipped that way. `analytics.throughput` meant "Last-minute throughput" (a
+// card on the Overview) and "Tok/s" (a column header on Usage Analytics); the
+// second definition silently overrode the first, so the Overview card was
+// labelled "Tok/s" above a value reading "0 RPM" in both languages.
+func TestNoTranslationKeyIsDefinedTwice(t *testing.T) {
+	app, err := assets.ReadFile("assets/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(app)
+
+	for _, lang := range []string{"en", "zh"} {
+		body := translationBlock(t, source, lang)
+		seen := map[string]bool{}
+		var dups []string
+		for _, match := range regexp.MustCompile(`(?m)^\s*'([a-zA-Z][a-zA-Z0-9_.]*)':`).
+			FindAllStringSubmatch(body, -1) {
+			if seen[match[1]] {
+				dups = append(dups, match[1])
+			}
+			seen[match[1]] = true
+		}
+		sort.Strings(dups)
+		if len(dups) > 0 {
+			t.Errorf("the %s table defines these keys more than once, so the earlier value is dead:\n  %s",
+				lang, strings.Join(dups, "\n  "))
+		}
+	}
+}
+
 // TestTranslationTablesAreInParity pins that every key exists in both languages.
 // A key present only in English falls back to the key name for a Chinese reader,
 // which is the same visible failure as an undefined key but harder to spot in
@@ -96,11 +131,25 @@ func TestTranslationTablesAreInParity(t *testing.T) {
 }
 
 // translationKeys parses one language block out of the TRANSLATIONS object.
+func translationKeys(t *testing.T, source, lang string) map[string]bool {
+	t.Helper()
+	keys := map[string]bool{}
+	for _, match := range regexp.MustCompile(`(?m)^\s*'([a-zA-Z][a-zA-Z0-9_.]*)':`).
+		FindAllStringSubmatch(translationBlock(t, source, lang), -1) {
+		keys[match[1]] = true
+	}
+	if len(keys) == 0 {
+		t.Fatalf("parsed 0 keys from the %s table, so the assertion would be vacuous", lang)
+	}
+	return keys
+}
+
+// translationBlock returns the raw text of one language block.
 //
 // The tables are found by their opening marker rather than by brace counting,
 // because the values contain braces ("{n} days") that would unbalance a naive
 // scan. Each block ends at the first line that closes it at the same indent.
-func translationKeys(t *testing.T, source, lang string) map[string]bool {
+func translationBlock(t *testing.T, source, lang string) string {
 	t.Helper()
 	marker := "\n  en: {"
 	if lang == "zh" {
@@ -115,13 +164,9 @@ func translationKeys(t *testing.T, source, lang string) map[string]bool {
 	if end < 0 {
 		t.Fatalf("could not locate the end of the %s translation table", lang)
 	}
-	keys := map[string]bool{}
-	for _, match := range regexp.MustCompile(`(?m)^\s*'([a-zA-Z][a-zA-Z0-9_.]*)':`).
-		FindAllStringSubmatch(rest[:end], -1) {
-		keys[match[1]] = true
+	block := rest[:end]
+	if !strings.Contains(block, ":") {
+		t.Fatalf("the %s block looks empty, so the assertion would be vacuous", lang)
 	}
-	if len(keys) == 0 {
-		t.Fatalf("parsed 0 keys from the %s table, so the assertion would be vacuous", lang)
-	}
-	return keys
+	return block
 }

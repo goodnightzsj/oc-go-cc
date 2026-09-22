@@ -237,7 +237,7 @@ const TRANSLATIONS = {
     'analytics.dailyTrend': 'Daily Token Trend',
     'analytics.requestTrend': 'Request trend',
     'analytics.tokenTrend': 'Token trend',
-    'analytics.throughput': 'Last-minute throughput',
+    'analytics.lastMinuteRate': 'Last-minute throughput',
     'analytics.granularity': 'Granularity',
     'analytics.hour': 'Hour',
     'analytics.day': 'Day',
@@ -739,7 +739,7 @@ const TRANSLATIONS = {
     'analytics.dailyTrend': '每日 Token 趋势',
     'analytics.requestTrend': '请求趋势',
     'analytics.tokenTrend': 'Token 趋势',
-    'analytics.throughput': '近一分钟吞吐',
+    'analytics.lastMinuteRate': '近一分钟吞吐',
     'analytics.granularity': '粒度',
     'analytics.hour': '小时',
     'analytics.day': '天',
@@ -2322,6 +2322,16 @@ function renderHistory() {
       : t('detail.unknown');
     const totalTokens = Number(h.input_tokens || 0) + Number(h.output_tokens || 0)
       + Number(h.cache_read_tokens || 0) + Number(h.cache_creation_tokens || 0);
+    // The split the row used to carry as two columns. It rides on the second
+    // line instead, where the cost cell already puts its own qualifier: two
+    // more columns would have squeezed the table back into a horizontal
+    // scrollbar on the narrower layouts for information that is secondary to
+    // the total. The labels are the removed columns' own, because the figures
+    // are the removed columns' values - prompt_tokens is raw input plus cache,
+    // so calling it "input" here would name it after a different number.
+    const tokenSplit = detailsKnown
+      ? `${Number(h.prompt_tokens || 0).toLocaleString()} ${t('th.promptTokens')} / ${Number(h.output_tokens || 0).toLocaleString()} ${t('th.outputTokens')}`
+      : t('detail.unknown');
     const pm = effectivePeakMultiplier(h);
     const peakMark = pm > 1
       ? ' <span class="badge badge-peak" title="' + escapeHtml(t('history.peakWindow')) + '">' + escapeHtml(t('detail.peak')) + ' ×' + pm + '</span>'
@@ -2332,7 +2342,7 @@ function renderHistory() {
       <td><div class="history-status-stack">${detailsKnown ? `<span class="badge ${h.success ? 'badge-success' : 'badge-error'}" title="${h.success ? t('badge.success') : t('badge.fail')}">${h.success ? t('badge.success') : t('badge.fail')}</span>` : `<span class="badge badge-unknown" title="${t('detail.unknown')}">${t('detail.unknown')}</span>`}<small class="history-stream-state">${streamLabel}</small></div></td>
       <td><div class="history-model-cell"><strong title="${escapeHtml(h.model)}">${escapeHtml(h.model) || '—'}</strong><small>${escapeHtml(providerLabel(h.provider))}</small></div></td>
       <td><span class="badge badge-scene" title="${t('detail.scenario')}: ${escapeHtml(h.scenario) || '—'}">${escapeHtml(h.scenario) || '—'}</span></td>
-      <td><button type="button" class="history-token-trigger" data-token-id="${escapeHtml(rowId)}" aria-label="${t('detail.title')}">${totalTokens.toLocaleString()}</button></td>
+      <td><button type="button" class="history-token-trigger" data-token-id="${escapeHtml(rowId)}" aria-label="${t('detail.title')}">${totalTokens.toLocaleString()}</button><br><small>${tokenSplit}</small></td>
       <td>${cost}<br><small>${costSourceLabel(h.cost_source)}</small></td>
       <td>${detailsKnown ? fmtDuration(h.duration_ms) : '—'}</td>
     </tr>
@@ -3447,6 +3457,14 @@ function showHistoryDetail(record) {
   modal.querySelector('.modal-footer')?.remove();
   const tokenValue = value => value != null ? Number(value).toLocaleString() : '—';
   const detailsKnown = historyHasDetails(record);
+  // This request's own output rate. It is the same quantity the analytics table
+  // reports per model, computed the same way (output tokens over the whole
+  // wall time, so it includes the wait for the first token), which is what
+  // makes one row's figure checkable against the model's average. Null when the
+  // request cannot support a rate, so the row is omitted rather than showing 0.
+  const tpsOfRow = detailsKnown && record.success && Number(record.duration_ms) > 0 && Number(record.output_tokens) > 0
+    ? Number(record.output_tokens) / (Number(record.duration_ms) / 1000)
+    : null;
   const statusLabel = detailsKnown ? (record.success ? t('detail.success') : t('detail.failed')) : t('detail.unknown');
   modalBody.innerHTML = `
     <div class="detail-summary">
@@ -3478,6 +3496,7 @@ function showHistoryDetail(record) {
       <div class="detail-row"><span class="detail-label">${t('detail.requestType')}</span><span class="detail-value">${detailsKnown ? t(record.streaming ? 'detail.streaming' : 'detail.nonStreaming') : t('detail.unavailable')}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.attempt')}</span><span class="detail-value">${detailsKnown ? (record.attempt || 1) : t('detail.unavailable')}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.duration')}</span><span class="detail-value">${detailsKnown ? fmtDuration(record.duration_ms) : t('detail.unavailable')}</span></div>
+      ${tpsOfRow == null ? '' : `<div class="detail-row"><span class="detail-label">${t('analytics.throughput')}</span><span class="detail-value" title="${escapeHtml(t('analytics.throughputHint'))}">${fmtThroughput(tpsOfRow)}</span></div>`}
     </div>
     ${record.error_msg ? `<div class="detail-error"><strong>${t('detail.error')}</strong><br>${escapeHtml(record.error_msg)}</div>` : ''}
   `;

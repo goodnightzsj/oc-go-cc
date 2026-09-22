@@ -179,8 +179,39 @@ async function checks() {
   const multi = get('daily-spend-note').textContent;
   assert.ok(!multi.includes('4.50'), 'the single-day caption does not survive a re-render: ' + multi);
 
-  // --- price table provenance ---
-  // A live table and the build-time snapshot price a request identically, so
+  // The detail dialog carries the same rate the model table reports, computed
+  // from that one request, so a row's figure can be checked against the model's
+  // average. 2000 output tokens over 4s is 500 tok/s.
+  const tpsRow = record => {
+    html = get('modal-body').innerHTML;
+    // Match the whole row, so the assertion sees the label and its value
+    // together rather than a bare number that could come from any other field.
+    const m = html.match(new RegExp('<div class="detail-row"><span class="detail-label">' +
+      t('analytics.throughput') + '</span><span class="detail-value"[^>]*>([^<]*)<'));
+    return m ? m[1] : null;
+  };
+  showHistoryDetail({ id:'r1', provider:'opencode-go', model:'glm-5.2', scenario:'default',
+    details_known:true, success:true, streaming:true, duration_ms:4000, output_tokens:2000,
+    attempt:1, start_time:'2026-09-07T02:00:00Z' });
+  assert.equal(tpsRow(), '500', 'the dialog states the request rate');
+  // Unknown outcome, unmeasured output or a failed request means no rate: the
+  // row is absent rather than zero, which would read as a stalled request. The
+  // assertion is on the row's presence, not on its text - a zeroed rate renders
+  // as "—" and would pass a substring check while still being wrong.
+  showHistoryDetail({ id:'r2', provider:'opencode-go', model:'glm-5.2', scenario:'default',
+    details_known:true, success:true, streaming:true, duration_ms:4000, output_tokens:0,
+    attempt:1, start_time:'2026-09-07T02:00:00Z' });
+  assert.equal(tpsRow(), null, 'no measured output yields no rate row');
+  showHistoryDetail({ id:'r3', provider:'opencode-go', model:'glm-5.2', scenario:'default',
+    details_known:true, success:false, streaming:true, duration_ms:4000, output_tokens:2000,
+    attempt:1, start_time:'2026-09-07T02:00:00Z' });
+  assert.equal(tpsRow(), null, 'a failed request yields no rate row');
+  showHistoryDetail({ id:'r4', provider:'opencode-go', model:'glm-5.2', scenario:'default',
+    details_known:false, success:false, streaming:false, duration_ms:0, output_tokens:0,
+    attempt:0, start_time:'2026-09-07T02:00:00Z' });
+  assert.equal(tpsRow(), null, 'an unknown record is not given a rate');
+
+  // --- price table provenance ---  // A live table and the build-time snapshot price a request identically, so
   // the panel must say which is in use; that distinction is its only purpose.
   AnalyticsModule.renderPriceTables({ tables: {
     'commandcode': { rules: 70, seed_rules: 70, live: true, refreshed_at: new Date().toISOString() },

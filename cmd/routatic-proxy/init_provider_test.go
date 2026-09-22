@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/site"
 )
 
 func TestInitCmd_ProviderFlag(t *testing.T) {
@@ -219,8 +220,18 @@ func TestGetProviderConfig_UnknownProvider(t *testing.T) {
 	}
 }
 
+// TestGetProviderConfig_AllProviders runs over the registry rather than a
+// hand-written list, which is what it used to be. That list had five names and
+// omitted cline-pass, so `init --provider cline-pass` would have failed at
+// runtime with "unknown provider" and no test would have said so.
 func TestGetProviderConfig_AllProviders(t *testing.T) {
-	providers := []string{"opencode-go", "opencode-zen", "aws-bedrock", "openrouter", "commandcode"}
+	providers := make([]string, 0, len(site.All()))
+	for _, d := range site.All() {
+		providers = append(providers, d.ID)
+		if _, ok := providerPresets[d.ID]; !ok {
+			t.Errorf("platform %q is registered but has no provider preset, so init --provider %s would fail at runtime", d.ID, d.ID)
+		}
+	}
 
 	for _, provider := range providers {
 		t.Run(provider, func(t *testing.T) {

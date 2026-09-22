@@ -1,8 +1,11 @@
 package history
 
 import (
+	"slices"
 	"testing"
 	"time"
+
+	"github.com/routatic/proxy/internal/site"
 )
 
 // inside is a Monday 02:00 UTC instant: weekday, inside the 01-04 window.
@@ -153,6 +156,75 @@ func TestEveryPeakScheduleIsWellFormed(t *testing.T) {
 			if w.Start < 0 || w.End > 24 || w.Start >= w.End {
 				t.Errorf("%s: window [%d,%d) is not a valid hour range", provider, w.Start, w.End)
 			}
+		}
+	}
+}
+
+// TestPeakSchedulesAgreeWithTheRegistry closes the one omission that has already
+// cost real money here. A platform that publishes two rates for one model needs
+// an entry in peakSchedules; without it every one of its requests bills flat at
+// the off-peak rate, the charge is simply wrong, and nothing reports it - the
+// row renders perfectly well with no badge.
+//
+// ClinePass was exactly that: its pricing table carries a Peak column, it had no
+// entry, and its traffic was under-billed until someone noticed no badge ever
+// appeared. The absence of a schedule is indistinguishable from a platform that
+// has no peak pricing, so the fact is now stated in the registry too and the two
+// are checked against each other. Either direction being wrong is a failure:
+// a PeakPriced platform with no rule over-bills nothing but under-charges its
+// peak hours, and a schedule for a platform that does not declare peak pricing
+// means the registry is out of date.
+func TestPeakSchedulesAgreeWithTheRegistry(t *testing.T) {
+	scheduled := PeakScheduledProviders()
+	for _, d := range site.All() {
+		_, hasSchedule := scheduled[d.ID]
+		if d.PeakPriced && !hasSchedule {
+			t.Errorf("platform %q declares PeakPriced but has no peakSchedules entry, so its peak hours would bill at the off-peak rate silently", d.ID)
+		}
+		if !d.PeakPriced && hasSchedule {
+			t.Errorf("peakSchedules prices %q but the registry does not declare it PeakPriced", d.ID)
+		}
+	}
+}
+
+// TestEachScheduleOwnsItsCoveredModels. peakSchedules lists the covered models
+// per platform on purpose (the comment on the table says why: a change to one
+// platform must not move another platform's money). But Go and CommandCode both
+// point at the same shared `peakModelFamilies` value, so they are not in fact
+// independent - a model added for one silently becomes peak-priced for the
+// other, which is the coupling the per-platform layout exists to prevent.
+//
+// The platforms happen to agree today. This asserts the agreement is a fact
+// about the data rather than an artefact of sharing a map, so the day one of
+// them publishes a different set, the test says so instead of quietly pricing
+// the other platform's traffic at peak.
+func TestEachScheduleOwnsItsCoveredModels(t *testing.T) {
+	// The shared list is only legitimate while every platform using it publishes
+	// the same covered set; assert each platform's set explicitly here so a
+	// divergence has to be recorded rather than absorbed.
+	want := map[string][]string{
+		"opencode-go": {"deepseek-v4-flash", "deepseek-v4.1-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"},
+		"commandcode": {"deepseek-v4-flash", "deepseek-v4.1-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"},
+		"cline-pass":  {"deepseek-v4-flash", "deepseek-v4.1-flash", "deepseek-v4-pro"},
+	}
+	for provider, models := range want {
+		s, ok := peakSchedules[provider]
+		if !ok {
+			t.Errorf("%s has no schedule", provider)
+			continue
+		}
+		for _, m := range models {
+			if !s.models[m] {
+				t.Errorf("%s does not cover %q", provider, m)
+			}
+		}
+		if len(s.models) != len(models) {
+			got := make([]string, 0, len(s.models))
+			for m := range s.models {
+				got = append(got, m)
+			}
+			slices.Sort(got)
+			t.Errorf("%s covers %v, want %v", provider, got, models)
 		}
 	}
 }

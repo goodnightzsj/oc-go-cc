@@ -135,8 +135,8 @@ func modelToStorageRecord(key string, m Model) storage.ModelRecord {
 		ContextWindow:   m.ContextWindow(),
 		MaxOutputTokens: m.MaxOutputTokens(),
 	}
-	if m.Rates != nil {
-		record.Rates = &storage.Rates{Input: m.Rates.Input, Output: m.Rates.Output}
+	if r := m.Rates(); r != nil {
+		record.Rates = &storage.Rates{Input: r.Input, Output: r.Output}
 	}
 	return record
 }
@@ -158,10 +158,7 @@ func storageModelToCatalogModel(m storage.Model) Model {
 		model.Limit = &Limit{Context: m.Limit.Context, Output: m.Limit.Output}
 	}
 	if m.Rates != nil {
-		model.Rates = &Rates{
-			Input:  m.Rates.Input,
-			Output: m.Rates.Output,
-		}
+		model.Cost = &Cost{Input: m.Rates.Input, Output: m.Rates.Output}
 	}
 	return model
 }

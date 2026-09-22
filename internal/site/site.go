@@ -86,12 +86,9 @@ type Descriptor struct {
 	// no peak pricing - which is why the fact is stated in both places and
 	// checked against itself.
 	//
-	// Only the platforms whose own pricing page carries two rates for one model
-	// set this. OpenRouter is deliberately false: it does express time-based
-	// pricing, but through per-model `pricing.overrides` on models.dev rather
-	// than a platform-wide rule, and this proxy prices OpenRouter from the
-	// catalog and reads no overrides at all - so there is no rule to register.
-	// That gap is tracked in docs/, not silently corrected.
+	// The flag is in the registry because the registry is keyed by platform id,
+	// which is what a schedule entry is keyed by too; the registry itself stays
+	// a plain data description and does not carry the rules.
 	PeakPriced bool
 }
 
@@ -104,7 +101,14 @@ var registry = []Descriptor{
 		RateTable: ClinePass, PeakPriced: true},
 	{ID: OpenCodeZen, DisplayName: "OpenCode Zen", Order: 3},
 	{ID: AWSBedrock, DisplayName: "AWS Bedrock", Order: 4},
-	{ID: OpenRouter, DisplayName: "OpenRouter", Order: 5},
+	// OpenRouter prices two of its models by the clock. Its windows are not a
+	// platform-wide rule - they come from per-model `pricing.overrides` on its
+	// own /api/v1/models endpoint, and the two models covered so far disagree on
+	// both hours and multiplier - which is why history.peakSchedules states them
+	// per model rather than per platform. They are transcribed there, not read
+	// at runtime: models.dev, the catalog this proxy syncs, carries no overrides
+	// at all.
+	{ID: OpenRouter, DisplayName: "OpenRouter", Order: 5, PeakPriced: true},
 }
 
 // All returns every descriptor in presentation order. Callers must not assume

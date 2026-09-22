@@ -37,7 +37,7 @@
         "context": 128000,
         "output": 4096
       },
-      "rates": {
+      "cost": {
         "input": 0.5,
         "output": 1.5
       }
@@ -59,7 +59,7 @@
         "context": 128000,
         "output": 4096
       },
-      "rates": {
+      "cost": {
         "input": 0.5,
         "output": 1.5
       }
@@ -82,7 +82,7 @@
         "context": 256000,
         "output": 8192
       },
-      "rates": {
+      "cost": {
         "input": 3.0,
         "output": 5.0
       }
@@ -104,7 +104,7 @@
         "context": 200000,
         "output": 8192
       },
-      "rates": {
+      "cost": {
         "input": 2.0,
         "output": 6.0
       }
@@ -126,7 +126,7 @@
         "context": 1000000,
         "output": 32768
       },
-      "rates": {
+      "cost": {
         "input": 1.0,
         "output": 2.0
       }
@@ -148,7 +148,7 @@
         "context": 1000000,
         "output": 32768
       },
-      "rates": {
+      "cost": {
         "input": 1.0,
         "output": 2.0
       }
@@ -170,7 +170,7 @@
         "context": 128000,
         "output": 4096
       },
-      "rates": {
+      "cost": {
         "input": 0.5,
         "output": 1.5
       }
@@ -192,7 +192,7 @@
         "context": 128000,
         "output": 4096
       },
-      "rates": {
+      "cost": {
         "input": 0.1,
         "output": 0.1
       }

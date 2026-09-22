@@ -111,7 +111,7 @@ func (s *Selector) resolveCandidates(scen config.CostScenario, constraints Scena
 			}
 			// Missing prices cannot participate in cheapest-model selection.
 			// Explicit zero rates remain valid (free) candidates.
-			if model.Rates == nil {
+			if model.Rates() == nil {
 				continue
 			}
 			if maxContext > 0 && model.ContextWindow() > maxContext {

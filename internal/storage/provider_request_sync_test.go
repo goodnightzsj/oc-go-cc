@@ -143,3 +143,64 @@ func TestSyncProviderUsageRequestsRequiresSnapshot(t *testing.T) {
 		t.Fatal("sync without provider snapshot succeeded")
 	}
 }
+
+// TestSyncInsertedRowsCarryThePeakMultiplier. The provider-sync path writes its
+// own INSERT column list rather than going through peakMultiplierForRecord, the
+// helper every other writer uses, and that list omitted peak_multiplier - so a
+// row imported from OpenCode Go's own billing snapshot was stored at the
+// column's DEFAULT of 1.
+//
+// That is the platform's peak-priced traffic, so the effect was a request billed
+// at twice the off-peak rate being displayed and totalled at the off-peak rate.
+// Nothing reported it, and the startup backfill silently corrected it on the next
+// service start, so the same row showed one number before a restart and another
+// after.
+//
+// 2026-09-07 is a Monday and 02:00 UTC sits inside the 01-04 window, so the
+// expected multiplier is 2 and a DEFAULT of 1 cannot pass by coincidence.
+func TestSyncInsertedRowsCarryThePeakMultiplier(t *testing.T) {
+	db, err := Open(Config{DatabasePath: filepath.Join(t.TempDir(), "peak.db")})
+	if err != nil {
+		t.Fatalf("open storage: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	observedAt := time.Date(2026, 9, 7, 2, 0, 0, 0, time.UTC)
+	if got := history.ProviderPeakMultiplier("opencode-go", "deepseek-v4-flash", observedAt); got != 2 {
+		t.Fatalf("fixture is not in the peak window: multiplier %v", got)
+	}
+	capturedAt := observedAt.Add(time.Minute)
+
+	// No local rows, so the snapshot row below has no candidate to match and is
+	// imported - which is the branch that writes the column.
+	providerRows := []ProviderCostRecord{
+		{Time: observedAt, Model: "deepseek-v4-flash", Provider: "inf-go.oa-compat", Plan: "lite",
+			InputTokens: 10, OutputTokens: 2, CacheReadTokens: 30, ProviderCostUnits: 1234},
+	}
+	if err := db.ReplaceProviderUsage(context.Background(), capturedAt, providerRows); err != nil {
+		t.Fatalf("replace provider usage: %v", err)
+	}
+	report, err := db.SyncProviderUsageRequests(context.Background(), true)
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if report.Inserted != 1 {
+		t.Fatalf("inserted = %d, want 1: %+v", report.Inserted, report)
+	}
+
+	var peak float64
+	if err := db.DB().QueryRow(`SELECT peak_multiplier FROM requests WHERE model = ?`, "deepseek-v4-flash").Scan(&peak); err != nil {
+		t.Fatalf("read peak_multiplier: %v", err)
+	}
+	if peak != 2 {
+		t.Errorf("imported peak-window row has peak_multiplier = %v, want 2", peak)
+	}
+
+	// And the row must not depend on the backfill to be right: a second pass
+	// finds nothing to correct, which is only true if the insert already set it.
+	if n, err := db.BackfillPeakMultipliers(context.Background()); err != nil {
+		t.Fatalf("backfill: %v", err)
+	} else if n != 0 {
+		t.Errorf("backfill corrected %d rows, so the insert did not carry the multiplier", n)
+	}
+}

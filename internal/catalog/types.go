@@ -40,7 +40,31 @@ type Limit struct {
 }
 
 // Rates describes model pricing per million tokens.
+//
+// This is the proxy's own shape, not models.dev's. models.dev publishes rates
+// under "cost" (and only input/output; cache rates live in the per-model
+// payload too but are not read here). Distinct types rather than one tag
+// because the two names mean different things: "rates" is what this proxy
+// prices with, "cost" is what the catalog happens to call it, and the mapping
+// between them is stated once, below.
 type Rates struct {
+	Input  float64 `json:"input"`
+	Output float64 `json:"output"`
+}
+
+// Cost is models.dev's own pricing object, exported because it is part of the
+// parsed catalog contract: a caller building a Model by hand must be able to
+// state a price the same way the JSON does. It is a separate type so the
+// upstream field name appears exactly once, at the conversion, instead of being
+// renamed into this package's vocabulary and then silently not matching.
+//
+// This existed as a live bug: Model.Rates carried the tag `rates`, the catalog
+// publishes `cost`, and the mismatch is invisible - Rates stays nil, the model
+// is stored with no price, and every cost reads as unknown rather than as
+// wrong. Three platforms (OpenCode Go, CommandCode, ClinePass) hid it, because
+// each has a hand-written seed table that fills the price in regardless. Any
+// platform priced only from the catalog got nothing.
+type Cost struct {
 	Input  float64 `json:"input"`
 	Output float64 `json:"output"`
 }
@@ -54,7 +78,17 @@ type Model struct {
 	ToolCall   bool       `json:"tool_call"`
 	Modalities Modalities `json:"modalities"`
 	Limit      *Limit     `json:"limit,omitempty"`
-	Rates      *Rates     `json:"rates,omitempty"`
+	Cost       *Cost      `json:"cost,omitempty"`
+}
+
+// Rates returns the model's published per-million-token rates, or nil when the
+// catalog carries none. A model with no rates is a different thing from one
+// costing zero, and the callers below depend on that distinction.
+func (m Model) Rates() *Rates {
+	if m.Cost == nil {
+		return nil
+	}
+	return &Rates{Input: m.Cost.Input, Output: m.Cost.Output}
 }
 
 // DisplayName returns the model's display name.
@@ -92,16 +126,16 @@ func (m Model) MaxOutputTokens() int64 {
 
 // CostInputPerM returns the input cost per million tokens, or 0 if unknown.
 func (m Model) CostInputPerM() float64 {
-	if m.Rates != nil {
-		return m.Rates.Input
+	if r := m.Rates(); r != nil {
+		return r.Input
 	}
 	return 0
 }
 
 // CostOutputPerM returns the output cost per million tokens, or 0 if unknown.
 func (m Model) CostOutputPerM() float64 {
-	if m.Rates != nil {
-		return m.Rates.Output
+	if r := m.Rates(); r != nil {
+		return r.Output
 	}
 	return 0
 }

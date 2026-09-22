@@ -97,7 +97,7 @@ func TestSelectCheapestRespectsActiveSite(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cat := selectorTestCatalog(t)
 			cat.Providers[site.CommandCode] = catalog.Provider{Name: site.CommandCode}
-			cat.Models["commandcode/published"] = catalog.Model{ID: "published", Rates: &catalog.Rates{Input: 10, Output: 10}}
+			cat.Models["commandcode/published"] = catalog.Model{ID: "published", Cost: &catalog.Cost{Input: 10, Output: 10}}
 			cfg := &config.Config{
 				ActiveSite: tc.active, APIKey: "synthetic-global",
 				CommandCode: config.CommandCodeConfig{APIKey: "synthetic-commandcode"},
@@ -123,7 +123,7 @@ func TestSelectCheapestRespectsActiveSite(t *testing.T) {
 func TestSelectCheapestDoesNotEnableKeylessCommandCode(t *testing.T) {
 	cat := selectorTestCatalog(t)
 	cat.Providers[site.CommandCode] = catalog.Provider{Name: site.CommandCode}
-	cat.Models["commandcode/cheap"] = catalog.Model{ID: "cheap", Rates: &catalog.Rates{Input: 0.01, Output: 0.01}}
+	cat.Models["commandcode/cheap"] = catalog.Model{ID: "cheap", Cost: &catalog.Cost{Input: 0.01, Output: 0.01}}
 	cfg := &config.Config{APIKey: "synthetic-global"}
 	got, err := NewSelector(cat, cfg).SelectCheapest("default", ScenarioConstraints{})
 	if err != nil || got.Provider == site.CommandCode {

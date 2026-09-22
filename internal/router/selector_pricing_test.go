@@ -12,7 +12,7 @@ func TestSelectCheapestDistinguishesUnknownFromFree(t *testing.T) {
 	cat := selectorTestCatalog(t)
 	cat.Models = map[string]catalog.Model{
 		"opencode-go/unknown": {ID: "unknown"},
-		"opencode-go/known":   {ID: "known", Rates: &catalog.Rates{Input: 1, Output: 2}},
+		"opencode-go/known":   {ID: "known", Cost: &catalog.Cost{Input: 1, Output: 2}},
 	}
 	selector := NewSelector(cat, &config.Config{OpenCodeGo: config.OpenCodeGoConfig{APIKey: "synthetic"}})
 	model, err := selector.SelectCheapest("default", ScenarioConstraints{})
@@ -23,7 +23,7 @@ func TestSelectCheapestDistinguishesUnknownFromFree(t *testing.T) {
 	if _, err := selector.SelectCheapest("default", ScenarioConstraints{}); !errors.Is(err, ErrNoCandidateModel) {
 		t.Fatalf("unknown-only selection error = %v", err)
 	}
-	cat.Models["opencode-go/free"] = catalog.Model{ID: "free", Rates: &catalog.Rates{}}
+	cat.Models["opencode-go/free"] = catalog.Model{ID: "free", Cost: &catalog.Cost{}}
 	model, err = selector.SelectCheapest("default", ScenarioConstraints{})
 	if err != nil || model.ModelID != "free" {
 		t.Fatalf("selection = %s, %v; want free", model.ModelID, err)

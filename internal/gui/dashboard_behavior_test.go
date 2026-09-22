@@ -73,10 +73,18 @@ const context = vm.createContext({
   assert, page: input.page, visiblePlatforms: input.visible, location, history,
   document: {
     getElementById: node, querySelectorAll(){return []}, querySelector(){return null},
-    addEventListener(){}, documentElement: {}, createElement(){return {}},
+    addEventListener(){}, documentElement: {dataset: {}, lang: ''}, createElement(){return {}},
   },
   window: {addEventListener(){}},
-  localStorage: {getItem(){return null}},
+  // The shim reports no computed style, so the app falls back to treating the
+  // page as dark - the same path a browser with no colorScheme support takes.
+  getComputedStyle: () => ({colorScheme: 'dark'}),
+  localStorage: (() => {
+    const store = new Map();
+    return {getItem: k => (store.has(k) ? store.get(k) : null),
+            setItem: (k, v) => store.set(k, String(v)),
+            removeItem: k => store.delete(k)};
+  })(),
   fetch: async () => ({ok: false, text: async () => 'synthetic unavailable response'}),
   setTimeout(){}, setInterval(){}, clearTimeout(){}, queueMicrotask(){},
   URLSearchParams, console: {error(){}},
@@ -278,6 +286,22 @@ vm.runInContext(` + "`" + `
   assert.equal(dotFor('broken'), 'bad', '30% must read bad');
   // Every row carries the extra cell; a header without one misaligns the table.
   assert.equal((perfHTML.match(/<td/g) || []).length, 24, 'three rows of eight cells');
+
+  // Theme has three states and the cycle must return to "follow the system".
+  // With only two, the first toggle wrote a value and the page ignored the
+  // system from then on, with no way back but clearing site data.
+  const themeStates = [];
+  const themeStatesPush = () => themeStates.push(localStorage.getItem('routatic-proxy-theme'));
+  cycleTheme(); themeStatesPush();
+  cycleTheme(); themeStatesPush();
+  cycleTheme(); themeStatesPush();
+  assert.equal(themeStates[0], 'light', 'first toggle must pin light');
+  assert.equal(themeStates[1], 'dark', 'second toggle must pin dark');
+  assert.equal(themeStates[2], null, 'third toggle must return to following the system');
+  // System mode is expressed by the absence of data-theme, so the CSS media
+  // query decides and a system change repaints without JavaScript.
+  assert.equal(document.documentElement.dataset.theme, undefined, 'system mode must set no data-theme');
+  assert.equal(document.documentElement.dataset.themeMode, 'system', 'the button must show the active mode');
 
   const unknownRecord = {id:'unknown', provider:'commandcode', model:'shared', details_known:false, success:false, streaming:false, duration_ms:0, attempt:0};
   allHistory = [unknownRecord];

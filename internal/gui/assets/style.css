@@ -201,6 +201,16 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
 .success-dot.success-warn { background: var(--ui-amber); }
 .success-dot.success-bad { background: var(--ui-red); }
 .success-dot.success-unknown { background: var(--ui-muted); opacity: .4; }
+
+/* The theme button has three states and two drawings, so the pinned ones get a
+   marker: a small dot under the icon. Following the system shows none, which
+   makes "no dot = the system decides" the default reading. */
+#btn-theme-toggle { position: relative; }
+#btn-theme-toggle[data-theme-mode="light"]::after,
+#btn-theme-toggle[data-theme-mode="dark"]::after {
+  content: ''; position: absolute; left: 50%; bottom: 3px; transform: translateX(-50%);
+  width: 4px; height: 4px; border-radius: 50%; background: currentColor;
+}
 .badge-scene { background: var(--ui-surface-raised); color: var(--ui-muted); }
 
 /* ── Filter Select ────────────────────────────────────────── */

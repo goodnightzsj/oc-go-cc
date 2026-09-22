@@ -60,24 +60,37 @@ context.getComputedStyle = element => ({colorScheme:element.dataset.theme || 'da
 async function checks() {
   const root = document.documentElement;
   root.dataset = {};
-  const saved = new Map();
-  localStorage.setItem = (key,value) => saved.set(key,value);
+  // Use the context's own store rather than a parallel one: a stub that only
+  // overrode setItem left getItem reading the real store, so reads and writes
+  // went to different places and the assertions passed for the wrong reason.
+  const saved = {get: () => localStorage.getItem(THEME_KEY), clear: () => localStorage.removeItem(THEME_KEY)};
+
   const attributes = {};
   document.getElementById('btn-theme-toggle').setAttribute = (key,value) => attributes[key] = value;
   for (const lang of ['en','zh']) {
     currentLang = lang;
-    root.dataset.theme = 'light';
-    syncThemeControl();
-    assert.equal(attributes['aria-label'],t('theme.dark'),'the action names the next theme');
-    toggleTheme();
-    assert.equal(root.dataset.theme,'dark');
-    assert.equal(saved.get('routatic-proxy-theme'),'dark','the selected theme survives a reload');
-    assert.equal(attributes['aria-label'],t('theme.light'));
-    assert.equal(document.getElementById('theme-action').textContent,t('theme.light'));
-    toggleTheme();
+    // Three states, cycled system -> light -> dark -> system. The old two-state
+    // version wrote a value on the first toggle and never returned to following
+    // the system, so the button described a choice the user could not undo.
+    // Start from the default state - no stored preference, following the
+    // system - so the whole cycle is exercised rather than its tail.
+    saved.clear();
+    applyThemeMode();
+    cycleTheme();                                   // system -> light
+    assert.equal(saved.get(),'light','light is pinned');
     assert.equal(root.dataset.theme,'light');
-    assert.equal(saved.get('routatic-proxy-theme'),'light');
-    assert.equal(attributes['data-i18n-aria-label'],'theme.dark','language switching keeps the correct theme action');
+    cycleTheme();                                   // light -> dark
+    assert.equal(saved.get(),'dark','dark is pinned');
+    assert.equal(root.dataset.theme,'dark');
+    assert.equal(attributes['data-theme-mode'],'dark','the active mode is stated');
+    cycleTheme();                                   // dark -> system
+    assert.equal(saved.get(),null,'the third toggle follows the system again (localStorage returns null for an absent key)');
+    assert.equal(root.dataset.theme,undefined,'system mode sets no data-theme, so the CSS query decides');
+    assert.equal(attributes['data-theme-mode'],'system');
+    // The action names what the next click produces, and in system mode that is
+    // a plain colour rather than another round of the cycle.
+    assert.ok(attributes['aria-label'].includes(t('theme.modeSystem')),'the label states the current mode');
+    assert.ok(attributes['aria-label'].includes(t('theme.light')),'the label names the next state');
   }
 }
 ` + platformBehaviorRunScript

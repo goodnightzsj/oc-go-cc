@@ -195,8 +195,13 @@ func PeakMultiplier(model string, t time.Time) float64 {
 
 // PeakSchedule returns one platform's published peak windows and multiplier,
 // and the multiplier is 1 (with no windows) for a platform that publishes
-// none. Callers outside this package use it to check their own copy of the
-// rule against this one rather than restating the hours.
+// none.
+//
+// Used by tests only. It existed to let the dashboard check its own copy of the
+// rule against this one; that copy was deleted when the rule gained a holiday
+// calendar the browser cannot reproduce, so nothing in the running program
+// calls this now. Kept because it is how the parity tests assert the dashboard
+// has not grown a second copy back.
 func PeakSchedule(provider string) (windows []PeakWindow, multiplier float64) {
 	s, ok := peakSchedules[site.Normalize(provider)]
 	if !ok {
@@ -206,6 +211,7 @@ func PeakSchedule(provider string) (windows []PeakWindow, multiplier float64) {
 }
 
 // PeakScheduledProviders names the platforms that publish peak pricing.
+// Tests only, for the reason on PeakSchedule.
 func PeakScheduledProviders() map[string]bool {
 	out := make(map[string]bool, len(peakSchedules))
 	for id := range peakSchedules {
@@ -215,6 +221,11 @@ func PeakScheduledProviders() map[string]bool {
 }
 
 // PeakModelFamilies names the model families the peak-pricing platforms cover.
+//
+// Tests only, for the reason on PeakSchedule. It is kept rather than folded
+// away because it is the one place that states which models carry two rates;
+// the map below holds the same names but nothing there says "this is the set",
+// and deleting the accessor would leave that knowledge implicit in a literal.
 func PeakModelFamilies() map[string]bool {
 	out := make(map[string]bool, len(peakModelFamilies))
 	for family := range peakModelFamilies {

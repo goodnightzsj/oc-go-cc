@@ -64,6 +64,15 @@ type quotaLink struct {
 	URL  string `json:"url"`
 }
 
+// quotaResponse is one provider's account view.
+//
+// The authority for what an account has left is the account's own quota report
+// - OpenCode Go's 5-hour, weekly and monthly windows, reported per key in
+// Accounts. ModelLimits and ModelUsage are a breakdown of that total, not a
+// second opinion on it: ModelLimits is the per-model share parsed from the docs
+// page, and ModelUsage is this instance's own ledger, calibrated against the
+// account total so the rows sum back to it. A model whose docs row cannot be
+// parsed therefore loses its breakdown and never its spend figure.
 type quotaResponse struct {
 	Provider        string                   `json:"provider"`
 	Status          string                   `json:"status"`

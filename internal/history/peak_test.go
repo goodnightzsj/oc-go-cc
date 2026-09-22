@@ -45,6 +45,42 @@ func TestPeakCoversOnlyTheDocumentedFamilies(t *testing.T) {
 	}
 }
 
+// ClinePass bills its DeepSeek rows at peak too, and its pricing table names
+// one of them differently from the id it serves.
+//
+// This was a live defect: cline-pass had no entry in peakSchedules at all, so
+// every ClinePass request billed flat at the off-peak rate. The instance
+// happened to serve cline-pass/deepseek-v4.1-flash, which is exactly the model
+// whose peak rate was being dropped, and no badge appeared.
+//
+// The alias is the subtle part. ClinePass's table lists a row named "DeepSeek
+// V4 Flash" and lists no v4.1 row, while its live roster serves
+// cline-pass/deepseek-v4.1-flash and has no plain v4-flash. DeepSeek's pricing
+// page - the source ClinePass footnotes - resolves the two: the legacy
+// deepseek-v4-flash name is still accepted but is served by DeepSeek-V4.1-Flash
+// and billed at the Flash price. So both spellings must be covered, or the
+// model actually being served would still be missed.
+func TestClinePassPeakCoversBothFlashSpellings(t *testing.T) {
+	for _, model := range []string{
+		"cline-pass/deepseek-v4.1-flash", // what the roster serves
+		"cline-pass/deepseek-v4-flash",   // what the pricing table calls it
+		"cline-pass/deepseek-v4-pro",
+	} {
+		if got := ProviderPeakMultiplier("cline-pass", model, inside); got != 2 {
+			t.Errorf("cline-pass/%s = %v, want 2: ClinePass publishes a peak rate for it", model, got)
+		}
+	}
+	// Its other models carry a single reference rate, so they must stay off-peak.
+	for _, model := range []string{
+		"cline-pass/glm-5.3", "cline-pass/kimi-k3", "cline-pass/qwen3.7-max",
+		"cline-pass/minimax-m3", "cline-pass/mimo-v2.5",
+	} {
+		if got := ProviderPeakMultiplier("cline-pass", model, inside); got != 1 {
+			t.Errorf("cline-pass/%s = %v, want 1 (single published rate)", model, got)
+		}
+	}
+}
+
 // The window is weekday-only and half-open at both ends, so 04:00 and 06:00 are
 // off-peak and 10:00 ends it. Read in UTC - the instant, not the wall clock of
 // whoever is looking at the dashboard.

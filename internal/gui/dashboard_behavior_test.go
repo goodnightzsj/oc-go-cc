@@ -221,6 +221,64 @@ vm.runInContext(` + "`" + `
   const ancient = fmtRelativeTime('2020-01-02T03:04:05Z');
   assert.ok(ancient.includes('2020'), 'a stamp years old must fall back to the date, got ' + ancient);
 
+  // Tooltip series: sorted largest-first, a long tail collapsed into one Other
+  // row that preserves the total, and a Total footer so the reader does not add
+  // the rows up themselves.
+  const many = Array.from({length: 12}, (_, i) => ({label: 'm' + i, n: (12 - i) * 100, value: String((12 - i) * 100)}));
+  const shaped = tooltipSeries(many, {otherLabel: 'Other', totalLabel: 'Total', format: v => v.toLocaleString()});
+  assert.ok(shaped.rows.length <= TOOLTIP_MAX_SERIES + 1, 'the tail must collapse, got ' + shaped.rows.length + ' rows');
+  assert.equal(shaped.rows[0].value, '1,200', 'the largest series must come first, got ' + shaped.rows[0].value);
+  const other = shaped.rows[shaped.rows.length - 1];
+  assert.ok(other.label.startsWith('Other'), 'the collapsed row must be labelled, got ' + other.label);
+  // The total must be the sum of everything, collapsed rows included - that is
+  // the whole point of keeping the bucket.
+  const rawTotal = many.reduce((a, m) => a + m.n, 0);
+  assert.equal(shaped.total, rawTotal, 'the reported total must be the sum of every series');
+  // The bucket's OWN value, which is what a reader adds to the visible rows to
+  // reconcile - distinct from shaped.total above, which is computed from the
+  // full sorted list and would stay correct even if the bucket were zeroed.
+  const hiddenSum = many.slice(TOOLTIP_MAX_SERIES).reduce((a, m) => a + m.n, 0);
+  assert.equal(other.n, hiddenSum, 'the collapsed bucket must hold the sum of what it hides');
+  assert.ok(shaped.footer.some(f => f.label === 'Total' && f.value === rawTotal.toLocaleString()), 'the footer must carry the total');
+  // A single series is its own total, so the footer would be noise.
+  const one = tooltipSeries([{label: 'only', n: 5, value: '5'}], {totalLabel: 'Total'});
+  assert.ok(!one.footer.some(f => f.label === 'Total'), 'one series needs no total row');
+  // Nothing to collapse below the cap: order only.
+  const few = tooltipSeries([{label:'a',n:1,value:'1'},{label:'b',n:9,value:'9'}], {totalLabel:'Total'});
+  assert.equal(few.rows[0].label, 'b', 'rows must be sorted even when nothing collapses');
+
+  // The Performance tab's health column: its dot must track the same
+  // success-rate bands the cell already grades, so a 100% row and an 88% row
+  // are not the same colour. Asserted against the rendered HTML rather than the
+  // DOM, because the shim's querySelectorAll returns nothing - the same reason
+  // the history assertions below read innerHTML.
+  PerfModule.data = [
+    {provider:'opencode-go', model:'perfect', count:10, success:10, failed:0, avg_ms:900, p50_ms:800, p90_ms:900, p99_ms:950},
+    {provider:'opencode-go', model:'shaky',   count:10, success:8,  failed:2, avg_ms:900, p50_ms:800, p90_ms:900, p99_ms:950},
+    {provider:'opencode-go', model:'broken',  count:10, success:3,  failed:7, avg_ms:900, p50_ms:800, p90_ms:900, p99_ms:950},
+  ];
+  PerfModule.sortField = 'count';
+  PerfModule.render();
+  const perfHTML = document.getElementById('perf-tbody').innerHTML;
+  // The model name is followed by <br> and the platform, so match the cell
+  // rather than the bare name. Plain string search rather than a regex: this
+  // block is part of a large embedded script and a regex literal here survives
+  // an editing round-trip badly.
+  const dotFor = model => {
+    const at = perfHTML.indexOf('>' + model + '<br>');
+    if (at < 0) return null;
+    const marker = perfHTML.indexOf('success-dot success-', at);
+    if (marker < 0) return null;
+    const tail = perfHTML.slice(marker + 'success-dot success-'.length);
+    const end = tail.search(/[^a-z]/);
+    return end < 0 ? tail : tail.slice(0, end);
+  };
+  assert.equal(dotFor('perfect'), 'good', '100% must read good');
+  assert.equal(dotFor('shaky'), 'warn', '80% must read warn');
+  assert.equal(dotFor('broken'), 'bad', '30% must read bad');
+  // Every row carries the extra cell; a header without one misaligns the table.
+  assert.equal((perfHTML.match(/<td/g) || []).length, 24, 'three rows of eight cells');
+
   const unknownRecord = {id:'unknown', provider:'commandcode', model:'shared', details_known:false, success:false, streaming:false, duration_ms:0, attempt:0};
   allHistory = [unknownRecord];
   renderHistory();

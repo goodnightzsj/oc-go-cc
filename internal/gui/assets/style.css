@@ -191,6 +191,16 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
 .timing-good { color: var(--ui-green); }
 .timing-ok { color: var(--ui-amber); }
 .timing-slow { color: var(--ui-red); }
+
+/* Success-rate health dot. The thresholds are the ones new-api uses for the
+   same judgement (100/90/70), kept in the code as well so the four levels are
+   never distinguished by colour alone - each carries an aria-label. */
+.success-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; }
+.success-dot.success-good { background: var(--ui-green); }
+.success-dot.success-ok { background: var(--ui-green); opacity: .55; }
+.success-dot.success-warn { background: var(--ui-amber); }
+.success-dot.success-bad { background: var(--ui-red); }
+.success-dot.success-unknown { background: var(--ui-muted); opacity: .4; }
 .badge-scene { background: var(--ui-surface-raised); color: var(--ui-muted); }
 
 /* ── Filter Select ────────────────────────────────────────── */

@@ -66,55 +66,39 @@
    browser paints ::backdrop behind it, and #test-modal is a plain <div>, which
    gets no backdrop at all.
 
-   The mask is one rounded, inset, frosted sheet, and the tint rides on it.
-
-   Why not the tint on ::backdrop: ::backdrop is a browser-painted full-viewport
-   layer that cannot be inset, rounded or bordered - a solid-colour probe fills
-   all four screen corners. Tinting it and then frosting an inset layer on top
-   gives a mask with no visible shape at all: the band outside the inset and the
-   area inside it are tinted identically, so the rounded corner is painted the
-   same colour as the rectangle around it and reads as a plain full-bleed veil.
-   Measured, both regions came out at the same value (-28.0 light / -24.3 dark).
-
-   Tinting the shaped layer instead is what makes the shape real: the 22px band
-   keeps the page's own colour, so the corner is legible. Nothing else may paint
-   a tint, or that band would be filled in again and the corner would vanish. */
+   There is no mask. The panel separates itself with a border and a large
+   elevation shadow, and a scrim was fighting that on both themes rather than
+   helping: a dark tint over the dark theme's ground darkened it by ~2%, which
+   is invisible, while the same tint over the light theme's near-white page
+   darkened it by ~25%, which is a grey film. Making the two match would have
+   needed very different alphas, and even then the mask read as a flat veil
+   under a rounded panel. Removing it leaves the panel floating over a legible
+   page, which is what the shadow and border were already doing. */
 .modal-overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 100; opacity: 0; visibility: hidden; transition: opacity 0.22s ease, visibility 0.22s; }
-/* Non-dialog overlays have no ::backdrop, so the shaped layer is their only
-   mask - it carries the tint for both variants. */
-.modal-overlay::before {
-  content: "";
-  position: absolute;
-  inset: 22px;
-  border-radius: 18px;
-  background: var(--ui-scrim, rgba(0, 0, 0, 0.6));
-  backdrop-filter: blur(16px) saturate(1.15);
-  -webkit-backdrop-filter: blur(16px) saturate(1.15);
-}
 .modal-overlay.visible { opacity: 1; visibility: visible; }
 dialog.modal-overlay:not([open]) { display: none; }
 /* A <dialog> shrink-wraps to its content and centres itself with `margin: auto`,
-   so its box is the panel's size, not the viewport. A mask painted by ::before
-   would then be inset *inside the panel* and hidden behind it. Stretching the
-   dialog to the viewport is what makes ::before a real mask; the flex centring
-   above still places the panel. */
+   which would make the box the panel's size rather than the viewport's. It is
+   stretched so that a click anywhere outside the panel lands on the dialog and
+   closes it, which is the expected way out of a modal; a shrink-wrapped dialog
+   would let such a click fall through to the page instead. */
 dialog.modal-overlay[open] {
   opacity: 1; visibility: visible; border: 0; padding: 0; color: inherit; background: transparent;
   width: auto; height: auto; max-width: none; max-height: none; margin: 0;
 }
-/* Transparent on purpose: the tint belongs to the shaped layer above, and a
-   second tint here would darken the band that makes the shape readable. */
+/* The browser's own ::backdrop is rgba(0,0,0,0.1) - a real, if faint, mask that
+   applies whenever the rule is absent. It has to be overridden explicitly
+   rather than left alone, or removing the scrim leaves this UA default behind
+   (measured: the overlay still darkened the page after the last tint token was
+   deleted). Transparent is the value that means "no mask". */
 dialog.modal-overlay::backdrop { background: transparent; }
 /* Frosting is decoration; honouring the reduced-motion preference means
-   dropping it rather than animating it more slowly. The tint stays, so the
-   separation survives without the blur. */
+   dropping it rather than animating it more slowly. */
 @media (prefers-reduced-motion: reduce) {
   .modal-overlay { transition: none; }
   .modal-content { transition: none; }
-  .modal-overlay::before { backdrop-filter: none; -webkit-backdrop-filter: none; }
 }
-/* Above the mask layer. */
-.modal-content { position: relative; z-index: 1; background: var(--ui-surface); border: 1px solid var(--ui-line-strong); border-radius: 14px; width: 90%; max-width: 520px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,0.34), 0 4px 14px rgba(0,0,0,0.18); transform: scale(0.96) translateY(6px); transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.3, 1); }
+.modal-content { background: var(--ui-surface); border: 1px solid var(--ui-line-strong); border-radius: 14px; width: 90%; max-width: 520px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,0.34), 0 4px 14px rgba(0,0,0,0.18); transform: scale(0.96) translateY(6px); transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.3, 1); }
 .modal-overlay.visible .modal-content { transform: scale(1) translateY(0); }
 .modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--ui-line); background: var(--ui-surface-raised); }
 .modal-title { font-size: 14px; font-weight: 600; }
@@ -363,19 +347,6 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: none;
   --ui-surface-raised: #1e2a3a;
   --ui-line: #2c394d;
   --ui-line-strong: #61718a;
-  /* The tint behind a modal. It is near-black in both themes, but the two
-     values differ by more than the theme difference suggests, because a tint's
-     reach depends on the ground it covers rather than on its own alpha.
-     Measured against each theme's own --ui-bg:
-       light (#f4f6fa, avg 247): 0.12 of #0b1220 lands at avg 220 - a 27-step drop
-       dark  (#101622, avg  24): the ground is already dark, so 0.12 would land
-                                 at avg 21 and read as no mask at all. Pure black
-                                 is the ceiling and it only reaches avg 0 - a
-                                 24-step drop. Matching the light theme's effect
-                                 therefore needs the alpha near its maximum.
-     An equal alpha in both themes is what produced the original bug: the mask
-     was plainly visible in light and invisible in dark. */
-  --ui-scrim: rgba(0, 0, 0, 0.82);
   --ui-text: #edf1f8;
   --ui-muted: #afbdd0;
   --ui-indigo: #a5b4fc;
@@ -1448,7 +1419,6 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
     --ui-input: #fdfdff;
     --ui-line: #d5dce7;
     --ui-line-strong: #8794a7;
-    --ui-scrim: rgba(11, 18, 32, 0.12);
     --ui-text: #172235;
     --ui-muted: #526178;
     --ui-indigo: #4f46e5;
@@ -1469,7 +1439,6 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
   --ui-input: #fdfdff;
   --ui-line: #d5dce7;
   --ui-line-strong: #8794a7;
-  --ui-scrim: rgba(11, 18, 32, 0.12);
   --ui-text: #172235;
   --ui-muted: #526178;
   --ui-indigo: #4f46e5;

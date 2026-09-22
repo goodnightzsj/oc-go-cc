@@ -163,6 +163,60 @@ Select **OpenRouter** in the Quota tab. Local usage includes only requests that 
 
 Official contracts: [Key limits and UTC usage](https://openrouter.ai/docs/api_reference/limits), [account Credits and Management Key requirement](https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits). Local HTTP response fields are documented in the [dashboard API reference](reference-api.md#dashboard-apis).
 
+## Pricing Source and Time-Window Rates
+
+### Prices come from the catalog
+
+OpenRouter publishes no per-token table this proxy parses, so `site.RateTable` is
+empty for it and its rates are read from the models.dev catalog instead, matched
+against the request's model id. That path was silently broken until 2026-09-22:
+the catalog's `Model` carried its rates under the JSON tag `rates` while
+models.dev publishes them under `cost`, so every catalog model parsed with no
+rates and every OpenRouter request was booked as unknown. Three other platforms
+hid it by having hand-written seed tables; OpenRouter is the platform priced only
+from the catalog. The mapping is now explicit and tested (see
+`internal/catalog/types.go`).
+
+### Prefixed ids are not a lookup problem
+
+An OpenRouter model id carries a vendor prefix (`openai/gpt-5.6-terra-pro`), and
+the catalog stores it that way. Lookup is `provider = ? AND name = ?`, with the
+same prefixed form on both sides, so the prefix is preserved rather than
+stripped - verified against a real catalog import. Stripping it would in fact
+introduce a defect: 83 of OpenRouter's variant ids (`:batch`, `:free`) carry
+prices that differ from their base model's, so folding them onto the base name
+would bill them at the wrong rate.
+
+### Time-window pricing is not modelled
+
+OpenRouter does express peak/off-peak, through per-model `pricing.overrides` on
+its own `/api/v1/models` endpoint. As of 2026-09-22 exactly two models use the
+time-window form:
+
+| Model | Window | Effect |
+|-------|--------|--------|
+| `deepseek/deepseek-v4.1-flash` | weekday `utc_start`/`utc_end` 0100-0400 and 0600-1000, plus all weekend | x2 on the listed base rate |
+| `tencent/hy3` | 0000-1600 UTC discounted, 1600-0000 full | **inverted** relative to DeepSeek: peak is 16:00-24:00 UTC |
+
+Two things follow, and neither is implemented here. `history.peakSchedules`
+models a *platform-wide* window with one multiplier, and `hy3` shows neither
+holds: the multiplier differs per model (x1.6 there, x2 elsewhere) and the
+window can point the other way. And models.dev - the source this proxy
+actually reads - does not carry `overrides` at all, so nothing has been lost by
+omitting it: the data is simply not fetched. A model with time-window pricing is
+therefore billed at its listed base rate, which for both of the above is the
+*cheaper* band, so the error is under-billing rather than over-billing.
+
+The 67 other models with overrides use `min_prompt_tokens` long-context tiers
+rather than time windows. Those are also not modelled by this path, and they move
+money in the other direction: a >200K-token request on `x-ai/grok-4.7` costs
+double what the catalog's single rate says.
+
+Both gaps are recorded rather than approximated. Fixing them means teaching the
+catalog import to read `overrides` and the pricing path to apply tiers and
+per-model windows, which is a change to the shared cost path rather than to
+OpenRouter alone.
+
 ## Cost-Based Routing Integration
 
 OpenRouter works seamlessly with `cost_routing`. Use `penalty_per_provider` to adjust effective costs:

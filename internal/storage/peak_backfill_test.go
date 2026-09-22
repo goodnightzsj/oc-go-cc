@@ -43,15 +43,25 @@ func TestBackfillPeakMultipliersRestoresOnlyUnmarkedPeakRows(t *testing.T) {
 	// Already marked: the platform billed it peak from a clock a second or two
 	// away from our start_time, and its figure must survive.
 	insert("already-peak", "opencode-go", "deepseek-v4-flash", "2026-09-07T10:00:30Z", 2)
+	// A Chinese public holiday on a weekday inside the window. 2026-10-01 is 国庆,
+	// a Thursday: OpenCode Go inherits DeepSeek's exemption, so this stays
+	// off-peak and must NOT be restored to peak.
+	insert("holiday-opencode", "opencode-go", "deepseek-v4-flash", "2026-10-01T02:00:00Z", 1)
+	// The same instant on CommandCode, which states no exemption: its holiday
+	// rows are billed at peak and do need restoring.
+	insert("holiday-commandcode", "commandcode", "deepseek/deepseek-v4-flash", "2026-10-01T02:00:00Z", 1)
+	// The working day after that holiday run, same clock time, must restore.
+	insert("after-holiday", "opencode-go", "deepseek-v4-flash", "2026-10-08T02:00:00Z", 1)
 
 	updated, err := db.BackfillPeakMultipliers(context.Background())
-	if err != nil || updated != 3 {
-		t.Fatalf("BackfillPeakMultipliers = %d, %v; want 3, nil", updated, err)
+	if err != nil || updated != 5 {
+		t.Fatalf("BackfillPeakMultipliers = %d, %v; want 5, nil", updated, err)
 	}
 	for id, want := range map[string]float64{
 		"peak-morning": 2, "peak-late": 2, "commandcode-peak": 2,
 		"offpeak-noon": 1, "weekend": 1, "other-model": 1,
 		"commandcode-fast": 1, "other-provider": 1, "already-peak": 2,
+		"holiday-opencode": 1, "holiday-commandcode": 2, "after-holiday": 2,
 	} {
 		if got := multiplierOf(id); got != want {
 			t.Errorf("%s peak_multiplier = %v, want %v", id, got, want)

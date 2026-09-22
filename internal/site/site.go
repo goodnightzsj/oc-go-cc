@@ -73,15 +73,35 @@ type Descriptor struct {
 	// creation has no computable price and is reported as unknown rather than
 	// estimated from a rate this proxy would be inventing.
 	CacheCreationBilledAsInput bool
+	// PeakPriced reports that this platform publishes two rates for the same
+	// model, one of them for named hours of the day.
+	//
+	// It is declared here so that "this platform has peak pricing but no rule in
+	// history.peakSchedules" is a failing test rather than a silent over-charge.
+	// That exact omission already shipped once: ClinePass publishes a Peak
+	// column, had no schedule entry, and every one of its requests billed flat
+	// at the off-peak rate with no badge to show for it (see the note on
+	// history.peakSchedules). A schedule entry is the only thing that prices
+	// those hours, so its absence is indistinguishable from a platform that has
+	// no peak pricing - which is why the fact is stated in both places and
+	// checked against itself.
+	//
+	// Only the platforms whose own pricing page carries two rates for one model
+	// set this. OpenRouter is deliberately false: it does express time-based
+	// pricing, but through per-model `pricing.overrides` on models.dev rather
+	// than a platform-wide rule, and this proxy prices OpenRouter from the
+	// catalog and reads no overrides at all - so there is no rule to register.
+	// That gap is tracked in docs/, not silently corrected.
+	PeakPriced bool
 }
 
 var registry = []Descriptor{
 	{ID: OpenCodeGo, DisplayName: "OpenCode Go", Order: 0, Visible: true, Default: true,
-		RateTable: OpenCodeGo, CacheCreationBilledAsInput: true},
+		RateTable: OpenCodeGo, CacheCreationBilledAsInput: true, PeakPriced: true},
 	{ID: CommandCode, DisplayName: "CommandCode", Order: 1, Visible: true,
-		RateTable: CommandCode},
+		RateTable: CommandCode, PeakPriced: true},
 	{ID: ClinePass, DisplayName: "ClinePass", Order: 2, Visible: true,
-		RateTable: ClinePass},
+		RateTable: ClinePass, PeakPriced: true},
 	{ID: OpenCodeZen, DisplayName: "OpenCode Zen", Order: 3},
 	{ID: AWSBedrock, DisplayName: "AWS Bedrock", Order: 4},
 	{ID: OpenRouter, DisplayName: "OpenRouter", Order: 5},

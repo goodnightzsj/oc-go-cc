@@ -187,35 +187,48 @@ introduce a defect: 83 of OpenRouter's variant ids (`:batch`, `:free`) carry
 prices that differ from their base model's, so folding them onto the base name
 would bill them at the wrong rate.
 
-### Time-window pricing is not modelled
+### Time-window pricing
 
-OpenRouter does express peak/off-peak, through per-model `pricing.overrides` on
-its own `/api/v1/models` endpoint. As of 2026-09-22 exactly two models use the
-time-window form:
+OpenRouter expresses peak/off-peak through per-model `pricing.overrides` on its
+own `/api/v1/models` endpoint (public, no key required). As of 2026-09-22 three
+models carry the time-window form:
 
 | Model | Window | Effect |
 |-------|--------|--------|
-| `deepseek/deepseek-v4.1-flash` | weekday `utc_start`/`utc_end` 0100-0400 and 0600-1000, plus all weekend | x2 on the listed base rate |
-| `tencent/hy3` | 0000-1600 UTC discounted, 1600-0000 full | **inverted** relative to DeepSeek: peak is 16:00-24:00 UTC |
+| `deepseek/deepseek-v4.1-flash` | weekday 0100-0400 and 0600-1000 UTC, plus a named all-weekend entry at the base rate | x2 the base rate |
+| `deepseek/deepseek-v4-pro-0813` | same, as the dated snapshot of the row above | x2 the base rate |
+| `tencent/hy3` | 0000-1600 UTC, **every day of the week** | x1.6 the base rate |
 
-Two things follow, and neither is implemented here. `history.peakSchedules`
-models a *platform-wide* window with one multiplier, and `hy3` shows neither
-holds: the multiplier differs per model (x1.6 there, x2 elsewhere) and the
-window can point the other way. And models.dev - the source this proxy
-actually reads - does not carry `overrides` at all, so nothing has been lost by
-omitting it: the data is simply not fetched. A model with time-window pricing is
-therefore billed at its listed base rate, which for both of the above is the
-*cheaper* band, so the error is under-billing rather than over-billing.
+Both DeepSeek rows restate DeepSeek's own published rule, so they are modelled
+exactly as the other three platforms' DeepSeek rows are. `hy3` is the one that
+does not fit that shape, in two ways at once: its multiplier is 1.6 rather than
+2, and its window runs every day including weekends. `history.peakSchedules`
+therefore states rules **per model** rather than per platform — a single
+platform-wide window cannot express both.
 
-The 67 other models with overrides use `min_prompt_tokens` long-context tiers
-rather than time windows. Those are also not modelled by this path, and they move
-money in the other direction: a >200K-token request on `x-ai/grok-4.7` costs
-double what the catalog's single rate says.
+An earlier revision of this document described two models and reversed `hy3`'s
+direction, calling 16:00-24:00 the peak band. Read from the live payload, the
+opposite holds: OpenRouter leads with the **higher** figure (0.132/0.528 per
+million) as the unconditional `prompt`/`completion` pair and applies the
+**discount** (0.0825/0.33) for 0000-1600. The multiplier in `peakSchedules` is
+stated against the rate this proxy actually prices from — models.dev — which
+records the discounted band as the base, so 1.6 reconciles the two sources.
+`TestOpenRouterPeakMatchesThePublishedOverrides` pins that arithmetic; if
+models.dev ever switches to the headline band, that test is where it surfaces.
 
-Both gaps are recorded rather than approximated. Fixing them means teaching the
-catalog import to read `overrides` and the pricing path to apply tiers and
-per-model windows, which is a change to the shared cost path rather than to
-OpenRouter alone.
+Unlike the other four platforms, these rules are transcribed rather than
+fetched. models.dev — the catalog this proxy syncs — carries no `overrides` at
+all, so there is nothing at runtime to read them from. A model whose window is
+not listed above therefore falls to its base rate, which **understates** the
+bill rather than inventing a rule.
+
+The 72 other override entries across 67 models use `min_prompt_tokens`
+long-context tiers rather than time windows. Those are modelled, but from a
+different source: `internal/catalog/types.go` reads them out of the catalog into
+the `cost_tiers` column, and `internal/storage/requests.go` applies the band the
+prompt size reaches. They move money in the direction the base rate misses — a
+>200K-token request on `x-ai/grok-4.7` costs double what the catalog's single
+rate says.
 
 ## Cost-Based Routing Integration
 

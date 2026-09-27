@@ -400,6 +400,7 @@ const TRANSLATIONS = {
     'th.outputTokens': 'Output Tokens',
     'th.cost': 'Cost',
     'th.duration': 'Duration',
+    'th.tokensPerSecond': 'Tok/s',
     'th.status': 'Status',
     'empty.noHistory': 'No history yet',
     'setting.proxy': 'Proxy Service',
@@ -913,6 +914,7 @@ const TRANSLATIONS = {
     'th.outputTokens': '输出 Token',
     'th.cost': '费用',
     'th.duration': '耗时',
+    'th.tokensPerSecond': 'Tok/s',
     'th.status': '状态',
     'empty.noHistory': '暂无历史请求',
     'setting.proxy': '代理服务',
@@ -2238,7 +2240,7 @@ function clearHistoryView(loading = false) {
   if (tip) tip.style.display = 'none';
   if (loading) document.getElementById('history-error').hidden = true;
   const message = t(loading ? 'data.loading' : 'detail.unavailable');
-  document.getElementById('history-tbody').innerHTML = `<tr><td colspan="7" class="empty-state">${message}</td></tr>`;
+  document.getElementById('history-tbody').innerHTML = `<tr><td colspan="8" class="empty-state">${message}</td></tr>`;
   ['history-summary-requests', 'history-summary-success', 'history-summary-tokens', 'history-summary-cost'].forEach(id => {
     document.getElementById(id).textContent = loading ? '…' : '—';
   });
@@ -2363,7 +2365,7 @@ function renderHistory() {
     historyTotal + t('status.count') + (historyHasFilters() ? t('status.filtered') : '');
 
   if (allHistory.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">' + (historyHasFilters()
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">' + (historyHasFilters()
       ? emptyStateContent('history.noMatches', 'history.emptyFiltersHint')
       : emptyStateContent('empty.noHistory', 'data.localEmptyHint')) + '</td></tr>';
     return;
@@ -2408,6 +2410,7 @@ function renderHistory() {
       <td><button type="button" class="history-token-trigger" data-token-id="${escapeHtml(rowId)}" aria-label="${t('detail.title')}">${totalTokens.toLocaleString()}</button><br><small>${tokenSplit}</small></td>
       <td>${cost}<br><small>${costSourceLabel(h.cost_source)}</small></td>
       <td>${detailsKnown ? gradeDuration(h, fmtDuration(h.duration_ms)) : '—'}</td>
+      <td title="${escapeHtml(t('analytics.throughputHint'))}">${detailsKnown && h.success ? fmtThroughput(requestThroughput(h)) : '—'}</td>
     </tr>
   `}).join('');
 

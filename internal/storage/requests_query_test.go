@@ -71,6 +71,97 @@ func TestHistoryTokensColumnSortsByTheTotalItDisplays(t *testing.T) {
 	}
 }
 
+// TestHistoryThroughputColumnSortsByTheRateItShows pins the history table's
+// Tok/s column. The cell renders output/duration, so the sort key must be that
+// same ratio - sorting by output_tokens alone would order a fast short answer
+// below a slow long one, which is the opposite of what the column claims.
+//
+// The fixture separates rate order from time order and from output order, and
+// includes a row with no duration so the unmeasurable case is covered:
+//
+//	row   output   duration   success   rate       start_time
+//	a        400      2000ms   yes       200 tok/s   t+1h
+//	b         50       500ms   yes       100 tok/s   t+2h
+//	c       1000     20000ms   yes        50 tok/s   t+3h
+//	d          0         0ms   yes       none        t+4h
+//	e        900      1000ms   NO        900 tok/s   t+5h
+//
+// e is the row that pins the flag condition: its figures alone would rank it
+// fastest, but the request failed, so its output is a partial count and the cell
+// shows a dash. A key that ignored success would put it first while the column
+// rendered nothing - the disagreement between sort and cell this whole test
+// exists to catch.
+//
+// Ascending rate -> c,b,a then d,e (both unmeasured, trailing in time order).
+// Descending -> a,b,c then d,e. Ascending output -> d,b,a,e,c. Ascending time ->
+// a,b,c,d,e. Distinct, so a failure names the ordering that actually ran rather
+// than passing on a coincidence - the mistake this table already made once with
+// its Tokens column.
+func TestHistoryThroughputColumnSortsByTheRateItShows(t *testing.T) {
+	db := newCostTestDB(t)
+	repo := NewRequests(db)
+	base := time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC)
+	for _, rec := range []history.RequestRecord{
+		{ID: "a", Model: "model-a", StartTime: base.Add(time.Hour), OutputTokens: 400, Duration: 2 * time.Second, Success: true},
+		{ID: "b", Model: "model-b", StartTime: base.Add(2 * time.Hour), OutputTokens: 50, Duration: 500 * time.Millisecond, Success: true},
+		{ID: "c", Model: "model-c", StartTime: base.Add(3 * time.Hour), OutputTokens: 1000, Duration: 20 * time.Second, Success: true},
+		{ID: "d", Model: "model-d", StartTime: base.Add(4 * time.Hour), OutputTokens: 0, Duration: 0, Success: true},
+		{ID: "e", Model: "model-e", StartTime: base.Add(5 * time.Hour), OutputTokens: 900, Duration: time.Second, Success: false},
+	} {
+		if err := repo.Insert(rec); err != nil {
+			t.Fatalf("insert %s: %v", rec.ID, err)
+		}
+	}
+	ordered := func(sortBy, dir string) string {
+		t.Helper()
+		rows, _, err := repo.Query(RequestQuery{Page: 1, PageSize: 10, SortBy: sortBy, SortOrder: dir})
+		if err != nil {
+			t.Fatalf("sort by %s: %v", sortBy, err)
+		}
+		ids := make([]string, 0, len(rows))
+		for _, r := range rows {
+			ids = append(ids, r.ID)
+		}
+		return strings.Join(ids, "")
+	}
+	// d sorts last in BOTH directions. A row with no measurable rate has no rank
+	// among the measured ones, and SQLite's default would put its NULL first when
+	// ascending - so a reader asking for the slowest requests would get a screen
+	// of dashes before the first real figure. The convention for an unknown value
+	// in a sortable column is to keep it out of the way, not to let it lead.
+	// The unmeasured rows trail in both directions, ordered among themselves by
+	// the secondary time key (newest first, so e before d). Their relative order
+	// does not matter - both cells render a dash - only that neither is ranked
+	// against a row that has a figure.
+	if got := ordered("tokens_per_second", "asc"); got != "cbaed" {
+		t.Errorf("ascending tokens_per_second = %q, want cbaed (rates 50,100,200 then unmeasured)", got)
+	}
+	if got := ordered("tokens_per_second", "desc"); got != "abced" {
+		t.Errorf("descending tokens_per_second = %q, want abced (rates 200,100,50 then unmeasured)", got)
+	}
+	// e carries the fastest figures in the fixture but failed, so its cell shows a
+	// dash and it must not be ranked among the measured rows. Without the success
+	// term it would lead the descending sort while rendering nothing.
+	for _, dir := range []string{"asc", "desc"} {
+		got := ordered("tokens_per_second", dir)
+		for _, measured := range []string{"a", "b", "c"} {
+			if strings.Index(got, "e") < strings.Index(got, measured) {
+				t.Errorf("%s: failed request e ranked above measured %s; its cell shows a dash: %q", dir, measured, got)
+			}
+		}
+	}
+	// Below is the assertion that fails if the key is ever replaced by output
+	// tokens: the two orderings differ, so this cannot pass by coincidence.
+	if got := ordered("output_tokens", "asc"); got != "dbaec" {
+		t.Errorf("ascending output_tokens = %q, want dbaec (outputs 0,50,400,900,1000)", got)
+	}
+	// The unmeasured row leads the output ordering and trails the rate ordering,
+	// which is the difference the two keys are supposed to have.
+	if ordered("tokens_per_second", "asc")[0] == ordered("output_tokens", "asc")[0] {
+		t.Error("the rate ordering equals the output ordering at the first row; the fixture cannot tell the two apart")
+	}
+}
+
 // TestRequestsQueryFiltersAndSortsFullDataset covers the filters and the sort
 // keys the history page does not use.
 func TestRequestsQueryFiltersAndSortsFullDataset(t *testing.T) {

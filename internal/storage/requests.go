@@ -352,6 +352,31 @@ func requestSortColumn(field string) string {
 		return "COALESCE(cost_usd, 0)"
 	case "duration_ms":
 		return "COALESCE(duration_ms, 0)"
+	case "tokens_per_second":
+		// The rate is output over seconds, and a row without both figures has no
+		// rate at all: the cell shows a dash, not a zero.
+		//
+		// The measurable test must match the cell's own condition exactly. The
+		// cell renders a rate only when the row has details, succeeded, and has
+		// both figures - a failed request's output is a partial count, so its rate
+		// is not comparable. A key that omitted either flag would rank rows the
+		// column shows as blank, so the reader would see dashes in the middle of
+		// an ordered list. Kept in the same order as historyHasDetails in app.js
+		// so the two can be read side by side.
+		const measurable = "details_known = 1 AND success = 1 " +
+			"AND COALESCE(output_tokens, 0) > 0 AND COALESCE(duration_ms, 0) > 0"
+		//
+		// SQLite sorts NULL before every value, so a bare NULL would leave the
+		// unmeasurable rows at the top of an ascending sort - the user asking for
+		// the slowest requests would get a screen of dashes first. The leading term
+		// pins them to the bottom in both directions.
+		//
+		// Integer division would truncate to 0 for any request under a second per
+		// token, so the numerator is cast to REAL before dividing.
+		return "(CASE WHEN " + measurable + " THEN 0 ELSE 1 END) ASC, " +
+			"CASE WHEN " + measurable +
+			" THEN CAST(COALESCE(output_tokens, 0) AS REAL) / (COALESCE(duration_ms, 0) / 1000.0) " +
+			"ELSE NULL END"
 	case "success":
 		return "COALESCE(success, 0)"
 	case "streaming":

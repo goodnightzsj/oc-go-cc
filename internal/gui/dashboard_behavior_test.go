@@ -332,6 +332,53 @@ vm.runInContext(` + "`" + `
   allHistory = [unknownRecord];
   renderHistory();
   assert.ok(document.getElementById('history-tbody').innerHTML.includes('badge-unknown'));
+
+  // The History row's column contract, by position. The header half is
+  // TestHistoryHeaderColumnsMatchTheRow in Go, where index.html is readable;
+  // this shim cannot see that file, so the two halves live apart and neither
+  // alone is enough - the same split the Performance table uses.
+  //
+  // Counting cells cannot see a shifted row: this table shipped a Tokens column
+  // sorted by a different figure than its cell displayed, and a row missing its
+  // last cell still has the right count for every cell before it. Only the
+  // position of a value that belongs to a known column can.
+  const measured = {id:'m', provider:'opencode-go', model:'deepseek-v4.1-flash', scenario:'default',
+    details_known:true, success:true, streaming:true, duration_ms:2000, output_tokens:400,
+    input_tokens:100, cache_read_tokens:0, cache_creation_tokens:0, cost_usd:0.01, start_time:'2026-09-27T10:00:00+08:00'};
+  allHistory = [measured];
+  renderHistory();
+  const historyHTML = document.getElementById('history-tbody').innerHTML;
+  const historyCells = historyHTML.slice(0, historyHTML.indexOf('</tr>')).split('<td').slice(1);
+  assert.equal(historyCells.length, 8, 'a History row must carry eight cells');
+  // Asserted on each cell's own markup rather than on a digit: the Duration cell
+  // carries the same tok/s figure in its grading tooltip, so a numeric search
+  // matches whichever of the two cells it lands in and cannot see them swap.
+  // The timing class is emitted only by gradeDuration, and the throughput hint
+  // only by the Tok/s cell, so each identifies exactly one column.
+  const timingClass = 'class=' + String.fromCharCode(34) + 'timing';
+  assert.ok(historyCells[6].includes(timingClass),
+    'cell 7 must be the graded Duration figure; got ' + historyCells[6]);
+  assert.ok(historyCells[7].includes('Output tokens divided by'),
+    'cell 8 must carry the Tok/s cell, whose tooltip is the throughput hint; got ' + historyCells[7]);
+  assert.ok(!historyCells[7].includes(timingClass),
+    'cell 8 must not be the Duration cell - the two are adjacent and swapping them still counts eight');
+  // 400 output tokens over 2000 ms is 200 tok/s.
+  assert.equal(Math.round(requestThroughput(measured)), 200, 'the row helper and the cell must use one definition');
+
+  allHistory = [unknownRecord];
+  renderHistory();
+  const unknownCells = document.getElementById('history-tbody').innerHTML.slice(0, document.getElementById('history-tbody').innerHTML.indexOf('</tr>')).split('<td').slice(1);
+  assert.equal(unknownCells.length, 8, 'an unknown row still carries eight cells');
+  // Compared against the cell's text, not the raw markup: splitting on "<td"
+  // leaves that cell's own opening-tag attributes in the segment, so the tooltip
+  // text is present even for a correctly blank cell. Take the content after the
+  // opening tag's ">" and strip any nested tags.
+  const cellText = cell => cell.slice(cell.indexOf('>') + 1).replace(/<[^>]*>/g, '').trim();
+  assert.equal(cellText(unknownCells[7]), '—',
+    'an unmeasured row must show a dash, not a fabricated rate; got ' + unknownCells[7]);
+  assert.equal(cellText(historyCells[7]), '200',
+    'the measured row must show its own rate under the Tok/s heading; got ' + historyCells[7]);
+
   showHistoryDetail(unknownRecord);
   assert.ok(document.getElementById('modal-body').innerHTML.includes('detail-status unknown'));
   assert.ok(HISTORY_CSV_COLUMNS.some(column => column[0] === 'details_known'), 'CSV needs its observation flag');

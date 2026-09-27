@@ -17,10 +17,14 @@ func TestHistoryAssetsKeepKeyboardDialogAndPromptTokens(t *testing.T) {
 
 	for _, marker := range []string{
 		`tabindex="0" aria-haspopup="dialog"`, "modal.showModal()", "prompt_tokens",
-		"historyQueryParams", "record.error_msg", "cost_usd", `colspan="7"`,
+		"historyQueryParams", "record.error_msg", "cost_usd", `colspan="8"`,
 		"window.CustomSelect", "window.HistoryDateRange", "renderHistorySummary", "detail.title",
 		"historyBreakdownMetric", "history-summary-token-note", "input_tokens", "cache_creation_tokens", "history-page-size", "bindPlotTooltip", "details_known",
 		"history-token-trigger", "bindHistoryTokenTooltips", "history-stream-state", "h.streaming", "document.querySelectorAll('.chart-tip')",
+		// The Tok/s cell shares requestThroughput with the Duration cell's grading
+		// and the detail dialog, so the row cannot report two different rates for
+		// one request. Asserted as the shared call, not the literal figure.
+		"fmtThroughput(requestThroughput(h))",
 	} {
 		if !strings.Contains(string(app), marker) {
 			t.Errorf("app.js missing History accessibility marker %q", marker)

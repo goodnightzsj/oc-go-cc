@@ -95,7 +95,7 @@ live roster 的条目**只有 `id/name/description/tags`，没有上下文窗口
 | 来源 | 条数 | 性质 |
 | --- | --- | --- |
 | models.dev `cline-pass` | 15 | 有 ctx/output/tools/reasoning/模态 + 价格 |
-| 官方文档页 | 13 | 有参考价，**无上下文/输出上限** |
+| 官方文档页 | 13 | 有参考费率，**无上下文/输出上限** |
 | live `recommended-models` | 12 | 实际可用的运行时事实；能力与价格全为 0 |
 
 差异：`muse-spark-1.3-contributor` 只在 live；`glm-5.3-flash`、`deepseek-v4.1-flash` 只在 models.dev；**9 个三源共有**。
@@ -123,7 +123,7 @@ live roster 的条目**只有 `id/name/description/tags`，没有上下文窗口
 
 因此 `peakSchedules` 已加入 `cline-pass` 条目（×2，同窗口）。覆盖模型为 `deepseek-v4-flash`、`deepseek-v4.1-flash`、`deepseek-v4-pro`——**两个 Flash 拼写都要列**，因为文档页那一行叫 "DeepSeek V4 Flash"，而 live roster 供的是 `cline-pass/deepseek-v4.1-flash` 且没有普通 v4-flash；DeepSeek 官方页把两者接起来（*"the legacy names deepseek-v4-flash ... are still accepted, but the corresponding models have been retired, their requests are served by the DeepSeek-V4.1-Flash model and billed at the Flash price"*）。
 
-**倍率作用于配额消耗的估算，不是账单。** 见「成本语义」节：ClinePass 是包月、不按参考价收费，所以这里的 ×2 改变的是"这段用量折合多少额度"，而不是"花了多少钱"。文档页把这张表定性为参考价，并写明它的用途是 *"...help you understand how usage is measured against your ClinePass quota"*，因此把峰谷带进估算与平台自己的口径一致。取错的后果是**高估或低估配额占用**，**不存在"向用户多收 / 少收"这个方向**——判断倍率是否合理要看它与 Cline 计量口径是否一致，而不是看它落在费用的哪一侧。本表取脚注指向的 DeepSeek 规则（×2）；Cline 页面只给它 DeepSeek V4 Pro 拆了 peak / off-peak 两行、Flash 单行，是否对 Flash 也按峰谷计量**无法从该页闭合**，取脚注规则是保守侧。
+**倍率作用于配额消耗的估算，不是账单。** 见「成本语义」节：ClinePass 是包月、不按参考费率收费，所以这里的 ×2 改变的是"这段用量折合多少额度"，而不是"花了多少钱"。文档页把这张表定性为参考费率，并写明它的用途是 *"...help you understand how usage is measured against your ClinePass quota"*，因此把峰谷带进估算与平台自己的口径一致。取错的后果是**高估或低估配额占用**，**不存在"向用户多收 / 少收"这个方向**——判断倍率是否合理要看它与 Cline 计量口径是否一致，而不是看它落在费用的哪一侧。本表取脚注指向的 DeepSeek 规则（×2）；Cline 页面只给它 DeepSeek V4 Pro 拆了 peak / off-peak 两行、Flash 单行，是否对 Flash 也按峰谷计量**无法从该页闭合**，取脚注规则是保守侧。
 
 中国法定节假日**已建模**（2026-09-22 补）。日历取自 [NateScarlet/holiday-cn](https://github.com/NateScarlet/holiday-cn)（每日抓取国务院公告，MIT，带 `papers` 溯源字段），运行时逐日拉取、24h 刷新，另内嵌一份种子到二进制里兜底。抓取失败保留上一份、绝不清空——清空会把节假日变回工作日，正好是这次要修的错。
 
@@ -131,7 +131,7 @@ live roster 的条目**只有 `id/name/description/tags`，没有上下文窗口
 
 调休补班日对判定无影响：高峰条件是周一~周五，而调休补班永远是把周末变成工作日，`weekday` 仍非 Mon–Fri。2007–2026 全部 138 个调休上班日中落在周一~周五的只有 1 个（2020-02-03，疫情延期通知里的"正常上班"日，本就不是假日）。
 
-**未登记的代价**：在此修正前，cline-pass 全部请求按 Off-peak 平计。本实例恰好跑 `cline-pass/deepseek-v4.1-flash`，正是被漏掉 peak 率的那个模型，于是高峰时段既不显示角标、费用也少算一半。
+**未登记的代价**：在此修正前，cline-pass 全部请求按 Off-peak 平计。本实例恰好跑 `cline-pass/deepseek-v4.1-flash`，正是被漏掉 peak 率的那个模型，于是高峰时段既不显示角标，`cost_usd` 也按谷价记账——**折合的配额消耗低估约一半**。（此处先前写作"费用也少算一半"，是把该列当账单读，那个方向在本平台不成立；口径见「成本语义」。）
 
 ### 定时刷新会丢规则（2026-09-22 修复）
 
@@ -168,7 +168,7 @@ live roster 的条目**只有 `id/name/description/tags`，没有上下文窗口
 
 ## 成本语义：参考消耗，不是账单
 
-ClinePass 是包月，用户**不按参考价付费**。文档页原文：
+ClinePass 是包月，用户**不按参考费率付费**。文档页原文：
 
 > ClinePass is a flat monthly subscription, so you are not charged the individual API prices below. These reference prices show the underlying per-1M-token rates for each model and can help you understand how usage is measured against your ClinePass quota.
 
@@ -214,7 +214,7 @@ GET /api/v1/users/me/plan   →  data.plan.entitlements.cline_pass.inferenceCapT
 | 窗口求和 | `∑costUsd` 折成美元后除以阈值，得 5.322% / 2.129% / 1.064%，`floor` 后正是端点报的 **5 / 2 / 1** |
 | 折成金额 | 三个阈值 = **$10 / $25 / $50** |
 
-所以本轮实测同时确认了：**我们的参考价与 Cline 自己的计费口径精确一致**，以及配额窗口确实是滚动 5 小时（拉到的 498 条记录跨度 1.50 小时，正好是窗口起点到现在）。
+所以本轮实测同时确认了：**我们的参考费率与 Cline 自己的计量口径精确一致**，以及配额窗口确实是滚动 5 小时（拉到的 498 条记录跨度 1.50 小时，正好是窗口起点到现在）。
 
 **面板不替换百分比。** `percentUsed` 是平台自己算的权威值，保持为主数字；分母只用来补充一行低调的剩余金额（`$9.47 left of $10.00`）。分母缺失时**不渲染金额**——按百分比倒推会编造平台从未给出的数字。
 
@@ -222,7 +222,7 @@ GET /api/v1/users/me/plan   →  data.plan.entitlements.cline_pass.inferenceCapT
 
 **仪表盘页面用 cookie 认证，不是 Bearer key。** 从 `app.cline.bot/dashboard/subscription` 抓到的同一请求只带 `cookie`，无 `authorization` 头（页面用 key 直接打会 401）。**但 Bearer key 路径独立可用**——上面的响应即由 key 取得，本项目无需浏览器会话。
 
-**不做的**：`/users/{id}/usages` 虽然逐请求可用（含 `aiInferenceProviderName`、`model_properties_override`），但**只保留当前 5 小时窗口**，日/周/月无法求和。用它做常驻对账既拉不到需要的跨度，又引入分页不稳定（`total` 字段恒为 0）和速率风险，而它本要解决的问题——参考价是否漂移——已由上表的逐条对账一次性验证。故不实现。
+**不做的**：`/users/{id}/usages` 虽然逐请求可用（含 `aiInferenceProviderName`、`model_properties_override`），但**只保留当前 5 小时窗口**，日/周/月无法求和。用它做常驻对账既拉不到需要的跨度，又引入分页不稳定（`total` 字段恒为 0）和速率风险，而它本要解决的问题——参考费率是否漂移——已由上表的逐条对账一次性验证。故不实现。
 
 **未决**：
 

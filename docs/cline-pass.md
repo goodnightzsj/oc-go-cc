@@ -115,13 +115,15 @@ live roster 的条目**只有 `id/name/description/tags`，没有上下文窗口
 | `deepseek-v4-flash` | 0.22 / 0.66 / 0.007 | 0.44 / 1.32 / 0.014 | 0.14 / 0.28 / 0.0028 | **= `mimo-v2.5` 的值** |
 | `deepseek-v4-pro` | 0.66 / 1.98 / 0.022 | 1.32 / 3.96 / 0.044 | 1.74 / 3.48 / 0.0145 | **= `mimo-v2.5-pro` 的值** |
 
-既不是 peak 也不是 off-peak，是映射错误。按 models.dev 计价会把这两条真实流量**少算约 2 倍**。
+既不是 peak 也不是 off-peak，是映射错误。按 models.dev 计价会把这两条真实流量**折合的配额消耗低估约 2 倍**（口径见「成本语义」：这里说的是计量，不是金额）。
 
 **来源分层必须留在文件里**（`_source` 字段）：13 行来自文档页，`glm-5.3-flash` 与 `deepseek-v4.1-flash` 两行**不在文档页**、取自 models.dev（第三方）。`muse-spark-1.3-contributor` 在 live roster 里但两源都没有费率，**故意不写规则**——缺规则会报 unknown，而缺规则不等于零价，编一个会显示一个自信的错误数字。
 
 **峰谷已登记（2026-09-22 修正）。** 文档页给 DeepSeek 两行标了 Peak 列，脚注指向 DeepSeek 官方定价页。**从这里可以读出窗口**：该页原文 *"Peak hours are 01:00 - 04:00 and 06:00 - 10:00 UTC, Monday through Friday, excluding Chinese public holidays"* —— **与 CommandCode / OpenCode Go 是同一套**。此前本节写"不是同一套、窗口未核实"，那是把"脚注指向别处"误读成了"规则不同"，而脚注指向的正是能给出窗口的那一页。
 
 因此 `peakSchedules` 已加入 `cline-pass` 条目（×2，同窗口）。覆盖模型为 `deepseek-v4-flash`、`deepseek-v4.1-flash`、`deepseek-v4-pro`——**两个 Flash 拼写都要列**，因为文档页那一行叫 "DeepSeek V4 Flash"，而 live roster 供的是 `cline-pass/deepseek-v4.1-flash` 且没有普通 v4-flash；DeepSeek 官方页把两者接起来（*"the legacy names deepseek-v4-flash ... are still accepted, but the corresponding models have been retired, their requests are served by the DeepSeek-V4.1-Flash model and billed at the Flash price"*）。
+
+**倍率作用于配额消耗的估算，不是账单。** 见「成本语义」节：ClinePass 是包月、不按参考价收费，所以这里的 ×2 改变的是"这段用量折合多少额度"，而不是"花了多少钱"。文档页把这张表定性为参考价，并写明它的用途是 *"...help you understand how usage is measured against your ClinePass quota"*，因此把峰谷带进估算与平台自己的口径一致。取错的后果是**高估或低估配额占用**，**不存在"向用户多收 / 少收"这个方向**——判断倍率是否合理要看它与 Cline 计量口径是否一致，而不是看它落在费用的哪一侧。本表取脚注指向的 DeepSeek 规则（×2）；Cline 页面只给它 DeepSeek V4 Pro 拆了 peak / off-peak 两行、Flash 单行，是否对 Flash 也按峰谷计量**无法从该页闭合**，取脚注规则是保守侧。
 
 中国法定节假日**已建模**（2026-09-22 补）。日历取自 [NateScarlet/holiday-cn](https://github.com/NateScarlet/holiday-cn)（每日抓取国务院公告，MIT，带 `papers` 溯源字段），运行时逐日拉取、24h 刷新，另内嵌一份种子到二进制里兜底。抓取失败保留上一份、绝不清空——清空会把节假日变回工作日，正好是这次要修的错。
 
@@ -170,7 +172,7 @@ ClinePass 是包月，用户**不按参考价付费**。文档页原文：
 
 > ClinePass is a flat monthly subscription, so you are not charged the individual API prices below. These reference prices show the underlying per-1M-token rates for each model and can help you understand how usage is measured against your ClinePass quota.
 
-所以本项目的 `cost_usd` 在这里是**"按参考费率的消耗估算"**，正好就是文档说的那个用途。
+所以本项目的 `cost_usd` 在这里是**"按参考费率的消耗估算"**，正好就是文档说的那个用途。峰谷倍率（见「价格表」）作用在这个估算上，因此它影响的是配额占用读数，不是任何金额。
 
 这也决定了面板不能照抄 CommandCode 的账本视图：`attachCommandCodeLedger` 做的是"本实例金额 vs 官方金额"，而 ClinePass 该做的是**"参考费率消耗 vs 官方窗口 `percentUsed`"**——后者本身就是百分比，比金额对账更直接。且它的窗口（滚动 5h / 日历周 / 日历月）比 OpenCode Go 的 31 天订阅周期**更好对齐**。
 

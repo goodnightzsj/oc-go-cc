@@ -19,7 +19,7 @@
 
 ## 峰谷与分档
 
-- Hard: **估算错时要错在"少收"一侧**。规则读不准时应回落基础价，而不是猜一个高价档。两处实际取舍都按这个方向定：条件读不懂的 `pricing.overrides` 一律**跳过**（条件未读的 override 会退化成无条件，按列表恰好排第一的档定价），未覆盖的时间窗模型回落底价。反过来猜会向用户报一个虚高的账单。
+- Hard: **估算错时要错在"少收"一侧**。规则读不准时应回落基础价，而不是猜一个高价档。两处实际取舍都按这个方向定：条件读不懂的 `pricing.overrides` 一律**跳过**（条件未读的 override 会退化成无条件，按列表恰好排第一的档定价），未覆盖的时间窗模型回落底价。反过来猜会向用户报一个虚高的账单。**此方向只适用于按量计费的平台**：包月订阅（当前只有 ClinePass，`docs/cline-pass.md`）的 `cost_usd` 是"参考费率的配额消耗估算"、不是账单，没有多收少收这个方向，判断依据是与平台计量口径是否一致。别拿这条规则去改订阅平台的倍率。
 - Hard: **倍率对齐计价来源的底价，不是上游载荷的 headline 价**。两处数据源对同一个模型可能记不同的档：OpenRouter 的 `tencent/hy3` 载荷 lead 0.132/0.528、折扣 0.0825/0.33，而 models.dev（本项目实际计价来源）记的底价是后者，所以倍率是 1.6 不是 2。`TestOpenRouterPeakMatchesThePublishedOverrides`（`internal/history/peak_test.go:292`）钉住这个算术；**若 models.dev 改用 headline 底价，这些倍率会双重计算，此测试是暴露点**。
 - 分档阈值的比较对象是**完整 prompt**（新鲜输入 + 缓存读 + 缓存写，`promptTokensOf`，`internal/storage/requests.go:539`），不是仅新鲜输入。只比新鲜输入会把缓存重的请求放进便宜档，而上游按贵档计费。阈值是**严格大于**。
 - 规则形态是**每 rule 自带** `models`/`windows`/`multiplier`/`allDays`（`internal/history/record.go:153-176`），不是每平台一条——同一个平台的模型可以在窗口方向、倍率、适用星期上各不相同。`allDays` 零值安全：漏写保持工作日限制，失败方向同样是少收。

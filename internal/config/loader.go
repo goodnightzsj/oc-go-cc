@@ -156,42 +156,42 @@ func applyEnvOverrides(cfg *Config) error {
 	// Global API keys (backward compatibility)
 	if v := envValue("ROUTATIC_PROXY_API_KEY"); v != "" {
 		cfg.APIKey = v
-		cfg.APIKeys = nil // env var overrides both api_key and api_keys
 	}
 	// Global API keys array (comma-separated)
 	if v := envValue("ROUTATIC_PROXY_API_KEYS"); v != "" {
 		cfg.APIKeys = parseCommaSeparatedKeys(v)
-		cfg.APIKey = ""
 	}
 
 	// Provider-specific API keys (new)
+	//
+	// Each platform's *_API_KEY and *_API_KEYS feed the same two config fields
+	// the file does, so they pool the same way: setting both appends rather
+	// than one clearing the other, matching EffectiveAPIKeys. A single-key
+	// environment override therefore no longer removes keys the file listed in
+	// api_keys - to drop those, clear api_keys in the file (or override it with
+	// *_API_KEYS).
+	//
 	// Single key
 	if v := envValue("ROUTATIC_PROXY_OPENCODE_GO_API_KEY"); v != "" {
 		cfg.OpenCodeGo.APIKey = v
-		cfg.OpenCodeGo.APIKeys = nil
 	}
 	// Comma-separated keys
 	if v := envValue("ROUTATIC_PROXY_OPENCODE_GO_API_KEYS"); v != "" {
 		cfg.OpenCodeGo.APIKeys = parseCommaSeparatedKeys(v)
-		cfg.OpenCodeGo.APIKey = ""
 	}
 
 	if v := envValue("ROUTATIC_PROXY_OPENCODE_ZEN_API_KEY"); v != "" {
 		cfg.OpenCodeZen.APIKey = v
-		cfg.OpenCodeZen.APIKeys = nil
 	}
 	if v := envValue("ROUTATIC_PROXY_OPENCODE_ZEN_API_KEYS"); v != "" {
 		cfg.OpenCodeZen.APIKeys = parseCommaSeparatedKeys(v)
-		cfg.OpenCodeZen.APIKey = ""
 	}
 
 	if v := envValue("ROUTATIC_PROXY_AWS_BEDROCK_API_KEY"); v != "" {
 		cfg.AWSBedrock.APIKey = v
-		cfg.AWSBedrock.APIKeys = nil
 	}
 	if v := envValue("ROUTATIC_PROXY_AWS_BEDROCK_API_KEYS"); v != "" {
 		cfg.AWSBedrock.APIKeys = parseCommaSeparatedKeys(v)
-		cfg.AWSBedrock.APIKey = ""
 	}
 	if v := envValue("ROUTATIC_PROXY_AWS_BILLING_ENABLED"); v != "" {
 		enabled, err := strconv.ParseBool(v)
@@ -209,22 +209,18 @@ func applyEnvOverrides(cfg *Config) error {
 
 	if v := envValue("ROUTATIC_PROXY_OPENROUTER_API_KEY"); v != "" {
 		cfg.OpenRouter.APIKey = v
-		cfg.OpenRouter.APIKeys = nil
 	}
 	if v := envValue("ROUTATIC_PROXY_OPENROUTER_API_KEYS"); v != "" {
 		cfg.OpenRouter.APIKeys = parseCommaSeparatedKeys(v)
-		cfg.OpenRouter.APIKey = ""
 	}
 	if v := envValue("ROUTATIC_PROXY_OPENROUTER_MANAGEMENT_API_KEY"); v != "" {
 		cfg.OpenRouter.ManagementAPIKey = v
 	}
 	if v := envValue("ROUTATIC_PROXY_COMMANDCODE_API_KEY"); v != "" {
 		cfg.CommandCode.APIKey = v
-		cfg.CommandCode.APIKeys = nil
 	}
 	if v := envValue("ROUTATIC_PROXY_COMMANDCODE_API_KEYS"); v != "" {
 		cfg.CommandCode.APIKeys = parseCommaSeparatedKeys(v)
-		cfg.CommandCode.APIKey = ""
 	}
 	if v := envValue("ROUTATIC_PROXY_COMMANDCODE_URL"); v != "" {
 		cfg.CommandCode.BaseURL = v
@@ -235,11 +231,9 @@ func applyEnvOverrides(cfg *Config) error {
 
 	if v := envValue("ROUTATIC_PROXY_CLINE_PASS_API_KEY"); v != "" {
 		cfg.ClinePass.APIKey = v
-		cfg.ClinePass.APIKeys = nil
 	}
 	if v := envValue("ROUTATIC_PROXY_CLINE_PASS_API_KEYS"); v != "" {
 		cfg.ClinePass.APIKeys = parseCommaSeparatedKeys(v)
-		cfg.ClinePass.APIKey = ""
 	}
 	if v := envValue("ROUTATIC_PROXY_CLINE_PASS_URL"); v != "" {
 		cfg.ClinePass.BaseURL = v

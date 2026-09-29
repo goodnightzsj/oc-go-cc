@@ -50,8 +50,8 @@
 
 | 配置/环境变量 | 行为 |
 | --- | --- |
-| `api_keys` / `ROUTATIC_PROXY_COMMANDCODE_API_KEYS` | 逗号分隔环境变量用于密钥轮换；池优先于单密钥 |
-| `api_key` / `ROUTATIC_PROXY_COMMANDCODE_API_KEY` | 平台单密钥；环境变量覆盖文件 |
+| `api_keys` / `ROUTATIC_PROXY_COMMANDCODE_API_KEYS` | 逗号分隔环境变量用于密钥轮换；与单密钥合并为同一个池（单密钥在前） |
+| `api_key` / `ROUTATIC_PROXY_COMMANDCODE_API_KEY` | 平台单密钥；环境变量覆盖文件里的同名字段 |
 | `ROUTATIC_PROXY_COMMANDCODE_URL` | 覆盖完整 Chat Completions URL |
 | `ROUTATIC_PROXY_COMMANDCODE_ANTHROPIC_URL` | 覆盖完整 Messages URL |
 | `timeout_ms` | 非流式单次尝试超时 |

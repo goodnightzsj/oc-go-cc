@@ -98,7 +98,9 @@ For streaming, the router downgrades to fast models (Qwen3.7 Plus) for better TT
 
 **Long-running stream policy:** The proxy never kills a stream that is actively producing bytes. The server-level `WriteTimeout` is set to 0; instead each upstream read uses a per-`Read` deadline via `http.ResponseController.SetReadDeadline` that is renewed on every successful byte. If the gap between bytes exceeds `OpenCodeGo.stream_timeout_ms` (or `OpenCodeZen.stream_timeout_ms`), the connection is treated as stuck and the request is routed to the next fallback model. Defaults to `timeout_ms` when unset. Client disconnects during a stream are logged at `Debug` level — this is normal during Claude Code tool execution and is not a failure signal.
 
-**Provider-specific API keys:** Each provider (OpenCode Go, OpenCode Zen, AWS Bedrock) can have its own `api_key` or `api_keys` array. Provider-specific keys take precedence over global keys. This enables per-provider fallback strategies and key rotation.
+**Provider-specific API keys:** Each provider (OpenCode Go, OpenCode Zen, AWS Bedrock, OpenRouter, CommandCode, ClinePass) can have its own `api_key` or `api_keys` array. Provider-specific keys take precedence over global keys. This enables per-provider fallback strategies and key rotation.
+
+Within one scope, `api_key` and `api_keys` are **one pool, not alternatives**: `EffectiveAPIKeys` (`internal/config/config.go`) returns the single key followed by the array, so `api_key` is used on its own when the array is empty and leads the pool when it is not. A key written in both fields appears once. This replaced an either/or rule where filling in `api_keys` silently dropped `api_key`.
 
 Environment variable overrides (single key):
 - `ROUTATIC_PROXY_OPENCODE_GO_API_KEY`
@@ -110,7 +112,7 @@ Environment variable overrides (comma-separated keys for round-robin):
 - `ROUTATIC_PROXY_OPENCODE_ZEN_API_KEYS=key-1,key-2`
 - `ROUTATIC_PROXY_AWS_BEDROCK_API_KEYS=key-1,key-2`
 
-Precedence: `*_API_KEYS` → `*_API_KEY` → global `API_KEYS` → global `API_KEY`.
+Precedence: provider-specific pool → global pool. Within a scope the single key and the array pool together (single first); across scopes the provider's own credentials are used when it has any, and the global pool only when it has none. An environment variable sets the field it names and does not clear the other, so `*_API_KEY` adds to a file's `api_keys` rather than replacing it.
 
 ## Key Files
 

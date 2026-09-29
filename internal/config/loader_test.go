@@ -300,7 +300,11 @@ func TestInterpolateEnvVars_NewPlaceholderAcceptsLegacyEnv(t *testing.T) {
 	}
 }
 
-func TestEnvOverrides_OC_GO_CC_API_KEY_OverridesAPIKeys(t *testing.T) {
+// A single-key environment variable sets the single field and leaves the file's
+// api_keys array alone; the pool is both, single first. It used to clear the
+// array, which made it impossible to add one more key from the environment to a
+// file that already listed several.
+func TestEnvOverrides_OC_GO_CC_API_KEY_PoolsWithFileAPIKeys(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.json")
 
@@ -323,9 +327,15 @@ func TestEnvOverrides_OC_GO_CC_API_KEY_OverridesAPIKeys(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	// Env var must fully replace the key pool, not append to it.
-	if keys := cfg.EffectiveAPIKeys(); len(keys) != 1 || keys[0] != "env-key" {
-		t.Errorf("EffectiveAPIKeys() = %v, want [env-key]", keys)
+	want := []string{"env-key", "file-key-1", "file-key-2"}
+	keys := cfg.EffectiveAPIKeys()
+	if len(keys) != len(want) {
+		t.Fatalf("EffectiveAPIKeys() = %v, want %v", keys, want)
+	}
+	for i := range want {
+		if keys[i] != want[i] {
+			t.Fatalf("EffectiveAPIKeys() = %v, want %v (env single key leads, file array follows)", keys, want)
+		}
 	}
 }
 
@@ -548,9 +558,13 @@ func TestEnvOverrides_GlobalCommaSeparatedKeys(t *testing.T) {
 		}
 	}
 
-	// Verify APIKey is cleared when API_KEYS env var is set
-	if cfg.APIKey != "" {
-		t.Errorf("APIKey = %q, want empty string", cfg.APIKey)
+	// The file's single key is kept: API_KEYS fills the array field, and the two
+	// fields pool. Clearing it was the old either/or behaviour.
+	if cfg.APIKey != "file-key" {
+		t.Errorf("APIKey = %q, want %q (the file's single key is not cleared by API_KEYS)", cfg.APIKey, "file-key")
+	}
+	if keys := cfg.EffectiveAPIKeys(); len(keys) != 3 || keys[0] != "file-key" {
+		t.Errorf("EffectiveAPIKeys() = %v, want the file key ahead of the two env keys", keys)
 	}
 }
 
@@ -739,17 +753,69 @@ func TestExpandHome(t *testing.T) {
 	}
 }
 
-func TestEffectiveAPIKeys_APICKeysTakesPrecedence(t *testing.T) {
+// The two credential fields are one pool, not two alternatives: the single key
+// is used when the array is empty, and leads the array when it is not. This
+// replaced an either/or rule where filling in api_keys silently dropped
+// api_key.
+//
+// Every position is named distinctly, so a result that merely has the right
+// length cannot pass: [key-a key-b single-key] and [single-key key-a key-b] are
+// both three long, and only the second is correct. That order is what the
+// rotation walks, so reversing it changes which key serves the first request.
+func TestEffectiveAPIKeys_PoolsBothFieldsWithTheSingleKeyFirst(t *testing.T) {
 	cfg := &Config{
 		APIKey:  "single-key",
 		APIKeys: []string{"key-a", "key-b"},
 	}
 	keys := cfg.EffectiveAPIKeys()
-	if len(keys) != 2 {
-		t.Fatalf("len(keys) = %d, want 2", len(keys))
+	want := []string{"single-key", "key-a", "key-b"}
+	if len(keys) != len(want) {
+		t.Fatalf("len(keys) = %d, want %d (%v)", len(keys), len(want), keys)
 	}
-	if keys[0] != "key-a" || keys[1] != "key-b" {
-		t.Errorf("keys = %v, want [key-a key-b]", keys)
+	for i := range want {
+		if keys[i] != want[i] {
+			t.Fatalf("keys = %v, want %v (the single key leads, the array follows)", keys, want)
+		}
+	}
+}
+
+// A key written into both fields is one credential, so it takes one slot in the
+// rotation. Keeping it twice would give that subscription two turns per cycle
+// and make the quota panel render two identical cards for one account.
+func TestEffectiveAPIKeys_DuplicateAcrossFieldsIsKeptOnce(t *testing.T) {
+	cfg := &Config{
+		APIKey:  "same-key",
+		APIKeys: []string{"same-key", "other-key"},
+	}
+	keys := cfg.EffectiveAPIKeys()
+	if len(keys) != 2 || keys[0] != "same-key" || keys[1] != "other-key" {
+		t.Fatalf("EffectiveAPIKeys() = %v, want [same-key other-key]", keys)
+	}
+}
+
+// Surrounding whitespace is trimmed per entry, so a key pasted with a trailing
+// space is the same credential as the untrimmed spelling and does not take a
+// second rotation slot.
+func TestEffectiveAPIKeys_TrimsEntries(t *testing.T) {
+	cfg := &Config{APIKey: " a ", APIKeys: []string{"", " b "}}
+	keys := cfg.EffectiveAPIKeys()
+	if len(keys) != 2 || keys[0] != "a" || keys[1] != "b" {
+		t.Fatalf("EffectiveAPIKeys() = %v, want [a b]", keys)
+	}
+}
+
+// The result must not alias the stored slice. Callers append to a key pool when
+// building a fallback chain, and an aliased result would write into the live
+// config - so the next request would rotate through keys the file never listed.
+func TestEffectiveAPIKeys_ResultDoesNotAliasTheConfig(t *testing.T) {
+	cfg := &Config{APIKeys: []string{"k1", "k2"}}
+	keys := cfg.EffectiveAPIKeys()
+	if len(keys) == 0 {
+		t.Fatal("no keys returned")
+	}
+	keys[0] = "mutated"
+	if cfg.APIKeys[0] != "k1" {
+		t.Fatal("mutating the returned pool changed the stored config")
 	}
 }
 
@@ -779,9 +845,20 @@ func TestOpenCodeGoConfig_EffectiveAPIKeys(t *testing.T) {
 		want   []string
 	}{
 		{
-			name:   "APIKeys takes precedence",
+			// Both fields filled: the pool is the single key followed by the
+			// array. The reversed arrangement is also three long, so only the
+			// exact sequence passes.
+			name:   "single key and array form one pool, single first",
 			config: OpenCodeGoConfig{APIKeys: []string{"key-1", "key-2"}, APIKey: "single-key"},
-			want:   []string{"key-1", "key-2"},
+			want:   []string{"single-key", "key-1", "key-2"},
+		},
+		{
+			// A key in both fields is one credential and takes one slot: the
+			// single field repeats the array's first entry, and the pool is
+			// still two keys, not three.
+			name:   "key in both fields is kept once",
+			config: OpenCodeGoConfig{APIKeys: []string{"single-key", "key-2"}, APIKey: "single-key"},
+			want:   []string{"single-key", "key-2"},
 		},
 		{
 			name:   "Falls back to APIKey",
@@ -817,9 +894,20 @@ func TestOpenCodeZenConfig_EffectiveAPIKeys(t *testing.T) {
 		want   []string
 	}{
 		{
-			name:   "APIKeys takes precedence",
+			// Both fields filled: the pool is the single key followed by the
+			// array. The reversed arrangement is also three long, so only the
+			// exact sequence passes.
+			name:   "single key and array form one pool, single first",
 			config: OpenCodeZenConfig{APIKeys: []string{"zen-1", "zen-2"}, APIKey: "zen-single"},
-			want:   []string{"zen-1", "zen-2"},
+			want:   []string{"zen-single", "zen-1", "zen-2"},
+		},
+		{
+			// A key in both fields is one credential and takes one slot: the
+			// single field repeats the array's first entry, and the pool is
+			// still two keys, not three.
+			name:   "key in both fields is kept once",
+			config: OpenCodeZenConfig{APIKeys: []string{"zen-single", "zen-2"}, APIKey: "zen-single"},
+			want:   []string{"zen-single", "zen-2"},
 		},
 		{
 			name:   "Falls back to APIKey",
@@ -855,9 +943,20 @@ func TestAWSBedrockConfig_EffectiveAPIKeys(t *testing.T) {
 		want   []string
 	}{
 		{
-			name:   "APIKeys takes precedence",
+			// Both fields filled: the pool is the single key followed by the
+			// array. The reversed arrangement is also three long, so only the
+			// exact sequence passes.
+			name:   "single key and array form one pool, single first",
 			config: AWSBedrockConfig{APIKeys: []string{"bedrock-1", "bedrock-2"}, APIKey: "bedrock-single"},
-			want:   []string{"bedrock-1", "bedrock-2"},
+			want:   []string{"bedrock-single", "bedrock-1", "bedrock-2"},
+		},
+		{
+			// A key in both fields is one credential and takes one slot: the
+			// single field repeats the array's first entry, and the pool is
+			// still two keys, not three.
+			name:   "key in both fields is kept once",
+			config: AWSBedrockConfig{APIKeys: []string{"bedrock-single", "bedrock-2"}, APIKey: "bedrock-single"},
+			want:   []string{"bedrock-single", "bedrock-2"},
 		},
 		{
 			name:   "Falls back to APIKey",
@@ -1179,8 +1278,13 @@ func TestEnvOverrides_OpenRouterCommaSeparatedKeys(t *testing.T) {
 		}
 	}
 
-	if cfg.OpenRouter.APIKey != "" {
-		t.Errorf("OpenRouter.APIKey = %q, want empty string", cfg.OpenRouter.APIKey)
+	// Same rule per platform: the file's single key stays and pools with the
+	// environment's array.
+	if cfg.OpenRouter.APIKey != "openrouter-file-key" {
+		t.Errorf("OpenRouter.APIKey = %q, want %q", cfg.OpenRouter.APIKey, "openrouter-file-key")
+	}
+	if keys := cfg.OpenRouter.EffectiveAPIKeys(); len(keys) != 4 || keys[0] != "openrouter-file-key" {
+		t.Errorf("OpenRouter.EffectiveAPIKeys() = %v, want the file key ahead of the three env keys", keys)
 	}
 }
 

@@ -41,9 +41,18 @@ func TestCommandCodeEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Both environment variables pool, single first, and the file's key is not
+	// discarded either: three credentials, not two. The old rule dropped the
+	// single env key whenever the array was set.
 	keys := cfg.ProviderAPIKeys("commandcode")
-	if len(keys) != 2 || keys[0] != "first-env" || keys[1] != "second-env" {
-		t.Fatal("dedicated environment pool must replace file/single credentials")
+	want := []string{"single-env", "first-env", "second-env"}
+	if len(keys) != len(want) {
+		t.Fatalf("provider key pool = %v, want %v", keys, want)
+	}
+	for i := range want {
+		if keys[i] != want[i] {
+			t.Fatalf("provider key pool = %v, want %v", keys, want)
+		}
 	}
 }
 

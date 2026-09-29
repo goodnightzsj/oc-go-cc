@@ -6,6 +6,7 @@
 
 - 用量与缓存 token 链路：`architecture/usage-pipeline.md`
 - provider 选择与平台边界：`architecture/provider-layer.md`
+- 请求与关闭生命周期：`architecture/request-lifecycle.md`
 - 模型与成本路由：`architecture/model-routing.md`
 - 入站协议与 Responses 边界：`reference/inbound-protocols.md`
 - 缓存/计费修复与三端对账：`reference/cache-billing-audit.md`

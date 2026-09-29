@@ -36,3 +36,24 @@ func TestCaptureBodyCompletesOnClose(t *testing.T) {
 		t.Fatal("capture callback never fired; pipe write end was not closed")
 	}
 }
+
+func TestCaptureBodyCloseWaitsForCallback(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	wrapped := CaptureBody(io.NopCloser(strings.NewReader("")), func([]byte) {
+		close(entered)
+		<-release
+	})
+	done := make(chan error, 1)
+	go func() { done <- wrapped.Close() }()
+	<-entered
+	select {
+	case err := <-done:
+		close(release)
+		t.Fatalf("Close returned before capture completed: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}

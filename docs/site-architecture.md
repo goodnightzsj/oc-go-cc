@@ -2,6 +2,8 @@
 
 设计定稿：2026-09-13。状态：**阶段 0–5 已实施**。
 
+2026-09-29后续变更：OpenRouter已迁入统一provider分派，handler不再支持nil registry作为发送降级方式；生产和测试装配迁移完成后删除旧client发送路径。下文阶段5与§9的保留结论是当时的兼容决策，已由本轮显式迁移取代。当前合同见 `llmdoc/architecture/provider-layer.md`。
+
 已实施：`internal/site` 注册表与重复清单收敛（0/1，零行为变化）；面板按各站点的 `Visible` 过滤，隐藏项保留代码与历史（2）；站点自有模型目录接入，修好 `/v1/models` 对 CommandCode 返回 0 项（3）；`active_site` 作用域 + 目录优先解析 + 面板选择器（4）。
 
 阶段 5 的核查结果与预期不同，记录如下以免重做：`provider/*.go` 已无任何按平台名的分支（0 处 `switch provider`），`loader.go` 与 `storage/pricing.go` 已在阶段 1 收敛，`client/opencode.go` 按 §9 保持原样。**真正的遗漏在 §2 清单之外**：`internal/router/selector.go` 的 `enabledProviders` 自带一份四平台名单（Go/Zen/Bedrock/OpenRouter），漏掉 CommandCode——于是成本路由下 CommandCode 无论配了多少 key 都不会被选中。已改为遍历 `site.All()` 并向 `config.ProviderAPIKeys` 逐个取凭证，配 `TestEnabledProvidersMatchesRegistryCoverage` 守卫，形态与 config 的 `TestProviderKeySourceCoversRegistry` 一致。

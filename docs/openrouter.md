@@ -433,3 +433,5 @@ For streaming, the router may downgrade to faster models for better TTFT (time t
 ---
 
 **Note**: OpenRouter models use the OpenAI Chat Completions API format. The proxy automatically handles request/response transformation between Anthropic and OpenAI formats.
+
+Dispatch uses `internal/provider/openrouter.go` through the shared provider registry. Explicit upstream wire formats other than `openai` fail before sending. Existing endpoint completion, inference-key pooling/global fallback, attribution headers and timeouts are preserved; the Management Key is never used for inference.

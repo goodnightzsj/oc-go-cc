@@ -6,12 +6,12 @@
 
 1. **入口**：`internal/handlers/messages.go` 接收 Anthropic `/v1/messages`，`CaptureOriginal` 记录原始请求（仅 debug_capture 开启时）。Responses 入站最终汇入同一条管线，见 `reference/inbound-protocols.md`。
 2. **路由**：`internal/router/` 按场景选择模型（scenario / override / family override），产出模型链。
-3. **发送**：`internal/provider/opencode_go.go` 的 `Stream`（真实流量主路径）或 `client/opencode.go` 的 `ChatCompletion`（registry 缺失兜底，OpenRouter 属此类）；两者均在 debug_capture 开启时记录 upstream request/response（`CaptureBody` 异步 tee）。provider 选择见 `architecture/provider-layer.md`。
+3. **发送**：统一由core.Provider的Execute/Stream发送，OpenRouter也在registry内，无legacy HTTP兜底。捕获路径复用client.CaptureBody异步tee，Close等待捕获回调。各平台协议与捕获覆盖见 `architecture/provider-layer.md`。
 4. **响应转换**：上游 OpenAI usage → Anthropic usage，`usageInfoToAnthropic`（`internal/transformer/stream.go:629`）→ `splitPromptTokens`：
    - OpenAI 标准：`prompt_tokens_details.cached_tokens` → cache_read；input = prompt − cached
    - DeepSeek 分区形：`prompt_cache_hit/miss_tokens` hit+miss == prompt → (miss, hit, 0)
    - 无缓存字段：全量当 input（最坏情形，成本会上浮）
-5. **录制**：流量完成后 `history.RequestRecord`（含 CacheReadTokens/CacheCreationTokens）→ `internal/storage/requests.go` Insert → SQLite `requests` 表。
+5. **录制**：流量完成后 `history.RequestRecord`（含 CacheReadTokens/CacheCreationTokens）→ `internal/storage/requests.go` Insert → SQLite `requests` 表。 每次执行独立生成UUID，外部X-Request-ID只关联回显/日志/capture，重复关联ID不覆盖记账；中断流保留已报告用量与失败状态。
 6. **成本**：逐请求成本入口是 `costForProviderTokensAt`（`internal/storage/pricing.go:31`），它在 `costForTokens`（`internal/storage/analytics.go:242`）之上叠乘 `history.ProviderPeakMultiplier(provider, model, t)`（`pricing.go:40`/`:51`），并按 **prompt 档位**选价——`PriceForProviderModel(provider, model, in+cacheRead+cacheCreate)` 的三参数形态（`pricing.go:38`）。长上下文分档来自 `models.cost_tiers` 列（建列 `internal/storage/database.go:335`，由 `internal/catalog/types.go` 填值），应用点在 `internal/storage/requests.go:507-519`，比较对象是完整 prompt（`promptTokensOf`，`requests.go:539`）。provider 同步路径另有 `provider_usage` 表（平台真实账单快照，`cost_units`/1e8 = USD）。
    平台费率表不再是纯构建期快照：`internal/storage/pricerefresh.go` 每小时从平台自己的页面刷新（`DefaultPriceRefreshInterval = time.Hour`，`:56`），seed 文件是刷新失败时的回退。另见 `reference/cache-billing-audit.md`。
 7. **下游**：GUI（`internal/gui`）读 requests/analytics 汇总；本地 CompactGate 网关作为客户端读代理回传的 usage（cached_input_tokens 与代理 cache_read 同源）。
@@ -25,5 +25,5 @@
 
 ## 已知缺口
 
-- `ChatCompletionNonStreaming`（`internal/client/opencode.go:321`）没有任何 capture 调用：它绕过 `ChatCompletion` 的捕获 tee，非流式读 body 的路径不经过捕获，原始数据不被记录。
+- OpenRouter Execute/Stream均捕获request/response，旧ChatCompletionNonStreaming已删除；其它provider的捕获覆盖以各自实现为准。
 - 捕获记录含完整对话内容（敏感），仅应临时开启。

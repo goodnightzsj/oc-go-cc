@@ -2,22 +2,12 @@
 package client
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
-	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/routatic/proxy/internal/config"
-	"github.com/routatic/proxy/internal/core"
-	"github.com/routatic/proxy/internal/debug"
-	"github.com/routatic/proxy/internal/models"
 	"github.com/routatic/proxy/internal/site"
-	"github.com/routatic/proxy/pkg/types"
 )
 
 // captureReadCloser wraps an io.ReadCloser with a TeeReader so every byte read
@@ -27,8 +17,9 @@ import (
 // goroutine leaked for every captured request.
 type captureReadCloser struct {
 	io.ReadCloser
-	r  io.Reader
-	pw *io.PipeWriter
+	r    io.Reader
+	pw   *io.PipeWriter
+	done <-chan struct{}
 }
 
 func (t *captureReadCloser) Read(p []byte) (n int, err error) {
@@ -38,6 +29,7 @@ func (t *captureReadCloser) Read(p []byte) (n int, err error) {
 func (t *captureReadCloser) Close() error {
 	err := t.ReadCloser.Close()
 	_ = t.pw.Close()
+	<-t.done
 	return err
 }
 
@@ -48,8 +40,11 @@ func CaptureBody(body io.ReadCloser, capture func(data []byte)) io.ReadCloser {
 		return body
 	}
 	pr, pw := io.Pipe()
-	tee := &captureReadCloser{ReadCloser: body, r: io.TeeReader(body, pw), pw: pw}
+	done := make(chan struct{})
+	tee := &captureReadCloser{ReadCloser: body, r: io.TeeReader(body, pw), pw: pw, done: done}
 	go func() {
+		defer close(done)
+		defer pr.Close()
 		data, _ := io.ReadAll(pr)
 		capture(data)
 	}()
@@ -83,30 +78,9 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("API error %d: %s", e.StatusCode, e.Body)
 }
 
-// OpenCodeClient handles communication with OpenCode Go and Zen APIs.
+// OpenCodeClient resolves per-provider request timeouts from live config.
 type OpenCodeClient struct {
-	atomic        *config.AtomicConfig
-	httpClient    *http.Client
-	keyCounter    atomic.Uint64
-	captureLogger *debug.CaptureLogger
-}
-
-// nextAPIKey returns the next API key in round-robin order from the given key pool.
-// The caller provides keys from a single config read so baseURL and apiKey
-// always come from the same snapshot.
-func (c *OpenCodeClient) nextAPIKey(keys []string) string {
-	if len(keys) == 0 {
-		return ""
-	}
-	n := uint64(len(keys))
-	old := c.keyCounter.Add(1)
-	return keys[(old-1)%n]
-}
-
-// getProviderAPIKeys returns the API keys for a specific provider.
-// It checks provider-specific keys first, then falls back to global keys for backward compatibility.
-func (c *OpenCodeClient) getProviderAPIKeys(modelConfig config.ModelConfig) []string {
-	return c.atomic.Get().ProviderAPIKeys(Provider(modelConfig))
+	atomic *config.AtomicConfig
 }
 
 // ProviderKeyCount returns the number of API keys configured for a provider.
@@ -119,28 +93,9 @@ func ProviderKeyCount(atomicCfg *config.AtomicConfig, provider string) int {
 	return max(1, len(atomicCfg.Get().ProviderAPIKeys(provider)))
 }
 
-// NewOpenCodeClient creates a client for sending requests to OpenCode Go,
-// OpenCode Zen, or AWS Bedrock endpoints. The client handles connection
-// pooling, API key rotation (round-robin across multiple keys when configured),
-// and request/response capture for debugging. Pass a non-nil captureLogger
-// to enable upstream traffic logging.
-func NewOpenCodeClient(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) *OpenCodeClient {
-	transport := &http.Transport{
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 20,
-		IdleConnTimeout:     90 * time.Second,
-		MaxConnsPerHost:     50,
-		DisableKeepAlives:   false,
-		Proxy:               http.ProxyFromEnvironment,
-	}
-
-	return &OpenCodeClient{
-		atomic: atomic,
-		httpClient: &http.Client{
-			Transport: transport,
-		},
-		captureLogger: captureLogger,
-	}
+// NewOpenCodeClient creates a timeout resolver. Providers own HTTP transport.
+func NewOpenCodeClient(atomic *config.AtomicConfig) *OpenCodeClient {
+	return &OpenCodeClient{atomic: atomic}
 }
 
 // StreamIdleTimeout returns the maximum gap between bytes on an active stream
@@ -197,169 +152,4 @@ func IsZen(model config.ModelConfig) bool {
 // IsBedrock returns true if the model uses the AWS Bedrock provider.
 func IsBedrock(model config.ModelConfig) bool {
 	return Provider(model) == ProviderAWSBedrock
-}
-
-// IsOpenRouter returns true if the model uses the OpenRouter provider.
-func IsOpenRouter(model config.ModelConfig) bool {
-	return Provider(model) == ProviderOpenRouter
-}
-
-// getEndpoint returns the appropriate endpoint config for a model.
-func (c *OpenCodeClient) getEndpoint(modelID string, modelConfig config.ModelConfig) endpointConfig {
-	cfg := c.atomic.Get()
-	apiKey := c.nextAPIKey(cfg.ProviderAPIKeys(Provider(modelConfig)))
-
-	if IsBedrock(modelConfig) {
-		bedrock := cfg.AWSBedrock
-		return endpointConfig{BaseURL: bedrock.BaseURL, APIKey: apiKey}
-	}
-
-	if IsZen(modelConfig) {
-		zen := cfg.OpenCodeZen
-		switch models.ClassifyEndpoint(modelID) {
-		case models.EndpointAnthropic:
-			return endpointConfig{BaseURL: zen.AnthropicBaseURL, APIKey: apiKey}
-		case models.EndpointResponses:
-			return endpointConfig{BaseURL: zen.ResponsesBaseURL, APIKey: apiKey}
-		case models.EndpointGemini:
-			return endpointConfig{BaseURL: zen.GeminiBaseURL + "/" + modelID, APIKey: apiKey}
-		default:
-			return endpointConfig{BaseURL: zen.BaseURL, APIKey: apiKey}
-		}
-	}
-
-	if IsOpenRouter(modelConfig) {
-		endpoint := strings.TrimRight(cfg.OpenRouter.BaseURL, "/")
-		if strings.HasSuffix(endpoint, "/v1") {
-			endpoint += "/chat/completions"
-		}
-		return endpointConfig{BaseURL: endpoint, APIKey: apiKey}
-	}
-	if Provider(modelConfig) != ProviderOpenCodeGo {
-		return endpointConfig{}
-	}
-
-	// Default: OpenCode Go
-	if models.IsAnthropicModel(modelID) {
-		return endpointConfig{BaseURL: cfg.OpenCodeGo.AnthropicBaseURL, APIKey: apiKey}
-	}
-	return endpointConfig{BaseURL: cfg.OpenCodeGo.BaseURL, APIKey: apiKey}
-}
-
-// endpointConfig holds configuration for a specific API endpoint.
-type endpointConfig struct {
-	BaseURL string
-	APIKey  string
-}
-
-// ChatCompletion sends a chat completion request.
-func (c *OpenCodeClient) ChatCompletion(
-	ctx context.Context,
-	modelID string,
-	req *types.ChatCompletionRequest,
-	modelConfig config.ModelConfig,
-) (*http.Response, error) {
-	if !config.SupportedProvider(Provider(modelConfig)) {
-		return nil, fmt.Errorf("unsupported provider %q", Provider(modelConfig))
-	}
-	endpoint := c.getEndpoint(modelID, modelConfig)
-	if endpoint.APIKey == "" {
-		return nil, fmt.Errorf("no API key configured for provider %q", Provider(modelConfig))
-	}
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	// Capture upstream request before sending
-	if c.captureLogger != nil {
-		c.captureLogger.CaptureUpstreamRequest(core.RequestMetadataFromContext(ctx).RequestID, Provider(modelConfig), body)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.BaseURL, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	SetProviderHeaders(httpReq, Provider(modelConfig))
-	// Anthropic endpoint uses x-api-key; OpenAI endpoint uses Bearer
-	if models.IsAnthropicModel(modelID) {
-		httpReq.Header.Set("x-api-key", endpoint.APIKey)
-	} else {
-		httpReq.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
-	}
-
-	if req.Stream != nil && *req.Stream {
-		httpReq.Header.Set("Accept", "text/event-stream")
-	}
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-
-	if resp.StatusCode >= http.StatusBadRequest {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		return nil, &APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
-	}
-
-	// Capture upstream response by wrapping the body. CaptureBody closes the
-	// pipe write end on Close so the async capture goroutine always finishes.
-	if c.captureLogger != nil {
-		resp.Body = CaptureBody(resp.Body, func(data []byte) {
-			c.captureLogger.CaptureUpstreamResponse(core.RequestMetadataFromContext(ctx).RequestID, Provider(modelConfig), data)
-		})
-	}
-
-	return resp, nil
-}
-
-// ChatCompletionNonStreaming sends a non-streaming request and returns the full parsed response.
-func (c *OpenCodeClient) ChatCompletionNonStreaming(
-	ctx context.Context,
-	modelID string,
-	req *types.ChatCompletionRequest,
-	modelConfig config.ModelConfig,
-) (*types.ChatCompletionResponse, error) {
-	streamFalse := false
-	req.Stream = &streamFalse
-
-	resp, err := c.ChatCompletion(ctx, modelID, req, modelConfig)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	var chatResp types.ChatCompletionResponse
-	if err := json.Unmarshal(body, &chatResp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	return &chatResp, nil
-}
-
-// GetStreamingBody returns the response body for streaming consumption.
-func (c *OpenCodeClient) GetStreamingBody(
-	ctx context.Context,
-	modelID string,
-	req *types.ChatCompletionRequest,
-	modelConfig config.ModelConfig,
-) (io.ReadCloser, error) {
-	streamTrue := true
-	req.Stream = &streamTrue
-
-	resp, err := c.ChatCompletion(ctx, modelID, req, modelConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	return resp.Body, nil
 }

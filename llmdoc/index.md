@@ -8,7 +8,8 @@ routatic-proxy（oc-go-cc）：Claude Code / Codex ↔ 上游模型网关的反�
 |------|------|
 | overview/project-overview.md | 项目定位、核心特征、目录地图 |
 | architecture/usage-pipeline.md | 用量/缓存 token 链路（入口→路由→发送→转换→录制→成本→下游） |
-| architecture/provider-layer.md | 平台注册表 vs 运行期 provider 实现、wire format 推断、平台展示顺序 |
+| architecture/provider-layer.md | 六平台统一分派、wire format与共享失败策略 |
+| architecture/request-lifecycle.md | 关闭所有权、HTTP排空、共享DB/capture释放与超时 |
 | architecture/model-routing.md | 场景判定、override 优先级、成本路由与场景键的同步点 |
 | `docs/site-architecture.md`（仓库根，非 llmdoc 内）| 站点可插拔架构设计（**已定稿并落地阶段 0–5**）：描述符、current-site 切换、目录优先解析、`/v1/models` 修复与五阶段推进 |
 | reference/inbound-protocols.md | 入站路由表、Responses 适配器与 fail-closed 边界 |
@@ -24,7 +25,7 @@ routatic-proxy（oc-go-cc）：Claude Code / Codex ↔ 上游模型网关的反�
 - `internal/storage/` — SQLite 5 表：requests / provider_usage / schema_info / providers / models
 - `internal/gui/` — 内嵌面板（index.html + app.js + style.css，Tailwind 编译）
 - `internal/debug/` — debug_capture（详见 must/accounting-baseline.md）
-- `internal/provider/` — 已登记 provider（以 `internal/site/site.go` 注册表为准）；`internal/client/` 是 OpenRouter 与所有未登记 provider 的第二条路径（见 architecture/provider-layer.md）
+- `internal/provider/` — 六平台统一发送；`internal/client/`仅保留timeout/身份/error/capture共用支持，不再发送HTTP
 - `pkg/types/` — Anthropic/OpenAI 共享 wire 类型
 - 交付面：`.github/workflows/`（ci / beta-release / release / release-pipeline）+ `scripts/`（prod-deploy 等）+ 双通道发布（见 CLAUDE.md）
 
@@ -40,5 +41,4 @@ routatic-proxy（oc-go-cc）：Claude Code / Codex ↔ 上游模型网关的反�
 - transformer 全部转换契约（thinking/effort、tools 格式）：目前只覆盖结构化输出与 Responses 入站
 - GUI 面板功能面与 API 端点清单
 - 发布/部署流水线文档（已有 CLAUDE.md 覆盖大部分）
-- `internal/client/opencode.go` 作为第二条发送路径尚无独立文档页
 - 远端运维面：白名单四层生成链（fail2ban / UFW / DOCKER-USER / nginx `geo` 块）、TUN MTU-PMTUD —— 本仓库无文档

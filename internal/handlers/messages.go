@@ -35,21 +35,18 @@ import (
 
 // MessagesHandler handles /v1/messages requests.
 type MessagesHandler struct {
-	client              *client.OpenCodeClient // kept for backward compat during migration
-	providerRegistry    *core.ProviderRegistry // new: provider dispatch
-	modelRouter         *router.ModelRouter
-	fallbackHandler     *router.FallbackHandler
-	streamProxy         *StreamProxy // new: SSE proxy by wire format
-	requestTransformer  *transformer.RequestTransformer
-	responseTransformer *transformer.ResponseTransformer
-	streamHandler       *transformer.StreamHandler
-	tokenCounter        *token.Counter
-	logger              *slog.Logger
-	rateLimiter         *middleware.RateLimiter
-	requestIDGen        *middleware.RequestIDGenerator
-	metrics             *metrics.Metrics
-	captureLogger       *debug.CaptureLogger
-	storage             StorageWriter // optional: SQLite persistence for requests/latency
+	client           *client.OpenCodeClient // provider timeout configuration
+	providerRegistry *core.ProviderRegistry
+	modelRouter      *router.ModelRouter
+	fallbackHandler  *router.FallbackHandler
+	streamProxy      *StreamProxy // SSE proxy by wire format
+	tokenCounter     *token.Counter
+	logger           *slog.Logger
+	rateLimiter      *middleware.RateLimiter
+	requestIDGen     *middleware.RequestIDGenerator
+	metrics          *metrics.Metrics
+	captureLogger    *debug.CaptureLogger
+	storage          StorageWriter // optional: SQLite persistence for requests/latency
 }
 
 // responseWriter wraps http.ResponseWriter to track if headers were written.
@@ -353,21 +350,18 @@ func NewMessagesHandler(
 	storage StorageWriter,
 ) *MessagesHandler {
 	return &MessagesHandler{
-		client:              openCodeClient,
-		providerRegistry:    providerRegistry,
-		modelRouter:         modelRouter,
-		fallbackHandler:     fallbackHandler,
-		streamProxy:         NewStreamProxy(),
-		requestTransformer:  transformer.NewRequestTransformer(),
-		responseTransformer: transformer.NewResponseTransformer(),
-		streamHandler:       transformer.NewStreamHandler(),
-		tokenCounter:        tokenCounter,
-		logger:              slog.Default(),
-		rateLimiter:         middleware.NewRateLimiter(100, time.Minute),
-		requestIDGen:        middleware.NewRequestIDGenerator(),
-		metrics:             metrics,
-		captureLogger:       captureLogger,
-		storage:             storage,
+		client:           openCodeClient,
+		providerRegistry: providerRegistry,
+		modelRouter:      modelRouter,
+		fallbackHandler:  fallbackHandler,
+		streamProxy:      NewStreamProxy(),
+		tokenCounter:     tokenCounter,
+		logger:           slog.Default(),
+		rateLimiter:      middleware.NewRateLimiter(100, time.Minute),
+		requestIDGen:     middleware.NewRequestIDGenerator(),
+		metrics:          metrics,
+		captureLogger:    captureLogger,
+		storage:          storage,
 	}
 }
 
@@ -665,6 +659,8 @@ func (h *MessagesHandler) handleStreaming(
 	// The model the client named, recorded alongside the one that served it so a
 	// rerouted request can be told apart from a passthrough after the fact.
 	requestedModel := anthropicReq.Model
+	// A caller's correlation ID may be reused; each billed execution is distinct.
+	recordID := uuid.NewString()
 
 	rw := &responseWriter{ResponseWriter: w}
 
@@ -701,6 +697,10 @@ func (h *MessagesHandler) handleStreaming(
 			h.logger.Info("provider usage limit reached, skipping streaming model", "provider", providerName, "model", model.ModelID)
 			continue
 		}
+		if !h.fallbackHandler.AllowAttempt(model) {
+			h.logger.Info("circuit breaker open, skipping streaming model", "provider", providerName, "model", model.ModelID)
+			continue
+		}
 
 		h.logger.Info("attempting streaming model", "model", model.ModelID, "provider", model.Provider)
 
@@ -713,9 +713,11 @@ func (h *MessagesHandler) handleStreaming(
 		// marks the model attempt as done.
 		recordStreamSuccess := func(model config.ModelConfig) {
 			cancelAttempt()
+			h.fallbackHandler.RecordAttempt(clientCtx, model, nil)
 			latency := time.Since(streamStart)
 			h.metrics.RecordSuccess(model.ModelID, latency)
 			h.logger.Info("streaming completed",
+				"request_id", requestID, "record_id", recordID,
 				"model", model.ModelID,
 				"latency", latency,
 				"input_tokens", rw.usage.inputTokens,
@@ -724,7 +726,7 @@ func (h *MessagesHandler) handleStreaming(
 				"cache_creation_input_tokens", rw.usage.cacheCreationInputTokens,
 			)
 			rec := history.RequestRecord{
-				ID:                  requestID,
+				ID:                  recordID,
 				Model:               model.ModelID,
 				RequestedModel:      requestedModel,
 				Provider:            providerName,
@@ -760,11 +762,12 @@ func (h *MessagesHandler) handleStreaming(
 				return
 			}
 			h.metrics.RecordFailureForModel(model.ModelID)
+			h.logger.Warn("recording interrupted stream", "request_id", requestID, "record_id", recordID, "error", err)
 			if h.storage == nil {
 				return
 			}
 			rec := history.RequestRecord{
-				ID:                  requestID,
+				ID:                  recordID,
 				Model:               model.ModelID,
 				RequestedModel:      requestedModel,
 				Provider:            providerName,
@@ -791,6 +794,10 @@ func (h *MessagesHandler) handleStreaming(
 		// if it should return.
 		handleStreamError := func(err error, model config.ModelConfig, action string) bool {
 			cancelAttempt()
+			lastStreamErr = err
+			if h.fallbackHandler.RecordAttempt(clientCtx, model, err) {
+				blockedProviders[providerName] = true
+			}
 			if clientCtx.Err() != nil {
 				h.logger.Debug("client disconnected during " + action + " stream")
 				recordStreamFailure(model, err, action)
@@ -832,113 +839,70 @@ func (h *MessagesHandler) handleStreaming(
 			return false
 		}
 
-		// Try new provider-based dispatch first.
-		if h.providerRegistry != nil {
-			if prov, ok := h.providerRegistry.Get(client.Provider(model)); ok {
-				streamBody, err := prov.Stream(attemptCtx, anthropicReq, model)
-				if err != nil {
-					cancelAttempt()
-					if clientCtx.Err() != nil {
-						h.logger.Debug("client disconnected during upstream request")
-						return
-					}
-					if router.IsUsageLimitError(err) {
-						blockedProviders[providerName] = true
-					}
-					// Streaming cannot retry once the SSE head is out, so a
-					// deterministic refusal is the client's answer. Keeping it
-					// lets the terminal error below name the cause instead of a
-					// generic "all streaming models failed".
-					lastStreamErr = err
-					h.logger.Warn("streaming request failed via provider", "model", model.ModelID, "provider", model.Provider, "error", err)
-					continue
-				}
-
-				// Bind body read to attemptCtx so streaming_timeout_ms aborts mid-stream.
-				streamReader := transformer.NewCtxReadCloser(attemptCtx, streamBody)
-
-				wireFormat := core.ModelWireFormat(prov, model)
-				if wireFormat == core.WireFormatAnthropic {
-					atomic.StoreInt32(&heartbeatPaused, 1)
-				}
-				errProxy := h.streamProxy.ProxyStream(rw, streamReader, wireFormat, model.ModelID, attemptCtx, idleTimeout, cancelAttempt)
-				if wireFormat == core.WireFormatAnthropic {
-					atomic.StoreInt32(&heartbeatPaused, 0)
-				}
-				if errProxy != nil {
-					if errProxy == transformer.ErrClientDisconnected {
-						if clientCtx.Err() != nil {
-							h.logger.Debug("client disconnected during stream")
-							recordStreamFailure(model, errProxy, wireFormat.String())
-							return
-						}
-						errProxy = fmt.Errorf("streaming timeout (%v) exceeded", timeout)
-					}
-					if !handleStreamError(errProxy, model, wireFormat.String()) {
-						return
-					}
-					continue
-				}
-
-				if isLowValueResponse(scenario, rw.getOutputTokens(), rw.hasContent()) {
-					h.logger.Warn("upstream returned low-value response, triggering fallback",
-						"model", model.ModelID, "provider", model.Provider,
-						"scenario", scenario, "output_tokens", rw.getOutputTokens())
-					if !handleStreamError(transformer.ErrEmptyStream, model, wireFormat.String()) {
-						return
-					}
-					continue
-				}
-
-				if finishStream(model, wireFormat.String()) {
-					continue
-				}
-				return
-			}
-		}
-
-		// Providers without a registry entry (e.g. OpenRouter) are plain
-		// OpenAI-compatible upstreams.
-		h.logger.Warn("provider not in registry, using OpenAI-compatible path",
-			"provider", model.Provider, "model", model.ModelID)
-
-		openaiReq, err := h.requestTransformer.TransformRequest(anthropicReq, model)
-		if err != nil {
+		prov, ok := h.providerRegistry.Get(providerName)
+		if !ok {
 			cancelAttempt()
-			h.logger.Warn("request transform failed", "model", model.ModelID, "error", err)
+			lastStreamErr = fmt.Errorf("provider %q is not registered", providerName)
 			continue
 		}
-
-		streamBody, err := h.client.GetStreamingBody(attemptCtx, model.ModelID, openaiReq, model)
+		streamBody, err := prov.Stream(attemptCtx, anthropicReq, model)
 		if err != nil {
 			cancelAttempt()
 			if clientCtx.Err() != nil {
 				h.logger.Debug("client disconnected during upstream request")
 				return
 			}
-			h.logger.Warn("streaming request failed", "model", model.ModelID, "error", err)
+			if h.fallbackHandler.RecordAttempt(clientCtx, model, err) {
+				blockedProviders[providerName] = true
+			}
+			// Streaming cannot retry once the SSE head is out, so a
+			// deterministic refusal is the client's answer. Keeping it
+			// lets the terminal error below name the cause instead of a
+			// generic "all streaming models failed".
+			lastStreamErr = err
+			h.logger.Warn("streaming request failed via provider", "model", model.ModelID, "provider", model.Provider, "error", err)
 			continue
 		}
 
 		// Bind body read to attemptCtx so streaming_timeout_ms aborts mid-stream.
 		streamReader := transformer.NewCtxReadCloser(attemptCtx, streamBody)
 
-		if err := h.streamHandler.ProxyStream(rw, streamReader, model.ModelID, attemptCtx, idleTimeout, cancelAttempt); err != nil {
-			if err == transformer.ErrClientDisconnected {
+		wireFormat := core.ModelWireFormat(prov, model)
+		if wireFormat == core.WireFormatAnthropic {
+			atomic.StoreInt32(&heartbeatPaused, 1)
+		}
+		errProxy := h.streamProxy.ProxyStream(rw, streamReader, wireFormat, model.ModelID, attemptCtx, idleTimeout, cancelAttempt)
+		if wireFormat == core.WireFormatAnthropic {
+			atomic.StoreInt32(&heartbeatPaused, 0)
+		}
+		if errProxy != nil {
+			if errProxy == transformer.ErrClientDisconnected {
 				if clientCtx.Err() != nil {
 					h.logger.Debug("client disconnected during stream")
-					recordStreamFailure(model, err, "openai")
+					recordStreamFailure(model, errProxy, wireFormat.String())
 					return
 				}
-				err = fmt.Errorf("streaming timeout (%v) exceeded", timeout)
+				errProxy = fmt.Errorf("streaming timeout (%v) exceeded", timeout)
 			}
-			if !handleStreamError(err, model, "openai") {
+			if !handleStreamError(errProxy, model, wireFormat.String()) {
 				return
 			}
 			continue
 		}
 
-		if finishStream(model, "openai") {
+		// OpenRouter's former Chat Completions path accepted completed empty
+		// replies. Moving its transport must not add this provider heuristic.
+		if providerName != client.ProviderOpenRouter && isLowValueResponse(scenario, rw.getOutputTokens(), rw.hasContent()) {
+			h.logger.Warn("upstream returned low-value response, triggering fallback",
+				"model", model.ModelID, "provider", model.Provider,
+				"scenario", scenario, "output_tokens", rw.getOutputTokens())
+			if !handleStreamError(transformer.ErrEmptyStream, model, wireFormat.String()) {
+				return
+			}
+			continue
+		}
+
+		if finishStream(model, wireFormat.String()) {
 			continue
 		}
 		return
@@ -1018,6 +982,7 @@ func (h *MessagesHandler) handleNonStreaming(
 	startTime := time.Now()
 	// See handleStreaming: kept for the same reason, from the same source.
 	requestedModel := anthropicReq.Model
+	recordID := uuid.NewString()
 
 	result, responseBody, err := h.fallbackHandler.ExecuteWithFallback(
 		ctx,
@@ -1027,23 +992,15 @@ func (h *MessagesHandler) handleNonStreaming(
 			attemptCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
-			// Try new provider-based dispatch first.
-			if h.providerRegistry != nil {
-				if prov, ok := h.providerRegistry.Get(client.Provider(model)); ok {
-					execResult, execErr := prov.Execute(attemptCtx, anthropicReq, model)
-					if execErr != nil {
-						return nil, execErr
-					}
-					return execResult.Body, nil
-				}
+			prov, ok := h.providerRegistry.Get(client.Provider(model))
+			if !ok {
+				return nil, fmt.Errorf("provider %q is not registered", client.Provider(model))
 			}
-
-			// Providers without a registry entry (e.g. OpenRouter) are plain
-			// OpenAI-compatible upstreams.
-			h.logger.Warn("provider not in registry, using OpenAI-compatible path",
-				"provider", model.Provider, "model", model.ModelID)
-
-			return h.executeOpenAIRequest(attemptCtx, anthropicReq, model)
+			execResult, execErr := prov.Execute(attemptCtx, anthropicReq, model)
+			if execErr != nil {
+				return nil, execErr
+			}
+			return execResult.Body, nil
 		},
 	)
 
@@ -1072,14 +1029,14 @@ func (h *MessagesHandler) handleNonStreaming(
 	latency := time.Since(startTime)
 	if writeErr != nil {
 		h.metrics.RecordFailureForModel(result.ModelID)
-		h.logger.Warn("response delivery failed", "model", result.ModelID, "request_id", requestID, "error", writeErr)
+		h.logger.Warn("response delivery failed", "model", result.ModelID, "request_id", requestID, "record_id", recordID, "error", writeErr)
 	} else {
 		h.metrics.RecordSuccess(result.ModelID, latency)
-		h.logger.Info("request completed", "model", result.ModelID, "attempts", result.Attempted, "latency", latency)
+		h.logger.Info("request completed", "model", result.ModelID, "request_id", requestID, "record_id", recordID, "attempts", result.Attempted, "latency", latency)
 	}
 
 	rec := history.RequestRecord{
-		ID:                  requestID,
+		ID:                  recordID,
 		Model:               result.ModelID,
 		RequestedModel:      requestedModel,
 		Provider:            result.Provider,
@@ -1100,30 +1057,6 @@ func (h *MessagesHandler) handleNonStreaming(
 			h.logger.Warn("failed to insert request into storage", "error", err)
 		}
 	}
-}
-
-// executeOpenAIRequest executes a request to the OpenAI endpoint with transformation.
-func (h *MessagesHandler) executeOpenAIRequest(
-	ctx context.Context,
-	anthropicReq *types.MessageRequest,
-	model config.ModelConfig,
-) ([]byte, error) {
-	openaiReq, err := h.requestTransformer.TransformRequest(anthropicReq, model)
-	if err != nil {
-		return nil, fmt.Errorf("request transform failed: %w", err)
-	}
-
-	resp, err := h.client.ChatCompletionNonStreaming(ctx, model.ModelID, openaiReq, model)
-	if err != nil {
-		return nil, fmt.Errorf("chat completion failed: %w", err)
-	}
-
-	anthropicResp, err := h.responseTransformer.TransformResponse(resp, model.ModelID)
-	if err != nil {
-		return nil, fmt.Errorf("response transform failed: %w", err)
-	}
-
-	return json.Marshal(anthropicResp)
 }
 
 // extractTextFromBlocks extracts plain text from Anthropic content blocks.

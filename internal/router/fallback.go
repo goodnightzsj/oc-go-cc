@@ -194,6 +194,37 @@ func (h *FallbackHandler) getCircuitBreaker(modelID string) *CircuitBreaker {
 	return cb
 }
 
+// AllowAttempt shares circuit admission between buffered and streaming calls.
+func (h *FallbackHandler) AllowAttempt(model config.ModelConfig) bool {
+	return h.getCircuitBreaker(config.ModelKey(model)).AllowRequest()
+}
+
+// RecordAttempt updates shared health and reports whether the rest of this
+// provider should be skipped for this request. ctx is the client's context, not
+// the per-attempt timeout: disconnects must not penalize a healthy upstream.
+func (h *FallbackHandler) RecordAttempt(ctx context.Context, model config.ModelConfig, err error) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	if err == nil {
+		h.getCircuitBreaker(config.ModelKey(model)).RecordSuccess()
+		return false
+	}
+	if IsUsageLimitError(err) {
+		return true
+	}
+	if IsAuthError(err) {
+		h.mu.Lock()
+		cfg := h.atomicCfg
+		h.mu.Unlock()
+		return client.ProviderKeyCount(cfg, client.Provider(model)) <= 1
+	}
+	if IsRetryableError(err) {
+		h.getCircuitBreaker(config.ModelKey(model)).RecordFailure()
+	}
+	return false
+}
+
 // ExecuteWithFallback tries models in sequence until one succeeds.
 // Respects circuit breaker state to skip models that are failing repeatedly.
 func (h *FallbackHandler) ExecuteWithFallback(
@@ -229,10 +260,8 @@ func (h *FallbackHandler) ExecuteWithFallback(
 			continue
 		}
 
-		cb := h.getCircuitBreaker(config.ModelKey(model))
-
 		// Skip models with open circuit breakers
-		if !cb.AllowRequest() {
+		if !h.AllowAttempt(model) {
 			h.logger.Info("circuit breaker open, skipping model",
 				"model", model.ModelID,
 				"attempt", i+1,
@@ -248,8 +277,8 @@ func (h *FallbackHandler) ExecuteWithFallback(
 		)
 
 		body, err := executor(ctx, model)
+		blockProvider := h.RecordAttempt(ctx, model, err)
 		if err == nil {
-			cb.RecordSuccess()
 			h.logger.Info("model succeeded",
 				"model", model.ModelID,
 				"attempt", i+1,
@@ -288,8 +317,7 @@ func (h *FallbackHandler) ExecuteWithFallback(
 		// models are skipped. If it has multiple keys, don't block the
 		// round-robin — the next attempt will use a different key.
 		if IsAuthError(err) {
-			keyCount := client.ProviderKeyCount(h.atomicCfg, provider)
-			if keyCount <= 1 {
+			if blockProvider {
 				h.logger.Warn("authentication error, blocking provider",
 					"provider", provider,
 					"model", model.ModelID,
@@ -303,18 +331,16 @@ func (h *FallbackHandler) ExecuteWithFallback(
 			h.logger.Warn("authentication error, but provider has multiple keys, trying next",
 				"provider", provider,
 				"model", model.ModelID,
-				"key_count", keyCount,
 				"error", err,
 			)
 		}
 
 		if IsRetryableError(err) {
-			cb.RecordFailure()
 			h.logger.Warn("model failed, trying fallback",
 				"model", model.ModelID,
 				"error", err,
 				"remaining", totalModels-i-1,
-				"circuit_state", cb.State(),
+				"circuit_state", h.getCircuitBreaker(config.ModelKey(model)).State(),
 			)
 		} else {
 			h.logger.Warn("non-retryable error (skipping circuit breaker), trying fallback",

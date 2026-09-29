@@ -28,7 +28,12 @@
 
 - 记录含完整对话内容，**仅调试期开启**。`logging.debug_capture`（`internal/config/config.go:324`）。
 - `CaptureEntry.Data` 是 string（SSE 多文档流不能作为 json.RawMessage）。
-- 流式上游捕获依赖 `CaptureBody`（`internal/client/opencode.go`）——关闭管道通过 Close 触发，任何替换必须保持该语义；`ChatCompletionNonStreaming` 仍无捕获（已知缺口）。
+- 流式上游捕获依赖 `CaptureBody`（`internal/client/opencode.go`）：Close关闭管道并等待回调，替换必须保持该语义。OpenRouter的Execute/Stream均捕获；旧客户端发送路径已删除。
+
+## 执行记账与关闭
+
+- requests.id是每次实际执行独立的UUID，不以客户端可重复的X-Request-ID去重执行。该头继续回显及关联日志/capture；历史主键不迁移、不覆盖。
+- 代理与GUI排空后才能释放共享SQLite与capture；超时显式失败，不能假装排空成功。见 `architecture/request-lifecycle.md`。
 
 ## 请求历史保留（不可回退）
 

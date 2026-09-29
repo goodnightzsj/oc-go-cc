@@ -1,20 +1,14 @@
 # Provider 层与平台边界
 
-**关键区分：平台数 ≠ provider 实现数。** 平台身份的唯一所有者是 `internal/site/site.go:95` 的 `registry`（当前 6 个 descriptor 中 5 个已登记 provider，`openrouter` 无 registry 实现）——平台数、展示顺序、`RateTable` 归属全部以该表为准，本节不重述。加平台只需改这一张注册表。把 `internal/provider/` 读成"每个平台各一个文件"是错的。
+平台身份以 `internal/site/site.go` 的 registry 为准；当前六平台均有运行期provider，在 `internal/server/server.go:69` 登记。新增平台仍须登记发送实现，描述符不自动创建它。
 
 ## 注册与分派
 
-| 环节 | 位置 |
-|------|------|
-| 共享 HTTP transport + 密钥轮询 | `internal/provider/provider.go:15` / `:23` / `:41`（`nextAPIKey`） |
-| 登记点（权威） | `internal/server/server.go:71-75`，与 `site` registry 中实现齐全的平台一一对应 |
-| 线程安全查找 | `internal/core/registry.go:22`（`Register`）/ `:34`（`Get`） |
-| 运行期分派 | `internal/handlers/messages.go:837`（流式）/ `:1032`（非流式），均取 `providerRegistry.Get(client.Provider(model))` |
-| provider 名来源 | `internal/client/opencode.go:188`（`Provider` → `config.NormalizeProvider`） |
-
-Registry 未命中时**回落到 legacy client**（`internal/handlers/messages.go:900-902` 注释点明 OpenRouter 属此类），走 `h.client.GetStreamingBody` / `h.executeOpenAIRequest`。`internal/client/opencode.go` 因此仍是活跃的第二条代码路径：`getEndpoint`（`:208`）与 `ChatCompletion`（`:256`）。
-
-配置层接受的名字由注册表决定：`SupportedProvider`（`internal/config/config.go:383`）内部转 `site.IsKnown`，凭证绑定 `ProviderAPIKeys`（`:434`）。
+- `internal/provider/provider.go:15` 持有HTTP transport和密钥轮换；`config.ProviderAPIKeys` 是推理密钥池的唯一来源。
+- `internal/handlers/messages.go:649`（流式）和 `:974`（非流式）只从registry分派；handler必须注入registry，目标未登记即显式失败。
+- `internal/client/opencode.go` 仅保留timeout、provider身份、APIError和CaptureBody等共用支持，旧HTTP发送路径已删除。
+- `internal/provider/openrouter.go:26` 创建OpenRouter发送器：所有模型固定Chat Completions与Bearer，保留 /v1 URL补全、归属头、推理密钥池的既有全局回退，Management Key不用于推理。显式非openai格式发送前报错；保留旧路径不应用低价值回复启发式的行为。
+- `internal/router/fallback.go:198` 的AllowAttempt及 `:205` 的RecordAttempt为两个执行循环共享：单key认证失败阻断本请求内该平台，多key继续轮换，限流跳过平台，5xx更新同一熔断器；父context取消不惩罚上游，已发送真实SSE payload后不切模型。
 
 ## Wire format
 
@@ -27,6 +21,7 @@ Registry 未命中时**回落到 legacy client**（`internal/handlers/messages.g
 | OpenCode Go | `models.IsAnthropicModel`（`internal/provider/opencode_go.go:36`） |
 | OpenCode Zen | `models.ClassifyEndpoint`（`internal/provider/opencode_zen.go:37`） |
 | AWS Bedrock | 模型 ID 前缀（`internal/provider/aws_bedrock.go:38`） |
+| OpenRouter | 所有模型固定Chat Completions（`internal/provider/openrouter.go:32`） |
 | CommandCode | `claude-*` → Anthropic，其余 Chat Completions（`internal/provider/commandcode.go:36`） |
 
 CommandCode 入口：`internal/provider/commandcode.go:27`（`NewCommandCodeProvider`）/ `:43`（`Execute`）/ `:72`（`Stream`）/ `:76`（`request`）；`x-cmd-zdr` 头在 `:114`。加载器默认值 `internal/config/loader.go:35-36`；非 openai/anthropic 的 wire format 在 `loader.go:590` 被拒绝。
@@ -40,7 +35,8 @@ CommandCode 入口：`internal/provider/commandcode.go:27`（`NewCommandCodeProv
 - **JS 镜像必须同步**：`internal/gui/assets/app.js:2706`（`PROVIDERS`，只列可见平台）、`:2700`（`HIDDEN_PLATFORMS`，隐藏平台仍保留标签以便渲染历史行）、`:2721`（`PROVIDER_ORDER`，两者拼接成完整展示顺序）、`:2724`（`compareProviderDisplay`）。使用点 `:2283`、`:4074`、`:4389`、`:4945`。
 - 行为守卫：`internal/gui/provider_display_behavior_test.go:5`，同时断言 fallback 链**不会**被重排。
 
-## 缺口
+## 回归
 
-- `internal/client/opencode.go` 作为 OpenRouter 及所有未登记 provider 的第二条路径，尚无独立文档页。
-- `internal/provider/platform_protocol_test.go:50` 只遍历五个已登记名（`:49` 的 `TestProviderScopedHeaders`），不覆盖 OpenRouter 的分野。
+- `internal/provider/openrouter_test.go`：URL、密钥轮换/全局回退、header隔离、缓存转换、取消和错误合同。
+- `internal/server/openrouter_test.go`：生产登记点、Messages/Responses各两种模式、独立记账和capture完整性。
+- `internal/handlers/stream_policy_test.go`：流式认证/熔断、跨执行模式共享健康状态、OpenRouter空完成回复兼容。

@@ -1,6 +1,6 @@
 # 项目概览
 
-routatic-proxy（仓库名 oc-go-cc）：位于 Claude Code / Codex / OpenCode 客户端与上游模型网关之间的反向代理。接收 Anthropic Messages 与 OpenAI Responses 两个入站端点（`POST /v1/messages`、`POST /v1/responses`；`/v1/chat/completions` 从未注册为入站路由，只作为出站 wire format 存在），路由到不同上游模型，在四类 wire format 间转换，并按入站协议回传对应形态的 SSE。上游平台的权威名单是 `internal/site/site.go` 的 `registry`（当前 6 个 descriptor，其中 5 个有运行期 provider 实现，未登记的那个走 legacy client）；展示顺序与 `RateTable` 归属同以该表为准，本节不重述——加平台只需改注册表。附带 SQLite 持久化（请求历史、用量分析）与内嵌 Web 面板（`start` 模式监听 3445，代理监听 3456）。
+routatic-proxy（仓库名 oc-go-cc）：位于 Claude Code / Codex / OpenCode 客户端与上游模型网关之间的反向代理。接收 Anthropic Messages 与 OpenAI Responses 两个入站端点（`POST /v1/messages`、`POST /v1/responses`；`/v1/chat/completions` 从未注册为入站路由，只作为出站 wire format 存在），路由到不同上游模型，在四类 wire format 间转换，并按入站协议回传对应形态的 SSE。上游平台的权威名单是 `internal/site/site.go` 的 `registry`（当前6个descriptor均有运行期provider，在server登记，无legacy发送路径）；展示顺序与 `RateTable` 归属同以该表为准，本节不重述。附带 SQLite 持久化（请求历史、用量分析）与内嵌 Web 面板（`start` 模式监听 3445，代理监听 3456）。
 
 ## 核心特征
 

@@ -60,6 +60,8 @@ type Server struct {
 	catalogSourceURL  string
 	srv               *http.Server
 	logger            *slog.Logger
+	limitsCancel      context.CancelFunc
+	limitsDone        chan struct{}
 
 	// One cached quota response per platform; each response carries its TTL.
 	quotaMu    sync.Mutex
@@ -179,11 +181,6 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 		}
 	}
 
-	// Refresh the per-model allowance table from the Go docs daily so the
-	// quota page stays current even when nobody opens it; the handler's
-	// ensureModelLimits covers the first request after startup.
-	go s.limitsLoop(ctx)
-
 	mux := http.NewServeMux()
 
 	// Content-hashed static assets. index.html is served from a rendered copy
@@ -249,15 +246,17 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 
 	// Wrap with security headers middleware.
 	s.srv = &http.Server{Handler: securityHeadersMiddleware(mux)}
+	limitsCtx, cancel := context.WithCancel(ctx)
+	s.limitsCancel = cancel
+	s.limitsDone = make(chan struct{})
+	go func() {
+		defer close(s.limitsDone)
+		s.limitsLoop(limitsCtx)
+	}()
 	go func() {
 		if srvErr := s.srv.Serve(ln); srvErr != nil && srvErr != http.ErrServerClosed {
 			s.logger.Error("gui server error", "err", srvErr)
 		}
-	}()
-
-	go func() {
-		<-ctx.Done()
-		_ = s.srv.Close()
 	}()
 
 	url := "http://" + ln.Addr().String() + "/"
@@ -395,7 +394,14 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.srv == nil {
 		return nil
 	}
-	return s.srv.Shutdown(ctx)
+	s.limitsCancel()
+	err := s.srv.Shutdown(ctx)
+	select {
+	case <-s.limitsDone:
+		return err
+	case <-ctx.Done():
+		return errors.Join(err, ctx.Err())
+	}
 }
 
 // ── API handlers ──────────────────────────────────────────────────────────────

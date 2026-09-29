@@ -45,7 +45,8 @@ func TestNativeAnthropicStreamPreservesInitialAndTerminalUsage(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	h := &MessagesHandler{
-		client: client.NewOpenCodeClient(cfg, nil), providerRegistry: reg,
+		fallbackHandler: router.NewFallbackHandler(nil, 3, time.Minute),
+		client:          client.NewOpenCodeClient(cfg), providerRegistry: reg,
 		streamProxy: NewStreamProxy(), logger: slog.Default(), metrics: metrics.New(),
 		storage: NewStorageAdapter(db),
 	}

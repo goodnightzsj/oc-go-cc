@@ -22,7 +22,6 @@ import (
 	"github.com/routatic/proxy/internal/router"
 	"github.com/routatic/proxy/internal/storage"
 	"github.com/routatic/proxy/internal/token"
-	"github.com/routatic/proxy/internal/transformer"
 	"github.com/routatic/proxy/pkg/types"
 	"path/filepath"
 )
@@ -30,9 +29,7 @@ import (
 func boolPtr(b bool) *bool { return &b }
 
 // newTestProviderRegistry mirrors production wiring (internal/server/server.go),
-// which registers all three providers unconditionally. Tests that pass a nil
-// registry exercise the OpenAI-compatible path reserved for unregistered
-// providers such as OpenRouter, which is not what most of these tests intend.
+// which registers all supported providers unconditionally.
 func newTestProviderRegistry(t *testing.T, atomicCfg *config.AtomicConfig) *core.ProviderRegistry {
 	t.Helper()
 	reg := core.NewProviderRegistry()
@@ -40,6 +37,9 @@ func newTestProviderRegistry(t *testing.T, atomicCfg *config.AtomicConfig) *core
 		provider.NewOpenCodeGoProvider(atomicCfg, nil),
 		provider.NewOpenCodeZenProvider(atomicCfg),
 		provider.NewAWSBedrockProvider(atomicCfg),
+		provider.NewCommandCodeProvider(atomicCfg, nil),
+		provider.NewClinePassProvider(atomicCfg, nil),
+		provider.NewOpenRouterProvider(atomicCfg, nil),
 	} {
 		if err := reg.Register(p); err != nil {
 			t.Fatalf("register provider %s: %v", p.Name(), err)
@@ -494,7 +494,8 @@ func TestHandleStreaming_UsageLimitSkipsRemainingProviderModels(t *testing.T) {
 		body: "event: message_start\ndata: {}\n\nevent: message_stop\ndata: {}\n\n",
 	})
 	h := &MessagesHandler{
-		client:           client.NewOpenCodeClient(atomicCfg, nil),
+		fallbackHandler:  router.NewFallbackHandler(nil, 3, time.Minute),
+		client:           client.NewOpenCodeClient(atomicCfg),
 		providerRegistry: registry,
 		streamProxy:      NewStreamProxy(),
 		logger:           slog.Default(),
@@ -632,15 +633,15 @@ func TestHandleStreaming_GoAnthropicModel_FallsThroughOnError(t *testing.T) {
 		},
 	}
 	atomicCfg := config.NewAtomicConfig(cfg, "/tmp/test-config.json")
-	ocClient := client.NewOpenCodeClient(atomicCfg, nil)
+	ocClient := client.NewOpenCodeClient(atomicCfg)
 
 	handler := &MessagesHandler{
-		client:              ocClient,
-		logger:              slog.Default(),
-		metrics:             metrics.New(),
-		streamHandler:       transformer.NewStreamHandler(),
-		requestTransformer:  transformer.NewRequestTransformer(),
-		responseTransformer: transformer.NewResponseTransformer(),
+		fallbackHandler:  router.NewFallbackHandler(nil, 3, time.Minute),
+		client:           ocClient,
+		providerRegistry: newTestProviderRegistry(t, atomicCfg),
+		streamProxy:      NewStreamProxy(),
+		logger:           slog.Default(),
+		metrics:          metrics.New(),
 	}
 
 	rawBody := json.RawMessage(`{
@@ -684,20 +685,17 @@ func newStreamingTestHandler(t *testing.T, upstreamURL string) *MessagesHandler 
 		},
 	}
 	atomicCfg := config.NewAtomicConfig(cfg, "/tmp/test-config.json")
-	ocClient := client.NewOpenCodeClient(atomicCfg, nil)
+	ocClient := client.NewOpenCodeClient(atomicCfg)
 
 	// Mirror production wiring: the registry is always populated, so requests
-	// dispatch through the provider path rather than the OpenAI-compatible
-	// fallback used for unregistered providers.
+	// dispatch through the provider that owns the wire format.
 	return &MessagesHandler{
-		client:              ocClient,
-		providerRegistry:    newTestProviderRegistry(t, atomicCfg),
-		streamProxy:         NewStreamProxy(),
-		logger:              slog.Default(),
-		metrics:             metrics.New(),
-		streamHandler:       transformer.NewStreamHandler(),
-		requestTransformer:  transformer.NewRequestTransformer(),
-		responseTransformer: transformer.NewResponseTransformer(),
+		client:           ocClient,
+		fallbackHandler:  router.NewFallbackHandler(nil, 3, time.Minute),
+		providerRegistry: newTestProviderRegistry(t, atomicCfg),
+		streamProxy:      NewStreamProxy(),
+		logger:           slog.Default(),
+		metrics:          metrics.New(),
 	}
 }
 
@@ -712,7 +710,7 @@ func TestHandleMessages_UnknownProvider(t *testing.T) {
 		},
 	}
 	atomicCfg := config.NewAtomicConfig(cfg, "/tmp/test-config.json")
-	ocClient := client.NewOpenCodeClient(atomicCfg, nil)
+	ocClient := client.NewOpenCodeClient(atomicCfg)
 	modelRouter := router.NewModelRouter(atomicCfg)
 	tokenCounter, err := token.NewCounter()
 	if err != nil {
@@ -723,7 +721,7 @@ func TestHandleMessages_UnknownProvider(t *testing.T) {
 		ocClient,
 		newTestProviderRegistry(t, atomicCfg),
 		modelRouter,
-		nil, // fallbackHandler
+		router.NewFallbackHandler(nil, 3, time.Minute),
 		tokenCounter,
 		metrics.New(),
 		nil, // captureLogger
@@ -794,7 +792,7 @@ func TestHandleMessages_StreamingMinimaxM3_UsesAnthropicEndpoint(t *testing.T) {
 	}
 	atomicCfg := config.NewAtomicConfig(cfg, "/tmp/test-config.json")
 
-	ocClient := client.NewOpenCodeClient(atomicCfg, nil)
+	ocClient := client.NewOpenCodeClient(atomicCfg)
 	modelRouter := router.NewModelRouter(atomicCfg)
 	tokenCounter, err := token.NewCounter()
 	if err != nil {
@@ -805,7 +803,7 @@ func TestHandleMessages_StreamingMinimaxM3_UsesAnthropicEndpoint(t *testing.T) {
 		ocClient,
 		newTestProviderRegistry(t, atomicCfg),
 		modelRouter,
-		nil, // fallbackHandler
+		router.NewFallbackHandler(nil, 3, time.Minute),
 		tokenCounter,
 		metrics.New(),
 		nil, // captureLogger
@@ -908,7 +906,7 @@ func TestHandleNonStreaming_GoAnthropicModel_ReplacesModelInBody(t *testing.T) {
 	}
 
 	atomicCfg := config.NewAtomicConfig(cfg, "/tmp/test-config.json")
-	ocClient := client.NewOpenCodeClient(atomicCfg, nil)
+	ocClient := client.NewOpenCodeClient(atomicCfg)
 	modelRouter := router.NewModelRouter(atomicCfg)
 	tokenCounter, err := token.NewCounter()
 	if err != nil {
@@ -1025,7 +1023,7 @@ func TestHandleNonStreaming_ZenAnthropicModel_ReplacesModelInBody(t *testing.T) 
 	}
 
 	atomicCfg := config.NewAtomicConfig(cfg, "/tmp/test-config.json")
-	ocClient := client.NewOpenCodeClient(atomicCfg, nil)
+	ocClient := client.NewOpenCodeClient(atomicCfg)
 	modelRouter := router.NewModelRouter(atomicCfg)
 	tokenCounter, err := token.NewCounter()
 	if err != nil {
@@ -1120,15 +1118,15 @@ func TestHandleStreaming_ConfigurableTimeout(t *testing.T) {
 		},
 	}
 	atomicCfg := config.NewAtomicConfig(cfg, "/tmp/test-config.json")
-	ocClient := client.NewOpenCodeClient(atomicCfg, nil)
+	ocClient := client.NewOpenCodeClient(atomicCfg)
 
 	handler := &MessagesHandler{
-		client:              ocClient,
-		logger:              slog.Default(),
-		metrics:             metrics.New(),
-		streamHandler:       transformer.NewStreamHandler(),
-		requestTransformer:  transformer.NewRequestTransformer(),
-		responseTransformer: transformer.NewResponseTransformer(),
+		fallbackHandler:  router.NewFallbackHandler(nil, 3, time.Minute),
+		client:           ocClient,
+		providerRegistry: newTestProviderRegistry(t, atomicCfg),
+		streamProxy:      NewStreamProxy(),
+		logger:           slog.Default(),
+		metrics:          metrics.New(),
 	}
 
 	rawBody := json.RawMessage(`{
@@ -1306,15 +1304,15 @@ func TestHandleStreaming_PerModelTimeoutFallback(t *testing.T) {
 		},
 	}
 	atomicCfg := config.NewAtomicConfig(cfg, "/tmp/test-config.json")
-	ocClient := client.NewOpenCodeClient(atomicCfg, nil)
+	ocClient := client.NewOpenCodeClient(atomicCfg)
 
 	handler := &MessagesHandler{
-		client:              ocClient,
-		logger:              slog.Default(),
-		metrics:             metrics.New(),
-		streamHandler:       transformer.NewStreamHandler(),
-		requestTransformer:  transformer.NewRequestTransformer(),
-		responseTransformer: transformer.NewResponseTransformer(),
+		fallbackHandler:  router.NewFallbackHandler(nil, 3, time.Minute),
+		client:           ocClient,
+		providerRegistry: newTestProviderRegistry(t, atomicCfg),
+		streamProxy:      NewStreamProxy(),
+		logger:           slog.Default(),
+		metrics:          metrics.New(),
 	}
 
 	rawBody := json.RawMessage(`{
@@ -1388,7 +1386,7 @@ func TestHandleNonStreaming_ParentContextCanceled_No502(t *testing.T) {
 	}
 
 	atomicCfg := config.NewAtomicConfig(cfg, "/tmp/test-config.json")
-	ocClient := client.NewOpenCodeClient(atomicCfg, nil)
+	ocClient := client.NewOpenCodeClient(atomicCfg)
 	modelRouter := router.NewModelRouter(atomicCfg)
 	tokenCounter, err := token.NewCounter()
 	if err != nil {
@@ -1470,7 +1468,7 @@ func TestHandleNonStreaming_ParentDeadlineExceeded_No502(t *testing.T) {
 	}
 
 	atomicCfg := config.NewAtomicConfig(cfg, "/tmp/test-config.json")
-	ocClient := client.NewOpenCodeClient(atomicCfg, nil)
+	ocClient := client.NewOpenCodeClient(atomicCfg)
 	modelRouter := router.NewModelRouter(atomicCfg)
 	tokenCounter, err := token.NewCounter()
 	if err != nil {

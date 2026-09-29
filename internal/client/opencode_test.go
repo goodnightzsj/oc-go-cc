@@ -1,15 +1,10 @@
 package client
 
 import (
-	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/routatic/proxy/internal/config"
-	"github.com/routatic/proxy/pkg/types"
 )
 
 func TestProvider(t *testing.T) {
@@ -76,81 +71,6 @@ func TestIsZen(t *testing.T) {
 	}
 }
 
-func TestNextAPIKey_RoundRobin(t *testing.T) {
-	cfg := &config.Config{
-		APIKeys: []string{"key-a", "key-b", "key-c"},
-	}
-	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := &OpenCodeClient{
-		atomic: atomicCfg,
-	}
-
-	// With 3 keys, iteration 0..5 should cycle key-a, key-b, key-c, key-a, key-b, key-c
-	expected := []string{"key-a", "key-b", "key-c", "key-a", "key-b", "key-c"}
-	for i, want := range expected {
-		if got := c.nextAPIKey(cfg.EffectiveAPIKeys()); got != want {
-			t.Errorf("iteration %d: nextAPIKey() = %q, want %q", i, got, want)
-		}
-	}
-}
-
-func TestNextAPIKey_SingleKey(t *testing.T) {
-	cfg := &config.Config{APIKey: "single"}
-	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := &OpenCodeClient{atomic: atomicCfg}
-
-	for i := 0; i < 5; i++ {
-		if got := c.nextAPIKey(cfg.EffectiveAPIKeys()); got != "single" {
-			t.Errorf("iteration %d: nextAPIKey() = %q, want %q", i, got, "single")
-		}
-	}
-}
-
-func TestNextAPIKey_EmptyKeys(t *testing.T) {
-	cfg := &config.Config{APIKey: ""}
-	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := &OpenCodeClient{atomic: atomicCfg}
-
-	if got := c.nextAPIKey(cfg.EffectiveAPIKeys()); got != "" {
-		t.Errorf("nextAPIKey() = %q, want empty string", got)
-	}
-}
-
-func TestNextAPIKey_ConcurrentSafety(t *testing.T) {
-	cfg := &config.Config{
-		APIKeys: []string{"k1", "k2", "k3"},
-	}
-	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := &OpenCodeClient{atomic: atomicCfg}
-
-	const goroutines = 3
-	const callsPerGoroutine = 100
-	results := make(chan string, goroutines*callsPerGoroutine)
-
-	for g := 0; g < goroutines; g++ {
-		go func() {
-			for i := 0; i < callsPerGoroutine; i++ {
-				results <- c.nextAPIKey(cfg.EffectiveAPIKeys())
-			}
-		}()
-	}
-
-	seen := make(map[string]int)
-	for i := 0; i < goroutines*callsPerGoroutine; i++ {
-		key := <-results
-		seen[key]++
-	}
-
-	// Each key should be seen exactly (goroutines*callsPerGoroutine)/3 times
-	total := goroutines * callsPerGoroutine
-	expectedPerKey := total / len(cfg.APIKeys)
-	for _, key := range cfg.APIKeys {
-		if seen[key] != expectedPerKey {
-			t.Errorf("key %q seen %d times, want %d", key, seen[key], expectedPerKey)
-		}
-	}
-}
-
 func TestStreamIdleTimeout(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -207,7 +127,7 @@ func TestRequestTimeout_UsesConfiguredTimeout(t *testing.T) {
 		},
 	}
 	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := NewOpenCodeClient(atomicCfg, nil)
+	c := NewOpenCodeClient(atomicCfg)
 
 	model := config.ModelConfig{Provider: ProviderOpenCodeGo, ModelID: "kimi-k2.6"}
 	timeout := c.RequestTimeout(model)
@@ -223,7 +143,7 @@ func TestRequestTimeout_FallsBackToDefault(t *testing.T) {
 		},
 	}
 	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := NewOpenCodeClient(atomicCfg, nil)
+	c := NewOpenCodeClient(atomicCfg)
 
 	model := config.ModelConfig{Provider: ProviderOpenCodeGo, ModelID: "kimi-k2.6"}
 	timeout := c.RequestTimeout(model)
@@ -239,7 +159,7 @@ func TestRequestTimeout_ZenProvider(t *testing.T) {
 		},
 	}
 	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := NewOpenCodeClient(atomicCfg, nil)
+	c := NewOpenCodeClient(atomicCfg)
 
 	model := config.ModelConfig{Provider: ProviderOpenCodeZen, ModelID: "claude-sonnet-4.5"}
 	timeout := c.RequestTimeout(model)
@@ -256,7 +176,7 @@ func TestStreamingTimeout_UsesStreamingTimeoutMs(t *testing.T) {
 		},
 	}
 	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := NewOpenCodeClient(atomicCfg, nil)
+	c := NewOpenCodeClient(atomicCfg)
 
 	model := config.ModelConfig{Provider: ProviderOpenCodeGo, ModelID: "kimi-k2.6"}
 	timeout := c.StreamingTimeout(model)
@@ -273,7 +193,7 @@ func TestStreamingTimeout_FallsBackToTimeoutMs(t *testing.T) {
 		},
 	}
 	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := NewOpenCodeClient(atomicCfg, nil)
+	c := NewOpenCodeClient(atomicCfg)
 
 	model := config.ModelConfig{Provider: ProviderOpenCodeGo, ModelID: "kimi-k2.6"}
 	timeout := c.StreamingTimeout(model)
@@ -290,7 +210,7 @@ func TestStreamingTimeout_FallsBackToDefault(t *testing.T) {
 		},
 	}
 	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := NewOpenCodeClient(atomicCfg, nil)
+	c := NewOpenCodeClient(atomicCfg)
 
 	model := config.ModelConfig{Provider: ProviderOpenCodeGo, ModelID: "kimi-k2.6"}
 	timeout := c.StreamingTimeout(model)
@@ -307,7 +227,7 @@ func TestStreamingTimeout_ZenProvider(t *testing.T) {
 		},
 	}
 	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := NewOpenCodeClient(atomicCfg, nil)
+	c := NewOpenCodeClient(atomicCfg)
 
 	model := config.ModelConfig{Provider: ProviderOpenCodeZen, ModelID: "claude-sonnet-4.5"}
 	timeout := c.StreamingTimeout(model)
@@ -324,7 +244,7 @@ func TestStreamingTimeout_SmallConfiguredValue(t *testing.T) {
 		},
 	}
 	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := NewOpenCodeClient(atomicCfg, nil)
+	c := NewOpenCodeClient(atomicCfg)
 
 	model := config.ModelConfig{Provider: ProviderOpenCodeGo, ModelID: "kimi-k2.6"}
 	timeout := c.StreamingTimeout(model)
@@ -345,8 +265,6 @@ func TestGetProviderAPIKeys_ProviderSpecificKeys(t *testing.T) {
 			APIKeys: []string{"bedrock-key-1", "bedrock-key-2"},
 		},
 	}
-	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := NewOpenCodeClient(atomicCfg, nil)
 
 	tests := []struct {
 		name     string
@@ -373,7 +291,7 @@ func TestGetProviderAPIKeys_ProviderSpecificKeys(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			model := config.ModelConfig{Provider: tt.provider, ModelID: "test-model"}
-			got := c.getProviderAPIKeys(model)
+			got := cfg.ProviderAPIKeys(Provider(model))
 			if len(got) != len(tt.want) {
 				t.Errorf("getProviderAPIKeys() = %v, want %v", got, tt.want)
 				return
@@ -394,11 +312,9 @@ func TestGetProviderAPIKeys_FallbackToGlobal(t *testing.T) {
 			// No provider-specific keys
 		},
 	}
-	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := NewOpenCodeClient(atomicCfg, nil)
 
 	model := config.ModelConfig{Provider: ProviderOpenCodeGo, ModelID: "test-model"}
-	got := c.getProviderAPIKeys(model)
+	got := cfg.ProviderAPIKeys(Provider(model))
 
 	want := []string{"global-key-1", "global-key-2"}
 	if len(got) != len(want) {
@@ -419,11 +335,9 @@ func TestGetProviderAPIKeys_ProviderKeysPrecedence(t *testing.T) {
 			APIKeys: []string{"go-specific-key"},
 		},
 	}
-	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := NewOpenCodeClient(atomicCfg, nil)
 
 	model := config.ModelConfig{Provider: ProviderOpenCodeGo, ModelID: "test-model"}
-	got := c.getProviderAPIKeys(model)
+	got := cfg.ProviderAPIKeys(Provider(model))
 
 	// Should use provider-specific keys, not global
 	want := []string{"go-specific-key"}
@@ -438,37 +352,13 @@ func TestOpenRouterKeys(t *testing.T) {
 			APIKey: "openrouter-specific-key",
 		},
 	}
-	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := NewOpenCodeClient(atomicCfg, nil)
 
 	model := config.ModelConfig{Provider: ProviderOpenRouter, ModelID: "openrouter-model"}
-	got := c.getProviderAPIKeys(model)
+	got := cfg.ProviderAPIKeys(Provider(model))
 
 	want := []string{"openrouter-specific-key"}
 	if len(got) != len(want) || got[0] != want[0] {
 		t.Errorf("getProviderAPIKeys() = %v, want %v", got, want)
-	}
-}
-
-func TestOpenRouterEndpoint(t *testing.T) {
-	cfg := &config.Config{
-		OpenRouter: config.OpenRouterConfig{
-			BaseURL: "https://openrouter.ai/api/v1",
-			APIKey:  "openrouter-key",
-		},
-	}
-	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := NewOpenCodeClient(atomicCfg, nil)
-
-	model := config.ModelConfig{Provider: ProviderOpenRouter, ModelID: "openrouter-model"}
-	endpoint := c.getEndpoint("openrouter-model", model)
-
-	wantURL := cfg.OpenRouter.BaseURL + "/chat/completions"
-	if endpoint.BaseURL != wantURL {
-		t.Errorf("getEndpoint BaseURL = %q, want %q", endpoint.BaseURL, wantURL)
-	}
-	if endpoint.APIKey != cfg.OpenRouter.APIKey {
-		t.Errorf("getEndpoint APIKey = %q, want %q", endpoint.APIKey, cfg.OpenRouter.APIKey)
 	}
 }
 
@@ -481,7 +371,7 @@ func TestOpenRouterTimeout(t *testing.T) {
 		},
 	}
 	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := NewOpenCodeClient(atomicCfg, nil)
+	c := NewOpenCodeClient(atomicCfg)
 
 	model := config.ModelConfig{Provider: ProviderOpenRouter, ModelID: "openrouter-model"}
 
@@ -496,77 +386,6 @@ func TestOpenRouterTimeout(t *testing.T) {
 	}
 }
 
-func TestOpenRouterChatCompletion_UsesBearerAuth(t *testing.T) {
-	var gotURL string
-	var gotAuth string
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotURL = r.URL.String()
-		gotAuth = r.Header.Get("Authorization")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"resp-1","object":"chat.completion","created":1,"model":"openrouter/model","choices":[],"usage":{}}`))
-	}))
-	defer ts.Close()
-
-	cfg := &config.Config{
-		OpenRouter: config.OpenRouterConfig{
-			BaseURL: ts.URL,
-			APIKey:  "openrouter-key",
-		},
-	}
-	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := NewOpenCodeClient(atomicCfg, nil)
-
-	model := config.ModelConfig{Provider: ProviderOpenRouter, ModelID: "openrouter/model"}
-	req := &types.ChatCompletionRequest{
-		Model:    "openrouter/model",
-		Messages: []types.ChatMessage{{Role: "user", Content: json.RawMessage(`"hello"`)}},
-	}
-	_, err := c.ChatCompletionNonStreaming(context.Background(), "openrouter/model", req, model)
-	if err != nil {
-		t.Fatalf("ChatCompletionNonStreaming() error = %v", err)
-	}
-
-	if gotURL != "/" {
-		t.Errorf("request URL = %q, want %q", gotURL, "/")
-	}
-	if gotAuth != "Bearer openrouter-key" {
-		t.Errorf("Authorization header = %q, want %q", gotAuth, "Bearer openrouter-key")
-	}
-}
-
-func TestOpenRouterChatCompletion_UsesOpenRouterBaseURL(t *testing.T) {
-	var gotURL string
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotURL = r.URL.String()
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"resp-2","object":"chat.completion","created":2,"model":"openrouter/model","choices":[],"usage":{}}`))
-	}))
-	defer ts.Close()
-
-	cfg := &config.Config{
-		OpenRouter: config.OpenRouterConfig{
-			BaseURL: ts.URL,
-			APIKey:  "openrouter-key",
-		},
-	}
-	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := NewOpenCodeClient(atomicCfg, nil)
-
-	model := config.ModelConfig{Provider: ProviderOpenRouter, ModelID: "openrouter/model"}
-	req := &types.ChatCompletionRequest{
-		Model:    "openrouter/model",
-		Messages: []types.ChatMessage{{Role: "user", Content: json.RawMessage(`"hello"`)}},
-	}
-	_, err := c.ChatCompletionNonStreaming(context.Background(), "openrouter/model", req, model)
-	if err != nil {
-		t.Fatalf("ChatCompletionNonStreaming() error = %v", err)
-	}
-
-	if gotURL != "/" {
-		t.Errorf("request URL = %q, want %q", gotURL, "/")
-	}
-}
-
 func TestOpenRouterTimeout_FallsBackToTimeoutMs(t *testing.T) {
 	cfg := &config.Config{
 		OpenRouter: config.OpenRouterConfig{
@@ -576,7 +395,7 @@ func TestOpenRouterTimeout_FallsBackToTimeoutMs(t *testing.T) {
 		},
 	}
 	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := NewOpenCodeClient(atomicCfg, nil)
+	c := NewOpenCodeClient(atomicCfg)
 
 	model := config.ModelConfig{Provider: ProviderOpenRouter, ModelID: "openrouter-model"}
 
@@ -595,11 +414,9 @@ func TestGetProviderAPIKeys_EmptyReturnsGlobal(t *testing.T) {
 			// No keys configured
 		},
 	}
-	atomicCfg := config.NewAtomicConfig(cfg, "")
-	c := NewOpenCodeClient(atomicCfg, nil)
 
 	model := config.ModelConfig{Provider: ProviderOpenCodeGo, ModelID: "test-model"}
-	got := c.getProviderAPIKeys(model)
+	got := cfg.ProviderAPIKeys(Provider(model))
 
 	want := []string{"global-single-key"}
 	if len(got) != len(want) || got[0] != want[0] {

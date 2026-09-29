@@ -44,7 +44,10 @@ func TestModelBreakdownThroughputWeightsByDuration(t *testing.T) {
 	})
 
 	a := NewAnalytics(db)
-	window := a.Window(30)
+	window, err := a.WindowBetween(at, at.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
 	rows, err := a.ModelBreakdown(window)
 	if err != nil {
 		t.Fatalf("ModelBreakdown: %v", err)
@@ -101,7 +104,11 @@ func TestThroughputExcludesUnmeasuredRequests(t *testing.T) {
 	}
 
 	a := NewAnalytics(db)
-	rows, err := a.ModelBreakdown(a.Window(30))
+	window, err := a.WindowBetween(at, at.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := a.ModelBreakdown(window)
 	if err != nil {
 		t.Fatalf("ModelBreakdown: %v", err)
 	}
@@ -128,7 +135,12 @@ func TestThroughputIsUnknownWithoutMeasuredRequests(t *testing.T) {
 		OutputTokens: 500, Duration: 10 * time.Second, Success: false, StartTime: at,
 	})
 
-	rows, err := NewAnalytics(db).ModelBreakdown(NewAnalytics(db).Window(30))
+	a := NewAnalytics(db)
+	window, err := a.WindowBetween(at, at.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := a.ModelBreakdown(window)
 	if err != nil {
 		t.Fatalf("ModelBreakdown: %v", err)
 	}

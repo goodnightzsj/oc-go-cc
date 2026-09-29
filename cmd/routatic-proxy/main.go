@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -88,7 +89,7 @@ when not headless. All usage data is persisted to SQLite.
 Invoking this command as "serve" always implies --headless.
 
 Press Ctrl+C to stop the server.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 			// Cobra aliases do not change flag defaults, so the legacy
 			// "serve" name forces headless mode explicitly.
 			if cmd.CalledAs() == "serve" {
@@ -126,20 +127,20 @@ Press Ctrl+C to stop the server.`,
 				return fmt.Errorf("failed to sync catalog: %w", err)
 			}
 
-			// Ensure SQLite database exists.
-			if err := ensureDatabase(); err != nil {
-				return fmt.Errorf("failed to initialize database: %w", err)
-			}
-
 			// Debug request/response capture, when enabled in config.
 			var captureLogger *debug.CaptureLogger
+			var shutdownErr error
 			if cfg.Logging.DebugCapture != nil && cfg.Logging.DebugCapture.Enabled {
 				captureStore, err := debug.NewStorage(*cfg.Logging.DebugCapture)
 				if err != nil {
 					return fmt.Errorf("failed to create debug storage: %w", err)
 				}
 				captureLogger = debug.NewCaptureLogger(captureStore, true)
-				defer func() { _ = captureLogger.Close() }()
+				defer func() {
+					if shutdownErr == nil {
+						runErr = errors.Join(runErr, captureLogger.Close(), captureStore.Close())
+					}
+				}()
 			}
 
 			// Override port if provided via flag.
@@ -204,6 +205,13 @@ Press Ctrl+C to stop the server.`,
 			if err != nil {
 				return fmt.Errorf("failed to create server: %w", err)
 			}
+			var guiSrv *gui.Server
+			defer func() {
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				shutdownErr = shutdownServers(shutdownCtx, srv, guiSrv)
+				runErr = errors.Join(runErr, shutdownErr)
+			}()
 
 			// Start config watcher for hot reload.
 			if cfg.HotReload {
@@ -217,7 +225,7 @@ Press Ctrl+C to stop the server.`,
 			}
 
 			// Context for graceful shutdown.
-			ctx, cancel := context.WithCancel(cmd.Context())
+			ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			pricesDone := make(chan struct{})
 			go func() {
 				defer close(pricesDone)
@@ -238,7 +246,6 @@ Press Ctrl+C to stop the server.`,
 				<-holidaysDone
 			}()
 
-			var guiSrv *gui.Server
 			var guiDone <-chan struct{}
 
 			// Start proxy in background and preserve startup failures for the
@@ -301,31 +308,18 @@ Press Ctrl+C to stop the server.`,
 			}
 
 			// Wait for signal or GUI window close.
-			sigCh := make(chan os.Signal, 1)
-			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-			defer signal.Stop(sigCh)
 			var proxyErr error
 			select {
-			case <-sigCh:
-				fmt.Println("\nShutting down...")
 			case proxyErr = <-proxyErrCh:
 				if proxyErr != nil {
 					slog.Error("proxy server error", "error", proxyErr)
 				}
 				cancel()
 			case <-ctx.Done():
+				fmt.Println("\nShutting down...")
 			case <-guiDone:
 				fmt.Println("\nGUI window closed, shutting down...")
 				cancel()
-			}
-
-			// Graceful shutdown.
-			cancel()
-			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer shutdownCancel()
-			_ = srv.Shutdown(shutdownCtx)
-			if guiSrv != nil {
-				_ = guiSrv.Shutdown(shutdownCtx)
 			}
 
 			return proxyErr

@@ -7,9 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/routatic/proxy/internal/client"
@@ -30,8 +28,8 @@ import (
 type Server struct {
 	atomic    *config.AtomicConfig
 	httpSrv   *http.Server
-	mux       http.Handler
-	mu        sync.Mutex
+	closeOnce sync.Once
+	closeErr  error
 	logger    *slog.Logger
 	levelVar  *slog.LevelVar
 	metrics   *metrics.Metrics // stored for Metrics() getter
@@ -62,7 +60,7 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 	// Create metrics
 	metrics := metrics.New()
 
-	openCodeClient := client.NewOpenCodeClient(atomic, captureLogger)
+	openCodeClient := client.NewOpenCodeClient(atomic)
 	fallbackHandler := router.NewFallbackHandler(logger, 3, 30*time.Second)
 	fallbackHandler.SetAtomicConfig(atomic)
 
@@ -73,6 +71,7 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 	_ = providerRegistry.Register(provider.NewAWSBedrockProvider(atomic))
 	_ = providerRegistry.Register(provider.NewCommandCodeProvider(atomic, captureLogger))
 	_ = providerRegistry.Register(provider.NewClinePassProvider(atomic, captureLogger))
+	_ = providerRegistry.Register(provider.NewOpenRouterProvider(atomic, captureLogger))
 
 	// Create status store for the statusline endpoint.
 	statusStore := status.NewStore(0)
@@ -93,7 +92,7 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 	if storageCfg.DatabasePath != "" {
 		db, err = storage.Open(storageCfg)
 		if err != nil {
-			logger.Warn("failed to open storage database, falling back to in-memory", "error", err)
+			return nil, fmt.Errorf("open storage database: %w", err)
 		} else {
 			logger.Info("storage database opened", "path", db.Path())
 			retention = storage.NewRetention(db, storageCfg.RetentionDays)
@@ -165,7 +164,6 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 	srv := &Server{
 		atomic:    atomic,
 		httpSrv:   httpSrv,
-		mux:       mux,
 		logger:    logger,
 		levelVar:  levelVar,
 		metrics:   metrics,
@@ -200,7 +198,8 @@ func (s *Server) Fallback() *router.FallbackHandler {
 	return s.fallback
 }
 
-// Start starts the server with graceful shutdown.
+// Start serves until Shutdown closes the listener. The application owns signals
+// and must finish draining every database consumer before calling Close.
 func (s *Server) Start() error {
 	cfg := s.atomic.Get()
 	s.logger.Info("starting routatic-proxy",
@@ -209,52 +208,7 @@ func (s *Server) Start() error {
 		"models_configured", len(cfg.Models),
 	)
 
-	s.mu.Lock()
-	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
-	s.httpSrv = &http.Server{
-		Addr:         addr,
-		Handler:      s.mux,
-		ReadTimeout:  120 * time.Second,
-		WriteTimeout: 0,
-		IdleTimeout:  300 * time.Second,
-	}
-	s.mu.Unlock()
-
-	// Graceful shutdown.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	go func() {
-		<-ctx.Done()
-		s.logger.Info("shutting down server...")
-
-		if s.retention != nil {
-			s.retention.Stop()
-		}
-
-		if s.storage != nil {
-			_ = s.storage.Close()
-		}
-
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		s.mu.Lock()
-		srvToShutdown := s.httpSrv
-		s.mu.Unlock()
-
-		if srvToShutdown != nil {
-			if err := srvToShutdown.Shutdown(shutdownCtx); err != nil {
-				s.logger.Error("server shutdown failed", "error", err)
-			}
-		}
-	}()
-
-	s.mu.Lock()
-	srvToStart := s.httpSrv
-	s.mu.Unlock()
-
-	if err := srvToStart.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := s.httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("server failed: %w", err)
 	}
 
@@ -265,14 +219,24 @@ func (s *Server) Start() error {
 // Shutdown gracefully shuts down the proxy server.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.logger.Info("programmatic shutdown requested")
-	s.mu.Lock()
-	srvToShutdown := s.httpSrv
-	s.mu.Unlock()
-
-	if srvToShutdown != nil {
-		return srvToShutdown.Shutdown(ctx)
+	if s.httpSrv != nil {
+		return s.httpSrv.Shutdown(ctx)
 	}
 	return nil
+}
+
+// Close releases resources shared with the dashboard. Call only after all HTTP
+// servers have drained successfully; a shutdown timeout is not a completed drain.
+func (s *Server) Close() error {
+	s.closeOnce.Do(func() {
+		if s.retention != nil {
+			s.retention.Stop()
+		}
+		if s.storage != nil {
+			s.closeErr = s.storage.Close()
+		}
+	})
+	return s.closeErr
 }
 
 // parseLogLevel converts a string log level to slog.Level.

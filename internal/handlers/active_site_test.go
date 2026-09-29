@@ -28,7 +28,7 @@ func activeSiteHandler(t *testing.T, cfg *config.Config) *MessagesHandler {
 		t.Fatalf("NewCounter: %v", err)
 	}
 	handler := NewMessagesHandler(
-		client.NewOpenCodeClient(atomicCfg, nil),
+		client.NewOpenCodeClient(atomicCfg),
 		newTestProviderRegistry(t, atomicCfg),
 		router.NewModelRouter(atomicCfg),
 		nil, tokenCounter, metrics.New(), nil, nil,

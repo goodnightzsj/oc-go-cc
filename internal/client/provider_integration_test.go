@@ -12,7 +12,7 @@ func TestCommandCodeUsesIndependentTimeouts(t *testing.T) {
 		OpenCodeGo:  config.OpenCodeGoConfig{TimeoutMs: 999, StreamTimeoutMs: 998, StreamingTimeoutMs: 997},
 		CommandCode: config.CommandCodeConfig{TimeoutMs: 1100, StreamTimeoutMs: 2200, StreamingTimeoutMs: 3300},
 	}
-	c := NewOpenCodeClient(config.NewAtomicConfig(cfg, ""), nil)
+	c := NewOpenCodeClient(config.NewAtomicConfig(cfg, ""))
 	model := config.ModelConfig{Provider: "commandcode", ModelID: "example"}
 	if got := c.RequestTimeout(model); got != 1100*time.Millisecond {
 		t.Errorf("request timeout = %v", got)

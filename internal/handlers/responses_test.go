@@ -58,7 +58,7 @@ func newResponsesTestHandler(t *testing.T, upstream http.Handler) (*MessagesHand
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := NewMessagesHandler(client.NewOpenCodeClient(cfg, nil), registry, router.NewModelRouter(cfg),
+	h := NewMessagesHandler(client.NewOpenCodeClient(cfg), registry, router.NewModelRouter(cfg),
 		router.NewFallbackHandler(slog.Default(), 3, time.Second),
 		counter, metrics.New(), nil, NewStorageAdapter(db))
 	return h, db

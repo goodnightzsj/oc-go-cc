@@ -140,11 +140,15 @@ func TestModelBreakdownSumsToSummary(t *testing.T) {
 	})
 
 	a := NewAnalytics(db)
-	summary, err := a.TokenSummary(a.Window(30))
+	window, err := a.WindowBetween(offPeak, offPeak.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary, err := a.TokenSummary(window)
 	if err != nil {
 		t.Fatalf("GetTokenSummary: %v", err)
 	}
-	breakdown, err := a.ModelBreakdown(a.Window(30))
+	breakdown, err := a.ModelBreakdown(window)
 	if err != nil {
 		t.Fatalf("GetModelBreakdown: %v", err)
 	}

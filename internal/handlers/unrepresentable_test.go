@@ -56,7 +56,7 @@ func TestHandleMessages_ToolReferenceIsDroppedNotRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := NewMessagesHandler(
-		client.NewOpenCodeClient(atomicCfg, nil), registry, modelRouter,
+		client.NewOpenCodeClient(atomicCfg), registry, modelRouter,
 		router.NewFallbackHandler(slog.Default(), 3, 0),
 		tokenCounter, metrics.New(), nil, nil,
 	)

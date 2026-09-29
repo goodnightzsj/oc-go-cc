@@ -174,18 +174,48 @@ func (c AWSBillingConfig) Validate() error {
 	return nil
 }
 
-// EffectiveAPIKeys returns the pool of API keys for AWS Bedrock. The APIKeys
-// array (for key rotation) takes precedence; if empty, falls back to the single
-// APIKey field. This precedence order allows a single key in config with an
-// override to multiple keys via environment variable (ROUTATIC_PROXY_AWS_BEDROCK_API_KEYS).
+// appendAPIKeys builds one key pool from the two config fields that hold it.
+//
+// The single key comes first and the array follows, so the rotation order is a
+// function of the config rather than of which field an operator happened to
+// fill in. Either may be empty: an empty array means the pool is just the
+// single key, which is the long-standing "one key" case.
+//
+// A key listed in both fields is kept once. Listing a key twice would put the
+// same credential in the rotation twice, so one subscription would take two
+// turns per cycle, and the quota panel would query that account twice and show
+// two identical cards. Order is preserved and the result is a fresh slice, so
+// callers cannot mutate the stored config by appending to it.
+func appendAPIKeys(single string, many []string) []string {
+	if single == "" && len(many) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(many)+1)
+	seen := make(map[string]bool, len(many)+1)
+	add := func(key string) {
+		key = strings.TrimSpace(key)
+		if key == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, key)
+	}
+	add(single)
+	for _, key := range many {
+		add(key)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// EffectiveAPIKeys returns the pool of API keys for AWS Bedrock: the single
+// APIKey field followed by the APIKeys array. The array cannot be empty and the
+// single field be ignored - both are the platform's own credentials, and a key
+// that was working must not stop working because a second one was added.
 func (c *AWSBedrockConfig) EffectiveAPIKeys() []string {
-	if len(c.APIKeys) > 0 {
-		return c.APIKeys
-	}
-	if c.APIKey != "" {
-		return []string{c.APIKey}
-	}
-	return nil
+	return appendAPIKeys(c.APIKey, c.APIKeys)
 }
 
 // OpenCodeGoConfig holds the upstream OpenCode Go API settings.
@@ -200,18 +230,10 @@ type OpenCodeGoConfig struct {
 	StreamingTimeoutMs int      `json:"streaming_timeout_ms,omitempty"`
 }
 
-// EffectiveAPIKeys returns the pool of API keys for OpenCode Go. The APIKeys
-// array (for key rotation) takes precedence; if empty, falls back to the single
-// APIKey field. This precedence order allows a single key in config with an
-// override to multiple keys via environment variable (ROUTATIC_PROXY_OPENCODE_GO_API_KEYS).
+// EffectiveAPIKeys returns the pool of API keys for OpenCode Go: the single
+// APIKey field followed by the APIKeys array.
 func (c *OpenCodeGoConfig) EffectiveAPIKeys() []string {
-	if len(c.APIKeys) > 0 {
-		return c.APIKeys
-	}
-	if c.APIKey != "" {
-		return []string{c.APIKey}
-	}
-	return nil
+	return appendAPIKeys(c.APIKey, c.APIKeys)
 }
 
 // OpenRouterConfig holds the upstream OpenRouter API settings.
@@ -225,16 +247,10 @@ type OpenRouterConfig struct {
 	StreamingTimeoutMs int      `json:"streaming_timeout_ms,omitempty"`
 }
 
-// EffectiveAPIKeys returns the pool of API keys for OpenRouter.
-// APIKeys takes precedence; falls back to the single APIKey field.
+// EffectiveAPIKeys returns the pool of API keys for OpenRouter: the single
+// APIKey field followed by the APIKeys array.
 func (c *OpenRouterConfig) EffectiveAPIKeys() []string {
-	if len(c.APIKeys) > 0 {
-		return c.APIKeys
-	}
-	if c.APIKey != "" {
-		return []string{c.APIKey}
-	}
-	return nil
+	return appendAPIKeys(c.APIKey, c.APIKeys)
 }
 
 // CommandCodeConfig uses the official Provider API, with its own credentials.
@@ -250,14 +266,10 @@ type CommandCodeConfig struct {
 	ZeroDataRetention  bool     `json:"zero_data_retention"`
 }
 
+// EffectiveAPIKeys returns the pool of API keys for CommandCode: the single
+// APIKey field followed by the APIKeys array.
 func (c *CommandCodeConfig) EffectiveAPIKeys() []string {
-	if len(c.APIKeys) > 0 {
-		return c.APIKeys
-	}
-	if c.APIKey != "" {
-		return []string{c.APIKey}
-	}
-	return nil
+	return appendAPIKeys(c.APIKey, c.APIKeys)
 }
 
 // ClinePassConfig holds the Cline API settings for the ClinePass subscription.
@@ -280,14 +292,10 @@ type ClinePassConfig struct {
 	StreamingTimeoutMs int      `json:"streaming_timeout_ms,omitempty"`
 }
 
+// EffectiveAPIKeys returns the pool of API keys for ClinePass: the single
+// APIKey field followed by the APIKeys array.
 func (c *ClinePassConfig) EffectiveAPIKeys() []string {
-	if len(c.APIKeys) > 0 {
-		return c.APIKeys
-	}
-	if c.APIKey != "" {
-		return []string{c.APIKey}
-	}
-	return nil
+	return appendAPIKeys(c.APIKey, c.APIKeys)
 }
 
 // OpenCodeZenConfig holds the upstream OpenCode Zen API settings.
@@ -303,18 +311,10 @@ type OpenCodeZenConfig struct {
 	StreamingTimeoutMs int      `json:"streaming_timeout_ms,omitempty"`
 }
 
-// EffectiveAPIKeys returns the pool of API keys for OpenCode Zen. The APIKeys
-// array (for key rotation) takes precedence; if empty, falls back to the single
-// APIKey field. This precedence order allows a single key in config with an
-// override to multiple keys via environment variable (ROUTATIC_PROXY_OPENCODE_ZEN_API_KEYS).
+// EffectiveAPIKeys returns the pool of API keys for OpenCode Zen: the single
+// APIKey field followed by the APIKeys array.
 func (c *OpenCodeZenConfig) EffectiveAPIKeys() []string {
-	if len(c.APIKeys) > 0 {
-		return c.APIKeys
-	}
-	if c.APIKey != "" {
-		return []string{c.APIKey}
-	}
-	return nil
+	return appendAPIKeys(c.APIKey, c.APIKeys)
 }
 
 // LoggingConfig controls application logging behavior.
@@ -354,19 +354,12 @@ type DebugCapture struct {
 	RedactAPIKeys bool   `json:"redact_api_keys"`
 }
 
-// EffectiveAPIKeys returns the global pool of API keys for rotation. The APIKeys
-// array takes precedence; if empty, falls back to the single APIKey field. This
-// precedence order is used by providers that lack their own key configuration,
-// falling back to global keys when neither provider-specific keys nor environment
-// overrides are set.
+// EffectiveAPIKeys returns the global pool of API keys for rotation: the single
+// APIKey field followed by the APIKeys array. It is used by providers that lack
+// their own key configuration, falling back to global keys when neither
+// provider-specific keys nor environment overrides are set.
 func (c *Config) EffectiveAPIKeys() []string {
-	if len(c.APIKeys) > 0 {
-		return c.APIKeys
-	}
-	if c.APIKey != "" {
-		return []string{c.APIKey}
-	}
-	return nil
+	return appendAPIKeys(c.APIKey, c.APIKeys)
 }
 
 // NormalizeProvider preserves the legacy empty-provider default and spelling.

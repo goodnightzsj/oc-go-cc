@@ -45,6 +45,16 @@ type ExecuteResult struct {
 	Body []byte
 }
 
+// ResponsesStatusError retains a failed execution's reported usage across
+// provider and fallback boundaries. Nil usage means it was not reported;
+// a non-nil all-zero usage is an explicit upstream observation.
+type ResponsesStatusError struct {
+	Status string
+	Usage  *types.Usage
+}
+
+func (e *ResponsesStatusError) Error() string { return "upstream Responses status: " + e.Status }
+
 // Provider is the abstraction for an upstream LLM provider.
 type Provider interface {
 	// Name returns the provider identifier (e.g. "opencode-go", "opencode-zen").

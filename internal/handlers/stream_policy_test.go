@@ -60,7 +60,7 @@ func TestStreamingPolicy(t *testing.T) {
 				t.Fatal("stream failures did not open circuit")
 			}
 			if tc.status == 500 {
-				_, _, err := fallback.ExecuteWithFallback(context.Background(), chain[:2], func(context.Context, config.ModelConfig) ([]byte, error) {
+				_, _, err := fallback.ExecuteWithFallback(context.Background(), chain[:2], func(context.Context, config.ModelConfig, int) ([]byte, error) {
 					t.Error("buffered request retried a model whose streaming circuit is open")
 					return nil, nil
 				})

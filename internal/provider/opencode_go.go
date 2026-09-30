@@ -93,8 +93,10 @@ func (p *OpenCodeGoProvider) executeOpenAI(ctx context.Context, req *types.Messa
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	normResp := transformer.OpenAIResponseToNormalized(&chatResp, model.ModelID)
-	anthropicResp := core.DenormalizeResponse(normResp)
+	anthropicResp, err := transformer.NewResponseTransformer().TransformResponse(&chatResp, model.ModelID)
+	if err != nil {
+		return nil, fmt.Errorf("response transform failed: %w", err)
+	}
 	resultBody, err := json.Marshal(anthropicResp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal response: %w", err)
@@ -139,10 +141,11 @@ func (p *OpenCodeGoProvider) executeResponses(ctx context.Context, req *types.Me
 	if err := json.Unmarshal(raw, &response); err != nil {
 		return nil, fmt.Errorf("decode Responses response: %w", err)
 	}
-	if response.Status == "failed" || response.Status == "cancelled" {
-		return nil, fmt.Errorf("upstream Responses status: %s", response.Status)
+	normalized, err := transformer.ResponsesToNormalized(&response, model.ModelID)
+	if err != nil {
+		return nil, err
 	}
-	encoded, err := json.Marshal(core.DenormalizeResponse(transformer.ResponsesToNormalized(&response, model.ModelID)))
+	encoded, err := json.Marshal(core.DenormalizeResponse(normalized))
 	return &core.ExecuteResult{Body: encoded}, err
 }
 

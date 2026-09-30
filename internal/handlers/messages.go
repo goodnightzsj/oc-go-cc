@@ -987,7 +987,8 @@ func (h *MessagesHandler) handleNonStreaming(
 	result, responseBody, err := h.fallbackHandler.ExecuteWithFallback(
 		ctx,
 		modelChain,
-		func(ctx context.Context, model config.ModelConfig) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, attempt int) ([]byte, error) {
+			attemptStart := time.Now()
 			timeout := h.client.RequestTimeout(model)
 			attemptCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
@@ -998,6 +999,23 @@ func (h *MessagesHandler) handleNonStreaming(
 			}
 			execResult, execErr := prov.Execute(attemptCtx, anthropicReq, model)
 			if execErr != nil {
+				// Record each reported failure before fallback can replace it with
+				// another execution. Missing usage is not an observed zero.
+				var failure *core.ResponsesStatusError
+				if errors.As(execErr, &failure) && failure.Usage != nil && h.storage != nil {
+					usage := failure.Usage
+					rec := history.RequestRecord{
+						ID: uuid.NewString(), Model: model.ModelID, RequestedModel: requestedModel,
+						Provider: client.Provider(model), Scenario: string(scenario),
+						StartTime: attemptStart, Duration: time.Since(attemptStart),
+						InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
+						CacheReadTokens: usage.CacheReadInputTokens, CacheCreationTokens: usage.CacheCreationInputTokens,
+						Success: false, ErrorMsg: execErr.Error(), Attempt: attempt,
+					}
+					if err := h.storage.InsertRequest(rec); err != nil {
+						h.logger.Warn("failed to insert request into storage", "error", err)
+					}
+				}
 				return nil, execErr
 			}
 			return execResult.Body, nil

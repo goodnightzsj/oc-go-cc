@@ -71,7 +71,7 @@ func TestCommandCodeRunsMatchThePlatformBill(t *testing.T) {
 	}
 	for _, c := range cases {
 		got, ok := costForProviderTokensAt("commandcode", c.model, c.input, c.output, c.cacheRead, 0,
-			sql.NullFloat64{}, sql.NullFloat64{}, offPeak)
+			sql.NullFloat64{}, sql.NullFloat64{}, offPeak, nil)
 		if !ok {
 			t.Errorf("%s: platform publishes rates, so the cost must be known", c.model)
 			continue

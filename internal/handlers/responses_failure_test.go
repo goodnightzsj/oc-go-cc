@@ -69,7 +69,7 @@ func TestNonStreamingResponsesFailureRetainsEachAttemptUsage(t *testing.T) {
 						h := &MessagesHandler{client: client.NewOpenCodeClient(cfg), providerRegistry: newTestProviderRegistry(t, cfg), fallbackHandler: router.NewFallbackHandler(logger, 3, time.Minute), logger: logger, metrics: metrics.New(), storage: NewStorageAdapter(db)}
 						skipped := config.ModelConfig{Provider: name, ModelID: "open-circuit", WireFormat: "responses"}
 						for range 3 {
-							h.fallbackHandler.RecordAttempt(context.Background(), skipped, &client.APIError{StatusCode: http.StatusServiceUnavailable})
+							h.fallbackHandler.AllowAttempt(skipped)(context.Background(), &client.APIError{StatusCode: http.StatusServiceUnavailable})
 						}
 						w := httptest.NewRecorder()
 						h.handleNonStreaming(w, httptest.NewRequest(http.MethodPost, "/v1/messages", nil), &types.MessageRequest{Model: "requested", MaxTokens: 16}, []config.ModelConfig{

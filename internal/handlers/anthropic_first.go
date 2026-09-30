@@ -40,11 +40,13 @@ type availabilityGate struct {
 	probing     bool
 	failures    int
 	nextProbe   time.Time
+	generation  uint64
 }
 
 type availabilityAttempt struct {
-	baseURL string
-	probe   bool
+	baseURL    string
+	probe      bool
+	generation uint64
 }
 
 func (g *availabilityGate) allow(now time.Time, baseURL string) (availabilityAttempt, bool) {
@@ -55,19 +57,20 @@ func (g *availabilityGate) allow(now time.Time, baseURL string) (availabilityAtt
 		g.resetLocked(baseURL)
 	}
 	if !g.unavailable {
-		return availabilityAttempt{baseURL: baseURL}, true
+		return availabilityAttempt{baseURL: baseURL, generation: g.generation}, true
 	}
 	if now.Before(g.nextProbe) || g.probing {
 		return availabilityAttempt{}, false
 	}
 	g.probing = true
-	return availabilityAttempt{baseURL: baseURL, probe: true}, true
+	g.generation++
+	return availabilityAttempt{baseURL: baseURL, probe: true, generation: g.generation}, true
 }
 
 func (g *availabilityGate) failed(now time.Time, attempt availabilityAttempt, retryAfter string) time.Duration {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if attempt.baseURL != g.baseURL {
+	if attempt.baseURL != g.baseURL || attempt.generation != g.generation {
 		return 0
 	}
 
@@ -96,7 +99,7 @@ func (g *availabilityGate) available(attempt availabilityAttempt) {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if attempt.baseURL != g.baseURL {
+	if attempt.baseURL != g.baseURL || attempt.generation != g.generation {
 		return
 	}
 	g.resetLocked(g.baseURL)
@@ -109,11 +112,21 @@ func (g *availabilityGate) reset(baseURL string) {
 }
 
 func (g *availabilityGate) resetLocked(baseURL string) {
+	g.generation++
 	g.baseURL = baseURL
 	g.unavailable = false
 	g.probing = false
 	g.failures = 0
 	g.nextProbe = time.Time{}
+}
+
+// abandon releases only this probe without changing the health conclusion.
+func (g *availabilityGate) abandon(attempt availabilityAttempt) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if attempt.probe && attempt.generation == g.generation {
+		g.probing = false
+	}
 }
 
 func parseRetryAfter(value string, now time.Time) (time.Duration, bool) {
@@ -180,6 +193,7 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	defer h.gate.abandon(attempt)
 	upstreamReq, err := newAnthropicRequest(r, cfg.BaseURL, body)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, "invalid Anthropic base URL")

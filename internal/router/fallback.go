@@ -34,6 +34,7 @@ type CircuitBreaker struct {
 	recoveryTimeout  time.Duration // how long to wait before half-open
 	halfOpenMaxCalls int           // max test calls in half-open state
 	halfOpenCalls    int
+	generation       uint64
 }
 
 // NewCircuitBreaker creates a circuit breaker that opens after threshold
@@ -50,49 +51,47 @@ func NewCircuitBreaker(threshold int, recoveryTimeout time.Duration) *CircuitBre
 	}
 }
 
-// AllowRequest returns whether the circuit should permit a request. In the
+// allowRequest returns the generation and whether to permit a request. In the
 // closed state, all requests pass. In the open state, requests are blocked
 // until recoveryTimeout elapses, at which point the circuit transitions to
-// half-open and allows a limited number of probe requests. A successful probe
-// closes the circuit; a failure reopens it.
-func (cb *CircuitBreaker) AllowRequest() bool {
+// half-open and allows a limited number of concurrent probes.
+func (cb *CircuitBreaker) allowRequest() (uint64, bool) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
 	switch cb.state {
 	case CircuitClosed:
-		return true
+		return cb.generation, true
 	case CircuitOpen:
 		// Check if recovery timeout has elapsed
 		if time.Since(cb.lastFailureTime) > cb.recoveryTimeout {
 			cb.state = CircuitHalfOpen
-			cb.halfOpenCalls = 0
-			return true
+			cb.generation++
+			cb.halfOpenCalls = 1
+			return cb.generation, true
 		}
-		return false
+		return 0, false
 	case CircuitHalfOpen:
 		if cb.halfOpenCalls < cb.halfOpenMaxCalls {
 			cb.halfOpenCalls++
-			return true
+			return cb.generation, true
 		}
-		return false
+		return 0, false
 	}
-	return false
+	return 0, false
 }
 
-// RecordSuccess transitions the circuit toward a healthy state. In half-open
+// recordSuccess requires mu and transitions toward a healthy state. In half-open
 // mode, accumulating enough successes (halfOpenMaxCalls, default 3) closes
 // the circuit. In closed mode, this resets the failure counter so transient
 // failures don't accumulate over time.
-func (cb *CircuitBreaker) RecordSuccess() {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-
+func (cb *CircuitBreaker) recordSuccess() {
 	switch cb.state {
 	case CircuitHalfOpen:
 		cb.successCount++
 		if cb.successCount >= cb.halfOpenMaxCalls {
 			cb.state = CircuitClosed
+			cb.generation++
 			cb.failureCount = 0
 			cb.successCount = 0
 		}
@@ -101,24 +100,23 @@ func (cb *CircuitBreaker) RecordSuccess() {
 	}
 }
 
-// RecordFailure transitions the circuit toward an unhealthy state. In half-open
+// recordFailure requires mu and transitions toward an unhealthy state. In half-open
 // mode, any failure immediately reopens the circuit. In closed mode, once the
 // failure count reaches the threshold, the circuit opens and blocks subsequent
 // requests until the recovery timeout elapses.
-func (cb *CircuitBreaker) RecordFailure() {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-
+func (cb *CircuitBreaker) recordFailure() {
 	cb.lastFailureTime = time.Now()
 	cb.failureCount++
 
 	switch cb.state {
 	case CircuitHalfOpen:
 		cb.state = CircuitOpen
+		cb.generation++
 		cb.successCount = 0
 	case CircuitClosed:
 		if cb.failureCount >= cb.threshold {
 			cb.state = CircuitOpen
+			cb.generation++
 		}
 	}
 }
@@ -194,33 +192,56 @@ func (h *FallbackHandler) getCircuitBreaker(modelID string) *CircuitBreaker {
 	return cb
 }
 
-// AllowAttempt shares circuit admission between buffered and streaming calls.
-func (h *FallbackHandler) AllowAttempt(model config.ModelConfig) bool {
-	return h.getCircuitBreaker(config.ModelKey(model)).AllowRequest()
+// AllowAttempt returns a once-only completion function, or nil when blocked.
+// Every admitted attempt must complete, including neutral/canceled outcomes.
+func (h *FallbackHandler) AllowAttempt(model config.ModelConfig) func(context.Context, error) bool {
+	cb := h.getCircuitBreaker(config.ModelKey(model))
+	generation, allowed := cb.allowRequest()
+	if !allowed {
+		return nil
+	}
+	var once sync.Once
+	var blockProvider bool
+	return func(ctx context.Context, err error) bool {
+		once.Do(func() {
+			blockProvider = h.recordAttempt(ctx, model, err, cb, generation)
+		})
+		return blockProvider
+	}
 }
 
-// RecordAttempt updates shared health and reports whether the rest of this
+// recordAttempt updates shared health and reports whether the rest of this
 // provider should be skipped for this request. ctx is the client's context, not
 // the per-attempt timeout: disconnects must not penalize a healthy upstream.
-func (h *FallbackHandler) RecordAttempt(ctx context.Context, model config.ModelConfig, err error) bool {
-	if ctx.Err() != nil {
-		return false
-	}
-	if err == nil {
-		h.getCircuitBreaker(config.ModelKey(model)).RecordSuccess()
-		return false
-	}
-	if IsUsageLimitError(err) {
-		return true
-	}
+func (h *FallbackHandler) recordAttempt(ctx context.Context, model config.ModelConfig, err error, cb *CircuitBreaker, generation uint64) bool {
+	blockProvider := IsUsageLimitError(err)
 	if IsAuthError(err) {
 		h.mu.Lock()
 		cfg := h.atomicCfg
 		h.mu.Unlock()
-		return client.ProviderKeyCount(cfg, client.Provider(model)) <= 1
+		blockProvider = client.ProviderKeyCount(cfg, client.Provider(model)) <= 1
 	}
-	if IsRetryableError(err) {
-		h.getCircuitBreaker(config.ModelKey(model)).RecordFailure()
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	// A late completion must not release or vote in a newer recovery round.
+	current := cb.generation == generation
+	if current && cb.state == CircuitHalfOpen {
+		cb.halfOpenCalls--
+	}
+	if ctx.Err() != nil {
+		return false
+	}
+	if err == nil {
+		if current {
+			cb.recordSuccess()
+		}
+		return false
+	}
+	if IsUsageLimitError(err) || IsAuthError(err) {
+		return blockProvider
+	}
+	if current && IsRetryableError(err) {
+		cb.recordFailure()
 	}
 	return false
 }
@@ -263,7 +284,8 @@ func (h *FallbackHandler) ExecuteWithFallback(
 		}
 
 		// Skip models with open circuit breakers
-		if !h.AllowAttempt(model) {
+		complete := h.AllowAttempt(model)
+		if complete == nil {
 			h.logger.Info("circuit breaker open, skipping model",
 				"model", model.ModelID,
 				"attempt", i+1,
@@ -279,7 +301,7 @@ func (h *FallbackHandler) ExecuteWithFallback(
 		)
 
 		body, err := executor(ctx, model, i+1)
-		blockProvider := h.RecordAttempt(ctx, model, err)
+		blockProvider := complete(ctx, err)
 		if err == nil {
 			h.logger.Info("model succeeded",
 				"model", model.ModelID,

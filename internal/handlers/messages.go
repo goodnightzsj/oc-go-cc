@@ -697,7 +697,8 @@ func (h *MessagesHandler) handleStreaming(
 			h.logger.Info("provider usage limit reached, skipping streaming model", "provider", providerName, "model", model.ModelID)
 			continue
 		}
-		if !h.fallbackHandler.AllowAttempt(model) {
+		complete := h.fallbackHandler.AllowAttempt(model)
+		if complete == nil {
 			h.logger.Info("circuit breaker open, skipping streaming model", "provider", providerName, "model", model.ModelID)
 			continue
 		}
@@ -713,7 +714,7 @@ func (h *MessagesHandler) handleStreaming(
 		// marks the model attempt as done.
 		recordStreamSuccess := func(model config.ModelConfig) {
 			cancelAttempt()
-			h.fallbackHandler.RecordAttempt(clientCtx, model, nil)
+			complete(clientCtx, nil)
 			latency := time.Since(streamStart)
 			h.metrics.RecordSuccess(model.ModelID, latency)
 			h.logger.Info("streaming completed",
@@ -795,7 +796,7 @@ func (h *MessagesHandler) handleStreaming(
 		handleStreamError := func(err error, model config.ModelConfig, action string) bool {
 			cancelAttempt()
 			lastStreamErr = err
-			if h.fallbackHandler.RecordAttempt(clientCtx, model, err) {
+			if complete(clientCtx, err) {
 				blockedProviders[providerName] = true
 			}
 			if clientCtx.Err() != nil {
@@ -843,17 +844,18 @@ func (h *MessagesHandler) handleStreaming(
 		if !ok {
 			cancelAttempt()
 			lastStreamErr = fmt.Errorf("provider %q is not registered", providerName)
+			complete(clientCtx, lastStreamErr)
 			continue
 		}
 		streamBody, err := prov.Stream(attemptCtx, anthropicReq, model)
 		if err != nil {
 			cancelAttempt()
+			if complete(clientCtx, err) {
+				blockedProviders[providerName] = true
+			}
 			if clientCtx.Err() != nil {
 				h.logger.Debug("client disconnected during upstream request")
 				return
-			}
-			if h.fallbackHandler.RecordAttempt(clientCtx, model, err) {
-				blockedProviders[providerName] = true
 			}
 			// Streaming cannot retry once the SSE head is out, so a
 			// deterministic refusal is the client's answer. Keeping it
@@ -878,6 +880,7 @@ func (h *MessagesHandler) handleStreaming(
 		if errProxy != nil {
 			if errProxy == transformer.ErrClientDisconnected {
 				if clientCtx.Err() != nil {
+					complete(clientCtx, errProxy)
 					h.logger.Debug("client disconnected during stream")
 					recordStreamFailure(model, errProxy, wireFormat.String())
 					return

@@ -113,8 +113,7 @@ type quotaModelUsage struct {
 }
 
 // maskKeyHint renders a key as a stable, non-reversible label. Only the last
-// four characters leave the process — enough to tell two configured keys apart,
-// never enough to reuse one.
+// four characters leave the process. This display hint is not a unique identity.
 func maskKeyHint(key string) string {
 	key = strings.TrimSpace(key)
 	if len(key) <= 4 {
@@ -462,9 +461,8 @@ func (s *Server) handleClinePassQuota(w http.ResponseWriter, r *http.Request, cf
 
 // attachClinePassLimits fills each window's LimitUSD from the plan endpoint.
 //
-// The ceilings are per account rather than per key, so this asks once per
-// distinct credential and reuses the answer: every key on the same subscription
-// sees the same caps, and a second lookup would only add a round trip. A failure
+// goQuotaKeys already deduplicates credentials and fetchQuotaAccounts preserves
+// their order. Display hints can collide and must not deduplicate accounts. A failure
 // is logged and leaves the windows percentage-only - the panel renders that
 // case, and losing the supplement must not cost the primary figure.
 func (s *Server) attachClinePassLimits(ctx context.Context, cfg *config.Config, accounts []quotaAccount) {
@@ -474,17 +472,11 @@ func (s *Server) attachClinePassLimits(ctx context.Context, cfg *config.Config, 
 		return
 	}
 	client := &http.Client{Timeout: quota.RequestTimeout}
-	seen := map[string]bool{}
 	for i := range accounts {
 		report := accounts[i].ClinePass
 		if report == nil || len(report.Windows) == 0 {
 			continue
 		}
-		key := accounts[i].KeyHint
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
 		// The plaintext key is not on the account, so the lookup runs per
 		// account record via the same credential list the fetch used.
 		limits, err := s.clinePassLimitsFor(ctx, client, cfg, planURL, i)

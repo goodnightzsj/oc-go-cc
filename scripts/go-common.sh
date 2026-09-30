@@ -48,7 +48,9 @@ source_fingerprint() {
 
   (
     cd "${root_dir}"
-    find cmd internal pkg -type f -name '*.go' -print
+    # These source trees also own embedded assets and templates. Hash all files
+    # so newly added embed inputs are watched without a second pattern registry.
+    find cmd internal pkg -type f -print
     printf '%s\n' go.mod go.sum
   ) | sort | while IFS= read -r path; do
     [[ -f "${root_dir}/${path}" ]] || continue

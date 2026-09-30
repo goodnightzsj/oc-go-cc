@@ -45,17 +45,21 @@ func TestNormalizedResponsesPreservesCacheAndToolStop(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"id":"resp_1","status":"completed","output":[{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"}],"usage":{"input_tokens":101,"output_tokens":7,"input_tokens_details":{"cached_tokens":90}}}`), &response); err != nil {
 		t.Fatal(err)
 	}
-	got := core.DenormalizeResponse(ResponsesToNormalized(&response, "synthetic"))
+	normalized, err := ResponsesToNormalized(&response, "synthetic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := core.DenormalizeResponse(normalized)
 	if got.StopReason != "tool_use" || len(got.Content) != 1 || got.Content[0].ID != "call_1" || got.Usage.InputTokens != 11 || got.Usage.CacheReadInputTokens != 90 || got.Usage.OutputTokens != 7 {
 		t.Fatalf("Responses conversion = %+v", got)
 	}
 	response.IncompleteDetails = &types.ResponsesIncompleteDetails{Reason: "max_output_tokens"}
-	if got := ResponsesToNormalized(&response, "synthetic"); got.StopReason != "max_tokens" {
-		t.Fatalf("incomplete treated as complete: %+v", got)
+	if got, err := ResponsesToNormalized(&response, "synthetic"); err != nil || got.StopReason != "max_tokens" {
+		t.Fatalf("incomplete treated as complete: %+v, %v", got, err)
 	}
 }
 
-func TestNormalizedChatUsesSharedCacheSplit(t *testing.T) {
+func TestChatResponseUsesSharedCacheSplit(t *testing.T) {
 	for _, usage := range []string{
 		`{"prompt_tokens":101,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":90}}`,
 		`{"prompt_tokens":101,"completion_tokens":7,"prompt_cache_hit_tokens":90,"prompt_cache_miss_tokens":11}`,
@@ -66,7 +70,10 @@ func TestNormalizedChatUsesSharedCacheSplit(t *testing.T) {
 		if err := json.Unmarshal([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":`+usage+`}`), &response); err != nil {
 			t.Fatal(err)
 		}
-		got := core.DenormalizeResponse(OpenAIResponseToNormalized(&response, "synthetic"))
+		got, err := NewResponseTransformer().TransformResponse(&response, "synthetic")
+		if err != nil {
+			t.Fatal(err)
+		}
 		if got.Usage.InputTokens != 11 || got.Usage.CacheReadInputTokens != 90 || got.Usage.CacheCreationInputTokens != 0 || got.Usage.OutputTokens != 7 {
 			t.Fatalf("usage=%+v source=%s", got.Usage, usage)
 		}
@@ -150,6 +157,22 @@ func TestResponsesUpstreamFailuresNeverSynthesizeCompletion(t *testing.T) {
 		}
 		if strings.Contains(tail, "response.failed") && w.usage != [4]int{11, 7, 90, 0} {
 			t.Fatalf("failure lost known usage: %v", w.usage)
+		}
+	}
+}
+
+func TestResponsesMissingTerminalUsagePreservesReportedUsage(t *testing.T) {
+	for _, terminal := range []string{
+		`{"type":"response.completed","response":{"status":"completed"}}`,
+		`{"type":"response.completed","response":{"status":"completed","usage":null}}`,
+	} {
+		ctx, cancel := context.WithCancel(context.Background())
+		w := &responsesUsageRecorder{ResponseRecorder: httptest.NewRecorder()}
+		body := sseLines(`{"type":"response.output_text.delta","delta":"answer","usage":{"input_tokens":101,"output_tokens":7,"input_tokens_details":{"cached_tokens":90}}}`, terminal)
+		err := NewStreamHandler().ProxyResponsesStream(w, body, "synthetic", ctx, 0, cancel)
+		cancel()
+		if err != nil || w.usage != [4]int{11, 7, 90, 0} {
+			t.Fatalf("missing terminal usage erased prior observation: usage=%v err=%v", w.usage, err)
 		}
 	}
 }

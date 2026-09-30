@@ -107,7 +107,7 @@ func TestCostForProviderTokensAt_UnpricedStaysUnknown(t *testing.T) {
 	}
 	for _, c := range cases {
 		if cost, ok := costForProviderTokensAt(c.provider, c.model, 1_000, 1_000, 0, 0,
-			sql.NullFloat64{}, sql.NullFloat64{}, at); ok {
+			sql.NullFloat64{}, sql.NullFloat64{}, at, nil); ok {
 			t.Errorf("%s: got cost=%v ok=true, want unknown", c.name, cost)
 		}
 	}

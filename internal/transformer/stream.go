@@ -873,7 +873,7 @@ func (h *StreamHandler) processResponsesSSELine(
 	}
 	usage := chunk.Usage
 	if usage == nil && chunk.Response != nil {
-		usage = &chunk.Response.Usage
+		usage = chunk.Response.Usage
 	}
 	if usage != nil {
 		state.usage = usage

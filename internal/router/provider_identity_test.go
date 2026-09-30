@@ -17,7 +17,7 @@ func TestFallbackSeparatesProvidersWithSameModel(t *testing.T) {
 		{Provider: "opencode-zen", ModelID: "same-model"},
 	}
 	for i := 0; i < 2; i++ {
-		result, body, err := h.ExecuteWithFallback(context.Background(), chain, func(_ context.Context, model config.ModelConfig) ([]byte, error) {
+		result, body, err := h.ExecuteWithFallback(context.Background(), chain, func(_ context.Context, model config.ModelConfig, _ int) ([]byte, error) {
 			if config.NormalizeProvider(model.Provider) == "opencode-go" {
 				return nil, &client.APIError{StatusCode: http.StatusServiceUnavailable}
 			}

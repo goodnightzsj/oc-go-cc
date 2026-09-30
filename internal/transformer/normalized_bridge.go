@@ -176,68 +176,15 @@ func AnthropicToGemini(anthropicReq *types.MessageRequest, model config.ModelCon
 
 // ── Response-side: wire format → NormalizedResponse ───────────────────
 
-// OpenAIResponseToNormalized converts an OpenAI ChatCompletionResponse to NormalizedResponse.
-func OpenAIResponseToNormalized(openaiResp *types.ChatCompletionResponse, modelID string) *core.NormalizedResponse {
-	nr := &core.NormalizedResponse{
-		ID:    openaiResp.ID,
-		Model: modelID,
-	}
-
-	for _, choice := range openaiResp.Choices {
-		msg := choice.Message
-
-		nm := core.NormalizedMessage{Role: msg.Role}
-
-		// Extract text content.
-		if msg.Content != nil {
-			nm.Content = msg.ContentText()
-		}
-
-		// Extract reasoning content (pointer field).
-		if msg.ReasoningContent != nil {
-			nm.Thinking = *msg.ReasoningContent
-		}
-
-		// Extract tool calls.
-		for _, tc := range msg.ToolCalls {
-			nm.ToolCalls = append(nm.ToolCalls, core.NormalizedToolCall{
-				ID:        tc.ID,
-				Name:      tc.Function.Name,
-				Arguments: tc.Function.Arguments,
-			})
-		}
-
-		nr.Messages = append(nr.Messages, nm)
-
-		// Map finish reason.
-		switch choice.FinishReason {
-		case "stop":
-			nr.StopReason = "end_turn"
-		case "length":
-			nr.StopReason = "max_tokens"
-		case "tool_calls":
-			nr.StopReason = "tool_use"
-		default:
-			nr.StopReason = "end_turn"
-		}
-	}
-
-	// Map usage. UsageInfo is a value type; check if it was populated.
-	if openaiResp.Usage.PromptTokens > 0 || openaiResp.Usage.CompletionTokens > 0 {
-		input, cacheRead, cacheCreate := splitPromptTokens(&openaiResp.Usage)
-		nr.Usage = core.NormalizedUsage{
-			InputTokens:         input,
-			OutputTokens:        openaiResp.Usage.CompletionTokens,
-			CacheReadTokens:     cacheRead,
-			CacheCreationTokens: cacheCreate,
-		}
-	}
-
-	return nr
-}
-
 // ResponsesToNormalized converts an OpenAI ResponsesResponse to NormalizedResponse.
-func ResponsesToNormalized(responsesResp *types.ResponsesResponse, modelID string) *core.NormalizedResponse {
+func ResponsesToNormalized(responsesResp *types.ResponsesResponse, modelID string) (*core.NormalizedResponse, error) {
+	if responsesResp.Status == "failed" || responsesResp.Status == "cancelled" {
+		failure := &core.ResponsesStatusError{Status: responsesResp.Status}
+		if responsesResp.Usage != nil {
+			failure.Usage = responsesUsageToAnthropic(responsesResp.Usage)
+		}
+		return nil, failure
+	}
 	nr := &core.NormalizedResponse{
 		ID:         responsesResp.ID,
 		Model:      modelID,
@@ -273,12 +220,12 @@ func ResponsesToNormalized(responsesResp *types.ResponsesResponse, modelID strin
 	if responsesResp.IncompleteDetails != nil && responsesResp.IncompleteDetails.Reason == "max_output_tokens" {
 		nr.StopReason = "max_tokens"
 	}
-	usage := responsesUsageToAnthropic(&responsesResp.Usage)
+	usage := responsesUsageToAnthropic(responsesResp.Usage)
 	nr.Usage = core.NormalizedUsage{
 		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, CacheReadTokens: usage.CacheReadInputTokens,
 	}
 
-	return nr
+	return nr, nil
 }
 
 // GeminiToNormalized converts a GeminiResponse to NormalizedResponse.

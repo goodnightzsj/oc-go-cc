@@ -104,8 +104,10 @@ func (p *OpenCodeZenProvider) executeOpenAI(ctx context.Context, req *types.Mess
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	normResp := transformer.OpenAIResponseToNormalized(&chatResp, model.ModelID)
-	anthropicResp := core.DenormalizeResponse(normResp)
+	anthropicResp, err := transformer.NewResponseTransformer().TransformResponse(&chatResp, model.ModelID)
+	if err != nil {
+		return nil, fmt.Errorf("response transform failed: %w", err)
+	}
 	resultBody, err := json.Marshal(anthropicResp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal response: %w", err)
@@ -241,7 +243,10 @@ func (p *OpenCodeZenProvider) executeResponses(ctx context.Context, req *types.M
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	normResp := transformer.ResponsesToNormalized(&responsesResp, model.ModelID)
+	normResp, err := transformer.ResponsesToNormalized(&responsesResp, model.ModelID)
+	if err != nil {
+		return nil, err
+	}
 	anthropicResp := core.DenormalizeResponse(normResp)
 	resultBody, err := json.Marshal(anthropicResp)
 	if err != nil {

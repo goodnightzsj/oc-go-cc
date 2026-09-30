@@ -28,7 +28,7 @@ func parseRequestTime(s string) time.Time {
 // costForProviderTokensAt returns a complete estimate only when every consumed
 // token category has a known rate. Catalog prices are provider-specific and do
 // not include cache rates; a missing rate must not be interpreted as free usage.
-func costForProviderTokensAt(provider, model string, in, out, cacheRead, cacheCreate int64, inputRate, outputRate sql.NullFloat64, t time.Time) (float64, bool) {
+func costForProviderTokensAt(provider, model string, in, out, cacheRead, cacheCreate int64, inputRate, outputRate sql.NullFloat64, t time.Time, tiers []PromptTier) (float64, bool) {
 	// Which rate source and cache-creation rule apply is platform metadata, not
 	// something to infer from the provider's name here. An unknown provider
 	// resolves to no descriptor, which leaves the table empty - the same
@@ -39,6 +39,12 @@ func costForProviderTokensAt(provider, model string, in, out, cacheRead, cacheCr
 			return costForTokens(provider, model, in, out, cacheRead, cacheCreate) *
 				history.ProviderPeakMultiplier(provider, model, t), true
 		}
+	}
+	// Insert and historical backfill select catalog bands from the same whole
+	// prompt. Published platform tables above retain their own rate precedence.
+	if band := tierRatesFor(tiers, in+cacheRead+cacheCreate); band != nil {
+		inputRate = sql.NullFloat64{Float64: band.Input, Valid: true}
+		outputRate = sql.NullFloat64{Float64: band.Output, Valid: true}
 	}
 	if !inputRate.Valid || !outputRate.Valid || cacheRead != 0 || (!descriptor.CacheCreationBilledAsInput && cacheCreate != 0) {
 		return 0, false

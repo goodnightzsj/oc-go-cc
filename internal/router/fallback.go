@@ -227,10 +227,12 @@ func (h *FallbackHandler) RecordAttempt(ctx context.Context, model config.ModelC
 
 // ExecuteWithFallback tries models in sequence until one succeeds.
 // Respects circuit breaker state to skip models that are failing repeatedly.
+// The executor receives the one-based chain position, including skipped models,
+// so per-attempt accounting agrees with FallbackResult.Attempted.
 func (h *FallbackHandler) ExecuteWithFallback(
 	ctx context.Context,
 	models []config.ModelConfig,
-	executor func(context.Context, config.ModelConfig) ([]byte, error),
+	executor func(context.Context, config.ModelConfig, int) ([]byte, error),
 ) (*FallbackResult, []byte, error) {
 	totalModels := len(models)
 	if totalModels == 0 {
@@ -276,7 +278,7 @@ func (h *FallbackHandler) ExecuteWithFallback(
 			"total", totalModels,
 		)
 
-		body, err := executor(ctx, model)
+		body, err := executor(ctx, model, i+1)
 		blockProvider := h.RecordAttempt(ctx, model, err)
 		if err == nil {
 			h.logger.Info("model succeeded",

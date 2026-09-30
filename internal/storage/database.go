@@ -369,6 +369,7 @@ func (d *Database) BackfillRequestCosts(ctx context.Context) (int64, error) {
 		       COALESCE(r.cache_creation_tokens, 0),
 		       m.cost_input_per_m,
 		       m.cost_output_per_m,
+		       m.cost_tiers,
 		       r.start_time
 		FROM requests r
 		LEFT JOIN models m ON m.name = r.model AND m.provider = COALESCE(NULLIF(r.provider, ''), 'opencode-go')
@@ -387,11 +388,12 @@ func (d *Database) BackfillRequestCosts(ctx context.Context) (int64, error) {
 		var id, model, provider, startTime string
 		var input, output, cacheRead, cacheCreation int64
 		var inputRate, outputRate sql.NullFloat64
-		if err := rows.Scan(&id, &model, &provider, &input, &output, &cacheRead, &cacheCreation, &inputRate, &outputRate, &startTime); err != nil {
+		var tiersJSON sql.NullString
+		if err := rows.Scan(&id, &model, &provider, &input, &output, &cacheRead, &cacheCreation, &inputRate, &outputRate, &tiersJSON, &startTime); err != nil {
 			_ = rows.Close()
 			return 0, err
 		}
-		cost, known := costForProviderTokensAt(provider, model, input, output, cacheRead, cacheCreation, inputRate, outputRate, parseRequestTime(startTime))
+		cost, known := costForProviderTokensAt(provider, model, input, output, cacheRead, cacheCreation, inputRate, outputRate, parseRequestTime(startTime), decodeTiers(tiersJSON))
 		if known {
 			pending = append(pending, requestCostRow{id: id, cost: cost})
 		}

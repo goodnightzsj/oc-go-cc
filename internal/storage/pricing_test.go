@@ -73,12 +73,12 @@ func TestParseRequestTime(t *testing.T) {
 	peakT := time.Date(2026, 8, 25, 7, 0, 0, 0, time.UTC)     // Tuesday 07:00Z, deepseek ×2
 	offPeakT := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC) // Tuesday 12:00Z, deepseek ×1
 	base, ok := costForProviderTokensAt("opencode-go", "deepseek-v4-flash", 1000, 500, 200000, 0,
-		sql.NullFloat64{}, sql.NullFloat64{}, offPeakT)
+		sql.NullFloat64{}, sql.NullFloat64{}, offPeakT, nil)
 	if !ok {
 		t.Fatal("deepseek-v4-flash on opencode-go must be priced")
 	}
 	peak, ok := costForProviderTokensAt("opencode-go", "deepseek-v4-flash", 1000, 500, 200000, 0,
-		sql.NullFloat64{}, sql.NullFloat64{}, peakT)
+		sql.NullFloat64{}, sql.NullFloat64{}, peakT, nil)
 	if !ok {
 		t.Fatal("deepseek-v4-flash on opencode-go must be priced in the peak window too")
 	}
@@ -99,7 +99,7 @@ func TestParseRequestTime(t *testing.T) {
 	ipm, opm, crpm, _, _ := PriceForProviderModel("opencode-go", "deepseek-v4-flash", in+cacheRead)
 	want := (float64(in)*ipm + float64(cacheRead)*crpm + float64(out)*opm) / 1e6 * 2
 	cacheOverlap, ok := costForProviderTokensAt("opencode-go", "deepseek-v4-flash", in, out, cacheRead, 0,
-		sql.NullFloat64{}, sql.NullFloat64{}, peakT)
+		sql.NullFloat64{}, sql.NullFloat64{}, peakT, nil)
 	if !ok {
 		t.Fatal("deepseek-v4-flash on opencode-go must be priced")
 	}
@@ -132,7 +132,7 @@ func TestOpenRouterFractionalPeakSurvivesTheCostPath(t *testing.T) {
 	// Monday 03:00Z and Sunday 09:00Z are both inside 0000-1600, which hy3 bills
 	// every day of the week; Monday 20:00Z is outside it.
 	cost := func(at time.Time) float64 {
-		got, ok := costForProviderTokensAt("openrouter", "tencent/hy3", tokens, tokens, 0, 0, in, out, at)
+		got, ok := costForProviderTokensAt("openrouter", "tencent/hy3", tokens, tokens, 0, 0, in, out, at, nil)
 		if !ok {
 			t.Fatalf("openrouter/tencent-hy3 must be priced at %v", at)
 		}

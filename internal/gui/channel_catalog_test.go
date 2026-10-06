@@ -28,7 +28,11 @@ func appendChannelCapture(t *testing.T, path, phase, id, body string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
 	if _, err := file.Write(append(data, '\n')); err != nil {
 		t.Fatal(err)
 	}

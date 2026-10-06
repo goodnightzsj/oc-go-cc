@@ -198,21 +198,29 @@ func (c *channelCatalog) refresh(ctx context.Context, directory string) (err err
 	return nil
 }
 
-func readChannelCache(path string) ([]byte, error) {
+func readChannelCache(path string) (_ []byte, err error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
 	return io.ReadAll(io.LimitReader(file, (1<<20)+1))
 }
 
-func scanChannelFile(ctx context.Context, path string, previous capturePosition, found channelData) (capturePosition, error) {
+func scanChannelFile(ctx context.Context, path string, previous capturePosition, found channelData) (_ capturePosition, err error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return previous, err
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
 	info, err := file.Stat()
 	if err != nil {
 		return previous, err

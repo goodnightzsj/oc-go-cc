@@ -83,6 +83,8 @@ Go per-model allowances come from the [Go docs](https://opencode.ai/docs/go). Pe
 
 Unknown costs are displayed as `—`, or a labeled known subtotal with the unknown-record count, instead of being presented as free usage. Analytics date buckets and the overview's today boundary use UTC; history date filters and individual timestamps use browser-local time. Settings are grouped by platform; sorting and fallback reordering support keyboard controls, with light/dark and mobile layouts.
 
+ClinePass's experimental channel target accepts manual input or recorded suggestions; an empty target uses `deepseek`, while pinning remains off by default. Suggestions use the embedded metadata-only JSON when `debug_capture` is off. With capture enabled, the GUI reads existing captures hourly and only rewrites changed channel sets; it does not add traffic capture or change capture settings. See [channel candidates and privacy](docs/cline-pass.md#渠道候选-json-与已有捕获). Settings errors retain drafts and distinguish rejected saves, unconfirmed network outcomes, and successful saves whose page refresh failed.
+
 ```bash
 routatic-proxy start
 # Or start in the background:

@@ -298,7 +298,7 @@ GET /api/v1/users/me/plan   →  data.plan.entitlements.cline_pass.inferenceCapT
 
 ### 实验性开关（2026-10-06）
 
-设置 → ClinePass →「钉死上游渠道（实验性）」；默认关闭，目标渠道填写网关 slug，例如 `deepseek`。开关与目标分别保存，关闭后保留目标，但不发送任何渠道限制。设置保存后下一次请求生效，无需重启；启用但目标为空会拒绝保存。
+设置 → ClinePass →「钉死上游渠道（实验性）」；默认关闭，目标渠道填写网关 slug，也可从候选中填入。未填写或仅空格时实际使用 `deepseek`，不因此自动打开开关。开关与目标分别保存，关闭后保留目标，但不发送任何渠道限制。设置保存后下一次请求生效，无需重启；非空且不合法的渠道仍拒绝保存。
 
 ```json
 {
@@ -322,6 +322,21 @@ GET /api/v1/users/me/plan   →  data.plan.entitlements.cline_pass.inferenceCapT
 不匹配/未知会记录警告，不伪造渠道，也不在已开始的流中抛弃输出或重试扣费。非流式请求同样先读取上游 SSE 再聚合，因此也覆盖观测。关闭时保持原发送与读取行为。标准 Messages/Responses 输出仍不新增渠道字段；CompactGate 看到转换后的响应时，应以代理日志而非客户端响应判断。
 
 真正验证限制还需要负对照：不存在的渠道若仍产生正常 completion，即证明这次限制被忽略；这可能消耗配额，本功能不自动发探测请求。
+
+### 渠道候选 JSON 与已有捕获
+
+- 内置模板位于 `internal/gui/assets/cline-pass-channels.json`，随 Git 和二进制发布，只包含模型及渠道集合。2026-10-06 的模板来自已有上游原始 capture：响应模型 `deepseek/deepseek-v4.1-flash`、实际渠道 `deepseek`、17 个上游列出的备用渠道。同期检查的 CompactGate 最近20条转换后响应没有渠道字段，未作为模板数据来源。
+- 未开启 `logging.debug_capture.enabled` 时始终返回内置模板，不读取捕获目录或以前生成的增量。`debug_capture` 的默认值仍为关闭，本次没有改动其实现或远端开关。
+- GUI 服务运行且 capture 开启时，启动及每小时增量读取 `capture-*.jsonl`，只提取 ClinePass 上游响应的 `model`、`canonicalSlug`、`finalProvider`、`fallbacksAvailable`。模型来自响应自身，不用可复用的请求 ID 配对；SSE 要有完整结束标志，缺模型或模型归属不明确的数据不进入候选。纯 headless 模式不运行 GUI 候选更新循环。
+- 规范化、排序、去重后的历史集合写入 capture 目录的 `channel-catalog.json`，不改 Git 中的模板；集合相同不重写文件。目录切换隔离旧缓存，失败保留有效候选并在页面显示更新失败；关闭 capture 后接口只返回内置模板，页面在下次读取候选时更新。
+- `actual` 表示曾实际返回，`available` 仅表示上游列出；都不保证该渠道对所有模型可用，更不证明钉死限制已被遵守。刷新候选不会修改用户填写的目标。
+- 新 JSON 与 `GET /api/cline-pass/channels` 不保存正文、headers、凭证或请求 ID。**现有 debug_capture 仍会保存请求和响应原文**；本次只复用它，不新增请求钩子、采集器或渠道流量日志，也不改变其隐私与轮转行为。
+
+### 设置保存反馈
+
+主配置、导入和 GUI 开关的错误响应使用固定中文 `error.message`，并提供 `error.code`、可定位的 `error.field` 和 `error.saved`；不回传原始异常或提交值。`saved:false` 表示此次接口没有确认保存，网络中断或非结构化网关错误则应视为结果未知，不自动重试。
+
+页面保留失败时的输入，持续显示错误并定位可编辑字段；保存期间继续输入的内容不会被随后刷新覆盖。保存已确认但刷新失败会明确提示“已保存”，不误报保存失败。监听地址或端口仍需重启服务，其余原有热更新语义不变。
 
 ### 部署后实测（2026-10-06）
 

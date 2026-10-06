@@ -5,6 +5,28 @@ import (
 	"testing"
 )
 
+func TestClinePassChannelDefaultOnLoad(t *testing.T) {
+	for _, target := range []string{"", "   ", "deepseek", "fireworks"} {
+		for _, enabled := range []bool{false, true} {
+			data, err := json.Marshal(Config{APIKey: "synthetic", ClinePass: ClinePassConfig{ChannelPin: target, ChannelPinEnabled: enabled}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := LoadJSON(data)
+			if err != nil {
+				t.Fatalf("target=%q enabled=%v: %v", target, enabled, err)
+			}
+			want := target
+			if target == "" || target == "   " {
+				want = "deepseek"
+			}
+			if cfg.ClinePass.ChannelPin != want || cfg.ClinePass.ChannelPinEnabled != enabled {
+				t.Fatalf("default changed target or switch: %+v", cfg.ClinePass)
+			}
+		}
+	}
+}
+
 func TestClinePassChannelPinValidation(t *testing.T) {
 	for _, tc := range []struct {
 		name, pin      string

@@ -1,0 +1,11 @@
+{
+  "deepseek/deepseek-v4.1-flash": {
+    "actual": ["deepseek"],
+    "available": [
+      "alibaba", "baseten", "boundless", "deepinfra", "fireworks",
+      "gmicloud", "inference-net", "modal", "morph", "novita",
+      "parasail", "particle", "relace", "runinfra", "runware",
+      "togetherai", "wafer"
+    ]
+  }
+}

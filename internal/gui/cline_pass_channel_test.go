@@ -36,13 +36,20 @@ func TestClinePassChannelPinConfigSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := httptest.NewRecorder()
-	srv.handleProxyConfig(rec, httptest.NewRequest(http.MethodPost, "/api/proxy/config", strings.NewReader(`{"cline_pass":{"channel_pin_enabled":true,"channel_pin":""}}`)))
+	srv.handleProxyConfig(rec, httptest.NewRequest(http.MethodPost, "/api/proxy/config", strings.NewReader(`{"cline_pass":{"channel_pin_enabled":true,"channel_pin":"deepseek/alibaba"}}`)))
 	after, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rec.Code != http.StatusBadRequest || !bytes.Equal(before, after) || srv.atomicCfg.Get().ClinePass.ChannelPinEnabled {
 		t.Fatal("invalid save changed disk or runtime")
+	}
+	for _, target := range []string{"", "   "} {
+		rec = httptest.NewRecorder()
+		srv.handleProxyConfig(rec, httptest.NewRequest(http.MethodPost, "/api/proxy/config", strings.NewReader(`{"cline_pass":{"channel_pin_enabled":true,"channel_pin":"`+target+`"}}`)))
+		if rec.Code != http.StatusNoContent || srv.atomicCfg.Get().ClinePass.ChannelPin != "deepseek" {
+			t.Fatalf("empty target did not use default: %d", rec.Code)
+		}
 	}
 }
 

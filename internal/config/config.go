@@ -3,7 +3,6 @@ package config
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/routatic/proxy/internal/site"
@@ -165,11 +164,11 @@ type AWSBillingConfig struct {
 func (c AWSBillingConfig) Validate() error {
 	if c.Enabled || c.LinkedAccountID != "" {
 		if len(c.LinkedAccountID) != 12 || strings.IndexFunc(c.LinkedAccountID, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
-			return fmt.Errorf("aws_bedrock.billing.linked_account_id must be a 12-digit account ID; billing queries must have an explicit account scope")
+			return invalid("aws_bedrock.billing.linked_account_id", "account_id", "aws_bedrock.billing.linked_account_id must be a 12-digit account ID; billing queries must have an explicit account scope")
 		}
 	}
 	if envVarPattern.MatchString(c.Profile) {
-		return fmt.Errorf("aws_bedrock.billing.profile contains an unresolved environment variable")
+		return invalid("aws_bedrock.billing.profile", "unresolved_env", "aws_bedrock.billing.profile contains an unresolved environment variable")
 	}
 	return nil
 }

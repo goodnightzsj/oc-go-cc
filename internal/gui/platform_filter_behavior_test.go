@@ -87,13 +87,15 @@ const nodes = new Map();
 function node(id) {
   if (!nodes.has(id)) nodes.set(id, {
     _value: '', get value(){return this._value}, set value(value){this._value = String(value)},
-    id, innerHTML: '', textContent: '', hidden: true, dataset: {}, style: {}, listeners: {}, children: [], options: [],
+    id, innerHTML: '', textContent: '', hidden: true, dataset: {}, style: {}, listeners: {}, children: [], options: [], attributes: {},
     classList: classListOf(),
     addEventListener(type, handler){(this.listeners[type] ||= []).push(handler)},
     emit(type){return Promise.all((this.listeners[type] || []).map(handler => handler({target:this})))},
     dispatchEvent(event){return Promise.resolve(this.emit(event.type))},
-    setAttribute(){}, getAttribute(){return null}, addEventListener(type,handler){(this.listeners[type] ||= []).push(handler)},
-    querySelectorAll(){return []}, querySelector(){return null}, focus(){},
+    setAttribute(k,v){this.attributes[k] = String(v)}, getAttribute(k){return this.attributes[k] || null}, removeAttribute(k){delete this.attributes[k]},
+    querySelectorAll(){return []}, querySelector(){return null}, closest(){return null}, focus(){context.document.activeElement = this},
+    insertAdjacentElement(_position, el){this.after = el},
+    replaceChildren(...kids){this.children = kids; this.options = kids},
     appendChild(child){this.children.push(child)},
     // CustomSelect wraps the select it enhances, so the node needs somewhere
     // to be inserted.
@@ -118,7 +120,7 @@ const context = vm.createContext({
         setAttribute(k,v){this.attributes[k] = String(v)}, getAttribute(k){return this.attributes[k]},
         append(...kids){this.children.push(...kids)}, appendChild(kid){this.children.push(kid); return kid},
         insertBefore(n){this.children.push(n); return n}, replaceChildren(...kids){this.children = kids},
-        addEventListener(){}, removeEventListener(){}, focus(){},
+        addEventListener(){}, removeEventListener(){}, focus(){context.document.activeElement = this}, remove(){this.removed = true},
         querySelectorAll(){return []}, querySelector(){return null},
         classList: classListOf(),
       };

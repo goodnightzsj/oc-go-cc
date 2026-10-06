@@ -5,7 +5,7 @@
 先读 `overview/project-overview.md` 建立全局认知，再按需深入：
 
 - 用量与缓存 token 链路：`architecture/usage-pipeline.md`
-- provider 选择与平台边界：`architecture/provider-layer.md`
+- provider 选择、ClinePass渠道候选与设置保存反馈：`architecture/provider-layer.md`
 - 请求与关闭生命周期：`architecture/request-lifecycle.md`
 - 模型与成本路由：`architecture/model-routing.md`
 - 入站协议与 Responses 边界：`reference/inbound-protocols.md`
@@ -37,3 +37,4 @@ cd /root/oc-go-cc && git pull --ff-only origin main && bash scripts/prod-deploy.
 - 缓存拆分两格式兼容（OpenAI `cached_tokens` + DeepSeek hit/miss），见 `must/accounting-baseline.md`
 - seed 价格与测试断言同步更新
 - capture 内容敏感，仅调试开启
+- 渠道候选只复用已有capture；关闭capture时只用内置JSON。候选或保存成功不证明上游强制路由，详见 `architecture/provider-layer.md`。

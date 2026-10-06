@@ -310,6 +310,11 @@ const TRANSLATIONS = {
     'history.peakWindow': 'Billed at this platform\'s peak rate for the hour of the request; the badge shows the multiplier',
     'filter.dateRange': 'Date range',
     'filter.today': 'Today',
+    'filter.throughToday': 'Always end today',
+    'filter.localDates': "Dates use your browser's local time zone.",
+    'filter.analyticsLimit': 'UTC dates · up to 92 days, including today.',
+    'filter.invalidDates': 'Enter valid dates (YYYY-MM-DD), with the start on or before the end.',
+    'filter.rangeTooLong': 'The range exceeds 92 days. Choose a later start date.',
     'filter.clear': 'Clear',
     'filter.apply': 'Apply',
     'action.cancel': 'Cancel',
@@ -843,6 +848,11 @@ const TRANSLATIONS = {
     'history.peakWindow': '按请求时刻所在平台的峰时费率计费，倍率见徽标',
     'filter.dateRange': '日期范围',
     'filter.today': '今天',
+    'filter.throughToday': '结束日期始终为今天',
+    'filter.localDates': '日期按浏览器本地时区计算。',
+    'filter.analyticsLimit': '按 UTC 日期计算，含今天最多 92 天。',
+    'filter.invalidDates': '请输入有效日期（YYYY-MM-DD），开始日期不能晚于结束日期。',
+    'filter.rangeTooLong': '范围超过 92 天，请选择更晚的开始日期。',
     'filter.clear': '清除',
     'filter.apply': '应用',
     'action.cancel': '取消',
@@ -1383,6 +1393,8 @@ window.HistoryDateRange = {
     this.trigger.addEventListener('click', () => this.toggle());
     document.getElementById('history-date-apply')?.addEventListener('click', () => this.apply());
     document.getElementById('history-date-clear')?.addEventListener('click', () => this.clear(true));
+    document.getElementById('history-date-cancel')?.addEventListener('click', () => this.close());
+    document.getElementById('history-through-today')?.addEventListener('change', () => syncDateRangeEnd('history'));
     this.root.querySelectorAll('[data-days]').forEach(button => {
       button.addEventListener('click', () => this.preset(Number(button.dataset.days)));
     });
@@ -1399,16 +1411,12 @@ window.HistoryDateRange = {
     this.syncFromHidden();
   },
 
-  valid(value) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-    return dateInputValue(new Date(`${value}T00:00:00`)) === value;
-  },
-
   toggle() {
     if (this.popover.hidden) this.open(); else this.close();
   },
 
   open() {
+    this.syncFromHidden();
     this.popover.hidden = false;
     this.trigger.setAttribute('aria-expanded', 'true');
     this.startDisplay.focus();
@@ -1422,12 +1430,20 @@ window.HistoryDateRange = {
 
   apply() {
     const start = this.startDisplay.value.trim();
-    const end = this.endDisplay.value.trim();
-    this.startDisplay.classList.toggle('invalid', !!start && !this.valid(start));
-    this.endDisplay.classList.toggle('invalid', !!end && !this.valid(end));
-    if ((start && !this.valid(start)) || (end && !this.valid(end)) || (start && end && start > end)) return;
+    const live = document.getElementById('history-through-today').checked;
+    const end = resolvedEndDate(live ? 'today' : this.endDisplay.value.trim());
+    const invalidStart = (live || !!start) && !validDateInput(start);
+    const invalidEnd = (!!end && !validDateInput(end)) || (!!start && !!end && start > end);
+    this.startDisplay.classList.toggle('invalid', invalidStart);
+    this.endDisplay.classList.toggle('invalid', invalidEnd);
+    this.startDisplay.setAttribute('aria-invalid', String(invalidStart));
+    this.endDisplay.setAttribute('aria-invalid', String(invalidEnd));
+    const error = document.getElementById('history-date-error');
+    error.hidden = !invalidStart && !invalidEnd;
+    error.textContent = error.hidden ? '' : t('filter.invalidDates');
+    if (!error.hidden) return;
     this.start.value = start;
-    this.end.value = end;
+    this.end.value = live ? 'today' : end;
     this.start.dispatchEvent(new Event('change', { bubbles: true }));
     this.end.dispatchEvent(new Event('change', { bubbles: true }));
     this.syncLabel();
@@ -1437,14 +1453,14 @@ window.HistoryDateRange = {
   clear(notify) {
     this.start.value = '';
     this.end.value = '';
-    this.startDisplay.value = '';
-    this.endDisplay.value = '';
-    this.syncLabel();
+    this.syncFromHidden();
     this.close();
     if (notify) this.start.dispatchEvent(new Event('change', { bubbles: true }));
   },
 
   preset(days) {
+    document.getElementById('history-through-today').checked = false;
+    syncDateRangeEnd('history');
     const end = new Date();
     const start = new Date(end);
     start.setDate(start.getDate() - Math.max(0, days - 1));
@@ -1456,15 +1472,24 @@ window.HistoryDateRange = {
   syncFromHidden() {
     if (!this.root) return;
     this.startDisplay.value = this.start.value;
-    this.endDisplay.value = this.end.value;
+    this.endDisplay.value = resolvedEndDate(this.end.value);
+    document.getElementById('history-through-today').checked = this.end.value === 'today';
+    syncDateRangeEnd('history');
+    document.getElementById('history-date-error').hidden = true;
+    for (const input of [this.startDisplay, this.endDisplay]) {
+      input.classList.remove('invalid');
+      input.setAttribute('aria-invalid', 'false');
+    }
     this.syncLabel();
   },
 
   syncLabel() {
     const label = document.getElementById('history-date-label');
     if (!label) return;
-    label.textContent = this.start?.value || this.end?.value
-      ? `${this.start.value || '…'} – ${this.end.value || '…'}`
+    if (this.root) syncDateRangeEnd('history');
+    const end = resolvedEndDate(this.end?.value);
+    label.textContent = this.start?.value || end
+      ? `${this.start.value || '…'} – ${this.end.value === 'today' ? `${t('filter.today')} (${end})` : end || '…'}`
       : t('filter.dateRange');
   },
 };
@@ -1795,6 +1820,12 @@ function buildViewHash() {
       }
     }
   }
+  // A dynamic end must not turn a chosen start into a moving boot default.
+  for (const [from, to] of [['from', 'to'], ['afrom', 'ato']]) {
+    if (params.get(to) === 'today') {
+      params.set(from, document.getElementById(VIEW_CONTROLS[from][0]).value);
+    }
+  }
   if (activeTab === 'history') {
     if (historyPage > 1) params.set('page', String(historyPage));
     if (currentSort.field !== 'start_time') params.set('sort', currentSort.field);
@@ -1923,6 +1954,9 @@ async function refreshCurrentTab() {
   switch (activeTab) {
     case 'history':
       await refreshHistory();
+      break;
+    case 'analytics':
+      if (document.getElementById('analytics-end')?.value === 'today') await AnalyticsModule.load();
       break;
     case 'quota':
       await QuotaModule.load();
@@ -2162,6 +2196,23 @@ function utcDateInputValue(date) {
   return date.toISOString().slice(0, 10);
 }
 
+// "today" is URL/UI intent only; APIs still receive concrete date boundaries.
+function resolvedEndDate(value, utc = false) {
+  return value === 'today' ? (utc ? utcDateInputValue(new Date()) : dateInputValue(new Date())) : value;
+}
+
+function validDateInput(value, utc = false) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00${utc ? 'Z' : ''}`);
+  return !Number.isNaN(date.getTime()) && (utc ? utcDateInputValue(date) : dateInputValue(date)) === value;
+}
+
+function syncDateRangeEnd(prefix, utc = false) {
+  const end = document.getElementById(`${prefix}-end-display`);
+  end.disabled = document.getElementById(`${prefix}-through-today`).checked;
+  if (end.disabled) end.value = resolvedEndDate('today', utc);
+}
+
 function historyDateBoundary(value, endOfDay) {
   if (!value) return '';
   const date = new Date(`${value}T00:00:00`);
@@ -2185,7 +2236,7 @@ function historyQueryParams(page = historyPage, size = historySize) {
     if (value) params.set(key, value);
   });
   const start = historyDateBoundary(document.getElementById('history-start')?.value, false);
-  const end = historyDateBoundary(document.getElementById('history-end')?.value, true);
+  const end = historyDateBoundary(resolvedEndDate(document.getElementById('history-end')?.value), true);
   if (start) params.set('start', start);
   if (end) params.set('end', end);
   params.set('sort', currentSort.field);
@@ -2224,6 +2275,7 @@ function syncAdvancedFilters(reveal = true) {
 }
 
 async function refreshHistory() {
+  window.HistoryDateRange?.syncLabel();
   syncAdvancedFilters(false);
   const seq = ++historyLoadSeq;
   const errorEl = document.getElementById('history-error');
@@ -4813,6 +4865,7 @@ document.addEventListener('DOMContentLoaded', () => TestModule.init());
 /* ── Analytics Tab (minimal, vanilla JS + SVG/CSS) ─────────────── */
 const AnalyticsModule = {
   loadSeq: 0,
+  loading: false,
   ready: false,
   query: '',
   breakdownMetric: 'tokens',
@@ -4885,6 +4938,14 @@ const AnalyticsModule = {
     document.getElementById('analytics-date-trigger')?.addEventListener('click', () => this.toggleDateRange());
     document.getElementById('analytics-date-cancel')?.addEventListener('click', () => this.closeDateRange());
     document.getElementById('analytics-date-apply')?.addEventListener('click', () => this.applyDateRange());
+    document.getElementById('analytics-through-today')?.addEventListener('change', () => syncDateRangeEnd('analytics', true));
+    document.getElementById('analytics-date-popover')?.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        this.closeDateRange();
+        document.getElementById('analytics-date-trigger')?.focus();
+      }
+    });
     document.querySelectorAll('#analytics-date-popover [data-days]').forEach(button => {
       button.addEventListener('click', () => this.presetDateRange(Number(button.dataset.days || 7)));
     });
@@ -4912,18 +4973,31 @@ const AnalyticsModule = {
     document.getElementById('analytics-date-trigger')?.setAttribute('aria-expanded', 'false');
   },
 
-  syncDateRange() {
+  syncDateRange(syncDraft = true) {
     const start = document.getElementById('analytics-start')?.value || '';
-    const end = document.getElementById('analytics-end')?.value || '';
-    const startDisplay = document.getElementById('analytics-start-display');
-    const endDisplay = document.getElementById('analytics-end-display');
-    if (startDisplay) startDisplay.value = start;
-    if (endDisplay) endDisplay.value = end;
+    const endValue = document.getElementById('analytics-end')?.value || '';
+    const end = resolvedEndDate(endValue, true);
+    if (syncDraft) {
+      const startDisplay = document.getElementById('analytics-start-display');
+      const endDisplay = document.getElementById('analytics-end-display');
+      if (startDisplay) startDisplay.value = start;
+      if (endDisplay) endDisplay.value = end;
+      document.getElementById('analytics-through-today').checked = endValue === 'today';
+      document.getElementById('analytics-date-error').hidden = true;
+      for (const input of [startDisplay, endDisplay]) {
+        input.classList.remove('invalid');
+        input.setAttribute('aria-invalid', 'false');
+      }
+    }
+    syncDateRangeEnd('analytics', true);
     const label = document.getElementById('analytics-date-label');
-    if (label) label.textContent = start && end ? `${start} → ${end} (UTC)` : t('filter.dateRange');
+    if (label) label.textContent = start && end
+      ? `${start} → ${endValue === 'today' ? `${t('filter.today')} (${end})` : end} (UTC)` : t('filter.dateRange');
   },
 
   presetDateRange(days) {
+    document.getElementById('analytics-through-today').checked = false;
+    syncDateRangeEnd('analytics', true);
     const end = new Date();
     const start = new Date(end);
     start.setUTCDate(start.getUTCDate() - Math.max(0, days - 1));
@@ -4934,33 +5008,37 @@ const AnalyticsModule = {
   applyDateRange() {
     const start = document.getElementById('analytics-start-display');
     const end = document.getElementById('analytics-end-display');
-    const valid = value => {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-      const date = new Date(`${value}T00:00:00Z`);
-      return !Number.isNaN(date.getTime()) && utcDateInputValue(date) === value;
-    };
-    start.classList.toggle('invalid', !valid(start.value));
-    end.classList.toggle('invalid', !valid(end.value));
-    if (!valid(start.value) || !valid(end.value) || start.value > end.value) return;
-    const span = (new Date(`${end.value}T00:00:00Z`) - new Date(`${start.value}T00:00:00Z`)) / 86400000 + 1;
-    if (span > 92) {
+    const live = document.getElementById('analytics-through-today').checked;
+    const endValue = resolvedEndDate(live ? 'today' : end.value.trim(), true);
+    const error = document.getElementById('analytics-date-error');
+    try {
+      this.queryParams(start.value.trim(), endValue);
+    } catch (e) {
+      start.classList.toggle('invalid', !validDateInput(start.value.trim(), true));
       end.classList.add('invalid');
+      start.setAttribute('aria-invalid', String(!validDateInput(start.value.trim(), true)));
+      end.setAttribute('aria-invalid', 'true');
+      error.textContent = e.message;
+      error.hidden = false;
       return;
     }
-    document.getElementById('analytics-start').value = start.value;
-    document.getElementById('analytics-end').value = end.value;
+    document.getElementById('analytics-start').value = start.value.trim();
+    document.getElementById('analytics-end').value = live ? 'today' : endValue;
     this.syncDateRange();
     this.closeDateRange();
     syncViewState();
     this.load(true);
   },
 
-  queryParams() {
-    const start = document.getElementById('analytics-start')?.value;
-    const end = document.getElementById('analytics-end')?.value;
+  queryParams(start = document.getElementById('analytics-start')?.value,
+    end = resolvedEndDate(document.getElementById('analytics-end')?.value, true)) {
+    if (!validDateInput(start, true) || !validDateInput(end, true) || start > end) {
+      throw new Error(t('filter.invalidDates'));
+    }
     const from = new Date(`${start}T00:00:00Z`);
     const to = new Date(`${end}T00:00:00Z`);
     to.setUTCDate(to.getUTCDate() + 1);
+    if (to - from > 92 * 86400000) throw new Error(t('filter.rangeTooLong'));
     const params = new URLSearchParams({
       from: from.toISOString(),
       to: to.toISOString(),
@@ -4972,17 +5050,21 @@ const AnalyticsModule = {
   },
 
   async load(force) {
+    if (!force && this.loading) return;
     const seq = ++this.loadSeq;
-    const params = this.queryParams();
+    this.loading = true;
     const genEl = document.getElementById('analytics-generated');
-    if (!this.ready || this.query !== params.toString()) {
-      this.query = params.toString();
-      this.clearView(true);
-    }
     const errorEl = document.getElementById('analytics-error');
     if (errorEl) errorEl.hidden = true;
 
     try {
+      // Polling updates the applied range, never an open popover's draft.
+      this.syncDateRange(false);
+      const params = this.queryParams();
+      if (!this.ready || this.query !== params.toString()) {
+        this.query = params.toString();
+        this.clearView(true);
+      }
       const [summary, trend, prices] = await Promise.all([
         fetchJSON(`/api/analytics/summary?${params}`),
         fetchJSON(`/api/analytics/tokens/trend?${params}`),
@@ -4995,7 +5077,7 @@ const AnalyticsModule = {
         throw new Error(t('data.invalid'));
       }
       this.currentView = summary;
-      this.currentTrend = this.fillTrend(trend.trend || []);
+      this.currentTrend = this.fillTrend(trend.trend || [], params);
       document.getElementById('analytics-empty').hidden = summary.summary.total_requests !== 0;
       document.getElementById('analytics-insights').hidden = summary.summary.total_requests === 0;
       this.renderKPIs(summary);
@@ -5004,7 +5086,7 @@ const AnalyticsModule = {
       this.renderTokenLines(this.currentTrend, 'analytics-token-trend');
       this.renderPeriodTable(this.currentTrend);
       this.renderModelTable(summary.models || []);
-      this.renderRetainedRange(summary.summary || {});
+      this.renderRetainedRange(summary.summary || {}, params);
       this.renderPriceTables(prices);
       this.ready = true;
       if (genEl) {
@@ -5019,6 +5101,8 @@ const AnalyticsModule = {
         errorEl.textContent = t('data.loadFail') + e.message;
         errorEl.hidden = false;
       }
+    } finally {
+      if (seq === this.loadSeq) this.loading = false;
     }
   },
 
@@ -5259,17 +5343,15 @@ const AnalyticsModule = {
     }).join('');
   },
 
-  fillTrend(points) {
+  fillTrend(points, params = this.queryParams()) {
     const byKey = new Map((points || []).map(point => [point.date, point]));
-    const startValue = document.getElementById('analytics-start')?.value;
-    const endValue = document.getElementById('analytics-end')?.value;
-    if (!startValue || !endValue) return points || [];
+    const startValue = params.get('from');
+    const endValue = params.get('to');
     const rows = [];
     const blank = date => ({date, requests:0, known_requests:0, error_requests:0, input_tokens:0, output_tokens:0, cache_read_tokens:0, cache_creation_tokens:0, cost_usd:0});
     if (this.granularity === 'hour') {
-      const cursor = new Date(`${startValue}T00:00:00Z`);
-      const end = new Date(`${endValue}T00:00:00Z`);
-      end.setUTCDate(end.getUTCDate() + 1);
+      const cursor = new Date(startValue);
+      const end = new Date(endValue);
       while (cursor < end) {
         const key = cursor.toISOString().slice(0, 13) + ':00:00Z';
         rows.push(byKey.get(key) || blank(key));
@@ -5277,9 +5359,9 @@ const AnalyticsModule = {
       }
       return rows;
     }
-    const cursor = new Date(`${startValue}T00:00:00Z`);
-    const end = new Date(`${endValue}T00:00:00Z`);
-    while (cursor <= end) {
+    const cursor = new Date(startValue);
+    const end = new Date(endValue);
+    while (cursor < end) {
       const key = utcDateInputValue(cursor);
       rows.push(byKey.get(key) || blank(key));
       cursor.setUTCDate(cursor.getUTCDate() + 1);
@@ -5558,11 +5640,11 @@ const AnalyticsModule = {
     });
   },
 
-  renderRetainedRange(summary) {
+  renderRetainedRange(summary, params = this.queryParams()) {
     const root=document.getElementById('analytics-retained-range');
     if (!root) return;
-    const from=document.getElementById('analytics-start')?.value||'';
-    const to=document.getElementById('analytics-end')?.value||'';
+    const from=params.get('from').slice(0,10);
+    const to=utcDateInputValue(new Date(new Date(params.get('to')).getTime()-86400000));
     root.textContent=t('analytics.retainedRange').replace('{from}',from).replace('{to}',to);
   },
 

@@ -84,13 +84,13 @@ func (s *Server) handleConfigExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.atomicCfg == nil {
-		http.Error(w, "config not available", http.StatusServiceUnavailable)
+		writeSettingsError(w, http.StatusServiceUnavailable, "config_unavailable", "", false)
 		return
 	}
 
 	cfg, err := anonymizeConfig(s.atomicCfg.Get())
 	if err != nil {
-		http.Error(w, "failed to export config", http.StatusInternalServerError)
+		writeSettingsError(w, http.StatusInternalServerError, "export_failed", "", false)
 		return
 	}
 
@@ -110,7 +110,7 @@ func (s *Server) handleConfigImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.atomicCfg == nil {
-		http.Error(w, "config not available", http.StatusServiceUnavailable)
+		writeSettingsError(w, http.StatusServiceUnavailable, "config_unavailable", "", false)
 		return
 	}
 
@@ -120,13 +120,13 @@ func (s *Server) handleConfigImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("invalid request: %v", err), http.StatusBadRequest)
+		writeSettingsError(w, http.StatusBadRequest, "invalid_json", "", false)
 		return
 	}
 
 	var patch map[string]json.RawMessage
 	if err := json.Unmarshal(req.Config, &patch); err != nil {
-		http.Error(w, fmt.Sprintf("invalid config: %v", err), http.StatusBadRequest)
+		writeSettingsError(w, http.StatusBadRequest, "object_required", "", false)
 		return
 	}
 	cfg, err := s.updateProxyConfig(patch, req.Apply)
@@ -136,7 +136,7 @@ func (s *Server) handleConfigImport(w http.ResponseWriter, r *http.Request) {
 	}
 	redacted, err := anonymizeConfig(cfg)
 	if err != nil {
-		http.Error(w, "failed to redact config", http.StatusInternalServerError)
+		writeSettingsError(w, http.StatusInternalServerError, "redaction_failed", "", req.Apply)
 		return
 	}
 
@@ -157,7 +157,7 @@ func (s *Server) handleConfigImport(w http.ResponseWriter, r *http.Request) {
 // settings saves and imports from losing each other's changes.
 func (s *Server) updateProxyConfig(patch map[string]json.RawMessage, apply bool) (*config.Config, error) {
 	if patch == nil {
-		return nil, errors.New("config must be a JSON object")
+		return nil, &config.ValidationError{Code: "object_required", Err: errors.New("config must be a JSON object")}
 	}
 	if err := stripMaskedKeys(patch); err != nil {
 		return nil, err
@@ -176,10 +176,10 @@ func (s *Server) updateProxyConfig(patch map[string]json.RawMessage, apply bool)
 	}
 	var merged map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &merged); err != nil {
-		return nil, fmt.Errorf("failed to parse current config: %w", err)
+		return nil, &config.ValidationError{Code: "stored_config_invalid", Err: fmt.Errorf("failed to parse current config: %w", err)}
 	}
 	if merged == nil {
-		return nil, errors.New("current config must be a JSON object")
+		return nil, &config.ValidationError{Code: "stored_config_invalid", Err: errors.New("current config must be a JSON object")}
 	}
 	for field, value := range patch {
 		// Settings sends partial provider/connection objects. Routing maps and
@@ -265,14 +265,4 @@ func writeConfigFile(path string, data []byte) error {
 		return fmt.Errorf("failed to replace config file: %w", err)
 	}
 	return nil
-}
-
-func writeConfigError(w http.ResponseWriter, err error) {
-	status := http.StatusBadRequest
-	var pathErr *os.PathError
-	var linkErr *os.LinkError
-	if errors.As(err, &pathErr) || errors.As(err, &linkErr) {
-		status = http.StatusInternalServerError
-	}
-	http.Error(w, err.Error(), status)
 }

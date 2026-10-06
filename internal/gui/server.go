@@ -56,12 +56,14 @@ type Server struct {
 	guiPort           atomic.Int32
 	startProxy        func() error
 	stopProxy         func() error
+	setAutostart      func(bool, int) error
 	catalogDir        string
 	catalogSourceURL  string
 	srv               *http.Server
 	logger            *slog.Logger
 	limitsCancel      context.CancelFunc
 	limitsDone        chan struct{}
+	channels          channelCatalog
 
 	// One cached quota response per platform; each response carries its TTL.
 	quotaMu    sync.Mutex
@@ -204,6 +206,7 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 	mux.HandleFunc("/api/history/summary", s.handleHistorySummary)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/proxy/config", s.handleProxyConfig)
+	mux.HandleFunc("/api/cline-pass/channels", s.handleChannelCatalog)
 	mux.HandleFunc("/api/proxy/start", s.handleProxyStart)
 	mux.HandleFunc("/api/proxy/stop", s.handleProxyStop)
 	mux.HandleFunc("/api/catalog/lock", s.handleCatalogLock)
@@ -251,7 +254,14 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 	s.limitsDone = make(chan struct{})
 	go func() {
 		defer close(s.limitsDone)
+		var workers sync.WaitGroup
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			s.channelLoop(limitsCtx)
+		}()
 		s.limitsLoop(limitsCtx)
+		workers.Wait()
 	}()
 	go func() {
 		if srvErr := s.srv.Serve(ln); srvErr != nil && srvErr != http.ErrServerClosed {
@@ -657,22 +667,30 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			Notify    *bool `json:"notify"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "bad request", http.StatusBadRequest)
+			writeSettingsError(w, http.StatusBadRequest, "invalid_json", "", false)
 			return
 		}
 		s.cfgMu.Lock()
+		defer s.cfgMu.Unlock()
 		if req.Autostart != nil {
-			s.cfg.Autostart = *req.Autostart
-			if *req.Autostart {
-				_ = daemon.EnableAutostart("", s.getProxyPort())
-			} else {
-				_ = daemon.DisableAutostart()
+			set := s.setAutostart
+			if set == nil {
+				set = func(enabled bool, port int) error {
+					if enabled {
+						return daemon.EnableAutostart("", port)
+					}
+					return daemon.DisableAutostart()
+				}
 			}
+			if err := set(*req.Autostart, s.getProxyPort()); err != nil {
+				writeSettingsError(w, http.StatusInternalServerError, "autostart_failed", "autostart", false)
+				return
+			}
+			s.cfg.Autostart = *req.Autostart
 		}
 		if req.Notify != nil {
 			s.cfg.Notify = *req.Notify
 		}
-		s.cfgMu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
@@ -711,7 +729,7 @@ func stripMaskedKeys(patch map[string]json.RawMessage) error {
 			} else {
 				for _, value := range asArray {
 					if value == keyMask {
-						return fmt.Errorf("%s mixes redacted and new values; replace the complete list", field)
+						return &config.ValidationError{Field: field, Code: "masked_keys_mixed", Err: fmt.Errorf("%s mixes redacted and new values; replace the complete list", field)}
 					}
 				}
 			}
@@ -728,7 +746,7 @@ func stripMaskedKeys(patch map[string]json.RawMessage) error {
 			continue // An explicit empty object resets that section.
 		}
 		if err := stripMaskedKeys(nested); err != nil {
-			return fmt.Errorf("%s.%w", field, err)
+			return config.AtField(field, err)
 		}
 		if len(nested) == 0 {
 			delete(patch, field)
@@ -788,7 +806,7 @@ func (s *Server) handleProxyStop(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleProxyConfig(w http.ResponseWriter, r *http.Request) {
 	if s.atomicCfg == nil {
-		http.Error(w, "proxy config not available", http.StatusServiceUnavailable)
+		writeSettingsError(w, http.StatusServiceUnavailable, "config_unavailable", "", false)
 		return
 	}
 
@@ -802,7 +820,7 @@ func (s *Server) handleProxyConfig(w http.ResponseWriter, r *http.Request) {
 		redacted, err := anonymizeConfig(s.atomicCfg.Get())
 		if err != nil {
 			// Fail closed: an unredactable config is never sent unredacted.
-			http.Error(w, "failed to redact config", http.StatusInternalServerError)
+			writeSettingsError(w, http.StatusInternalServerError, "redaction_failed", "", false)
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
@@ -812,7 +830,7 @@ func (s *Server) handleProxyConfig(w http.ResponseWriter, r *http.Request) {
 		// Decode only the fields the client sent (partial update).
 		var patch map[string]json.RawMessage
 		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-			http.Error(w, fmt.Sprintf("invalid config format: %v", err), http.StatusBadRequest)
+			writeSettingsError(w, http.StatusBadRequest, "invalid_json", "", false)
 			return
 		}
 

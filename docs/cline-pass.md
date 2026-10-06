@@ -160,7 +160,7 @@ live roster 的条目**只有 `id/name/description/tags`，没有上下文窗口
 - `cline-free/deepseek-v4.1-flash` 返回 500（免费池对这个模型不可用），`not-a-channel/whatever` 返回 404 `model not found` —— 前缀是会被校验的真实路由键。
 - 裸名 `deepseek-v4.1-flash` 返回 400 `invalid model format. Expected format: modelType/model`。**这条决定了本项目的实现必须保持 `model` 原样透传**：`internal/provider/cline_pass.go` 直接把 `model.ModelID` 发上去，`TestClinePassForwardsModelIDUnchanged` 钉住它。若剥掉前缀，上游会 400。
 
-**不写死渠道。** `cline-pass/` 前缀本身**就是**计费池选择器，它已经是写死的（配置里 `model_overrides` 把它固定成 `cline-pass/deepseek-v4.1-flash`）。上游渠道（`finalProvider`）另有一层，但**钉不住**——见「上游渠道」节。
+`cline-pass/` 前缀本身**就是**计费池选择器，不是上游渠道。上游渠道（`finalProvider`）另有一层：历史实测忽略客户端限制；现提供默认关闭的实验性渠道设置，仍不保证上游遵守——见「上游渠道」节。
 
 ⚠️ **本文档先前声称"响应里没有任何渠道字段"，那是错的。** 该结论来自一份 compactgate 抓包，它之所以干净，是因为抓的是**经过本项目 transformer 之后**的 SSE，而 `provider_metadata` 在转换中被丢弃；且那次成功调用走的是 **Claude Code 直连 `opencode.9962510.xyz` 的实验路径，根本没经过本项目**（另一份 `api.cline.bot` 直连抓包是 404）。**上游原生响应确实带 `provider_metadata.gateway.routing`**，含 `finalProvider`、15 个 `fallbacksAvailable`、`planningReasoning`；本项目不把它透传（`/v1/messages` 只返回 `id/type/role/content/model/stop_reason/usage`），所以从本项目的输出里看不到它。
 
@@ -242,7 +242,7 @@ GET /api/v1/users/me/plan   →  data.plan.entitlements.cline_pass.inferenceCapT
 | 上下文/输出上限 | **已解决（2026-09-22）**：模型列表本身仍不带这些字段，改由 catalog 的嵌套视图提供并已落库（见「模型目录」）。此前 registry 默认值把 `deepseek-v4-pro` 的输出上限从 384,000 压到 8,192 | 不再是未验证项；`max_output_tokens` 现在参与 `clampOutputTokens` |
 | `cline-pass` 是否会被 models.dev 调整 | 其 DeepSeek 两行已证有误 | 只当能力字段来源，价格不取它 |
 
-## 上游渠道（uplink）：网关确实公布了，但钉不住
+## 上游渠道（uplink）：限制请求与实际观测
 
 [dsh-cline-pass](https://github.com/yhshzh/dsh-cline-pass)（MIT，dsh 插件，8656 行 JS）实现了完整的「探测 → 校验 → 钉住」链路。它的机制与**在本账户上的实测结果**如下。
 
@@ -294,7 +294,34 @@ GET /api/v1/users/me/plan   →  data.plan.entitlements.cline_pass.inferenceCapT
 
 结论：**渠道探测在本账户上不可行**，因为它的前提（不可能的 `only` 会让路由失败并报出渠道全集）不成立——路由忽略 `only`，请求照常成功。插件作者显然是在一个 `only` 生效的环境里开发的（或上游后来改了行为）。第二个探测路径（从错误文本刮 provider 列表）同样落空。
 
-**不实现渠道钉住。** 本项目不引入一个在目标账户上被证明是空操作的功能；渠道由网关自行选择，`fallbacksAvailable` 等字段只用于观测，不进路由决策。
+以上为 **2026-09-21/22 的历史实测**，不是对当前上游行为的保证。当时未实现渠道设置；2026-10-06 按新需求加入以下实验性功能。
+
+### 实验性开关（2026-10-06）
+
+设置 → ClinePass →「钉死上游渠道（实验性）」；默认关闭，目标渠道填写网关 slug，例如 `deepseek`。开关与目标分别保存，关闭后保留目标，但不发送任何渠道限制。设置保存后下一次请求生效，无需重启；启用但目标为空会拒绝保存。
+
+```json
+{
+  "cline_pass": {
+    "channel_pin_enabled": true,
+    "channel_pin": "deepseek"
+  }
+}
+```
+
+设置作用于**所有 ClinePass 模型**，不是所有平台，也不是按模型规则。目标必须支持实际请求的模型；不支持时上游可能报错。不会修改 `model`、订阅池前缀、密钥轮换或本代理的模型兜底策略。
+
+参考 [dsh-cline-pass 双管道实现](https://github.com/yhshzh/dsh-cline-pass/blob/91fbd7e0c73f3b824fd0103b16683d44210d658b/lib/protocol.js#L184)，在共享发送入口同时注入 `provider.only=[目标]` 和 `providerOptions.gateway.only=[目标]`；`z-ai`/`zai` 分别使用两管道的拼写。只发 `only`，不把允许回退的 `order` 当作强制限制。[Vercel 官方合同](https://vercel.com/docs/ai-gateway/models-and-providers/provider-filtering-and-ordering)说明了二者差异，但该合同**不证明 Cline 会遵守客户端传入值**。[另一项目的 9 月 28 日记录](https://github.com/idlm/cline-pass-switcher/blob/main/OBSERVE.md)仍报告 DeepSeek 的限制被忽略；这是他人环境证据，不替代本机实测。
+
+启用时逐行观测上游 SSE 的 `provider_metadata.gateway.routing.finalProvider`，覆盖根对象、`choices[].message` 和 `choices[].delta`；不会修改响应字节，不缓冲整段对话、不启动额外 goroutine。日志只记录请求关联 ID、目标渠道、实际渠道和 `adherence`：
+
+- `matched`：完整流中返回的实际渠道与目标相同，**不能单凭这个证明强制生效**，可能只是自动路由恰好命中。
+- `mismatch`：完整流返回了其他渠道，此次限制未被遵守。
+- `unverified`：缺少渠道元数据或流未完整结束，不能判定。
+
+不匹配/未知会记录警告，不伪造渠道，也不在已开始的流中抛弃输出或重试扣费。非流式请求同样先读取上游 SSE 再聚合，因此也覆盖观测。关闭时保持原发送与读取行为。标准 Messages/Responses 输出仍不新增渠道字段；CompactGate 看到转换后的响应时，应以代理日志而非客户端响应判断。
+
+真正验证限制还需要负对照：不存在的渠道若仍产生正常 completion，即证明这次限制被忽略；这可能消耗配额，本功能不自动发探测请求。
 
 ### 与当前模型的关系
 

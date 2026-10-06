@@ -23,8 +23,17 @@
 | AWS Bedrock | 模型 ID 前缀（`internal/provider/aws_bedrock.go:38`） |
 | OpenRouter | 所有模型固定Chat Completions（`internal/provider/openrouter.go:32`） |
 | CommandCode | `claude-*` → Anthropic，其余 Chat Completions（`internal/provider/commandcode.go:36`） |
+| ClinePass | 所有模型固定 Chat Completions，上游始终 SSE，非流式本地聚合（`internal/provider/cline_pass.go:40`） |
 
 CommandCode 入口：`internal/provider/commandcode.go:27`（`NewCommandCodeProvider`）/ `:43`（`Execute`）/ `:72`（`Stream`）/ `:76`（`request`）；`x-cmd-zdr` 头在 `:114`。加载器默认值 `internal/config/loader.go:35-36`；非 openai/anthropic 的 wire format 在 `loader.go:590` 被拒绝。
+
+## ClinePass 渠道限制与观测
+
+- 设置 `cline_pass.channel_pin_enabled` 默认关闭，`channel_pin` 保存网关 slug；开启但目标为空会拒绝保存。设置作用于所有 ClinePass 模型，热更新下一次请求生效（`internal/config/config.go:286`、`internal/config/loader.go:417`）。
+- 共享发送入口同时写入 `provider.only` 与 `providerOptions.gateway.only`；`z-ai`/`zai` 按两条管道分别拼写。关闭时两字段完全省略，不修改模型/订阅池前缀、密钥轮换或模型兜底（`internal/provider/cline_pass.go:80`）。
+- `internal/provider/cline_pass_channel.go:18` 包装上游响应流，只观测根对象或 message/delta 中的 `provider_metadata.gateway.routing.finalProvider`；保留原字节与错误，不缓冲完整响应。元数据可能晚于 `finish_reason`，需读到 `[DONE]`。
+- 日志含 `request_id`、`requested_provider`、`actual_provider`、`adherence`。完整且匹配为 `matched`，完整但不同为 `mismatch`，缺元数据、未完成或跳过超长行则 `unverified`。匹配不等于限制生效；不存在渠道仍正常完成才是限制被忽略的强反证。
+- 标准 Messages/Responses 输出不新增渠道字段，CompactGate 转换后响应通常不能证明实际渠道；应关联代理观测日志。异常观测只告警，不丢弃输出或自动重试扣费。详细合同与实验见 [ClinePass 文档](../../docs/cline-pass.md)。
 
 ## 平台展示顺序
 
@@ -40,3 +49,5 @@ CommandCode 入口：`internal/provider/commandcode.go:27`（`NewCommandCodeProv
 - `internal/provider/openrouter_test.go`：URL、密钥轮换/全局回退、header隔离、缓存转换、取消和错误合同。
 - `internal/server/openrouter_test.go`：生产登记点、Messages/Responses各两种模式、独立记账和capture完整性。
 - `internal/handlers/stream_policy_test.go`：流式认证/熔断、跨执行模式共享健康状态、OpenRouter空完成回复兼容。
+- `internal/config/cline_pass_channel_test.go`、`internal/gui/cline_pass_channel_test.go`：校验、持久化、开关热更新、目标保留及真实前端保存逻辑。
+- `internal/provider/cline_pass_channel_test.go`：流式/非流式双字段、off→on→off、别名、晚到元数据、缺失/不匹配/超长行、错误透传与并发关闭。

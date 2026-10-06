@@ -414,6 +414,12 @@ func validate(cfg *Config) error {
 	if cfg.ClinePass.TimeoutMs < 0 || cfg.ClinePass.StreamTimeoutMs < 0 || cfg.ClinePass.StreamingTimeoutMs < 0 {
 		return fmt.Errorf("cline_pass timeouts must not be negative")
 	}
+	if cfg.ClinePass.ChannelPinEnabled && strings.TrimSpace(cfg.ClinePass.ChannelPin) == "" {
+		return fmt.Errorf("cline_pass.channel_pin is required when channel_pin_enabled is true")
+	}
+	if pin := cfg.ClinePass.ChannelPin; pin != "" && !channelSlugPattern.MatchString(pin) {
+		return fmt.Errorf("cline_pass.channel_pin must be a lowercase provider slug (letters, digits and hyphens)")
+	}
 
 	if err := validateOverrideMap("models", cfg.Models); err != nil {
 		return err
@@ -456,6 +462,8 @@ func validate(cfg *Config) error {
 
 	return nil
 }
+
+var channelSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 // validateCostScenarios rejects cost_routing.scenarios keys that are not real
 // routing scenarios. A typo would otherwise sit in the config doing nothing,

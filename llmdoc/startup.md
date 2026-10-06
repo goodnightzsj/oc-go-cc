@@ -10,6 +10,7 @@
 - 模型与成本路由：`architecture/model-routing.md`
 - 入站协议与 Responses 边界：`reference/inbound-protocols.md`
 - 缓存/计费修复与三端对账：`reference/cache-billing-audit.md`
+- 远端发布回退、白名单与渠道验收：`reference/remote-ops.md`
 - 记账与调试硬约束：`must/accounting-baseline.md`
 
 ## 常用命令
@@ -29,7 +30,7 @@ ssh root@23.80.89.173
 cd /root/oc-go-cc && git pull origin main && bash scripts/prod-deploy.sh
 ```
 
-部署会重启 systemd 服务，期间本地 AI 短暂断连；用 `curl -fsS http://127.0.0.1:3456/health` 验证。面板/历史 DB：`/root/.local/share/routatic-proxy/data.db`；配置默认 `/root/.config/routatic-proxy/config.json`（env 插值 `ROUTATIC_PROXY_API_KEY`）。旧路径 `/root/.config/oc-go-cc/config.json`（`internal/config/loader.go:17`）与旧变量名 `OC_GO_CC_*`（`loader.go:63-72` 的 `legacyEnvNames`）仍作回退兼容。
+部署会重启 systemd 服务，期间本地 AI 短暂断连；实际执行应 detached 并仅 fast-forward 拉取，检查运行版本、health与真实交互，见 `reference/remote-ops.md`。面板/历史 DB：`/root/.local/share/routatic-proxy/data.db`；配置默认 `/root/.config/routatic-proxy/config.json`（env 插值 `ROUTATIC_PROXY_API_KEY`）。旧路径 `/root/.config/oc-go-cc/config.json`（`internal/config/loader.go:17`）与旧变量名 `OC_GO_CC_*`（`loader.go:63-72` 的 `legacyEnvNames`）仍作回退兼容。
 
 ## 关键约束速查
 

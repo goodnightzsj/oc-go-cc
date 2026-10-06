@@ -8,12 +8,13 @@ routatic-proxy（oc-go-cc）：Claude Code / Codex ↔ 上游模型网关的反�
 |------|------|
 | overview/project-overview.md | 项目定位、核心特征、目录地图 |
 | architecture/usage-pipeline.md | 用量/缓存 token 链路（入口→路由→发送→转换→录制→成本→下游） |
-| architecture/provider-layer.md | 六平台统一分派、wire format与共享失败策略 |
+| architecture/provider-layer.md | 六平台统一分派、wire format、共享失败策略与ClinePass渠道观测 |
 | architecture/request-lifecycle.md | 关闭所有权、HTTP排空、共享DB/capture释放与超时 |
 | architecture/model-routing.md | 场景判定、override 优先级、成本路由与场景键的同步点 |
 | `docs/site-architecture.md`（仓库根，非 llmdoc 内）| 站点可插拔架构设计（**已定稿并落地阶段 0–5**）：描述符、current-site 切换、目录优先解析、`/v1/models` 修复与五阶段推进 |
 | reference/inbound-protocols.md | 入站路由表、Responses 适配器与 fail-closed 边界 |
 | reference/cache-billing-audit.md | 2026-08-26 缓存与计费修复、三端对账（OpenCode/代理/CompactGate） |
+| reference/remote-ops.md | 远端发布回退、白名单生成链、Cloudflare遗留封禁及渠道实测边界 |
 | must/accounting-baseline.md | 记账与调试硬约束（缓存语义、费率表归属、峰谷与分档方向、capture 约定、保留策略、时区底线） |
 | must/verification-integrity.md | 验证完整性硬约束（注入必须证明生效、fixture 必须能区分实现、脱敏前缀） |
 
@@ -41,4 +42,4 @@ routatic-proxy（oc-go-cc）：Claude Code / Codex ↔ 上游模型网关的反�
 - transformer 全部转换契约（thinking/effort、tools 格式）：目前只覆盖结构化输出与 Responses 入站
 - GUI 面板功能面与 API 端点清单
 - 发布/部署流水线文档（已有 CLAUDE.md 覆盖大部分）
-- 远端运维面：白名单四层生成链（fail2ban / UFW / DOCKER-USER / nginx `geo` 块）、TUN MTU-PMTUD —— 本仓库无文档
+- TUN MTU-PMTUD：目前仅有2026-09-23反思记录，尚无独立运维参考

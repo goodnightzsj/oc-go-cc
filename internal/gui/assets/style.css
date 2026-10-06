@@ -1538,6 +1538,7 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
 .config-fields > p, .config-fields > .checkbox-group { grid-column: 1 / -1; }
 .config-fields > .flex { flex-wrap: wrap; }
 .config-fields label { font-size: 12px; }
+.config-fields .channel-pin-toggle { min-height: 44px; }
 .config-fields input:not([type="checkbox"]) { min-width: 0; min-height: 38px; font-size: 13px; }
 .config-fields .input-with-btn input { width: 0; }
 .settings-save-bar { position: sticky; bottom: 0; z-index: 20; display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; padding: 16px 0; border-top: 1px solid var(--ui-line); background: var(--ui-bg); }

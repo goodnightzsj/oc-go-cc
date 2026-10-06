@@ -377,6 +377,9 @@ const TRANSLATIONS = {
     'clinepass.quotaHint': 'Reads the plan usage windows with this platform API key. No browser session is required. The endpoint is undocumented, so its fields may change.',
     'clinepass.subscription': 'Subscription dashboard',
     'clinepass.docs': 'ClinePass docs',
+    'clinepass.channelPin': 'Pin upstream channel (experimental)',
+    'clinepass.channelTarget': 'Target channel',
+    'clinepass.channelHint': 'Off by default. Applies to all ClinePass models. Sends an only restriction; Cline may ignore it. Logs report matched, mismatch or unverified. A match alone does not prove enforcement.',
 
     'filter.scenario': 'Scenario',
     'filter.startDate': 'Start date',
@@ -892,6 +895,9 @@ const TRANSLATIONS = {
     'clinepass.quotaHint': '使用本平台 API 密钥读取套餐用量窗口，无需浏览器会话。该端点未公开，字段可能变化。',
     'clinepass.subscription': '订阅面板',
     'clinepass.docs': 'ClinePass 文档',
+    'clinepass.channelPin': '钉死上游渠道（实验性）',
+    'clinepass.channelTarget': '目标渠道',
+    'clinepass.channelHint': '默认关闭，开启后作用于所有 ClinePass 模型。发送 only 限制，但 Cline 可能忽略。日志区分 matched（匹配）、mismatch（不匹配）和 unverified（无法验证）；匹配不等于强制生效。',
 
     'filter.scenario': '场景',
     'filter.startDate': '开始日期',
@@ -3253,6 +3259,8 @@ const CONFIG_FIELDS = [
   ['cline_pass.timeout_ms', 'cfg-cline-pass-timeout', 'int'],
   ['cline_pass.stream_timeout_ms', 'cfg-cline-pass-stream-timeout', 'int'],
   ['cline_pass.streaming_timeout_ms', 'cfg-cline-pass-streaming-timeout', 'int'],
+  ['cline_pass.channel_pin_enabled', 'cfg-cline-pass-channel-pin-enabled', 'bool'],
+  ['cline_pass.channel_pin', 'cfg-cline-pass-channel-pin', 'string'],
 
   // Logging
   // Routing scope. The option list carries the visible platforms; which of

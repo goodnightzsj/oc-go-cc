@@ -39,8 +39,9 @@ func aggregateChatStream(r io.Reader, modelID string) (*types.ChatCompletionResp
 	toolCalls := map[int]*types.ToolCall{}
 	var toolOrder []int
 	seen := false
+	complete := false
 
-	limited := io.LimitReader(r, maxAggregatedStreamBytes+1)
+	limited := &io.LimitedReader{R: r, N: maxAggregatedStreamBytes + 1}
 	scanner := bufio.NewScanner(limited)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for scanner.Scan() {
@@ -54,15 +55,20 @@ func aggregateChatStream(r io.Reader, modelID string) (*types.ChatCompletionResp
 		}
 		payload = strings.TrimSpace(payload)
 		if payload == "[DONE]" {
+			complete = true
 			break
 		}
-		var chunk types.ChatCompletionChunk
-		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			// A chunk that is not JSON is not ours to interpret; a stream that
-			// carries no readable chunk at all is caught by the seen guard.
-			continue
+		var chunk struct {
+			types.ChatCompletionChunk
+			Error json.RawMessage `json:"error"`
 		}
-		seen = true
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			return nil, fmt.Errorf("decode cline-pass stream chunk: %w", err)
+		}
+		if len(chunk.Error) != 0 && string(chunk.Error) != "null" {
+			return nil, fmt.Errorf("cline-pass stream reported an upstream error")
+		}
+		seen = seen || len(chunk.Choices) > 0
 		if chunk.ID != "" {
 			out.ID = chunk.ID
 		}
@@ -115,11 +121,19 @@ func aggregateChatStream(r io.Reader, modelID string) (*types.ChatCompletionResp
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("read cline-pass stream: %w", err)
 	}
+	if limited.N == 0 {
+		return nil, fmt.Errorf("cline-pass stream exceeds %d bytes", maxAggregatedStreamBytes)
+	}
 	if !seen {
 		// An upstream that produced no readable chunk is a failure, not an
 		// empty completion: reporting it as the latter would show a successful
 		// request with no output.
 		return nil, fmt.Errorf("cline-pass stream carried no data chunks")
+	}
+	// finish_reason ends the choice, not the wire stream: usage and routing
+	// metadata may still follow. Only [DONE] confirms the complete stream.
+	if !complete {
+		return nil, fmt.Errorf("cline-pass stream ended before [DONE]: %w", io.ErrUnexpectedEOF)
 	}
 	if content.Len() > 0 {
 		encoded, err := json.Marshal(content.String())

@@ -3,7 +3,10 @@ package router
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +34,11 @@ func TestIsRetryableError_ClientsErrorsNotRetryable(t *testing.T) {
 		{err: &client.APIError{StatusCode: 503, Body: "service unavailable"}, want: true},
 
 		// Non-API errors — fall back to string matching
+		{err: context.DeadlineExceeded, want: true},
+		{err: fmt.Errorf("request failed: %w", context.DeadlineExceeded), want: true},
+		{err: fmt.Errorf("read failed: %w", os.ErrDeadlineExceeded), want: true},
+		{err: fmt.Errorf("lookup failed: %w", &net.DNSError{Err: "stalled", IsTimeout: true}), want: true},
+		{err: fmt.Errorf("request canceled: %w", context.Canceled), want: false},
 		{err: errors.New("request timeout"), want: true},
 		{err: errors.New("connection refused"), want: true},
 		{err: errors.New("connection reset by peer"), want: true},

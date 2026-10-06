@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -436,8 +437,16 @@ func IsRetryableError(err error) bool {
 		return apiErr.StatusCode >= 500
 	}
 
-	// For non-API errors (network errors, timeouts, etc.), fall back to
-	// pattern matching on the error string.
+	// Wrapped deadlines and network timeouts need not contain "timeout".
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	// Retain legacy classification for untyped upstream errors.
 	errStr := err.Error()
 
 	retryable := []string{

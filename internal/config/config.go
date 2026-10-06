@@ -290,6 +290,10 @@ type ClinePassConfig struct {
 	TimeoutMs          int      `json:"timeout_ms"`
 	StreamTimeoutMs    int      `json:"stream_timeout_ms"`
 	StreamingTimeoutMs int      `json:"streaming_timeout_ms,omitempty"`
+	// Channel pinning requests a gateway restriction, not a guarantee that
+	// Cline honors it. Actual routing is observed from upstream metadata.
+	ChannelPinEnabled bool   `json:"channel_pin_enabled,omitempty"`
+	ChannelPin        string `json:"channel_pin,omitempty"`
 }
 
 // EffectiveAPIKeys returns the pool of API keys for ClinePass: the single

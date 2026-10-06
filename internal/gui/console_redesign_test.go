@@ -55,6 +55,22 @@ func TestConsoleThemeStyles(t *testing.T) {
 	}
 }
 
+func TestConsolePreservesHorizontalNavigation(t *testing.T) {
+	data, err := assets.ReadFile("assets/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(data)
+	if !strings.Contains(cssSection(css, ".tab-content.active"), "overscroll-behavior: auto contain;") {
+		t.Error("content pages must allow horizontal navigation while retaining vertical containment")
+	}
+	// Tables must not block the gesture before it reaches the page boundary.
+	blocked := regexp.MustCompile(`overscroll-behavior(?:-x|-inline)?\s*:\s*(?:contain|none)\b`)
+	if matches := blocked.FindAllString(css, -1); len(matches) > 0 {
+		t.Errorf("horizontal browser navigation is blocked: %v", matches)
+	}
+}
+
 const consoleThemeBehaviorScript = platformBehaviorDOMScript + `
 context.getComputedStyle = element => ({colorScheme:element.dataset.theme || 'dark'});
 async function checks() {

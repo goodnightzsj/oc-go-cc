@@ -27,7 +27,7 @@ make run       # 直接运行（不带构建）
 
 ```bash
 ssh root@23.80.89.173
-cd /root/oc-go-cc && git pull origin main && bash scripts/prod-deploy.sh
+cd /root/oc-go-cc && git pull --ff-only origin main && bash scripts/prod-deploy.sh
 ```
 
 部署会重启 systemd 服务，期间本地 AI 短暂断连；实际执行应 detached 并仅 fast-forward 拉取，检查运行版本、health与真实交互，见 `reference/remote-ops.md`。面板/历史 DB：`/root/.local/share/routatic-proxy/data.db`；配置默认 `/root/.config/routatic-proxy/config.json`（env 插值 `ROUTATIC_PROXY_API_KEY`）。旧路径 `/root/.config/oc-go-cc/config.json`（`internal/config/loader.go:17`）与旧变量名 `OC_GO_CC_*`（`loader.go:63-72` 的 `legacyEnvNames`）仍作回退兼容。

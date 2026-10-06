@@ -323,6 +323,22 @@ GET /api/v1/users/me/plan   →  data.plan.entitlements.cline_pass.inferenceCapT
 
 真正验证限制还需要负对照：不存在的渠道若仍产生正常 completion，即证明这次限制被忽略；这可能消耗配额，本功能不自动发探测请求。
 
+### 部署后实测（2026-10-06）
+
+远端部署功能提交 `42ad363` 后，19:17（Asia/Shanghai）以 CompactGate 记录191248的实际出站模型 `cline-pass/deepseek-v4.1-flash` 构造最小合成请求；不重放原始长对话，每条 `max_tokens=256`。六条请求均返回200、有效正文及完整结束标志，每条只有一次该模型的上游调用。
+
+| 设置 | 客户端模式 | 出站限制 | 实际渠道 | 判定 |
+| --- | --- | --- | --- | --- |
+| 关闭（前/后各一次） | SSE | 两个 only 字段均无 | deepseek | 关闭恢复原行为 |
+| deepseek | SSE | 双字段 only=deepseek | deepseek | matched，但不能证明强制生效 |
+| alibaba | SSE | 双字段 only=alibaba | deepseek | mismatch，限制未被遵守 |
+| codex-no-such-channel | SSE | 双字段 only=不存在渠道 | deepseek | mismatch，正常完成证明限制被忽略 |
+| deepseek | 非流式 JSON | 双字段 only=deepseek，上游仍SSE | deepseek | 聚合与观测正常 |
+
+另以 `thinking={type:enabled,budget_tokens:1024}`、一个合成工具声明、`max_tokens=2048` 补测关闭/不存在渠道两条请求；两条均正常完成，不存在渠道仍实际为 DeepSeek。出站 thinking 和工具声明均存在，负对照结论不只来自无工具的简单载荷。
+
+证据分别来自上游 capture 的实际请求字段、完整 SSE 的 `finalProvider` 与 `[DONE]`，并由同一 `request_id` 的渠道日志交叉验证。因此：**本项目的开关、注入和观测已生效，但该账户、该订阅模型当前无法通过这些客户端参数强制钉死渠道**；不能外推为所有模型或未来版本的结论。实验后恢复原设置（关闭、空目标），未切换计费池。另从本机经公开 HTTPS 域名完成一次正常 SSE 推理，验证外网整条链路。
+
 ### 与当前模型的关系
 
 | 插件 | 本项目 | 说明 |

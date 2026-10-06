@@ -89,8 +89,28 @@ func (p *ClinePassProvider) request(ctx context.Context, req *types.MessageReque
 		// Cline API documents `stream` as defaulting to true, so relying on the
 		// default would send every request down the streaming path by accident.
 		converted.Stream = &stream
+		// Cline has direct and planner pipelines. Send the restriction to both;
+		// only (unlike order) excludes other channels when the gateway honors it.
+		out := struct {
+			*types.ChatCompletionRequest
+			Provider        *clineChannelOptions `json:"provider,omitempty"`
+			ProviderOptions *struct {
+				Gateway clineChannelOptions `json:"gateway"`
+			} `json:"providerOptions,omitempty"`
+		}{ChatCompletionRequest: converted}
+		if cfg.ClinePass.ChannelPinEnabled {
+			target := cfg.ClinePass.ChannelPin
+			direct, planner := target, target
+			if target == "zai" || target == "z-ai" {
+				direct, planner = "z-ai", "zai"
+			}
+			out.Provider = &clineChannelOptions{Only: []string{direct}}
+			out.ProviderOptions = &struct {
+				Gateway clineChannelOptions `json:"gateway"`
+			}{Gateway: clineChannelOptions{Only: []string{planner}}}
+		}
 		var payload []byte
-		payload, err = json.Marshal(converted)
+		payload, err = json.Marshal(out)
 		if err == nil {
 			return p.send(ctx, cfg, key, payload, stream)
 		}
@@ -123,6 +143,9 @@ func (p *ClinePassProvider) send(ctx context.Context, cfg *config.Config, key st
 			return nil, fmt.Errorf("read cline-pass error (HTTP %d): %w", resp.StatusCode, err)
 		}
 		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: clineErrorBody(resp, body)}
+	}
+	if cfg.ClinePass.ChannelPinEnabled {
+		resp.Body = newClineChannelBody(resp.Body, cfg.ClinePass.ChannelPin, rid(ctx))
 	}
 	if p.capture != nil {
 		return client.CaptureBody(resp.Body, func(data []byte) {

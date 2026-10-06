@@ -380,10 +380,9 @@ const TRANSLATIONS = {
     'clinepass.channelPin': 'Pin upstream channel (experimental)',
     'clinepass.channelTarget': 'Target channel',
     'clinepass.channelHint': 'Off by default. Applies to all ClinePass models. Sends an only restriction; Cline may ignore it. Logs report matched, mismatch or unverified. A match alone does not prove enforcement.',
-    'clinepass.channelInput': 'Choose a suggestion or type a channel. Empty uses deepseek. Suggestions do not guarantee support for every model.',
-    'clinepass.channelChoose': 'Fill from recorded channels',
-    'clinepass.channelActual': 'Previously returned',
-    'clinepass.channelAvailable': 'Listed by upstream, not verified',
+    'clinepass.channelInput': 'Type to filter or use the arrow to browse channels. Custom values are allowed; empty uses deepseek. Suggestions do not guarantee support for every model.',
+    'clinepass.channelChoose': 'Show channels',
+    'clinepass.channelEmpty': 'No matching channels. You can use your typed value.',
     'clinepass.channelBuiltin': 'Using the built-in template (debug_capture is off).',
     'clinepass.channelWaiting': 'Using the template while waiting for the first capture check.',
     'clinepass.channelChecked': 'Existing captures are checked hourly. Last checked: {time}.',
@@ -914,10 +913,9 @@ const TRANSLATIONS = {
     'clinepass.channelPin': '钉死上游渠道（实验性）',
     'clinepass.channelTarget': '目标渠道',
     'clinepass.channelHint': '默认关闭，开启后作用于所有 ClinePass 模型。发送 only 限制，但 Cline 可能忽略。日志区分 matched（匹配）、mismatch（不匹配）和 unverified（无法验证）；匹配不等于强制生效。',
-    'clinepass.channelInput': '可选择候选或直接填写，留空使用 deepseek。候选不代表所有模型都支持。',
-    'clinepass.channelChoose': '从记录的渠道填入',
-    'clinepass.channelActual': '曾实际返回',
-    'clinepass.channelAvailable': '上游列出，未实测',
+    'clinepass.channelInput': '输入可模糊匹配，点击箭头查看全部渠道；也可直接填写，留空使用 deepseek。候选不代表所有模型都支持。',
+    'clinepass.channelChoose': '展开渠道候选',
+    'clinepass.channelEmpty': '没有匹配渠道，可使用当前输入值。',
     'clinepass.channelBuiltin': '正在使用内置模板（未开启 debug_capture）。',
     'clinepass.channelWaiting': '暂用内置模板，等待首次检查已有捕获。',
     'clinepass.channelChecked': '每小时检查已有捕获，上次检查：{time}。',
@@ -3418,23 +3416,9 @@ async function loadChannelCatalog() {
   try {
     const r = await settingsRequest('/api/cline-pass/channels');
     const data = await r.json();
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = t('clinepass.channelChoose');
-    const options = [placeholder];
-    for (const [model, channels] of Object.entries(data.channels)) {
-      for (const [kind, label] of [['actual', 'clinepass.channelActual'], ['available', 'clinepass.channelAvailable']]) {
-        for (const channel of channels[kind] || []) {
-          const option = document.createElement('option');
-          option.value = channel;
-          option.textContent = `${channel} · ${t(label)} · ${model}`;
-          options.push(option);
-        }
-      }
-    }
-    list.replaceChildren(...options);
-    list.value = '';
-    window.CustomSelect?.syncAll();
+    channelSuggestions = [...new Set(Object.values(data.channels).flatMap(channels =>
+      [...(channels.actual || []), ...(channels.available || [])]))].sort();
+    renderChannelOptions();
     source.textContent = data.error ? t('clinepass.channelFailed')
       : !data.capture_enabled ? t('clinepass.channelBuiltin')
       : data.last_checked ? t('clinepass.channelChecked').replace('{time}', new Date(data.last_checked).toLocaleString())
@@ -3444,6 +3428,110 @@ async function loadChannelCatalog() {
     source.textContent = t('clinepass.channelFailed');
     source.classList.add('is-error');
   }
+}
+
+let channelSuggestions = ['deepseek'];
+
+function renderChannelOptions(query = document.getElementById('cfg-cline-pass-channel-pin').value) {
+  const input = document.getElementById('cfg-cline-pass-channel-pin');
+  const list = document.getElementById('cline-pass-channel-options');
+  query = query.trim().toLowerCase();
+  const options = channelSuggestions.filter(channel => {
+    let position = 0;
+    return [...query].every(char => (position = channel.toLowerCase().indexOf(char, position) + 1) > 0);
+  }).map((channel, index) => {
+    const option = document.createElement('div');
+    option.id = `cline-pass-channel-option-${index}`;
+    option.className = 'theme-select-option';
+    option.setAttribute('role', 'option');
+    option.setAttribute('aria-selected', 'false');
+    option.dataset.channel = channel;
+    option.textContent = channel;
+    return option;
+  });
+  if (!options.length) {
+    const empty = document.createElement('div');
+    empty.className = 'channel-combobox-empty';
+    empty.setAttribute('role', 'status');
+    empty.textContent = t('clinepass.channelEmpty');
+    options.push(empty);
+  }
+  list.replaceChildren(...options);
+  input.removeAttribute('aria-activedescendant');
+}
+
+function initChannelCombobox() {
+  const root = document.getElementById('cline-pass-channel-combobox');
+  const input = document.getElementById('cfg-cline-pass-channel-pin');
+  const list = document.getElementById('cline-pass-channel-options');
+  const close = () => {
+    list.hidden = true;
+    root.classList.remove('open');
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+  };
+  const open = (query = input.value) => {
+    window.CustomSelect?.closeAll();
+    renderChannelOptions(query);
+    list.hidden = false;
+    root.classList.add('open');
+    input.setAttribute('aria-expanded', 'true');
+    const rect = input.getBoundingClientRect();
+    const height = list.getBoundingClientRect().height;
+    const above = rect.bottom + height + 5 > window.innerHeight && rect.top > height + 5;
+    list.style.top = above ? 'auto' : 'calc(100% + 5px)';
+    list.style.bottom = above ? 'calc(100% + 5px)' : 'auto';
+  };
+  const choose = option => {
+    input.value = option.dataset.channel;
+    input.dispatchEvent(new Event('input', {bubbles: true}));
+    close();
+    input.focus();
+  };
+  input.addEventListener('input', () => open());
+  input.addEventListener('click', () => open());
+  document.getElementById('cline-pass-channel-toggle').addEventListener('click', () => {
+    if (list.hidden) open(''); else close();
+    input.focus();
+  });
+  // Keep the input focused while choosing; blur still owns the empty default.
+  root.addEventListener('pointerdown', event => {
+    if (event.target !== input) event.preventDefault();
+  });
+  list.addEventListener('click', event => {
+    const option = event.target.closest('[role="option"]');
+    if (option) choose(option);
+  });
+  input.addEventListener('blur', close);
+  document.addEventListener('pointerdown', event => {
+    if (!root.contains(event.target)) close();
+  });
+  input.addEventListener('keydown', event => {
+    if (event.isComposing) return;
+    if (event.key === 'Escape') { close(); return; }
+    if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) return;
+    if (list.hidden) {
+      if (event.key === 'Enter') return;
+      open('');
+    }
+    const options = [...list.querySelectorAll('[role="option"]')];
+    const index = options.findIndex(option => option.id === input.getAttribute('aria-activedescendant'));
+    if (event.key === 'Enter') {
+      if (index >= 0) { event.preventDefault(); choose(options[index]); }
+      else close();
+      return;
+    }
+    event.preventDefault();
+    if (!options.length) return;
+    const next = event.key === 'ArrowDown' ? Math.min(index + 1, options.length - 1)
+      : index < 0 ? options.length - 1 : Math.max(index - 1, 0);
+    options.forEach((option, i) => {
+      option.classList.toggle('selected', i === next);
+      option.setAttribute('aria-selected', String(i === next));
+    });
+    input.setAttribute('aria-activedescendant', options[next].id);
+    options[next].scrollIntoView({block: 'nearest'});
+  });
 }
 
 function updateConfigChangeCount() {
@@ -3490,13 +3578,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fillDefaultChannel();
     updateConfigChangeCount();
   });
-  document.getElementById('cline-pass-channel-options')?.addEventListener('change', event => {
-    if (!event.target.value) return;
-    document.getElementById('cfg-cline-pass-channel-pin').value = event.target.value;
-    event.target.value = '';
-    window.CustomSelect?.syncAll();
-    updateConfigChangeCount();
-  });
+  initChannelCombobox();
   loadChannelCatalog();
   setInterval(loadChannelCatalog, 60 * 60 * 1000);
   applySelectableSites();

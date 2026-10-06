@@ -35,6 +35,7 @@ CommandCode 入口：`internal/provider/commandcode.go:27`（`NewCommandCodeProv
 - 日志含 `request_id`、`requested_provider`、`actual_provider`、`adherence`。完整且匹配为 `matched`，完整但不同为 `mismatch`，缺元数据、未完成或跳过超长行则 `unverified`。匹配不等于限制生效；不存在渠道仍正常完成才是限制被忽略的强反证。
 - 标准 Messages/Responses 输出不新增渠道字段，CompactGate 转换后响应通常不能证明实际渠道；应关联代理观测日志。异常观测只告警，不丢弃输出或自动重试扣费。详细合同与实验见 [ClinePass 文档](../../docs/cline-pass.md)。
 - GUI 候选由 `internal/gui/channel_catalog.go:88` 的snapshot及 `:113` 的channelLoop管理，通过 `GET /api/cline-pass/channels` 暴露：关闭capture始终使用嵌入JSON；开启后启动及每小时扫描现有capture增量，仅依据响应自身model/canonicalSlug归属提取actual/available渠道，不用request_id配对，不新增采集或改debug_capture。集合不变不写capture目录的channel-catalog.json；失败保留有效候选并公开安全错误状态。模板来自已核实的上游原始capture，非CompactGate转换后输出。纯headless不运行GUI扫描。
+- 目标渠道输入与下拉合为可编辑combobox，候选合并所有模型的actual/available并去重排序，只显示渠道名；输入忽略大小写按字符顺序模糊匹配，箭头展开全部候选，支持方向键/Enter/Escape。候选外的手写值仍允许保存；刷新不覆盖草稿，失败保留已有候选。API继续保留模型/来源元数据，不把候选当作路由支持保证。实现见 `internal/gui/assets/app.js` 的 `loadChannelCatalog`、`renderChannelOptions`、`initChannelCombobox`，回归见 `internal/gui/settings_behavior_test.go`。
 - `internal/config/validation_error.go` 提供字段/code和保留诊断的错误链；GUI通过 `internal/gui/settings_error.go:58` 输出固定中文与saved状态，不输出原始异常。主设置、降级链、导入与GUI开关共享反馈语义：设置失败保留草稿、定位可编辑字段；网络结果未知不自动重试，保存成功后的刷新失败不称为保存失败。自启动系统操作失败返回错误，不发布成功状态。
 - 保存期间的新编辑不进入已保存基线、不被随后刷新覆盖；导入响应只控制自身预览，迟到结果不关闭新弹窗，旧原生close事件不删除新预览按钮。行为守卫为 `internal/gui/settings_behavior_test.go`；候选目录的隐私、轮转、小时更新与取消守卫为 `internal/gui/channel_catalog_test.go`。
 

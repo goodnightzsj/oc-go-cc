@@ -104,17 +104,24 @@ async function checks() {
   assert.equal(get('save-status').textContent,'请修改渠道','old success timer must not erase new error');
 
   target.value = 'manual-channel';
-  fetch = async()=>ok({capture_enabled:false,channels:{'deepseek/test':{actual:['deepseek'],available:['novita']}}});
+  fetch = async()=>ok({capture_enabled:false,channels:{'deepseek/test':{actual:['deepseek'],available:['novita','deepseek']},'other/model':{actual:['novita'],available:['alibaba','deepinfra']}}});
   await loadChannelCatalog();
   assert.equal(target.value,'manual-channel','candidate refresh never edits selection');
   assert.equal(get('cline-pass-channel-source').textContent,t('clinepass.channelBuiltin'));
-  const choices = get('cline-pass-channel-options').options;
-  assert.equal(choices.length,3);
-  assert.match(choices[1].textContent,/deepseek.*曾实际返回.*deepseek\/test/);
-  assert.match(choices[2].textContent,/novita.*未实测/);
+  renderChannelOptions('');
+  const labels = () => JSON.stringify(get('cline-pass-channel-options').children.map(option=>option.textContent));
+  assert.equal(labels(),JSON.stringify(['alibaba','deepinfra','deepseek','novita']),'only unique channel names, no model/source labels');
+  renderChannelOptions('  INF  ');
+  assert.equal(labels(),JSON.stringify(['deepinfra']),'case-insensitive partial matching');
+  renderChannelOptions('dsk');
+  assert.equal(labels(),JSON.stringify(['deepseek']),'ordered fuzzy matching');
+  renderChannelOptions('missing-channel');
+  assert.equal(get('cline-pass-channel-options').children[0].getAttribute('role'),'status','no match is feedback, not a selectable value');
+  assert.equal(target.value,'manual-channel');
+  const choices = get('cline-pass-channel-options').children;
   fetch = async()=>{throw new Error('private-sentinel')};
   await loadChannelCatalog();
-  assert.equal(get('cline-pass-channel-options').options,choices,'failed candidate refresh keeps valid options');
+  assert.equal(get('cline-pass-channel-options').children,choices,'failed candidate refresh keeps valid options');
   assert.equal(get('cline-pass-channel-source').textContent,t('clinepass.channelFailed'));
   assert.equal(target.value,'manual-channel');
 

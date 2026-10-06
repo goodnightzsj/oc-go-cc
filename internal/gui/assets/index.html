@@ -165,6 +165,9 @@
               <span aria-hidden="true">–</span>
               <label><span data-i18n="filter.endDate">End date</span><input type="text" id="history-end-display" inputmode="numeric" placeholder="YYYY-MM-DD" autocomplete="off"></label>
             </div>
+            <label class="date-range-live"><input type="checkbox" id="history-through-today"><span data-i18n="filter.throughToday">Always end today</span></label>
+            <p class="page-meta" data-i18n="filter.localDates">Dates use your browser's local time zone.</p>
+            <p class="date-range-error" id="history-date-error" role="alert" hidden></p>
             <div class="date-range-presets">
               <button type="button" data-days="0" data-i18n="filter.today">Today</button>
               <button type="button" data-days="7" data-i18n="analytics.last7d">Last 7 days</button>
@@ -172,6 +175,7 @@
             </div>
             <div class="date-range-actions">
               <button type="button" id="history-date-clear" data-i18n="filter.clear">Clear</button>
+              <button type="button" id="history-date-cancel" data-i18n="action.cancel">Cancel</button>
               <button type="button" class="primary" id="history-date-apply" data-i18n="filter.apply">Apply</button>
             </div>
           </div>
@@ -480,6 +484,9 @@
               <span aria-hidden="true">→</span>
               <label><span data-i18n="filter.endDate">End date</span><input type="text" id="analytics-end-display" inputmode="numeric" placeholder="YYYY-MM-DD" autocomplete="off"></label>
             </div>
+            <label class="date-range-live"><input type="checkbox" id="analytics-through-today"><span data-i18n="filter.throughToday">Always end today</span></label>
+            <p class="page-meta" data-i18n="filter.analyticsLimit">UTC dates · up to 92 days, including today.</p>
+            <p class="date-range-error" id="analytics-date-error" role="alert" hidden></p>
             <div class="date-range-presets">
               <button type="button" data-days="7" data-i18n="analytics.last7d">Last 7 days</button>
               <button type="button" data-days="30" data-i18n="analytics.last30d">Last 30 days</button>

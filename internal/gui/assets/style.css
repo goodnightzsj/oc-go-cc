@@ -1033,6 +1033,10 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
 }
 .date-range-fields input:focus { outline: 0; border-color: var(--ui-indigo); box-shadow: 0 0 0 2px rgba(129, 140, 248, .18); }
 .date-range-fields input.invalid { border-color: var(--ui-red); }
+.date-range-fields input:disabled { color: var(--ui-muted); cursor: not-allowed; }
+.date-range-live { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 12px; cursor: pointer; }
+.date-range-live input { accent-color: var(--ui-indigo); }
+.date-range-error { color: var(--ui-red); font-size: 12px; }
 .date-range-presets { display: flex; gap: 6px; margin-top: 10px; }
 .date-range-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--ui-line); }
 .date-range-presets button,

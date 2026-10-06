@@ -1026,7 +1026,9 @@ func (h *MessagesHandler) handleNonStreaming(
 	)
 
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		// An attempt's deadline can expire while the client is still waiting.
+		// Only the parent request decides whether there is no response to send.
+		if ctx.Err() != nil {
 			h.logger.Info("request context canceled during non-streaming fallback", "error", err)
 			return
 		}

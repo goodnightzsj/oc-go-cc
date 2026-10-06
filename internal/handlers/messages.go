@@ -878,6 +878,11 @@ func (h *MessagesHandler) handleStreaming(
 			atomic.StoreInt32(&heartbeatPaused, 0)
 		}
 		if errProxy != nil {
+			// The body reader uses a cancellation sentinel; retain the attempt's
+			// deadline identity for health settlement without blaming parent cancellation.
+			if errors.Is(errProxy, transformer.ErrStreamReadCanceled) && attemptCtx.Err() == context.DeadlineExceeded {
+				errProxy = fmt.Errorf("streaming timeout (%v) exceeded: %w: %w", timeout, attemptCtx.Err(), errProxy)
+			}
 			if errProxy == transformer.ErrClientDisconnected {
 				if clientCtx.Err() != nil {
 					complete(clientCtx, errProxy)

@@ -380,6 +380,14 @@ const TRANSLATIONS = {
     'clinepass.channelPin': 'Pin upstream channel (experimental)',
     'clinepass.channelTarget': 'Target channel',
     'clinepass.channelHint': 'Off by default. Applies to all ClinePass models. Sends an only restriction; Cline may ignore it. Logs report matched, mismatch or unverified. A match alone does not prove enforcement.',
+    'clinepass.channelInput': 'Choose a suggestion or type a channel. Empty uses deepseek. Suggestions do not guarantee support for every model.',
+    'clinepass.channelChoose': 'Fill from recorded channels',
+    'clinepass.channelActual': 'Previously returned',
+    'clinepass.channelAvailable': 'Listed by upstream, not verified',
+    'clinepass.channelBuiltin': 'Using the built-in template (debug_capture is off).',
+    'clinepass.channelWaiting': 'Using the template while waiting for the first capture check.',
+    'clinepass.channelChecked': 'Existing captures are checked hourly. Last checked: {time}.',
+    'clinepass.channelFailed': 'Could not update suggestions. Keeping existing values; you can still type a channel.',
 
     'filter.scenario': 'Scenario',
     'filter.startDate': 'Start date',
@@ -441,6 +449,14 @@ const TRANSLATIONS = {
     'badge.fail': 'Fail',
     'port.info': 'Listening port: —',
     'save.unloaded': 'Config not loaded, cannot save',
+    'save.rejected': 'Not saved. Check the settings and try again.',
+    'save.unknown': 'Save result is unconfirmed. Reload the configuration to check before trying again.',
+    'save.refreshFailed': 'Saved, but the page could not refresh. Reload the page to check.',
+    'save.permission': 'You cannot save from this page. Check your login and access permissions.',
+    'save.loadFailed': 'Could not load the configuration. Check the connection and reload.',
+    'save.integer': 'Enter a whole number greater than or equal to zero.',
+    'save.invalidJSON': 'Invalid JSON. Check commas, quotes and brackets.',
+    'save.restart': 'Saved. Restart the service to apply the new listen address or port.',
     'fallback.scenario': 'Scenario',
     'fallback.default': 'Default',
     'fallback.streaming': 'Streaming',
@@ -898,6 +914,14 @@ const TRANSLATIONS = {
     'clinepass.channelPin': '钉死上游渠道（实验性）',
     'clinepass.channelTarget': '目标渠道',
     'clinepass.channelHint': '默认关闭，开启后作用于所有 ClinePass 模型。发送 only 限制，但 Cline 可能忽略。日志区分 matched（匹配）、mismatch（不匹配）和 unverified（无法验证）；匹配不等于强制生效。',
+    'clinepass.channelInput': '可选择候选或直接填写，留空使用 deepseek。候选不代表所有模型都支持。',
+    'clinepass.channelChoose': '从记录的渠道填入',
+    'clinepass.channelActual': '曾实际返回',
+    'clinepass.channelAvailable': '上游列出，未实测',
+    'clinepass.channelBuiltin': '正在使用内置模板（未开启 debug_capture）。',
+    'clinepass.channelWaiting': '暂用内置模板，等待首次检查已有捕获。',
+    'clinepass.channelChecked': '每小时检查已有捕获，上次检查：{time}。',
+    'clinepass.channelFailed': '候选更新失败，保留已有值；仍可直接填写渠道。',
 
     'filter.scenario': '场景',
     'filter.startDate': '开始日期',
@@ -959,6 +983,14 @@ const TRANSLATIONS = {
     'badge.fail': '失败',
     'port.info': '监听端口：—',
     'save.unloaded': '未加载当前配置，无法保存',
+    'save.rejected': '未保存，请检查设置项后重试。',
+    'save.unknown': '保存结果尚未确认，请重新加载配置核对后再操作。',
+    'save.refreshFailed': '已保存，但页面刷新失败，请重新加载页面核对。',
+    'save.permission': '当前页面无权保存，请检查登录状态和访问权限。',
+    'save.loadFailed': '配置加载失败，请检查连接后重新加载页面。',
+    'save.integer': '请输入 0 或正整数。',
+    'save.invalidJSON': 'JSON 格式不正确，请检查逗号、引号和括号。',
+    'save.restart': '已保存；监听地址或端口需重启服务后生效。',
     'setting.testModel': '测试模型',
     'setting.testModelDesc': '发送快速测试请求以验证模型连接',
     'btn.testModel': '测试模型',
@@ -1092,6 +1124,7 @@ function toggleLanguage() {
   QuotaModule.renderLocalUsage();
   FallbackModule.renderChain();
   updateConfigChangeCount();
+  loadChannelCatalog();
   if (lastOverviewView) renderOverviewUsage(lastOverviewView.data, lastOverviewView.trend, lastOverviewView.latency);
 }
 
@@ -2564,29 +2597,34 @@ async function toggleProxy(el) {
 }
 
 async function toggleAutostart(el) {
-  el._changing = true;
-  try {
-    const r = await fetch('/api/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ autostart: el.checked })
-    });
-    if (!r.ok) { el.checked = !el.checked; }
-  } catch(e) { el.checked = !el.checked; }
-  setTimeout(() => { el._changing = false; }, 1000);
+  await saveRuntimeSetting(el, 'autostart');
 }
 
 async function toggleNotify(el) {
+  await saveRuntimeSetting(el, 'notify');
+}
+
+async function saveRuntimeSetting(el, field) {
+  if (el.disabled) return;
+  const requested = el.checked;
+  clearSettingsFieldError();
+  el.disabled = true;
   el._changing = true;
   try {
-    const r = await fetch('/api/config', {
+    await settingsRequest('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ notify: el.checked })
-    });
-    if (!r.ok) { el.checked = !el.checked; }
-  } catch(e) { el.checked = !el.checked; }
-  setTimeout(() => { el._changing = false; }, 1000);
+      body: JSON.stringify({ [field]: requested })
+    }, true);
+    showSaveStatus(t('status.saveOk'), 'success');
+  } catch (e) {
+    if (!e.unknown && !e.saved) el.checked = !requested;
+    el.disabled = false;
+    showSettingsError(e, field);
+  } finally {
+    el.disabled = false;
+    el._changing = false;
+  }
 }
 
 /* ── CSV export ────────────────────────────────────────────────── */
@@ -3302,7 +3340,7 @@ function readFieldValue(field) {
     const current = deepGet(currentProxyConfig, field[0]);
     if (raw.trim() === '' && current == null) return undefined;
     const v = Number(raw);
-    if (!Number.isSafeInteger(v) || v < 0) throw new Error(`${field[0]}: ${currentLang === 'zh' ? '请输入非负整数' : 'Enter a non-negative integer'}`);
+    if (!Number.isSafeInteger(v) || v < 0) throw settingsFailure(t('save.integer'), {field: field[0]});
     return v === current ? undefined : v;
   }
   if (field[2] === 'keys') {
@@ -3312,20 +3350,29 @@ function readFieldValue(field) {
   }
   // string
   const v = raw;
-  const current = deepGet(currentProxyConfig, field[0]);
+  const current = deepGet(currentProxyConfig, field[0]) || (field[0] === 'cline_pass.channel_pin' ? 'deepseek' : '');
   return v === (current || '') ? undefined : v;
 }
 
-async function loadProxyConfig() {
+function configInputSnapshot() {
+  return new Map(CONFIG_FIELDS.map(([, id, type]) => {
+    const el = document.getElementById(id);
+    return [id, type === 'bool' ? el?.checked : el?.value];
+  }));
+}
+
+async function loadProxyConfig({preserveInputs = configInputSnapshot(), quiet = false} = {}) {
   try {
-    const r = await fetch('/api/proxy/config');
-    if (!r.ok) throw new Error(await r.text());
-    currentProxyConfig = await r.json();
-    if (!currentProxyConfig) return;
+    const r = await settingsRequest('/api/proxy/config');
+    const loaded = await r.json();
+    if (!loaded || typeof loaded !== 'object' || Array.isArray(loaded)) throw settingsFailure(t('save.loadFailed'));
+    currentProxyConfig = loaded;
 
     for (const [path, id, type] of CONFIG_FIELDS) {
       const el = document.getElementById(id);
       if (!el) continue;
+      // An acknowledged save must not erase edits made while it was in flight.
+      if ((type === 'bool' ? el.checked : el.value) !== preserveInputs.get(id)) continue;
       const val = deepGet(currentProxyConfig, path);
       if (type === 'bool') {
         el.checked = !!val;
@@ -3347,14 +3394,55 @@ async function loadProxyConfig() {
             el.appendChild(option);
           }
         }
-        el.value = val || '';
+        el.value = val || (id === 'cfg-cline-pass-channel-pin' ? 'deepseek' : '');
       }
     }
     window.CustomSelect?.syncAll();
     updateConfigChangeCount();
+    return true;
   } catch (e) {
-    console.error('Failed to load proxy config:', e);
-    showSaveStatus(t('save.unloaded') + ': ' + e.message, 'error');
+    if (!quiet) showSaveStatus(t('save.loadFailed'), 'error');
+    return false;
+  }
+}
+
+function fillDefaultChannel() {
+  const input = document.getElementById('cfg-cline-pass-channel-pin');
+  if (input && !input.value.trim()) input.value = 'deepseek';
+}
+
+async function loadChannelCatalog() {
+  const source = document.getElementById('cline-pass-channel-source');
+  const list = document.getElementById('cline-pass-channel-options');
+  if (!source || !list) return;
+  try {
+    const r = await settingsRequest('/api/cline-pass/channels');
+    const data = await r.json();
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = t('clinepass.channelChoose');
+    const options = [placeholder];
+    for (const [model, channels] of Object.entries(data.channels)) {
+      for (const [kind, label] of [['actual', 'clinepass.channelActual'], ['available', 'clinepass.channelAvailable']]) {
+        for (const channel of channels[kind] || []) {
+          const option = document.createElement('option');
+          option.value = channel;
+          option.textContent = `${channel} · ${t(label)} · ${model}`;
+          options.push(option);
+        }
+      }
+    }
+    list.replaceChildren(...options);
+    list.value = '';
+    window.CustomSelect?.syncAll();
+    source.textContent = data.error ? t('clinepass.channelFailed')
+      : !data.capture_enabled ? t('clinepass.channelBuiltin')
+      : data.last_checked ? t('clinepass.channelChecked').replace('{time}', new Date(data.last_checked).toLocaleString())
+      : t('clinepass.channelWaiting');
+    source.classList.toggle('is-error', !!data.error);
+  } catch (_) {
+    source.textContent = t('clinepass.channelFailed');
+    source.classList.add('is-error');
   }
 }
 
@@ -3398,6 +3486,19 @@ document.addEventListener('DOMContentLoaded', () => {
     field?.addEventListener('input', updateConfigChangeCount);
     field?.addEventListener('change', updateConfigChangeCount);
   }
+  document.getElementById('cfg-cline-pass-channel-pin')?.addEventListener('blur', () => {
+    fillDefaultChannel();
+    updateConfigChangeCount();
+  });
+  document.getElementById('cline-pass-channel-options')?.addEventListener('change', event => {
+    if (!event.target.value) return;
+    document.getElementById('cfg-cline-pass-channel-pin').value = event.target.value;
+    event.target.value = '';
+    window.CustomSelect?.syncAll();
+    updateConfigChangeCount();
+  });
+  loadChannelCatalog();
+  setInterval(loadChannelCatalog, 60 * 60 * 1000);
   applySelectableSites();
   applyActiveSite();
   const viewControlIds = new Set(Object.values(VIEW_CONTROLS).flat());
@@ -3429,9 +3530,9 @@ async function applyActiveSite() {
   try {
     active = (await fetchJSON('/api/sites')).active || '';
   } catch (_) {
-    return; // leave the selectors as rendered rather than guessing
+    return false; // leave the selectors as rendered rather than guessing
   }
-  if (seq !== activeSiteLoadSeq) return;
+  if (seq !== activeSiteLoadSeq) return true;
   lastActiveSite = active;
   setViewPlatform(viewPlatformPinned);
   const offered = VIEW_CONTROLS.platform.some(id => {
@@ -3440,6 +3541,7 @@ async function applyActiveSite() {
   });
   renderActiveSiteNote(offered ? '' : active);
   syncViewState({replace: true});
+  return true;
 }
 
 // renderActiveSiteNote shows why the views cannot open on the active platform.
@@ -3463,12 +3565,12 @@ function startActiveSitePolling() {
 // picking it would route every request into a 401.
 async function applySelectableSites() {
   const select = document.getElementById('cfg-active-site');
-  if (!select) return;
+  if (!select) return true;
   let sites;
   try {
     sites = (await fetchJSON('/api/sites')).sites || [];
   } catch (_) {
-    return; // leave the selector as rendered rather than guessing
+    return false; // leave the selector as rendered rather than guessing
   }
   const selectable = new Map(sites.map(s => [s.id, s.selectable]));
   for (const option of select.options) {
@@ -3481,6 +3583,7 @@ async function applySelectableSites() {
   }
   // Disabling choices must not edit the stored setting on the user's behalf.
   window.CustomSelect?.syncAll();
+  return true;
 }
 
 async function saveProxyConfig() {
@@ -3490,8 +3593,13 @@ async function saveProxyConfig() {
   }
 
   const saveBtn = document.getElementById('btn-save-cfg');
+  if (saveBtn.disabled) return;
+  clearSettingsFieldError();
+  fillDefaultChannel();
+  const submittedInputs = configInputSnapshot();
   saveBtn.disabled = true;
   saveBtn.textContent = t('status.saving');
+  let confirmed = false;
 
   try {
   // Build a patch object with only changed fields.
@@ -3509,41 +3617,108 @@ async function saveProxyConfig() {
     return;
   }
 
-    const r = await fetch('/api/proxy/config', {
+    await settingsRequest('/api/proxy/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch)
-    });
-
-    if (r.ok) {
-      showSaveStatus(t('status.saveOk'), 'success');
-      // Reload the full config from the server to stay in sync.
-      await loadProxyConfig();
-      if (Object.hasOwn(patch, 'active_site')) viewPlatformPinned = null;
-      // A saved active_site or key change also moves what every other tab is
-      // showing: those selectors are set from /api/sites, which until now was
-      // only read at page load, so a new platform only took effect after a
-      // manual refresh. Re-derive both here so the rest of the dashboard
-      // follows the save it just acknowledged.
-      await applySelectableSites();
-      await applyActiveSite();
-    } else {
-      const txt = await r.text();
-      showSaveStatus(t('status.saveFail') + txt, 'error');
+    }, true);
+    confirmed = true;
+    // Record exactly what was acknowledged, even if the follow-up GET fails.
+    for (const [path] of CONFIG_FIELDS) {
+      const value = deepGet(patch, path);
+      if (value !== undefined) deepSet(currentProxyConfig, path, value);
     }
+    const loaded = await loadProxyConfig({preserveInputs: submittedInputs, quiet: true});
+    if (Object.hasOwn(patch, 'active_site')) viewPlatformPinned = null;
+    const selectable = await applySelectableSites();
+    const active = await applyActiveSite();
+    updateConfigChangeCount();
+    const refreshed = loaded && selectable && active;
+    const success = Object.hasOwn(patch, 'host') || Object.hasOwn(patch, 'port') ? t('save.restart') : t('status.saveOk');
+    showSaveStatus(refreshed ? success : t('save.refreshFailed'), refreshed ? 'success' : 'error');
   } catch (e) {
-    showSaveStatus(t('status.saveFail') + e.message, 'error');
+    if (confirmed) showSaveStatus(t('save.refreshFailed'), 'error');
+    else showSettingsError(e);
   } finally {
     saveBtn.disabled = false;
     saveBtn.textContent = t('btn.save');
   }
 }
 
+// Settings endpoints return safe structured errors. Never display arbitrary
+// server text (which may be an HTML proxy error or contain submitted secrets).
+function settingsFailure(message, details = {}) {
+  return Object.assign(new Error(message), {settingsError: true}, details);
+}
+
+async function settingsRequest(url, options, writing = false) {
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch (_) {
+    throw settingsFailure(t(writing ? 'save.unknown' : 'save.loadFailed'), {unknown: writing});
+  }
+  if (response.ok) return response;
+  let detail;
+  try { detail = (await response.json()).error; } catch (_) { /* Not a settings response. */ }
+  if (detail && typeof detail.code === 'string' && typeof detail.message === 'string' && typeof detail.saved === 'boolean') {
+    throw settingsFailure(detail.saved ? t('save.refreshFailed') : detail.message, {field: detail.field, saved: detail.saved});
+  }
+  const unknown = writing && response.status >= 500;
+  const key = response.status === 401 || response.status === 403 ? 'save.permission'
+    : unknown ? 'save.unknown' : writing ? 'save.rejected' : 'save.loadFailed';
+  throw settingsFailure(t(key), {unknown});
+}
+
+let settingsFieldError = null;
+function clearSettingsFieldError() {
+  if (!settingsFieldError) return;
+  const {controls, note} = settingsFieldError;
+  for (const [control, describedBy] of controls) {
+    control.removeAttribute('aria-invalid');
+    if (describedBy) control.setAttribute('aria-describedby', describedBy);
+    else control.removeAttribute('aria-describedby');
+  }
+  note.remove();
+  settingsFieldError = null;
+}
+
+function showSettingsError(error, fallbackField) {
+  const message = error.settingsError ? error.message : t('save.rejected');
+  showSaveStatus(message, 'error');
+  const field = error.field || fallbackField;
+  const binding = CONFIG_FIELDS.find(([path]) => field === path || field?.startsWith(path + '['));
+  const id = binding?.[1] || (['autostart', 'notify'].includes(field) ? 'toggle-' + field : null);
+  const input = id && document.getElementById(id);
+  if (!input) return;
+  clearSettingsFieldError();
+  const note = document.createElement('p');
+  note.id = id + '-error';
+  note.className = 'settings-field-error';
+  note.textContent = message;
+  note.setAttribute('role', 'alert');
+  const focusTarget = window.CustomSelect?.instances.get(input)?.button || input;
+  const controls = [...new Set([input, focusTarget])].map(control => [control, control.getAttribute('aria-describedby')]);
+  settingsFieldError = {controls, note};
+  for (const [control, describedBy] of controls) {
+    control.setAttribute('aria-invalid', 'true');
+    control.setAttribute('aria-describedby', [describedBy, note.id].filter(Boolean).join(' '));
+  }
+  (input.closest('.input-with-btn, .theme-select, .runtime-controls > div') || input).insertAdjacentElement('afterend', note);
+  const section = input.closest('details');
+  if (section) section.open = true;
+  focusTarget.focus();
+}
+
+let saveStatusTimer = null;
 function showSaveStatus(msg, type) {
   const status = document.getElementById('save-status');
+  clearTimeout(saveStatusTimer);
   status.textContent = msg;
   status.className = 'save-status ' + type;
-  setTimeout(() => {
+  status.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  if (type !== 'success') return;
+  saveStatusTimer = setTimeout(() => {
     status.textContent = '';
     status.className = 'save-status';
   }, 4000);
@@ -3711,6 +3886,8 @@ function closeHistoryModal() {
 
 modalClose?.addEventListener('click', closeHistoryModal);
 modal?.addEventListener('close', function() {
+  // Native close events are queued; a newer dialog may already be open.
+  if (modal.open) return;
   modal.querySelector('.modal-footer')?.remove();
   const target = modalReturnFocus;
   modalReturnFocus = null;
@@ -3887,10 +4064,7 @@ async function exportConfig() {
   btn.textContent = t('status.exporting');
 
   try {
-    const response = await fetch('/api/config/export');
-    if (!response.ok) {
-      throw new Error(await response.text());
-    }
+    const response = await settingsRequest('/api/config/export');
 
     const blob = await response.blob();
     const downloadUrl = URL.createObjectURL(blob);
@@ -3904,7 +4078,7 @@ async function exportConfig() {
 
     showSaveStatus(t('status.exportOk'), 'success');
   } catch (e) {
-    showSaveStatus(t('status.exportFail') + e.message, 'error');
+    showSaveStatus(e.settingsError ? e.message : t('save.loadFailed'), 'error');
   } finally {
     btn.disabled = false;
     btn.textContent = t('btn.export');
@@ -3928,13 +4102,13 @@ async function handleConfigImport(file) {
 
   try {
     const content = await file.text();
-    const config = JSON.parse(content);
-    const response = await fetch('/api/config/import', {
+    let config;
+    try { config = JSON.parse(content); } catch (_) { throw settingsFailure(t('save.invalidJSON')); }
+    const response = await settingsRequest('/api/config/import', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ config, apply: false })
     });
-    if (!response.ok) throw new Error(await response.text());
     const preview = await response.json();
 
     const previewHtml = `
@@ -3942,6 +4116,7 @@ async function handleConfigImport(file) {
         <span class="detail-label">${t('modal.importConfirm')}</span>
       </div>
       <pre style="max-height: 300px; overflow: auto; padding: 12px; font-size: 12px; white-space: pre-wrap; word-break: break-all;">${escapeHtml(JSON.stringify(preview.config, null, 2))}</pre>
+      <p id="import-status" class="settings-field-error" role="alert"></p>
     `;
 
     modalBody.innerHTML = previewHtml;
@@ -3967,33 +4142,41 @@ async function handleConfigImport(file) {
     };
 
     const applyBtn = document.getElementById('btn-import-apply');
+    const importStatus = document.getElementById('import-status');
     applyBtn.onclick = async () => {
+      if (applyBtn.disabled) return;
       applyBtn.disabled = true;
+      const submittedInputs = configInputSnapshot();
+      let confirmed = false;
       try {
-        const response = await fetch('/api/config/import', {
+        await settingsRequest('/api/config/import', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ config: config, apply: true })
-        });
+        }, true);
+        confirmed = true;
 
-        if (!response.ok) {
-          throw new Error(await response.text());
-        }
+        // The user may have closed this preview and opened another dialog
+        // while the request was in flight. Do not close that newer dialog.
+        if (document.getElementById('import-status') === importStatus) closeHistoryModal();
 
-        closeHistoryModal();
-        const footer = modal.querySelector('.modal-footer');
-        if (footer) footer.remove();
-
-        showSaveStatus(t('status.importOk'), 'success');
-        await loadProxyConfig();
+        const loaded = await loadProxyConfig({preserveInputs: submittedInputs, quiet: true});
+        if (Object.hasOwn(config, 'active_site')) viewPlatformPinned = null;
+        const selectable = await applySelectableSites();
+        const active = await applyActiveSite();
+        const refreshed = loaded && selectable && active;
+        showSaveStatus(refreshed ? t('status.importOk') : t('save.refreshFailed'), refreshed ? 'success' : 'error');
       } catch (e) {
-        showSaveStatus(t('status.importFail') + e.message, 'error');
+        if (e.saved) confirmed = true;
+        const message = confirmed ? t('save.refreshFailed') : e.settingsError ? e.message : t('save.rejected');
+        if (document.getElementById('import-status') === importStatus) importStatus.textContent = message;
+        showSaveStatus(message, 'error');
       } finally {
-        applyBtn.disabled = false;
+        applyBtn.disabled = confirmed;
       }
     };
   } catch (e) {
-    showSaveStatus(t('status.importFail') + e.message, 'error');
+    showSaveStatus(e.settingsError ? e.message : t('save.loadFailed'), 'error');
   } finally {
     btn.disabled = false;
     btn.textContent = t('btn.import');
@@ -4272,29 +4455,26 @@ const FallbackModule = {
     }
 
     const saveBtn = document.querySelector('.fallback-actions .btn-primary');
+    if (saveBtn?.disabled) return;
     if (saveBtn) {
       saveBtn.disabled = true;
       saveBtn.textContent = t('fallback.saving');
     }
 
     try {
-      const patch = { fallbacks: { ...this.chains } };
-      const r = await fetch('/api/proxy/config', {
+      const submitted = JSON.parse(JSON.stringify(this.chains));
+      const patch = { fallbacks: submitted };
+      await settingsRequest('/api/proxy/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch)
-      });
-
-      if (r.ok) {
-        this.setStatus(t('fallback.saved'), 'success');
-        this.originalChains = JSON.parse(JSON.stringify(this.chains));
-        if (currentProxyConfig) currentProxyConfig.fallbacks = JSON.parse(JSON.stringify(this.chains));
-      } else {
-        const txt = await r.text();
-        this.setStatus(t('fallback.saveFailed') + ': ' + txt, 'error');
-      }
+      }, true);
+      this.originalChains = submitted;
+      if (currentProxyConfig) currentProxyConfig.fallbacks = submitted;
+      const pending = JSON.stringify(this.chains) !== JSON.stringify(submitted);
+      this.setStatus(t('fallback.saved') + (pending ? ' ' + t('fallback.unsaved') : ''), 'success');
     } catch (e) {
-      this.setStatus(t('fallback.saveFailed') + ': ' + e.message, 'error');
+      this.setStatus(e.settingsError ? e.message : t('save.rejected'), 'error');
     } finally {
       if (saveBtn) {
         saveBtn.disabled = false;

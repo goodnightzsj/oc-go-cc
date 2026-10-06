@@ -173,6 +173,9 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
 .save-status { margin-top: 10px; font-size: 12px; text-align: center; }
 .save-status.success { color: var(--ui-green); }
 .save-status.error { color: var(--ui-red); }
+.settings-field-error { color: var(--ui-red); font-size: 12px; line-height: 1.5; margin: 6px 0; overflow-wrap: anywhere; }
+.settings-field-error:empty { display: none; }
+[aria-invalid="true"] { border-color: var(--ui-red) !important; }
 
 /* ── Tab System ───────────────────────────────────────────── */
 .tab-content { display: none; }

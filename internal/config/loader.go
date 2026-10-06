@@ -35,6 +35,7 @@ const (
 	defaultCommandCodeBaseURL          = "https://api.commandcode.ai/provider/v1/chat/completions"
 	defaultCommandCodeAnthropicBaseURL = "https://api.commandcode.ai/provider/v1/messages"
 	defaultClinePassBaseURL            = "https://api.cline.bot/api/v1/chat/completions"
+	DefaultClinePassChannel            = "deepseek"
 )
 
 // envVarPattern matches ${ENV_VAR} placeholders in config values.
@@ -196,7 +197,7 @@ func applyEnvOverrides(cfg *Config) error {
 	if v := envValue("ROUTATIC_PROXY_AWS_BILLING_ENABLED"); v != "" {
 		enabled, err := strconv.ParseBool(v)
 		if err != nil {
-			return fmt.Errorf("ROUTATIC_PROXY_AWS_BILLING_ENABLED must be a boolean")
+			return invalid("", "invalid_environment", "ROUTATIC_PROXY_AWS_BILLING_ENABLED must be a boolean")
 		}
 		cfg.AWSBedrock.Billing.Enabled = enabled
 	}
@@ -297,6 +298,9 @@ func applyDefaults(cfg *Config) {
 	// rather than a chain of per-platform blocks is what makes "add a platform"
 	// a matter of adding rows instead of finding every branch that mentions one.
 	applySiteDefaults(cfg)
+	if strings.TrimSpace(cfg.ClinePass.ChannelPin) == "" {
+		cfg.ClinePass.ChannelPin = DefaultClinePassChannel
+	}
 	if cfg.Logging.Level == "" {
 		cfg.Logging.Level = defaultLogLevel
 	}
@@ -320,18 +324,18 @@ func applyDefaults(cfg *Config) {
 // validate checks that all required configuration fields are present.
 func validate(cfg *Config) error {
 	if cfg.Port < 0 || cfg.Port > 65535 {
-		return fmt.Errorf("port must be between 1 and 65535 (0 uses the default)")
+		return invalid("port", "port_range", "port must be between 1 and 65535 (0 uses the default)")
 	}
 	if len(cfg.EffectiveAPIKeys()) == 0 && len(cfg.OpenCodeGo.EffectiveAPIKeys()) == 0 &&
 		len(cfg.OpenCodeZen.EffectiveAPIKeys()) == 0 && len(cfg.AWSBedrock.EffectiveAPIKeys()) == 0 &&
 		len(cfg.OpenRouter.EffectiveAPIKeys()) == 0 && len(cfg.CommandCode.EffectiveAPIKeys()) == 0 &&
 		len(cfg.ClinePass.EffectiveAPIKeys()) == 0 {
-		return fmt.Errorf("api_key or api_keys is required (set via config file or ROUTATIC_PROXY_API_KEY env var; OC_GO_CC_API_KEY is still supported)")
+		return invalid("", "missing_api_key", "api_key or api_keys is required (set via config file or ROUTATIC_PROXY_API_KEY env var; OC_GO_CC_API_KEY is still supported)")
 	}
 	if cfg.AnthropicFirst.Enabled {
 		u, err := url.Parse(cfg.AnthropicFirst.BaseURL)
 		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-			return fmt.Errorf("anthropic_first.base_url must be an absolute http or https URL")
+			return invalid("anthropic_first.base_url", "absolute_url", "anthropic_first.base_url must be an absolute http or https URL")
 		}
 	}
 
@@ -345,43 +349,43 @@ func validate(cfg *Config) error {
 
 	// Validate provider-specific API keys
 	if err := validateSingleAPIKey(cfg.OpenCodeGo.APIKey); err != nil {
-		return fmt.Errorf("opencode_go.api_key: %w", err)
+		return AtField("opencode_go", err)
 	}
 	if err := validateAPIKeys(cfg.OpenCodeGo.APIKeys); err != nil {
-		return fmt.Errorf("opencode_go.api_keys: %w", err)
+		return AtField("opencode_go", err)
 	}
 
 	if err := validateSingleAPIKey(cfg.OpenCodeZen.APIKey); err != nil {
-		return fmt.Errorf("opencode_zen.api_key: %w", err)
+		return AtField("opencode_zen", err)
 	}
 	if err := validateAPIKeys(cfg.OpenCodeZen.APIKeys); err != nil {
-		return fmt.Errorf("opencode_zen.api_keys: %w", err)
+		return AtField("opencode_zen", err)
 	}
 
 	if err := validateSingleAPIKey(cfg.AWSBedrock.APIKey); err != nil {
-		return fmt.Errorf("aws_bedrock.api_key: %w", err)
+		return AtField("aws_bedrock", err)
 	}
 	if err := validateAPIKeys(cfg.AWSBedrock.APIKeys); err != nil {
-		return fmt.Errorf("aws_bedrock.api_keys: %w", err)
+		return AtField("aws_bedrock", err)
 	}
 	if err := cfg.AWSBedrock.Billing.Validate(); err != nil {
 		return err
 	}
 
 	if err := validateSingleAPIKey(cfg.OpenRouter.APIKey); err != nil {
-		return fmt.Errorf("openrouter.api_key: %w", err)
+		return AtField("openrouter", err)
 	}
 	if err := validateAPIKeys(cfg.OpenRouter.APIKeys); err != nil {
-		return fmt.Errorf("openrouter.api_keys: %w", err)
+		return AtField("openrouter", err)
 	}
 	if err := validateSingleAPIKey(cfg.OpenRouter.ManagementAPIKey); err != nil {
-		return fmt.Errorf("openrouter.management_api_key: %w", err)
+		return invalid("openrouter.management_api_key", "unresolved_env", "openrouter.management_api_key: %v", err)
 	}
 	if err := validateSingleAPIKey(cfg.CommandCode.APIKey); err != nil {
-		return fmt.Errorf("commandcode.api_key: %w", err)
+		return AtField("commandcode", err)
 	}
 	if err := validateAPIKeys(cfg.CommandCode.APIKeys); err != nil {
-		return fmt.Errorf("commandcode.api_keys: %w", err)
+		return AtField("commandcode", err)
 	}
 	for field, endpoint := range map[string]string{
 		"base_url":           cfg.CommandCode.BaseURL,
@@ -392,33 +396,33 @@ func validate(cfg *Config) error {
 		}
 		u, err := url.Parse(endpoint)
 		if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
-			return fmt.Errorf("commandcode.%s must be an absolute http or https URL without credentials or fragment", field)
+			return invalid("commandcode."+field, "plain_url", "commandcode.%s must be an absolute http or https URL without credentials or fragment", field)
 		}
 	}
-	if cfg.CommandCode.TimeoutMs < 0 || cfg.CommandCode.StreamTimeoutMs < 0 || cfg.CommandCode.StreamingTimeoutMs < 0 {
-		return fmt.Errorf("commandcode timeouts must not be negative")
+	if err := validateTimeouts("commandcode", cfg.CommandCode.TimeoutMs, cfg.CommandCode.StreamTimeoutMs, cfg.CommandCode.StreamingTimeoutMs); err != nil {
+		return err
 	}
 
 	if err := validateSingleAPIKey(cfg.ClinePass.APIKey); err != nil {
-		return fmt.Errorf("cline_pass.api_key: %w", err)
+		return AtField("cline_pass", err)
 	}
 	if err := validateAPIKeys(cfg.ClinePass.APIKeys); err != nil {
-		return fmt.Errorf("cline_pass.api_keys: %w", err)
+		return AtField("cline_pass", err)
 	}
 	if endpoint := cfg.ClinePass.BaseURL; endpoint != "" { // validate is also used on configs before defaults.
 		u, err := url.Parse(endpoint)
 		if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
-			return fmt.Errorf("cline_pass.base_url must be an absolute http or https URL without credentials or fragment")
+			return invalid("cline_pass.base_url", "plain_url", "cline_pass.base_url must be an absolute http or https URL without credentials or fragment")
 		}
 	}
-	if cfg.ClinePass.TimeoutMs < 0 || cfg.ClinePass.StreamTimeoutMs < 0 || cfg.ClinePass.StreamingTimeoutMs < 0 {
-		return fmt.Errorf("cline_pass timeouts must not be negative")
+	if err := validateTimeouts("cline_pass", cfg.ClinePass.TimeoutMs, cfg.ClinePass.StreamTimeoutMs, cfg.ClinePass.StreamingTimeoutMs); err != nil {
+		return err
 	}
 	if cfg.ClinePass.ChannelPinEnabled && strings.TrimSpace(cfg.ClinePass.ChannelPin) == "" {
-		return fmt.Errorf("cline_pass.channel_pin is required when channel_pin_enabled is true")
+		return invalid("cline_pass.channel_pin", "channel_required", "cline_pass.channel_pin is required when channel_pin_enabled is true")
 	}
-	if pin := cfg.ClinePass.ChannelPin; pin != "" && !channelSlugPattern.MatchString(pin) {
-		return fmt.Errorf("cline_pass.channel_pin must be a lowercase provider slug (letters, digits and hyphens)")
+	if pin := cfg.ClinePass.ChannelPin; pin != "" && !ValidChannelSlug(pin) {
+		return invalid("cline_pass.channel_pin", "channel_slug", "cline_pass.channel_pin must be a lowercase provider slug (letters, digits and hyphens)")
 	}
 
 	if err := validateOverrideMap("models", cfg.Models); err != nil {
@@ -455,7 +459,7 @@ func validate(cfg *Config) error {
 	// routing failure later, so it is caught where the typo was made.
 	if cfg.ActiveSite != "" {
 		if !SupportedProvider(cfg.ActiveSite) {
-			return fmt.Errorf("active_site %q is not a known platform", cfg.ActiveSite)
+			return invalid("active_site", "unknown_provider", "active_site %q is not a known platform", cfg.ActiveSite)
 		}
 		cfg.ActiveSite = NormalizeProvider(cfg.ActiveSite)
 	}
@@ -464,6 +468,23 @@ func validate(cfg *Config) error {
 }
 
 var channelSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
+// ValidChannelSlug reports whether a value is a single gateway channel name.
+func ValidChannelSlug(value string) bool {
+	return channelSlugPattern.MatchString(value)
+}
+
+func validateTimeouts(provider string, total, idle, streaming int) error {
+	for _, value := range []struct {
+		field string
+		ms    int
+	}{{"timeout_ms", total}, {"stream_timeout_ms", idle}, {"streaming_timeout_ms", streaming}} {
+		if value.ms < 0 {
+			return invalid(provider+"."+value.field, "non_negative", "%s timeouts must not be negative", provider)
+		}
+	}
+	return nil
+}
 
 // validateCostScenarios rejects cost_routing.scenarios keys that are not real
 // routing scenarios. A typo would otherwise sit in the config doing nothing,
@@ -474,7 +495,7 @@ func validateCostScenarios(cr *CostRoutingConfig) error {
 	}
 	for name := range cr.Scenarios {
 		if !slices.Contains(CostScenarioNames, name) {
-			return fmt.Errorf("cost_routing.scenarios has unknown scenario %q (valid: %s)",
+			return invalid("cost_routing.scenarios", "unknown_scenario", "cost_routing.scenarios has unknown scenario %q (valid: %s)",
 				name, strings.Join(CostScenarioNames, ", "))
 		}
 	}
@@ -489,7 +510,7 @@ func validateVisionModels(cfg *Config) error {
 		if model, ok := cfg.Models[scenario]; ok && !model.Vision {
 			resolved := ResolveModelConfig(model)
 			if !resolved.Vision {
-				return fmt.Errorf("models[%q] does not support vision but is configured for vision scenario", scenario)
+				return invalid(fmt.Sprintf("models[%q]", scenario), "vision_required", "models[%q] does not support vision but is configured for vision scenario", scenario)
 			}
 		}
 	}
@@ -531,7 +552,7 @@ func validateSingleAPIKey(key string) error {
 		return nil
 	}
 	if envVarPattern.MatchString(key) {
-		return fmt.Errorf("api_key contains unresolved env var %q — set the corresponding environment variable or use api_keys", key)
+		return invalid("api_key", "unresolved_env", "api_key contains unresolved env var — set the corresponding environment variable or use api_keys")
 	}
 	return nil
 }
@@ -539,10 +560,10 @@ func validateSingleAPIKey(key string) error {
 func validateAPIKeys(keys []string) error {
 	for i, key := range keys {
 		if key == "" {
-			return fmt.Errorf("api_keys[%d] is empty — each key must be a non-empty string", i)
+			return invalid(fmt.Sprintf("api_keys[%d]", i), "empty_key", "api_keys[%d] is empty — each key must be a non-empty string", i)
 		}
 		if envVarPattern.MatchString(key) {
-			return fmt.Errorf("api_keys[%d] contains unresolved env var %q — set the corresponding environment variable or remove this entry", i, key)
+			return invalid(fmt.Sprintf("api_keys[%d]", i), "unresolved_env", "api_keys[%d] contains unresolved env var — set the corresponding environment variable or remove this entry", i)
 		}
 	}
 	return nil
@@ -561,7 +582,7 @@ func validateModelOverrides(overrides map[string]ModelConfig) error {
 func validateModelFamilyOverrides(overrides map[string]ModelConfig) error {
 	for key := range overrides {
 		if strings.TrimSpace(key) == "" {
-			return fmt.Errorf("model_family_overrides has an empty family key")
+			return invalid("model_family_overrides", "empty_family", "model_family_overrides has an empty family key")
 		}
 	}
 	return validateOverrideMap("model_family_overrides", overrides)
@@ -581,24 +602,24 @@ func validateOverrideMap(label string, overrides map[string]ModelConfig) error {
 
 func validateModelConfig(label string, mc ModelConfig) error {
 	if strings.TrimSpace(mc.ModelID) == "" {
-		return fmt.Errorf("%s is missing required field model_id", label)
+		return invalid(label+".model_id", "model_required", "%s is missing required field model_id", label)
 	}
 	if !SupportedProvider(mc.Provider) {
-		return fmt.Errorf("%s has invalid provider %q", label, mc.Provider)
+		return invalid(label+".provider", "unknown_provider", "%s has invalid provider %q", label, mc.Provider)
 	}
 	switch mc.WireFormat {
 	case "", "auto", "openai", "anthropic", "responses", "gemini":
 	default:
-		return fmt.Errorf("%s has invalid wire_format %q", label, mc.WireFormat)
+		return invalid(label+".wire_format", "wire_format", "%s has invalid wire_format %q", label, mc.WireFormat)
 	}
 	if NormalizeProvider(mc.Provider) == "commandcode" && mc.WireFormat != "" && mc.WireFormat != "auto" && mc.WireFormat != "openai" && mc.WireFormat != "anthropic" {
-		return fmt.Errorf("%s: commandcode supports only openai or anthropic upstream wire formats", label)
+		return invalid(label+".wire_format", "commandcode_wire_format", "%s: commandcode supports only openai or anthropic upstream wire formats", label)
 	}
 	// ClinePass publishes no Messages endpoint, so anthropic is not a choice
 	// here: accepting it would send a model to an endpoint that does not exist
 	// and report the gateway's 401 as an auth problem.
 	if NormalizeProvider(mc.Provider) == "cline-pass" && mc.WireFormat != "" && mc.WireFormat != "auto" && mc.WireFormat != "openai" {
-		return fmt.Errorf("%s: cline-pass supports only the openai upstream wire format", label)
+		return invalid(label+".wire_format", "cline_wire_format", "%s: cline-pass supports only the openai upstream wire format", label)
 	}
 	return nil
 }

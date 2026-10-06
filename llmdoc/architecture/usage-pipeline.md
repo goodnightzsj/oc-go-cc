@@ -23,6 +23,24 @@
 - 平台 `cacheWrite5m/1h` 恒为 null → cache creation 按 input 价计。
 - 两处时区注意：`requests.start_time` 新写入行已是 UTC（`internal/storage/requests.go:54` 的 `rec.StartTime.UTC().Format(time.RFC3339Nano)`）；历史行可能带 +08:00，`internal/storage/pricing.go:12` 的解析器两者都接受。OpenCode 账单为 UTC；CompactGate `time` 为 UTC。
 
+## 面板时间筛选
+
+各页并非同一个时间窗口，不应仅凭“最近 7 天”文案直接对账。日期范围在各自时区包含结束日，API 上界为次日零点（左闭右开）；只查询本实例仍保留、且符合对应统计口径的记录。
+
+| 页面 | 默认与口径 | URL 状态 |
+|------|------------|----------|
+| 概览 | 默认最近 7 天，可选 7/30/90；从当前时刻回退 N×24 小时，非 N 个日历日；“今天”卡片单独按 UTC | 范围仅保存在当前页面内存，重载恢复 7 天 |
+| 历史请求 | 默认不限日期；日期输入与今天/7/30 天快捷按浏览器本地时区，快捷立即应用 | `from` / `to` |
+| 用量分析 | 默认含当天的 7 个 UTC 日历日；7/30/90 天快捷需应用；最多 92 天 | `afrom` / `ato`；小时/天粒度不写入 URL |
+| 性能 | 默认全部，可选最近 1h/24h/7d，按经过时长回退 | `range` |
+| 用量与账单的本地账本 | 默认最近 30 天，可选 7/30/90；与概览同为相对 N 天 | `days` |
+
+官方配额/账单独立于本地账本：按上游窗口展示；AWS 手动查询最近 30 个完整 UTC 日，不含当天。设置、降级策略没有时间筛选。来源：`internal/storage/analytics.go:52`、`internal/storage/latency.go:221`、`internal/gui/assets/app.js:1730`。
+
+历史和分析弹窗均支持“结束日期始终为今天”：开始日期固定，隐藏结束值及 URL 分别保存 `to=today` / `ato=today`；发请求时由 `resolvedEndDate` 按本地/UTC 解析为实际边界，不把标记传给后端。动态范围始终显式保存开始日期，即使它恰好等于初始化默认值，重载也不能滑动开始日期。页面可见时复用 3 秒轮询，跨日及重载自动推进结束日期；分析的固定范围仍按原方式手动刷新。见 `internal/gui/assets/app.js:1807`、`:2199`、`:5032`。
+
+checkbox 和日期输入是弹窗草稿，应用才生效；取消/Escape 后重开恢复已应用值。快捷日期退出动态模式，清除历史范围也清除动态状态。非法日期和倒置范围显式报错；动态分析跨日超过 92 天时提示调整开始日期，不截断范围或绕过后端限制。回归：`internal/gui/date_range_behavior_test.go:5`。
+
 ## 已知缺口
 
 - OpenRouter Execute/Stream均捕获request/response，旧ChatCompletionNonStreaming已删除；其它provider的捕获覆盖以各自实现为准。

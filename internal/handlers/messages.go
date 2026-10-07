@@ -655,7 +655,7 @@ func (h *MessagesHandler) handleStreaming(
 	scenario router.Scenario,
 	requestID string,
 ) {
-	clientCtx := r.Context()
+	clientCtx := h.metrics.WithUpstreamCounting(r.Context())
 	// The model the client named, recorded alongside the one that served it so a
 	// rerouted request can be told apart from a passthrough after the fact.
 	requestedModel := anthropicReq.Model
@@ -755,14 +755,24 @@ func (h *MessagesHandler) handleStreaming(
 		// actually consumed, so a failure after SSE payload started leaves a
 		// permanent one-sided gap unless the proxy records it too. Streams
 		// without reported usage cannot be assigned synthetic token counts.
-		recordStreamFailure := func(model config.ModelConfig, err error, action string) {
+		recordStreamFailure := func(model config.ModelConfig, err error, action string, failed bool) {
 			cancelAttempt()
-			if rw.usage.inputTokens == 0 && rw.usage.outputTokens == 0 &&
-				rw.usage.cacheReadInputTokens == 0 && rw.usage.cacheCreationInputTokens == 0 {
+			rw.mu.Lock()
+			hasUsage := rw.usage.inputTokens != 0 || rw.usage.outputTokens != 0 ||
+				rw.usage.cacheReadInputTokens != 0 || rw.usage.cacheCreationInputTokens != 0
+			// A client may disconnect after receiving an upstream error frame.
+			// Preserve that observed failure even if cancellation wins the read loop.
+			failed = failed || rw.streamErr != nil
+			rw.mu.Unlock()
+			// Count the known outcome independently of billing. Preserve the
+			// existing accounting for cancellations with reported usage.
+			if failed || hasUsage {
+				h.metrics.RecordFailureForModel(model.ModelID)
+			}
+			if !hasUsage {
 				h.logger.Warn(action+" streaming failed, no usage reported", "model", model.ModelID, "error", err)
 				return
 			}
-			h.metrics.RecordFailureForModel(model.ModelID)
 			h.logger.Warn("recording interrupted stream", "request_id", requestID, "record_id", recordID, "error", err)
 			if h.storage == nil {
 				return
@@ -801,7 +811,7 @@ func (h *MessagesHandler) handleStreaming(
 			}
 			if clientCtx.Err() != nil {
 				h.logger.Debug("client disconnected during " + action + " stream")
-				recordStreamFailure(model, err, action)
+				recordStreamFailure(model, err, action, false)
 				return false // abort
 			}
 			if err == transformer.ErrStreamIdle {
@@ -809,7 +819,7 @@ func (h *MessagesHandler) handleStreaming(
 					"model", model.ModelID, "idle_timeout", idleTimeout)
 				if rw.ssePayloadWritten {
 					h.sendStreamError(rw, "stream idle after SSE payload started")
-					recordStreamFailure(model, err, action)
+					recordStreamFailure(model, err, action, true)
 					return false // abort
 				}
 				return true // continue to next model
@@ -819,7 +829,7 @@ func (h *MessagesHandler) handleStreaming(
 					"model", model.ModelID)
 				if rw.ssePayloadWritten {
 					h.sendStreamError(rw, "empty stream after SSE payload started")
-					recordStreamFailure(model, err, action)
+					recordStreamFailure(model, err, action, true)
 					return false // abort
 				}
 				return true // continue to next model
@@ -827,7 +837,7 @@ func (h *MessagesHandler) handleStreaming(
 			h.logger.Warn(action+" streaming failed", "model", model.ModelID, "error", err)
 			if rw.ssePayloadWritten {
 				h.sendStreamError(rw, "all upstream models failed after SSE payload started")
-				recordStreamFailure(model, err, action)
+				recordStreamFailure(model, err, action, true)
 				return false // abort — cannot fallback after SSE payload started
 			}
 			return true // continue to next model
@@ -887,7 +897,7 @@ func (h *MessagesHandler) handleStreaming(
 				if clientCtx.Err() != nil {
 					complete(clientCtx, errProxy)
 					h.logger.Debug("client disconnected during stream")
-					recordStreamFailure(model, errProxy, wireFormat.String())
+					recordStreamFailure(model, errProxy, wireFormat.String(), false)
 					return
 				}
 				errProxy = fmt.Errorf("streaming timeout (%v) exceeded", timeout)
@@ -986,7 +996,7 @@ func (h *MessagesHandler) handleNonStreaming(
 	scenario router.Scenario,
 	requestID string,
 ) {
-	ctx := r.Context()
+	ctx := h.metrics.WithUpstreamCounting(r.Context())
 	startTime := time.Now()
 	// See handleStreaming: kept for the same reason, from the same source.
 	requestedModel := anthropicReq.Model

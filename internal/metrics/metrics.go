@@ -2,6 +2,7 @@
 package metrics
 
 import (
+	"context"
 	"math"
 	"slices"
 	"sync"
@@ -63,7 +64,6 @@ func (m *Metrics) RecordRequest(streaming bool) {
 // RecordSuccess records a successful request.
 func (m *Metrics) RecordSuccess(model string, latency time.Duration) {
 	m.requestsSuccess.Add(1)
-	m.upstreamCalls.Add(1)
 	m.recordLatency(latency)
 	m.recordModel(model)
 	m.recordModelLatency(model, latency)
@@ -71,6 +71,21 @@ func (m *Metrics) RecordSuccess(model string, latency time.Duration) {
 	m.modelSuccessMu.Lock()
 	m.modelSuccess[model]++
 	m.modelSuccessMu.Unlock()
+}
+
+type upstreamCounterKey struct{}
+
+// WithUpstreamCounting attributes provider HTTP attempts to this request's metrics.
+func (m *Metrics) WithUpstreamCounting(ctx context.Context) context.Context {
+	return context.WithValue(ctx, upstreamCounterKey{}, m)
+}
+
+// RecordUpstreamCall counts a RoundTrip, independently of its eventual outcome.
+// Provider calls outside a tracked gateway request do not affect its metrics.
+func RecordUpstreamCall(ctx context.Context) {
+	if m, _ := ctx.Value(upstreamCounterKey{}).(*Metrics); m != nil {
+		m.upstreamCalls.Add(1)
+	}
 }
 
 // RecordFailure records a failed request.

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/metrics"
 )
 
 // baseProvider holds shared HTTP transport and key rotation used by all
@@ -32,9 +33,18 @@ func newBaseProvider(atomic *config.AtomicConfig) baseProvider {
 	return baseProvider{
 		atomic: atomic,
 		httpClient: &http.Client{
-			Transport: transport,
+			Transport: &countingTransport{transport},
 		},
 	}
+}
+
+// Count at the shared transport boundary, including retries and redirects, but
+// not candidates rejected before sending. Embedded transport keeps idle cleanup.
+type countingTransport struct{ *http.Transport }
+
+func (t *countingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	metrics.RecordUpstreamCall(req.Context())
+	return t.Transport.RoundTrip(req)
 }
 
 // nextAPIKey returns the next API key in round-robin order from the given pool.

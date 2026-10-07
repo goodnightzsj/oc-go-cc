@@ -118,6 +118,14 @@ func TestStreamingBodyTimeoutAttribution(t *testing.T) {
 				if attempts.Load() != 1 {
 					t.Fatalf("attempts=%d; must not fallback after output", attempts.Load())
 				}
+				wantFailures := int64(1)
+				if parentCancel {
+					wantFailures = 0
+				}
+				snapshot := h.metrics.GetSnapshot()
+				if snapshot.RequestsFailed != wantFailures || snapshot.RequestsSuccess != 0 || snapshot.UpstreamCalls != 1 {
+					t.Errorf("stream outcome counters=%+v want failures=%d and one upstream call", snapshot, wantFailures)
+				}
 				want := "open"
 				if parentCancel {
 					want = "closed"
@@ -217,6 +225,9 @@ func TestNonStreamingAttemptTimeout(t *testing.T) {
 				}
 				if attempts.Load() != wantAttempts {
 					t.Fatalf("attempts=%d want=%d", attempts.Load(), wantAttempts)
+				}
+				if got := m.GetSnapshot().UpstreamCalls; got != int64(wantAttempts) {
+					t.Errorf("upstream_calls=%d want actual sends=%d", got, wantAttempts)
 				}
 				if state := h.fallbackHandler.GetCircuitStates()["opencode-go/synthetic-primary"]; state != "open" {
 					t.Fatalf("timed-out model circuit=%s", state)

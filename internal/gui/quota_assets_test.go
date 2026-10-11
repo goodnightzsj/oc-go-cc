@@ -118,8 +118,8 @@ func TestMultiKeyAccountCardsSitSideBySide(t *testing.T) {
 	if !strings.Contains(css, ".quota-accounts.quota-accounts-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; margin-top: 16px; }") {
 		t.Error("the account grid must put two keys side by side, with a top margin off the scope note")
 	}
-	if !strings.Contains(css, ".quota-accounts.quota-accounts-grid > :only-child") {
-		t.Error("a lone account must span the full width rather than sit in the left half")
+	if strings.Contains(css, ".quota-accounts.quota-accounts-grid > :only-child") {
+		t.Error("a lone account must keep the half width, not stretch across the page")
 	}
 	// The window grid keeps its default two-per-row; a three-column override
 	// would stretch the progress bars across a half-width card.

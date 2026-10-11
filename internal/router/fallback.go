@@ -146,6 +146,7 @@ type FallbackHandler struct {
 	cbTimeout       time.Duration
 	mu              sync.Mutex
 	atomicCfg       *config.AtomicConfig // Optional: for checking provider key counts
+	keyAvailability KeyAvailability      // Optional: live key health, preferred over the count
 }
 
 // NewFallbackHandler creates a handler that tries models in sequence until one
@@ -172,12 +173,49 @@ func NewFallbackHandler(logger *slog.Logger, cbThreshold int, cbTimeout time.Dur
 	}
 }
 
+// KeyAvailability reports whether a provider has any key able to take a request
+// right now. It is satisfied by the provider layer's key scheduler.
+//
+// The fallback handler needs this to decide whether a 401 says "this credential
+// is bad, try the platform's next model" or "this platform has nothing left to
+// try". Counting keys is not enough: a platform with three keys can have all
+// three resting, and continuing down its model chain would then spend one
+// rejected request per model.
+type KeyAvailability interface {
+	// HasUsableKey reports whether the named provider has at least one key that
+	// is not resting. A provider with no keys configured reports false.
+	HasUsableKey(provider string) bool
+}
+
 // SetAtomicConfig sets the atomic config for the fallback handler.
 // This is used to check provider key counts for auth error handling.
 func (h *FallbackHandler) SetAtomicConfig(cfg *config.AtomicConfig) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.atomicCfg = cfg
+}
+
+// SetKeyAvailability installs the key-health source used to decide whether an
+// auth failure should skip the rest of a provider's models.
+func (h *FallbackHandler) SetKeyAvailability(source KeyAvailability) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.keyAvailability = source
+}
+
+// providerHasUsableKey reports whether the provider can still take a request.
+//
+// Without a key-health source it falls back to the older rule - more than one
+// configured key means "another key may work" - so the handler behaves sensibly
+// when it is constructed without one.
+func (h *FallbackHandler) providerHasUsableKey(provider string) bool {
+	h.mu.Lock()
+	cfg, source := h.atomicCfg, h.keyAvailability
+	h.mu.Unlock()
+	if source != nil {
+		return source.HasUsableKey(provider)
+	}
+	return client.ProviderKeyCount(cfg, provider) > 1
 }
 
 // getCircuitBreaker returns or creates a circuit breaker for a model.
@@ -217,10 +255,11 @@ func (h *FallbackHandler) AllowAttempt(model config.ModelConfig) func(context.Co
 func (h *FallbackHandler) recordAttempt(ctx context.Context, model config.ModelConfig, err error, cb *CircuitBreaker, generation uint64) bool {
 	blockProvider := IsUsageLimitError(err)
 	if IsAuthError(err) {
-		h.mu.Lock()
-		cfg := h.atomicCfg
-		h.mu.Unlock()
-		blockProvider = client.ProviderKeyCount(cfg, client.Provider(model)) <= 1
+		// An auth failure says the credential is bad. Whether that should skip
+		// the platform's remaining models depends on whether another key can
+		// take over: if one can, the next model is worth trying; if none can,
+		// every further model would be rejected the same way.
+		blockProvider = !h.providerHasUsableKey(client.Provider(model))
 	}
 	cb.mu.Lock()
 	defer cb.mu.Unlock()

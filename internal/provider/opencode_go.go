@@ -25,7 +25,9 @@ type OpenCodeGoProvider struct {
 
 // NewOpenCodeGoProvider creates a new OpenCodeGoProvider.
 func NewOpenCodeGoProvider(atomic *config.AtomicConfig, capture *debug.CaptureLogger) *OpenCodeGoProvider {
-	return &OpenCodeGoProvider{baseProvider: newBaseProvider(atomic), capture: capture}
+	base := newBaseProvider(atomic)
+	registerPool(client.ProviderOpenCodeGo, base.keys)
+	return &OpenCodeGoProvider{baseProvider: base, capture: capture}
 }
 
 // Name returns the provider identifier.
@@ -68,16 +70,20 @@ func (p *OpenCodeGoProvider) Stream(ctx context.Context, req *types.MessageReque
 func (p *OpenCodeGoProvider) executeOpenAI(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeGo.BaseURL
-	apiKey := p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
+	sel, err := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
+	if err != nil {
+		return nil, err
+	}
 
 	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
 	if err != nil {
+		sel.Settle(nil)
 		return nil, fmt.Errorf("request transform failed: %w", err)
 	}
 	streamFalse := false
 	openaiReq.Stream = &streamFalse
 
-	resp, err := p.doRequest(ctx, endpoint, apiKey, openaiReq, false)
+	resp, err := p.doRequest(ctx, endpoint, sel, openaiReq, false)
 	if err != nil {
 		return nil, err
 	}
@@ -110,16 +116,20 @@ func (p *OpenCodeGoProvider) executeOpenAI(ctx context.Context, req *types.Messa
 func (p *OpenCodeGoProvider) streamOpenAI(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeGo.BaseURL
-	apiKey := p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
+	sel, rerr := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
+	if rerr != nil {
+		return nil, rerr
+	}
 
 	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
 	if err != nil {
+		sel.Settle(nil)
 		return nil, fmt.Errorf("request transform failed: %w", err)
 	}
 	streamTrue := true
 	openaiReq.Stream = &streamTrue
 
-	resp, err := p.doRequest(ctx, endpoint, apiKey, openaiReq, true)
+	resp, err := p.doRequest(ctx, endpoint, sel, openaiReq, true)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +170,11 @@ func (p *OpenCodeGoProvider) responsesRequest(ctx context.Context, req *types.Me
 		return nil, err
 	}
 	payload.Stream = stream
-	resp, err := p.doRequest(ctx, cfg.OpenCodeGo.ResponsesBaseURL, p.nextAPIKey(cfg.ProviderAPIKeys(p.Name())), payload, stream)
+	sel, rerr := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
+	if rerr != nil {
+		return nil, rerr
+	}
+	resp, err := p.doRequest(ctx, cfg.OpenCodeGo.ResponsesBaseURL, sel, payload, stream)
 	if err != nil {
 		return nil, err
 	}
@@ -172,10 +186,14 @@ func (p *OpenCodeGoProvider) responsesRequest(ctx context.Context, req *types.Me
 func (p *OpenCodeGoProvider) executeAnthropic(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeGo.AnthropicBaseURL
-	apiKey := p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
+	sel, rerr := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
+	if rerr != nil {
+		return nil, rerr
+	}
 
 	rawBody, err := anthropicPayload(ctx, req, model, false)
 	if err != nil {
+		sel.Settle(nil)
 		return nil, fmt.Errorf("failed to marshal anthropic request: %w", err)
 	}
 
@@ -184,21 +202,25 @@ func (p *OpenCodeGoProvider) executeAnthropic(ctx context.Context, req *types.Me
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-	httpReq.Header.Set("x-api-key", apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+sel.Key())
+	httpReq.Header.Set("x-api-key", sel.Key())
 	client.SetProviderHeaders(httpReq, p.Name())
 	client.SetAnthropicHeaders(httpReq)
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
+		sel.Settle(err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
+		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
+		sel.Settle(apiErr)
+		return nil, apiErr
 	}
+	sel.Settle(nil)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -211,10 +233,14 @@ func (p *OpenCodeGoProvider) executeAnthropic(ctx context.Context, req *types.Me
 func (p *OpenCodeGoProvider) streamAnthropic(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeGo.AnthropicBaseURL
-	apiKey := p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
+	sel, rerr := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
+	if rerr != nil {
+		return nil, rerr
+	}
 
 	rawBody, err := anthropicPayload(ctx, req, model, true)
 	if err != nil {
+		sel.Settle(nil)
 		return nil, fmt.Errorf("failed to marshal anthropic request: %w", err)
 	}
 
@@ -223,8 +249,8 @@ func (p *OpenCodeGoProvider) streamAnthropic(ctx context.Context, req *types.Mes
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-	httpReq.Header.Set("x-api-key", apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+sel.Key())
+	httpReq.Header.Set("x-api-key", sel.Key())
 	httpReq.Header.Set("Accept", "text/event-stream")
 	client.SetProviderHeaders(httpReq, p.Name())
 	client.SetAnthropicHeaders(httpReq)
@@ -235,14 +261,18 @@ func (p *OpenCodeGoProvider) streamAnthropic(ctx context.Context, req *types.Mes
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
+		sel.Settle(err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
+		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
+		sel.Settle(apiErr)
+		return nil, apiErr
 	}
+	sel.Settle(nil)
 
 	if p.capture != nil {
 		return client.CaptureBody(resp.Body, func(data []byte) {
@@ -259,9 +289,12 @@ func rid(ctx context.Context) string {
 	return core.RequestMetadataFromContext(ctx).RequestID
 }
 
-func (p *OpenCodeGoProvider) doRequest(ctx context.Context, endpoint, apiKey string, req any, stream bool) (*http.Response, error) {
+// doRequest sends one request and settles the key reservation with the result,
+// so every caller reports the key's health without repeating the plumbing.
+func (p *OpenCodeGoProvider) doRequest(ctx context.Context, endpoint string, sel *selection, req any, stream bool) (*http.Response, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
+		sel.Settle(nil) // never sent: no verdict for the key
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 	if p.capture != nil {
@@ -273,7 +306,7 @@ func (p *OpenCodeGoProvider) doRequest(ctx context.Context, endpoint, apiKey str
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+sel.Key())
 	client.SetProviderHeaders(httpReq, p.Name())
 	if stream {
 		httpReq.Header.Set("Accept", "text/event-stream")
@@ -281,14 +314,18 @@ func (p *OpenCodeGoProvider) doRequest(ctx context.Context, endpoint, apiKey str
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
+		sel.Settle(err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
+		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
+		sel.Settle(apiErr)
+		return nil, apiErr
 	}
+	sel.Settle(nil)
 
 	if p.capture != nil {
 		resp.Body = client.CaptureBody(resp.Body, func(data []byte) {

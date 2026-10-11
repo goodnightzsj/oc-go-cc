@@ -24,7 +24,9 @@ type OpenRouterProvider struct {
 }
 
 func NewOpenRouterProvider(atomic *config.AtomicConfig, capture *debug.CaptureLogger) *OpenRouterProvider {
-	return &OpenRouterProvider{baseProvider: newBaseProvider(atomic), capture: capture}
+	base := newBaseProvider(atomic)
+	registerPool(client.ProviderOpenRouter, base.keys)
+	return &OpenRouterProvider{baseProvider: base, capture: capture}
 }
 
 func (p *OpenRouterProvider) Name() string { return client.ProviderOpenRouter }
@@ -62,10 +64,18 @@ func (p *OpenRouterProvider) request(ctx context.Context, req *types.MessageRequ
 		return nil, fmt.Errorf("openrouter supports only the openai upstream wire format")
 	}
 	cfg := p.atomic.Get()
-	key := p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
+	sel, err := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
+	if err != nil {
+		return nil, err
+	}
+	key := sel.Key()
 	if key == "" {
 		return nil, fmt.Errorf("no API key configured for provider %q", p.Name())
 	}
+	// Every path out settles the reservation: a local transform failure
+	// releases it with no verdict, the send result reports the key's health.
+	var settleErr error
+	defer func() { sel.Settle(settleErr) }()
 	endpoint := strings.TrimRight(cfg.OpenRouter.BaseURL, "/")
 	if strings.HasSuffix(endpoint, "/v1") {
 		endpoint += "/chat/completions"
@@ -94,15 +104,20 @@ func (p *OpenRouterProvider) request(ctx context.Context, req *types.MessageRequ
 	}
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
+		settleErr = err
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
 		defer func() { _ = resp.Body.Close() }()
 		body, readErr := io.ReadAll(resp.Body)
+		retryAfter := resp.Header.Get("Retry-After")
 		if readErr != nil {
+			settleErr = &client.APIError{StatusCode: resp.StatusCode, RetryAfter: retryAfter}
 			return nil, fmt.Errorf("read upstream error: %w: %w", readErr, &client.APIError{StatusCode: resp.StatusCode, Body: string(body)})
 		}
-		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(body)}
+		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(body), RetryAfter: retryAfter}
+		settleErr = apiErr
+		return nil, apiErr
 	}
 	if p.capture != nil {
 		return client.CaptureBody(resp.Body, func(data []byte) {

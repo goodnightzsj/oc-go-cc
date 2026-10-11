@@ -1369,3 +1369,33 @@ func TestValidateCostScenarios_NoCostRoutingBlockIsFine(t *testing.T) {
 		t.Fatalf("config without cost_routing should validate, got: %v", err)
 	}
 }
+
+// Key scheduling accepts only the implemented strategy. A typo must fail at
+// load time rather than silently picking a different rule than the operator
+// asked for, which is the same reason the cost-routing keys are validated.
+func TestKeyStrategyValidation(t *testing.T) {
+	accept := []string{
+		`{"cline_pass":{"api_key":"k"}}`,
+		`{"cline_pass":{"api_key":"k","key_strategy":"fill_first"}}`,
+	}
+	for _, body := range accept {
+		if _, err := LoadJSON([]byte(body)); err != nil {
+			t.Errorf("config %s was rejected: %v", body, err)
+		}
+	}
+	reject := []struct{ body, want string }{
+		{`{"cline_pass":{"api_key":"k","key_strategy":"round_robin"}}`, "cline_pass.key_strategy"},
+		{`{"opencode_go":{"api_key":"k","key_strategy":"nope"}}`, "opencode_go.key_strategy"},
+		{`{"commandcode":{"api_key":"k","key_strategy":"fill-first"}}`, "commandcode.key_strategy"},
+	}
+	for _, tc := range reject {
+		_, err := LoadJSON([]byte(tc.body))
+		if err == nil {
+			t.Errorf("config %s was accepted; an unimplemented strategy must be rejected", tc.body)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("error for %s = %q, want it to name %q", tc.body, err, tc.want)
+		}
+	}
+}

@@ -25,7 +25,9 @@ type CommandCodeProvider struct {
 }
 
 func NewCommandCodeProvider(atomic *config.AtomicConfig, capture *debug.CaptureLogger) *CommandCodeProvider {
-	p := &CommandCodeProvider{baseProvider: newBaseProvider(atomic), capture: capture}
+	base := newBaseProvider(atomic)
+	registerPool(client.ProviderCommandCode, base.keys)
+	p := &CommandCodeProvider{baseProvider: base, capture: capture}
 	// Redirects must not move a dedicated credential to another endpoint.
 	p.httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return p
@@ -75,14 +77,19 @@ func (p *CommandCodeProvider) Stream(ctx context.Context, req *types.MessageRequ
 
 func (p *CommandCodeProvider) request(ctx context.Context, req *types.MessageRequest, model config.ModelConfig, stream bool) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
-	key := p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
-	if key == "" {
-		return nil, fmt.Errorf("no API key configured for commandcode")
+	sel, err := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
+	if err != nil {
+		return nil, err
 	}
+	key := sel.Key()
+	// Settled on every path out of this function: an encode failure releases the
+	// reservation with no verdict, and the send result below reports the key's
+	// health. Leaking a reservation would keep the key counted as in-flight.
+	var settleErr error
+	defer func() { sel.Settle(settleErr) }()
 	format := core.ModelWireFormat(p, model)
 	endpoint := cfg.CommandCode.BaseURL
 	var payload []byte
-	var err error
 	switch format {
 	case core.WireFormatAnthropic:
 		endpoint = cfg.CommandCode.AnthropicBaseURL
@@ -98,6 +105,8 @@ func (p *CommandCodeProvider) request(ctx context.Context, req *types.MessageReq
 		return nil, fmt.Errorf("commandcode does not provide %s upstream format", format)
 	}
 	if err != nil {
+		// A local encode failure never reached the upstream, so the key carries
+		// no verdict - settleErr stays nil and the reservation is released.
 		return nil, fmt.Errorf("encode commandcode request: %w", err)
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
@@ -121,15 +130,19 @@ func (p *CommandCodeProvider) request(ctx context.Context, req *types.MessageReq
 	}
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
+		settleErr = err
 		return nil, fmt.Errorf("commandcode request failed: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer func() { _ = resp.Body.Close() }()
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		if err != nil {
+			settleErr = &client.APIError{StatusCode: resp.StatusCode, RetryAfter: resp.Header.Get("Retry-After")}
 			return nil, fmt.Errorf("read commandcode error (HTTP %d): %w", resp.StatusCode, err)
 		}
-		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(body)}
+		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(body), RetryAfter: resp.Header.Get("Retry-After")}
+		settleErr = apiErr
+		return nil, apiErr
 	}
 	if p.capture != nil {
 		return client.CaptureBody(resp.Body, func(data []byte) {

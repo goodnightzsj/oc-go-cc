@@ -139,12 +139,35 @@ type ModelConfig struct {
 	AnthropicToolsDisabled bool            `json:"anthropic_tools_disabled"`
 }
 
+// Key scheduling strategies. Only fill-first is implemented: the earliest
+// configured key that is not resting takes the request, so a working key keeps
+// its traffic. It replaced plain round-robin, which moved every other request
+// onto the next key regardless of how the previous one was doing - a healthy
+// key's traffic was split for no reason, and a failing key was only noticed
+// every other request.
+const (
+	KeyStrategyFillFirst = "fill_first"
+)
+
+// keyStrategyOf resolves a configured strategy, defaulting to fill-first. An
+// empty value is the documented default rather than an error, so an existing
+// config keeps working unchanged.
+func keyStrategyOf(configured string) string {
+	if v := strings.TrimSpace(configured); v != "" {
+		return v
+	}
+	return KeyStrategyFillFirst
+}
+
 // AWSBedrockConfig holds the upstream AWS Bedrock Mantle API settings.
 type AWSBedrockConfig struct {
-	BaseURL            string           `json:"base_url"`
-	AnthropicBaseURL   string           `json:"anthropic_base_url,omitempty"`
-	APIKey             string           `json:"api_key,omitempty"`
-	APIKeys            []string         `json:"api_keys,omitempty"`
+	BaseURL          string   `json:"base_url"`
+	AnthropicBaseURL string   `json:"anthropic_base_url,omitempty"`
+	APIKey           string   `json:"api_key,omitempty"`
+	APIKeys          []string `json:"api_keys,omitempty"`
+	// KeyStrategy names how requests are scheduled across this platform's keys.
+	// Empty means "fill_first"; see the constants above.
+	KeyStrategy        string           `json:"key_strategy,omitempty"`
 	ProjectID          string           `json:"project_id,omitempty"`
 	WireFormat         string           `json:"wire_format,omitempty"` // "openai" (default), "anthropic"
 	TimeoutMs          int              `json:"timeout_ms"`
@@ -219,14 +242,17 @@ func (c *AWSBedrockConfig) EffectiveAPIKeys() []string {
 
 // OpenCodeGoConfig holds the upstream OpenCode Go API settings.
 type OpenCodeGoConfig struct {
-	BaseURL            string   `json:"base_url"`
-	AnthropicBaseURL   string   `json:"anthropic_base_url"`
-	ResponsesBaseURL   string   `json:"responses_base_url"`
-	APIKey             string   `json:"api_key,omitempty"`
-	APIKeys            []string `json:"api_keys,omitempty"`
-	TimeoutMs          int      `json:"timeout_ms"`
-	StreamTimeoutMs    int      `json:"stream_timeout_ms"`
-	StreamingTimeoutMs int      `json:"streaming_timeout_ms,omitempty"`
+	BaseURL          string   `json:"base_url"`
+	AnthropicBaseURL string   `json:"anthropic_base_url"`
+	ResponsesBaseURL string   `json:"responses_base_url"`
+	APIKey           string   `json:"api_key,omitempty"`
+	APIKeys          []string `json:"api_keys,omitempty"`
+	// KeyStrategy names how requests are scheduled across this platform's keys.
+	// Empty means "fill_first"; see the constants above.
+	KeyStrategy        string `json:"key_strategy,omitempty"`
+	TimeoutMs          int    `json:"timeout_ms"`
+	StreamTimeoutMs    int    `json:"stream_timeout_ms"`
+	StreamingTimeoutMs int    `json:"streaming_timeout_ms,omitempty"`
 }
 
 // EffectiveAPIKeys returns the pool of API keys for OpenCode Go: the single
@@ -237,13 +263,16 @@ func (c *OpenCodeGoConfig) EffectiveAPIKeys() []string {
 
 // OpenRouterConfig holds the upstream OpenRouter API settings.
 type OpenRouterConfig struct {
-	BaseURL            string   `json:"base_url"`
-	APIKey             string   `json:"api_key,omitempty"`
-	APIKeys            []string `json:"api_keys,omitempty"`
-	ManagementAPIKey   string   `json:"management_api_key,omitempty"` // Account credits only; never used for inference.
-	TimeoutMs          int      `json:"timeout_ms"`
-	StreamTimeoutMs    int      `json:"stream_timeout_ms"`
-	StreamingTimeoutMs int      `json:"streaming_timeout_ms,omitempty"`
+	BaseURL string   `json:"base_url"`
+	APIKey  string   `json:"api_key,omitempty"`
+	APIKeys []string `json:"api_keys,omitempty"`
+	// KeyStrategy names how requests are scheduled across this platform's keys.
+	// Empty means "fill_first"; see the constants above.
+	KeyStrategy        string `json:"key_strategy,omitempty"`
+	ManagementAPIKey   string `json:"management_api_key,omitempty"` // Account credits only; never used for inference.
+	TimeoutMs          int    `json:"timeout_ms"`
+	StreamTimeoutMs    int    `json:"stream_timeout_ms"`
+	StreamingTimeoutMs int    `json:"streaming_timeout_ms,omitempty"`
 }
 
 // EffectiveAPIKeys returns the pool of API keys for OpenRouter: the single
@@ -255,14 +284,17 @@ func (c *OpenRouterConfig) EffectiveAPIKeys() []string {
 // CommandCodeConfig uses the official Provider API, with its own credentials.
 // BaseURL and AnthropicBaseURL are complete endpoint URLs, like OpenCode Go.
 type CommandCodeConfig struct {
-	BaseURL            string   `json:"base_url"`
-	AnthropicBaseURL   string   `json:"anthropic_base_url"`
-	APIKey             string   `json:"api_key,omitempty"`
-	APIKeys            []string `json:"api_keys,omitempty"`
-	TimeoutMs          int      `json:"timeout_ms"`
-	StreamTimeoutMs    int      `json:"stream_timeout_ms"`
-	StreamingTimeoutMs int      `json:"streaming_timeout_ms,omitempty"`
-	ZeroDataRetention  bool     `json:"zero_data_retention"`
+	BaseURL          string   `json:"base_url"`
+	AnthropicBaseURL string   `json:"anthropic_base_url"`
+	APIKey           string   `json:"api_key,omitempty"`
+	APIKeys          []string `json:"api_keys,omitempty"`
+	// KeyStrategy names how requests are scheduled across this platform's keys.
+	// Empty means "fill_first"; see the constants above.
+	KeyStrategy        string `json:"key_strategy,omitempty"`
+	TimeoutMs          int    `json:"timeout_ms"`
+	StreamTimeoutMs    int    `json:"stream_timeout_ms"`
+	StreamingTimeoutMs int    `json:"streaming_timeout_ms,omitempty"`
+	ZeroDataRetention  bool   `json:"zero_data_retention"`
 }
 
 // EffectiveAPIKeys returns the pool of API keys for CommandCode: the single
@@ -283,12 +315,15 @@ func (c *CommandCodeConfig) EffectiveAPIKeys() []string {
 // cline-cloud) would be a separate site descriptor bound to the same
 // EffectiveAPIKeys, because they share this base URL and this credential.
 type ClinePassConfig struct {
-	BaseURL            string   `json:"base_url"`
-	APIKey             string   `json:"api_key,omitempty"`
-	APIKeys            []string `json:"api_keys,omitempty"`
-	TimeoutMs          int      `json:"timeout_ms"`
-	StreamTimeoutMs    int      `json:"stream_timeout_ms"`
-	StreamingTimeoutMs int      `json:"streaming_timeout_ms,omitempty"`
+	BaseURL string   `json:"base_url"`
+	APIKey  string   `json:"api_key,omitempty"`
+	APIKeys []string `json:"api_keys,omitempty"`
+	// KeyStrategy names how requests are scheduled across this platform's keys.
+	// Empty means "fill_first"; see the constants above.
+	KeyStrategy        string `json:"key_strategy,omitempty"`
+	TimeoutMs          int    `json:"timeout_ms"`
+	StreamTimeoutMs    int    `json:"stream_timeout_ms"`
+	StreamingTimeoutMs int    `json:"streaming_timeout_ms,omitempty"`
 	// Channel pinning requests a gateway restriction, not a guarantee that
 	// Cline honors it. Actual routing is observed from upstream metadata.
 	ChannelPinEnabled bool   `json:"channel_pin_enabled,omitempty"`
@@ -303,15 +338,18 @@ func (c *ClinePassConfig) EffectiveAPIKeys() []string {
 
 // OpenCodeZenConfig holds the upstream OpenCode Zen API settings.
 type OpenCodeZenConfig struct {
-	BaseURL            string   `json:"base_url"`
-	AnthropicBaseURL   string   `json:"anthropic_base_url"`
-	ResponsesBaseURL   string   `json:"responses_base_url"`
-	GeminiBaseURL      string   `json:"gemini_base_url"`
-	APIKey             string   `json:"api_key,omitempty"`
-	APIKeys            []string `json:"api_keys,omitempty"`
-	TimeoutMs          int      `json:"timeout_ms"`
-	StreamTimeoutMs    int      `json:"stream_timeout_ms"`
-	StreamingTimeoutMs int      `json:"streaming_timeout_ms,omitempty"`
+	BaseURL          string   `json:"base_url"`
+	AnthropicBaseURL string   `json:"anthropic_base_url"`
+	ResponsesBaseURL string   `json:"responses_base_url"`
+	GeminiBaseURL    string   `json:"gemini_base_url"`
+	APIKey           string   `json:"api_key,omitempty"`
+	APIKeys          []string `json:"api_keys,omitempty"`
+	// KeyStrategy names how requests are scheduled across this platform's keys.
+	// Empty means "fill_first"; see the constants above.
+	KeyStrategy        string `json:"key_strategy,omitempty"`
+	TimeoutMs          int    `json:"timeout_ms"`
+	StreamTimeoutMs    int    `json:"stream_timeout_ms"`
+	StreamingTimeoutMs int    `json:"streaming_timeout_ms,omitempty"`
 }
 
 // EffectiveAPIKeys returns the pool of API keys for OpenCode Zen: the single

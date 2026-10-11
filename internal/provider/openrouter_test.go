@@ -26,12 +26,11 @@ func TestOpenRouterContract(t *testing.T) {
 				if suffix == "" {
 					wantPath = "/"
 				}
-				wantKey := "Bearer synthetic-a"
-				if calls%2 == 0 {
-					wantKey = "Bearer synthetic-b"
-				}
-				if r.URL.Path != wantPath || r.Header.Get("Authorization") != wantKey {
-					t.Error("endpoint or dedicated key rotation changed")
+				// Fill-first: the first key keeps serving while it works. The
+				// rule this replaced alternated to synthetic-b on every other
+				// call, which split a healthy key's traffic for no reason.
+				if r.URL.Path != wantPath || r.Header.Get("Authorization") != "Bearer synthetic-a" {
+					t.Errorf("endpoint or key selection changed: path=%q auth=%q", r.URL.Path, r.Header.Get("Authorization"))
 				}
 				for key, want := range map[string]string{
 					"HTTP-Referer": "https://github.com/routatic/proxy", "X-OpenRouter-Title": "routatic-proxy",

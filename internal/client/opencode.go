@@ -72,6 +72,11 @@ const (
 type APIError struct {
 	StatusCode int
 	Body       string
+	// RetryAfter is the upstream's Retry-After header, verbatim, when it sent
+	// one. It is carried rather than parsed here because only the key scheduler
+	// has a use for it, and the value may be either delta-seconds or an HTTP
+	// date; the scheduler handles both.
+	RetryAfter string
 }
 
 func (e *APIError) Error() string {

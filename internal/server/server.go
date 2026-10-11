@@ -63,6 +63,10 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 	openCodeClient := client.NewOpenCodeClient(atomic)
 	fallbackHandler := router.NewFallbackHandler(logger, 3, 30*time.Second)
 	fallbackHandler.SetAtomicConfig(atomic)
+	// The handler decides whether a 401 should skip a platform's remaining
+	// models, and that depends on whether another key can take over - a live
+	// question the config's key count cannot answer.
+	fallbackHandler.SetKeyAvailability(provider.NewKeyAvailability(atomic))
 
 	// Register providers.
 	providerRegistry := core.NewProviderRegistry()

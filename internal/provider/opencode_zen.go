@@ -25,7 +25,9 @@ type OpenCodeZenProvider struct {
 
 // NewOpenCodeZenProvider creates a new OpenCodeZenProvider.
 func NewOpenCodeZenProvider(atomic *config.AtomicConfig) *OpenCodeZenProvider {
-	return &OpenCodeZenProvider{baseProvider: newBaseProvider(atomic)}
+	base := newBaseProvider(atomic)
+	registerPool(client.ProviderOpenCodeZen, base.keys)
+	return &OpenCodeZenProvider{baseProvider: base}
 }
 
 // Name returns the provider identifier.
@@ -79,16 +81,20 @@ func (p *OpenCodeZenProvider) Stream(ctx context.Context, req *types.MessageRequ
 func (p *OpenCodeZenProvider) executeOpenAI(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeZen.BaseURL
-	apiKey := p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
+	sel, err := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
+	if err != nil {
+		return nil, err
+	}
 
 	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
 	if err != nil {
+		sel.Settle(nil)
 		return nil, fmt.Errorf("request transform failed: %w", err)
 	}
 	streamFalse := false
 	openaiReq.Stream = &streamFalse
 
-	resp, err := p.doRequest(ctx, endpoint, apiKey, openaiReq, false)
+	resp, err := p.doRequest(ctx, endpoint, sel, openaiReq, false)
 	if err != nil {
 		return nil, err
 	}
@@ -121,16 +127,20 @@ func (p *OpenCodeZenProvider) executeOpenAI(ctx context.Context, req *types.Mess
 func (p *OpenCodeZenProvider) streamOpenAI(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeZen.BaseURL
-	apiKey := p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
+	sel, rerr := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
+	if rerr != nil {
+		return nil, rerr
+	}
 
 	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
 	if err != nil {
+		sel.Settle(nil)
 		return nil, fmt.Errorf("request transform failed: %w", err)
 	}
 	streamTrue := true
 	openaiReq.Stream = &streamTrue
 
-	resp, err := p.doRequest(ctx, endpoint, apiKey, openaiReq, true)
+	resp, err := p.doRequest(ctx, endpoint, sel, openaiReq, true)
 	if err != nil {
 		return nil, err
 	}
@@ -143,10 +153,14 @@ func (p *OpenCodeZenProvider) streamOpenAI(ctx context.Context, req *types.Messa
 func (p *OpenCodeZenProvider) executeAnthropic(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeZen.AnthropicBaseURL
-	apiKey := p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
+	sel, rerr := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
+	if rerr != nil {
+		return nil, rerr
+	}
 
 	rawBody, err := anthropicPayload(ctx, req, model, false)
 	if err != nil {
+		sel.Settle(nil)
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
@@ -155,8 +169,8 @@ func (p *OpenCodeZenProvider) executeAnthropic(ctx context.Context, req *types.M
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-	httpReq.Header.Set("x-api-key", apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+sel.Key())
+	httpReq.Header.Set("x-api-key", sel.Key())
 	client.SetProviderHeaders(httpReq, p.Name())
 	client.SetAnthropicHeaders(httpReq)
 
@@ -182,10 +196,14 @@ func (p *OpenCodeZenProvider) executeAnthropic(ctx context.Context, req *types.M
 func (p *OpenCodeZenProvider) streamAnthropic(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeZen.AnthropicBaseURL
-	apiKey := p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
+	sel, rerr := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
+	if rerr != nil {
+		return nil, rerr
+	}
 
 	rawBody, err := anthropicPayload(ctx, req, model, true)
 	if err != nil {
+		sel.Settle(nil)
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
@@ -194,8 +212,8 @@ func (p *OpenCodeZenProvider) streamAnthropic(ctx context.Context, req *types.Me
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-	httpReq.Header.Set("x-api-key", apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+sel.Key())
+	httpReq.Header.Set("x-api-key", sel.Key())
 	httpReq.Header.Set("Accept", "text/event-stream")
 	client.SetProviderHeaders(httpReq, p.Name())
 	client.SetAnthropicHeaders(httpReq)
@@ -219,15 +237,19 @@ func (p *OpenCodeZenProvider) streamAnthropic(ctx context.Context, req *types.Me
 func (p *OpenCodeZenProvider) executeResponses(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeZen.ResponsesBaseURL
-	apiKey := p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
+	sel, rerr := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
+	if rerr != nil {
+		return nil, rerr
+	}
 
 	responsesReq, err := transformer.AnthropicToResponses(req, model)
 	if err != nil {
+		sel.Settle(nil)
 		return nil, err
 	}
 	responsesReq.Stream = false
 
-	resp, err := p.doJSONRequest(ctx, endpoint, apiKey, responsesReq)
+	resp, err := p.doJSONRequest(ctx, endpoint, sel, responsesReq)
 	if err != nil {
 		return nil, err
 	}
@@ -261,15 +283,19 @@ func (p *OpenCodeZenProvider) executeResponses(ctx context.Context, req *types.M
 func (p *OpenCodeZenProvider) streamResponses(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeZen.ResponsesBaseURL
-	apiKey := p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
+	sel, rerr := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
+	if rerr != nil {
+		return nil, rerr
+	}
 
 	responsesReq, err := transformer.AnthropicToResponses(req, model)
 	if err != nil {
+		sel.Settle(nil)
 		return nil, err
 	}
 	responsesReq.Stream = true
 
-	resp, err := p.doJSONRequest(ctx, endpoint, apiKey, responsesReq)
+	resp, err := p.doJSONRequest(ctx, endpoint, sel, responsesReq)
 	if err != nil {
 		return nil, err
 	}
@@ -282,12 +308,15 @@ func (p *OpenCodeZenProvider) streamResponses(ctx context.Context, req *types.Me
 func (p *OpenCodeZenProvider) executeGemini(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeZen.GeminiBaseURL + "/" + model.ModelID
-	apiKey := p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
+	sel, rerr := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
+	if rerr != nil {
+		return nil, rerr
+	}
 
 	geminiReq := transformer.AnthropicToGemini(req, model)
 	geminiReq.Stream = false
 
-	resp, err := p.doJSONRequest(ctx, endpoint, apiKey, geminiReq)
+	resp, err := p.doJSONRequest(ctx, endpoint, sel, geminiReq)
 	if err != nil {
 		return nil, err
 	}
@@ -318,12 +347,15 @@ func (p *OpenCodeZenProvider) executeGemini(ctx context.Context, req *types.Mess
 func (p *OpenCodeZenProvider) streamGemini(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
 	endpoint := cfg.OpenCodeZen.GeminiBaseURL + "/" + model.ModelID
-	apiKey := p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
+	sel, rerr := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
+	if rerr != nil {
+		return nil, rerr
+	}
 
 	geminiReq := transformer.AnthropicToGemini(req, model)
 	geminiReq.Stream = true
 
-	resp, err := p.doJSONRequest(ctx, endpoint, apiKey, geminiReq)
+	resp, err := p.doJSONRequest(ctx, endpoint, sel, geminiReq)
 	if err != nil {
 		return nil, err
 	}
@@ -333,9 +365,12 @@ func (p *OpenCodeZenProvider) streamGemini(ctx context.Context, req *types.Messa
 
 // ── HTTP helpers ──────────────────────────────────────────────────────
 
-func (p *OpenCodeZenProvider) doRequest(ctx context.Context, endpoint, apiKey string, req any, stream bool) (*http.Response, error) {
+// doRequest sends one request and settles the key reservation with the result,
+// so every caller reports the key's health without repeating the plumbing.
+func (p *OpenCodeZenProvider) doRequest(ctx context.Context, endpoint string, sel *selection, req any, stream bool) (*http.Response, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
+		sel.Settle(nil) // never sent: no verdict for the key
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
@@ -344,7 +379,7 @@ func (p *OpenCodeZenProvider) doRequest(ctx context.Context, endpoint, apiKey st
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+sel.Key())
 	if stream {
 		httpReq.Header.Set("Accept", "text/event-stream")
 	}
@@ -352,18 +387,22 @@ func (p *OpenCodeZenProvider) doRequest(ctx context.Context, endpoint, apiKey st
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
+		sel.Settle(err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
+		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
+		sel.Settle(apiErr)
+		return nil, apiErr
 	}
+	sel.Settle(nil)
 
 	return resp, nil
 }
 
-func (p *OpenCodeZenProvider) doJSONRequest(ctx context.Context, endpoint, apiKey string, req any) (*http.Response, error) {
-	return p.doRequest(ctx, endpoint, apiKey, req, false)
+func (p *OpenCodeZenProvider) doJSONRequest(ctx context.Context, endpoint string, sel *selection, req any) (*http.Response, error) {
+	return p.doRequest(ctx, endpoint, sel, req, false)
 }

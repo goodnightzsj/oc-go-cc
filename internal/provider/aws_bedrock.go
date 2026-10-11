@@ -24,7 +24,9 @@ type AWSBedrockProvider struct {
 
 // NewAWSBedrockProvider creates a new AWSBedrockProvider.
 func NewAWSBedrockProvider(atomic *config.AtomicConfig) *AWSBedrockProvider {
-	return &AWSBedrockProvider{baseProvider: newBaseProvider(atomic)}
+	base := newBaseProvider(atomic)
+	registerPool(client.ProviderAWSBedrock, base.keys)
+	return &AWSBedrockProvider{baseProvider: base}
 }
 
 // Name returns the provider identifier.
@@ -79,7 +81,10 @@ func (p *AWSBedrockProvider) Stream(ctx context.Context, req *types.MessageReque
 func (p *AWSBedrockProvider) executeOpenAI(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
 	endpoint := p.bedrockEndpoint(cfg, model.ModelID)
-	apiKey := p.bedrockAPIKey(cfg)
+	sel, rerr := p.bedrockKey(cfg)
+	if rerr != nil {
+		return nil, rerr
+	}
 
 	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
 	if err != nil {
@@ -88,7 +93,7 @@ func (p *AWSBedrockProvider) executeOpenAI(ctx context.Context, req *types.Messa
 	streamFalse := false
 	openaiReq.Stream = &streamFalse
 
-	resp, err := p.doBedrockRequest(ctx, endpoint, apiKey, cfg.AWSBedrock.ProjectID, openaiReq, false)
+	resp, err := p.doBedrockRequest(ctx, endpoint, sel, cfg.AWSBedrock.ProjectID, openaiReq, false)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +126,10 @@ func (p *AWSBedrockProvider) executeOpenAI(ctx context.Context, req *types.Messa
 func (p *AWSBedrockProvider) streamOpenAI(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
 	endpoint := p.bedrockEndpoint(cfg, model.ModelID)
-	apiKey := p.bedrockAPIKey(cfg)
+	sel, rerr := p.bedrockKey(cfg)
+	if rerr != nil {
+		return nil, rerr
+	}
 
 	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
 	if err != nil {
@@ -130,7 +138,7 @@ func (p *AWSBedrockProvider) streamOpenAI(ctx context.Context, req *types.Messag
 	streamTrue := true
 	openaiReq.Stream = &streamTrue
 
-	resp, err := p.doBedrockRequest(ctx, endpoint, apiKey, cfg.AWSBedrock.ProjectID, openaiReq, true)
+	resp, err := p.doBedrockRequest(ctx, endpoint, sel, cfg.AWSBedrock.ProjectID, openaiReq, true)
 	if err != nil {
 		return nil, err
 	}
@@ -143,14 +151,17 @@ func (p *AWSBedrockProvider) streamOpenAI(ctx context.Context, req *types.Messag
 func (p *AWSBedrockProvider) executeResponses(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
 	endpoint := p.responsesEndpoint(cfg)
-	apiKey := p.bedrockAPIKey(cfg)
+	sel, rerr := p.bedrockKey(cfg)
+	if rerr != nil {
+		return nil, rerr
+	}
 
 	responsesReq, err := transformer.AnthropicToResponses(req, model)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := p.doBedrockRequest(ctx, endpoint, apiKey, cfg.AWSBedrock.ProjectID, responsesReq, false)
+	resp, err := p.doBedrockRequest(ctx, endpoint, sel, cfg.AWSBedrock.ProjectID, responsesReq, false)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +195,10 @@ func (p *AWSBedrockProvider) executeResponses(ctx context.Context, req *types.Me
 func (p *AWSBedrockProvider) streamResponses(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
 	endpoint := p.responsesEndpoint(cfg)
-	apiKey := p.bedrockAPIKey(cfg)
+	sel, rerr := p.bedrockKey(cfg)
+	if rerr != nil {
+		return nil, rerr
+	}
 
 	responsesReq, err := transformer.AnthropicToResponses(req, model)
 	if err != nil {
@@ -192,7 +206,7 @@ func (p *AWSBedrockProvider) streamResponses(ctx context.Context, req *types.Mes
 	}
 	responsesReq.Stream = true
 
-	resp, err := p.doBedrockRequest(ctx, endpoint, apiKey, cfg.AWSBedrock.ProjectID, responsesReq, true)
+	resp, err := p.doBedrockRequest(ctx, endpoint, sel, cfg.AWSBedrock.ProjectID, responsesReq, true)
 	if err != nil {
 		return nil, err
 	}
@@ -208,10 +222,14 @@ func (p *AWSBedrockProvider) executeAnthropic(ctx context.Context, req *types.Me
 	if endpoint == "" {
 		return nil, fmt.Errorf("anthropic_base_url not configured for aws-bedrock provider")
 	}
-	apiKey := p.bedrockAPIKey(cfg)
+	sel, rerr := p.bedrockKey(cfg)
+	if rerr != nil {
+		return nil, rerr
+	}
 
 	rawBody, err := anthropicPayload(ctx, req, model, false)
 	if err != nil {
+		sel.Settle(nil)
 		return nil, fmt.Errorf("failed to marshal anthropic request: %w", err)
 	}
 
@@ -220,7 +238,7 @@ func (p *AWSBedrockProvider) executeAnthropic(ctx context.Context, req *types.Me
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+sel.Key())
 	client.SetProviderHeaders(httpReq, p.Name())
 	client.SetAnthropicHeaders(httpReq)
 	if cfg.AWSBedrock.ProjectID != "" {
@@ -229,14 +247,18 @@ func (p *AWSBedrockProvider) executeAnthropic(ctx context.Context, req *types.Me
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
+		sel.Settle(err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
+		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
+		sel.Settle(apiErr)
+		return nil, apiErr
 	}
+	sel.Settle(nil)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -252,10 +274,14 @@ func (p *AWSBedrockProvider) streamAnthropic(ctx context.Context, req *types.Mes
 	if endpoint == "" {
 		return nil, fmt.Errorf("anthropic_base_url not configured for aws-bedrock provider")
 	}
-	apiKey := p.bedrockAPIKey(cfg)
+	sel, rerr := p.bedrockKey(cfg)
+	if rerr != nil {
+		return nil, rerr
+	}
 
 	rawBody, err := anthropicPayload(ctx, req, model, true)
 	if err != nil {
+		sel.Settle(nil)
 		return nil, fmt.Errorf("failed to marshal anthropic request: %w", err)
 	}
 
@@ -264,7 +290,7 @@ func (p *AWSBedrockProvider) streamAnthropic(ctx context.Context, req *types.Mes
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+sel.Key())
 	if cfg.AWSBedrock.ProjectID != "" {
 		httpReq.Header.Set("OpenAI-Project", cfg.AWSBedrock.ProjectID)
 	}
@@ -274,24 +300,30 @@ func (p *AWSBedrockProvider) streamAnthropic(ctx context.Context, req *types.Mes
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
+		sel.Settle(err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
+		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
+		sel.Settle(apiErr)
+		return nil, apiErr
 	}
+	sel.Settle(nil)
 
 	return resp.Body, nil
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-// bedrockAPIKey returns the Bedrock-specific API key if configured, otherwise
-// falls back to the global API key pool.
-func (p *AWSBedrockProvider) bedrockAPIKey(cfg *config.Config) string {
-	return p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
+// bedrockKey reserves the Bedrock-specific API key if configured, otherwise
+// falls back to the global API key pool. The caller settles the reservation.
+// It fails when no key is configured or when every key is resting, so callers
+// do not send with an empty credential.
+func (p *AWSBedrockProvider) bedrockKey(cfg *config.Config) (*selection, error) {
+	return p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
 }
 
 // needsOpenaiPath returns true for models that require the /openai path prefix
@@ -328,9 +360,13 @@ func (p *AWSBedrockProvider) responsesEndpoint(cfg *config.Config) string {
 
 // doBedrockRequest sends an HTTP request to the Bedrock Mantle endpoint with
 // the OpenAI-Project header when configured.
-func (p *AWSBedrockProvider) doBedrockRequest(ctx context.Context, endpoint, apiKey, projectID string, req any, stream bool) (*http.Response, error) {
+// doBedrockRequest sends one request and settles the key reservation with the
+// result, so every caller reports the key's health without repeating the
+// plumbing.
+func (p *AWSBedrockProvider) doBedrockRequest(ctx context.Context, endpoint string, sel *selection, projectID string, req any, stream bool) (*http.Response, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
+		sel.Settle(nil) // never sent: no verdict for the key
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
@@ -339,7 +375,7 @@ func (p *AWSBedrockProvider) doBedrockRequest(ctx context.Context, endpoint, api
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+sel.Key())
 	if projectID != "" {
 		httpReq.Header.Set("OpenAI-Project", projectID)
 	}
@@ -350,14 +386,18 @@ func (p *AWSBedrockProvider) doBedrockRequest(ctx context.Context, endpoint, api
 
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
+		sel.Settle(err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
+		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
+		sel.Settle(apiErr)
+		return nil, apiErr
 	}
+	sel.Settle(nil)
 
 	return resp, nil
 }

@@ -56,6 +56,9 @@ func TestStreamingBodyTimeoutAttribution(t *testing.T) {
 					BaseURL: upstream.URL, AnthropicBaseURL: upstream.URL,
 					ResponsesBaseURL: upstream.URL, GeminiBaseURL: upstream.URL,
 					StreamingTimeoutMs: timeoutMs,
+					// A key is required now: the provider refuses to send with an
+					// empty credential rather than letting the upstream reject it.
+					APIKey: "synthetic-zen-key",
 				}}, "")
 				h := &MessagesHandler{
 					fallbackHandler: router.NewFallbackHandler(nil, 1, time.Minute),

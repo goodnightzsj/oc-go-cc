@@ -27,7 +27,9 @@ type ClinePassProvider struct {
 }
 
 func NewClinePassProvider(atomic *config.AtomicConfig, capture *debug.CaptureLogger) *ClinePassProvider {
-	p := &ClinePassProvider{baseProvider: newBaseProvider(atomic), capture: capture}
+	base := newBaseProvider(atomic)
+	registerPool(client.ProviderClinePass, base.keys)
+	p := &ClinePassProvider{baseProvider: base, capture: capture}
 	// Redirects must not move a dedicated credential to another endpoint.
 	p.httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return p
@@ -79,10 +81,11 @@ func (p *ClinePassProvider) Stream(ctx context.Context, req *types.MessageReques
 // unchanged on the non-streaming path.
 func (p *ClinePassProvider) request(ctx context.Context, req *types.MessageRequest, model config.ModelConfig, stream bool) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
-	key := p.nextAPIKey(cfg.ProviderAPIKeys(p.Name()))
-	if key == "" {
-		return nil, fmt.Errorf("no API key configured for cline-pass")
+	sel, err := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
+	if err != nil {
+		return nil, err
 	}
+	key := sel.Key()
 	converted, err := transformer.AnthropicToChatCompletion(req, model)
 	if err == nil {
 		// The field is always written, never left to the server default: the
@@ -112,9 +115,20 @@ func (p *ClinePassProvider) request(ctx context.Context, req *types.MessageReque
 		var payload []byte
 		payload, err = json.Marshal(out)
 		if err == nil {
-			return p.send(ctx, cfg, key, payload, stream)
+			body, sendErr := p.send(ctx, cfg, key, payload, stream)
+			// A stream body that opens successfully is a success even though the
+			// caller reads it later: the upstream has accepted the key and
+			// started answering, which is what the health record is about. A
+			// failure that arrives mid-stream is reported by the stream reader,
+			// not here.
+			sel.Settle(sendErr)
+			return body, sendErr
 		}
 	}
+	// The key was reserved but never sent, so it must be released without a
+	// verdict: the request was never attempted, and counting that as a key
+	// failure would cool a healthy credential for a local encoding error.
+	sel.Settle(nil)
 	return nil, fmt.Errorf("encode cline-pass request: %w", err)
 }
 
@@ -142,7 +156,7 @@ func (p *ClinePassProvider) send(ctx context.Context, cfg *config.Config, key st
 		if err != nil {
 			return nil, fmt.Errorf("read cline-pass error (HTTP %d): %w", resp.StatusCode, err)
 		}
-		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: clineErrorBody(resp, body)}
+		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: clineErrorBody(resp, body), RetryAfter: resp.Header.Get("Retry-After")}
 	}
 	if cfg.ClinePass.ChannelPinEnabled {
 		resp.Body = newClineChannelBody(resp.Body, cfg.ClinePass.ChannelPin, rid(ctx))

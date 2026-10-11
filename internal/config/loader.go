@@ -354,6 +354,9 @@ func validate(cfg *Config) error {
 	if err := validateAPIKeys(cfg.OpenCodeGo.APIKeys); err != nil {
 		return AtField("opencode_go", err)
 	}
+	if err := validateKeyStrategy("opencode_go.key_strategy", cfg.OpenCodeGo.KeyStrategy); err != nil {
+		return AtField("opencode_go", err)
+	}
 
 	if err := validateSingleAPIKey(cfg.OpenCodeZen.APIKey); err != nil {
 		return AtField("opencode_zen", err)
@@ -361,11 +364,17 @@ func validate(cfg *Config) error {
 	if err := validateAPIKeys(cfg.OpenCodeZen.APIKeys); err != nil {
 		return AtField("opencode_zen", err)
 	}
+	if err := validateKeyStrategy("opencode_zen.key_strategy", cfg.OpenCodeZen.KeyStrategy); err != nil {
+		return AtField("opencode_zen", err)
+	}
 
 	if err := validateSingleAPIKey(cfg.AWSBedrock.APIKey); err != nil {
 		return AtField("aws_bedrock", err)
 	}
 	if err := validateAPIKeys(cfg.AWSBedrock.APIKeys); err != nil {
+		return AtField("aws_bedrock", err)
+	}
+	if err := validateKeyStrategy("aws_bedrock.key_strategy", cfg.AWSBedrock.KeyStrategy); err != nil {
 		return AtField("aws_bedrock", err)
 	}
 	if err := cfg.AWSBedrock.Billing.Validate(); err != nil {
@@ -378,6 +387,9 @@ func validate(cfg *Config) error {
 	if err := validateAPIKeys(cfg.OpenRouter.APIKeys); err != nil {
 		return AtField("openrouter", err)
 	}
+	if err := validateKeyStrategy("openrouter.key_strategy", cfg.OpenRouter.KeyStrategy); err != nil {
+		return AtField("openrouter", err)
+	}
 	if err := validateSingleAPIKey(cfg.OpenRouter.ManagementAPIKey); err != nil {
 		return invalid("openrouter.management_api_key", "unresolved_env", "openrouter.management_api_key: %v", err)
 	}
@@ -385,6 +397,9 @@ func validate(cfg *Config) error {
 		return AtField("commandcode", err)
 	}
 	if err := validateAPIKeys(cfg.CommandCode.APIKeys); err != nil {
+		return AtField("commandcode", err)
+	}
+	if err := validateKeyStrategy("commandcode.key_strategy", cfg.CommandCode.KeyStrategy); err != nil {
 		return AtField("commandcode", err)
 	}
 	for field, endpoint := range map[string]string{
@@ -407,6 +422,9 @@ func validate(cfg *Config) error {
 		return AtField("cline_pass", err)
 	}
 	if err := validateAPIKeys(cfg.ClinePass.APIKeys); err != nil {
+		return AtField("cline_pass", err)
+	}
+	if err := validateKeyStrategy("cline_pass.key_strategy", cfg.ClinePass.KeyStrategy); err != nil {
 		return AtField("cline_pass", err)
 	}
 	if endpoint := cfg.ClinePass.BaseURL; endpoint != "" { // validate is also used on configs before defaults.
@@ -555,6 +573,18 @@ func validateSingleAPIKey(key string) error {
 		return invalid("api_key", "unresolved_env", "api_key contains unresolved env var — set the corresponding environment variable or use api_keys")
 	}
 	return nil
+}
+
+// validateKeyStrategy rejects anything the scheduler does not implement, so a
+// typo cannot silently fall back to a different rule than the operator asked
+// for.
+func validateKeyStrategy(field, value string) error {
+	switch v := strings.TrimSpace(value); v {
+	case "", KeyStrategyFillFirst:
+		return nil
+	default:
+		return fmt.Errorf("%s must be %q (the only implemented strategy), got %q", field, KeyStrategyFillFirst, v)
+	}
 }
 
 func validateAPIKeys(keys []string) error {

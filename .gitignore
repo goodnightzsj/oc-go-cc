@@ -63,3 +63,7 @@ MIGRATION.md
 *.db-shm
 *.sqlite
 *.sqlite3
+
+# Local working docs (not part of the shipped source)
+/docs/
+/llmdoc/

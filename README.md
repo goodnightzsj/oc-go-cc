@@ -99,34 +99,34 @@ The screenshots below use fixed synthetic demonstration data. They do not contai
 
 #### Overview
 
-![Dashboard overview with request trends, token trends and a platform health table](docs/assets/dashboard-overview.png)
+![Dashboard overview with request trends, token trends and a platform health table](assets/dashboard-overview.png)
 
 #### Request History
 
-![Paginated request history with filters, breakdowns and peak-billing badges](docs/assets/dashboard-history.png)
+![Paginated request history with filters, breakdowns and peak-billing badges](assets/dashboard-history.png)
 
 #### Request Detail
 
-![Request detail dialog naming the client's requested model alongside the served one](docs/assets/dashboard-request-detail.png)
+![Request detail dialog naming the client's requested model alongside the served one](assets/dashboard-request-detail.png)
 
 #### Usage Analytics
 
-![Usage analytics with a throughput column, period details and platform distribution](docs/assets/dashboard-analytics.png)
+![Usage analytics with a throughput column, period details and platform distribution](assets/dashboard-analytics.png)
 
 #### Price Sources
 
-![Panel stating whether each platform's price table is live or the build-time snapshot](docs/assets/dashboard-price-sources.png)
+![Panel stating whether each platform's price table is live or the build-time snapshot](assets/dashboard-price-sources.png)
 
 <details>
 <summary>Usage &amp; billing, performance, fallback, and settings</summary>
 
-![Usage and billing view](docs/assets/dashboard-quota.png)
+![Usage and billing view](assets/dashboard-quota.png)
 
-![Model performance view](docs/assets/dashboard-performance.png)
+![Model performance view](assets/dashboard-performance.png)
 
-![Fallback policy editor](docs/assets/dashboard-fallback.png)
+![Fallback policy editor](assets/dashboard-fallback.png)
 
-![Proxy settings](docs/assets/dashboard-settings.png)
+![Proxy settings](assets/dashboard-settings.png)
 
 </details>
 

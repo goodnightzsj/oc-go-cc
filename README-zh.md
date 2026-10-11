@@ -60,34 +60,34 @@ Go 模型额度来自 [Go 文档](https://opencode.ai/docs/zh-cn/go)，分模型
 
 #### 概览
 
-![包含请求趋势、Token 趋势与平台健康表的仪表盘概览](docs/zh/assets/dashboard-overview.png)
+![包含请求趋势、Token 趋势与平台健康表的仪表盘概览](assets/zh/dashboard-overview.png)
 
 #### 历史请求
 
-![包含筛选、分布统计与高峰计费角标的分页历史请求](docs/zh/assets/dashboard-history.png)
+![包含筛选、分布统计与高峰计费角标的分页历史请求](assets/zh/dashboard-history.png)
 
 #### 请求详情
 
-![标出客户端请求模型与实际服务模型的请求详情弹窗](docs/zh/assets/dashboard-request-detail.png)
+![标出客户端请求模型与实际服务模型的请求详情弹窗](assets/zh/dashboard-request-detail.png)
 
 #### 用量分析
 
-![包含吞吐列、周期明细与平台分布的用量分析](docs/zh/assets/dashboard-analytics.png)
+![包含吞吐列、周期明细与平台分布的用量分析](assets/zh/dashboard-analytics.png)
 
 #### 价格来源
 
-![说明各平台价格表来自实时抓取还是构建时快照](docs/zh/assets/dashboard-price-sources.png)
+![说明各平台价格表来自实时抓取还是构建时快照](assets/zh/dashboard-price-sources.png)
 
 <details>
 <summary>用量与账单、性能、降级策略和设置</summary>
 
-![用量与账单页面](docs/zh/assets/dashboard-quota.png)
+![用量与账单页面](assets/zh/dashboard-quota.png)
 
-![模型性能页面](docs/zh/assets/dashboard-performance.png)
+![模型性能页面](assets/zh/dashboard-performance.png)
 
-![降级策略编辑器](docs/zh/assets/dashboard-fallback.png)
+![降级策略编辑器](assets/zh/dashboard-fallback.png)
 
-![代理设置页面](docs/zh/assets/dashboard-settings.png)
+![代理设置页面](assets/zh/dashboard-settings.png)
 
 </details>
 

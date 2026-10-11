@@ -57,3 +57,81 @@ func TestQuotaAssetsExposePlanWindows(t *testing.T) {
 		}
 	}
 }
+
+// TestMultiKeyAccountCardsSitSideBySide pins the ClinePass account layout.
+//
+// Two things had to hold, and each was wrong at some point:
+//
+//   - The card's single block must fill the card. It used to sit in a
+//     two-column panel grid that exists for CommandCode, whose card really does
+//     hold four blocks; with one block the content occupied the left 53% and the
+//     windows were squeezed into 286px each inside a 1204px card.
+//   - Two keys must sit side by side rather than one screen apart, and the
+//     card's own windows stay two per row so they fit a half-width card.
+//
+// The renderer's markup and the stylesheet are checked together: a class with no
+// rule does nothing, and a rule with no class never applies.
+func TestMultiKeyAccountCardsSitSideBySide(t *testing.T) {
+	app, err := assets.ReadFile("assets/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(app)
+
+	// ClinePass is the renderer whose single block is the plan windows.
+	clinePass := source[strings.Index(source, "renderClinePassAccount"):]
+	clinePass = clinePass[:strings.Index(clinePass, "renderAccount(account)")]
+	if !strings.Contains(clinePass, `class="commandcode-panels commandcode-panels-single"`) {
+		t.Error("the ClinePass card must use the single-column panel wrapper so its block fills the card")
+	}
+	if strings.Contains(clinePass, `class="commandcode-panels"`) {
+		t.Error("the ClinePass card must not use the bare two-column panel wrapper")
+	}
+	// CommandCode has four blocks and keeps the two-column panels.
+	commandCode := source[strings.Index(source, "renderCommandCodeAccount"):]
+	commandCode = commandCode[:strings.Index(commandCode, "renderClinePass(view)")]
+	if !strings.Contains(commandCode, `class="commandcode-panels"`) || strings.Contains(commandCode, "commandcode-panels-single") {
+		t.Error("CommandCode has four blocks and must keep the two-column panel grid")
+	}
+
+	// Both multi-key containers carry the side-by-side class.
+	for _, id := range []string{"quota-commandcode-accounts", "quota-cline-pass-accounts"} {
+		if !strings.Contains(string(page), `id="`+id+`" class="quota-accounts quota-accounts-grid"`) {
+			t.Errorf("%s must carry quota-accounts-grid so its keys lay out side by side", id)
+		}
+	}
+	// The single-window-grid platforms keep the one-column container.
+	for _, id := range []string{"quota-accounts", "quota-openrouter-accounts"} {
+		if strings.Contains(string(page), `id="`+id+`" class="quota-accounts quota-accounts-grid"`) {
+			t.Errorf("%s must not carry the two-column class", id)
+		}
+	}
+
+	css := readStyleSheet(t)
+	if !strings.Contains(css, ".commandcode-panels-single { grid-template-columns: minmax(0, 1fr); }") {
+		t.Error("the single-column panel modifier must collapse the panel grid to one column")
+	}
+	if !strings.Contains(css, ".quota-accounts.quota-accounts-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; margin-top: 16px; }") {
+		t.Error("the account grid must put two keys side by side, with a top margin off the scope note")
+	}
+	if !strings.Contains(css, ".quota-accounts.quota-accounts-grid > :only-child") {
+		t.Error("a lone account must span the full width rather than sit in the left half")
+	}
+	// The window grid keeps its default two-per-row; a three-column override
+	// would stretch the progress bars across a half-width card.
+	if strings.Contains(css, ".commandcode-panels-single .commandcode-windows") {
+		t.Error("the card's windows must keep the default two-per-row grid")
+	}
+	// The narrow breakpoint collapses the side-by-side grid again.
+	at := strings.Index(css, "@media (max-width: 1280px) {")
+	if at < 0 {
+		t.Fatal("the 1280px breakpoint is gone")
+	}
+	if !strings.Contains(css[at:at+1400], ".quota-accounts.quota-accounts-grid { grid-template-columns: minmax(0, 1fr); }") {
+		t.Error("the side-by-side grid must collapse to one column at the 1280px breakpoint")
+	}
+}

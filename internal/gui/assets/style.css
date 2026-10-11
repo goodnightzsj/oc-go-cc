@@ -1591,6 +1591,24 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
 .commandcode-account { display: block; padding: 12px 0; }
 .commandcode-account > .quota-account-head { margin-bottom: 12px; }
 .commandcode-panels { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+
+/* A platform whose card holds a single block has nothing for the second column
+   to carry, and the two-column track left the content in the left half with the
+   right half empty - the card spans the page but its windows were squeezed into
+   about half of it. Collapsing the panel grid to one column lets the block fill
+   the card. CommandCode keeps the two-column panels: it really does put four
+   blocks there. */
+.commandcode-panels-single { grid-template-columns: minmax(0, 1fr); }
+
+/* More than one key on such a card puts the cards side by side, so two accounts
+   are comparable at a glance instead of one screen apart. The card's own window
+   grid stays at two per row, which is what fits a half-width card.
+   The top margin separates the cards from the scope note above them: that note
+   carries only a top margin, so without this the first card's border sat flush
+   against its last line. */
+.quota-accounts.quota-accounts-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; margin-top: 16px; }
+.quota-accounts.quota-accounts-grid > :only-child { grid-column: 1 / -1; }
+
 .commandcode-block { min-width: 0; padding: 20px; border: 1px solid var(--ui-line); border-radius: 10px; background: var(--ui-surface); }
 .commandcode-credits { grid-row: span 2; }
 .commandcode-block .section-heading { color: var(--ui-text); text-transform: none; }
@@ -1622,6 +1640,9 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
   .routing-notes { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 12px 20px; padding-top: 0; }
   .routing-notes .section-heading, .routing-notes h3 { margin: 0; }
   .commandcode-windows { grid-template-columns: minmax(0, 1fr); }
+  /* At this width the card's own windows are single-column, so two half-width
+     cards would each be a narrow tall column. Stack them instead. */
+  .quota-accounts.quota-accounts-grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 1040px) {
   .commandcode-panels { grid-template-columns: minmax(0, 1fr); }

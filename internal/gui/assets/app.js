@@ -6155,7 +6155,7 @@ const QuotaModule = {
         <span class="quota-reset"${deadline == null ? '' : ` data-deadline="${deadline}"`}>${deadline == null ? t('quota.resetUnknown') : ''}</span></div>`;
     }).join('');
     return `<section class="quota-account commandcode-account">${head}
-      <div class="commandcode-panels">
+      <div class="commandcode-panels commandcode-panels-single">
         <section class="commandcode-block commandcode-credits"><h3 class="section-heading">${t('clinepass.windows')}</h3>
           <div class="commandcode-windows">${windows}</div>
           <p class="page-meta">${t('clinepass.percentNote')}</p>

@@ -33,6 +33,13 @@ func (t *captureReadCloser) Close() error {
 	return err
 }
 
+// UpstreamChannel forwards the wrapped body's channel report. Without this the
+// capture wrapper would erase the method and the channel would be lost exactly
+// when capture is enabled - which is the configuration used to investigate it.
+func (t *captureReadCloser) UpstreamChannel() string {
+	return UpstreamChannelOf(t.ReadCloser)
+}
+
 // CaptureBody wraps body so that all bytes read from it are delivered (async)
 // to capture. Returns body unchanged when capture is nil.
 func CaptureBody(body io.ReadCloser, capture func(data []byte)) io.ReadCloser {
@@ -157,4 +164,29 @@ func IsZen(model config.ModelConfig) bool {
 // IsBedrock returns true if the model uses the AWS Bedrock provider.
 func IsBedrock(model config.ModelConfig) bool {
 	return Provider(model) == ProviderAWSBedrock
+}
+
+// UpstreamChannelReader is implemented by a stream body that observed which
+// upstream channel actually served the request. Only platforms whose upstream
+// publishes that fact implement it; everything else simply does not, and
+// callers treat absence as "no channel to report".
+//
+// The value is only knowable once the stream has ended: the gateway names the
+// channel in its last metadata frame, after the content. A caller reading it
+// early gets an empty string, which is the correct answer at that point.
+type UpstreamChannelReader interface {
+	UpstreamChannel() string
+}
+
+// UpstreamChannelOf returns the channel a stream body reported, or "" when the
+// body is not a channel reporter or has not seen the metadata yet.
+//
+// Callers must not reach into a concrete provider type for this: the handler
+// layer would then have to import every provider package.
+func UpstreamChannelOf(body any) string {
+	reader, ok := body.(UpstreamChannelReader)
+	if !ok {
+		return ""
+	}
+	return reader.UpstreamChannel()
 }

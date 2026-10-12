@@ -188,6 +188,7 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
 .badge-error { background: rgba(255,69,58,0.15); color: var(--ui-red); }
 .badge-unknown { background: rgba(154,163,173,.12); color: var(--ui-muted); }
 .badge-peak { background:#b45309; color:#fff; }
+.badge-channel { background: rgba(244,114,182,0.15); color: #f472b6; }
 
 /* Duration grading. Colour carries the judgement, so the three levels are also
    named in a title attribute and never rely on hue alone. */

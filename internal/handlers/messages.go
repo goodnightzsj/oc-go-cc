@@ -684,6 +684,11 @@ func (h *MessagesHandler) handleStreaming(
 	// cause. Without it every exhausted chain reads as "all streaming models
 	// failed", which says nothing a client can act on.
 	var lastStreamErr error
+	// currentStream is the attempt's upstream body, held here so the failure
+	// recorder can read the channel from it. The gateway names the channel in
+	// its last frame, so this is only ever read after the stream has stopped -
+	// which is exactly when a failure is recorded.
+	var currentStream io.ReadCloser
 
 	for attempt, model := range modelChain {
 		select {
@@ -712,7 +717,12 @@ func (h *MessagesHandler) handleStreaming(
 
 		// recordStreamSuccess records a successful stream completion and
 		// marks the model attempt as done.
-		recordStreamSuccess := func(model config.ModelConfig) {
+		//
+		// The channel is read from the body rather than from a captured
+		// variable: the gateway names it in the last frame, so the only correct
+		// moment to ask is after the stream has ended. Reading it earlier would
+		// record an empty channel for every request.
+		recordStreamSuccess := func(model config.ModelConfig, upstreamChannel string) {
 			cancelAttempt()
 			complete(clientCtx, nil)
 			latency := time.Since(streamStart)
@@ -742,6 +752,7 @@ func (h *MessagesHandler) handleStreaming(
 				Success:             true,
 				Attempt:             attempt + 1,
 				PeakMultiplier:      history.ProviderPeakMultiplier(providerName, model.ModelID, streamStart),
+				UpstreamChannel:     upstreamChannel,
 			}
 			if h.storage != nil {
 				if err := h.storage.InsertRequest(rec); err != nil {
@@ -793,6 +804,7 @@ func (h *MessagesHandler) handleStreaming(
 				Success:             false,
 				Attempt:             attempt + 1,
 				PeakMultiplier:      history.ProviderPeakMultiplier(providerName, model.ModelID, streamStart),
+				UpstreamChannel:     client.UpstreamChannelOf(currentStream),
 			}
 			if err := h.storage.InsertRequest(rec); err != nil {
 				h.logger.Warn("failed to insert failed request into storage", "error", err)
@@ -846,7 +858,7 @@ func (h *MessagesHandler) handleStreaming(
 			if err := rw.finish(); err != nil {
 				return handleStreamError(err, model, action)
 			}
-			recordStreamSuccess(model)
+			recordStreamSuccess(model, client.UpstreamChannelOf(currentStream))
 			return false
 		}
 
@@ -878,6 +890,7 @@ func (h *MessagesHandler) handleStreaming(
 
 		// Bind body read to attemptCtx so streaming_timeout_ms aborts mid-stream.
 		streamReader := transformer.NewCtxReadCloser(attemptCtx, streamBody)
+		currentStream = streamReader
 
 		wireFormat := core.ModelWireFormat(prov, model)
 		if wireFormat == core.WireFormatAnthropic {
@@ -1002,6 +1015,10 @@ func (h *MessagesHandler) handleNonStreaming(
 	requestedModel := anthropicReq.Model
 	recordID := uuid.NewString()
 
+	// Set by the attempt that succeeds, then stored. Empty for every platform
+	// whose upstream does not name a channel.
+	var upstreamChannel string
+
 	result, responseBody, err := h.fallbackHandler.ExecuteWithFallback(
 		ctx,
 		modelChain,
@@ -1036,6 +1053,9 @@ func (h *MessagesHandler) handleNonStreaming(
 				}
 				return nil, execErr
 			}
+			// The upstream body has been drained by Execute, so the channel the
+			// gateway named in its last frame is available now.
+			upstreamChannel = execResult.UpstreamChannel
 			return execResult.Body, nil
 		},
 	)
@@ -1089,6 +1109,7 @@ func (h *MessagesHandler) handleNonStreaming(
 		Success:             writeErr == nil,
 		Attempt:             result.Attempted,
 		PeakMultiplier:      history.ProviderPeakMultiplier(result.Provider, result.ModelID, startTime),
+		UpstreamChannel:     upstreamChannel,
 	}
 	if h.storage != nil {
 		if err := h.storage.InsertRequest(rec); err != nil {

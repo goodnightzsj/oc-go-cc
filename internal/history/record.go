@@ -39,6 +39,17 @@ type RequestRecord struct {
 	// per platform, and 1.6 is what makes "peak" a set of values rather than a
 	// boolean.
 	PeakMultiplier float64 `json:"peak_multiplier"`
+
+	// UpstreamChannel is the channel the upstream gateway actually used, as it
+	// reported it. It is empty for every platform that does not publish one -
+	// today only ClinePass, whose gateway names a channel per response.
+	//
+	// This is not the same axis as Provider. Provider is who we sent the request
+	// to ("cline-pass"); the channel is which upstream the gateway then picked
+	// behind that subscription, and it is not ours to choose: an account can be
+	// pinned to one channel and served by another. Storing the observed value is
+	// what makes that visible after the fact.
+	UpstreamChannel string `json:"upstream_channel,omitempty"`
 }
 
 // RequestedModelDiffers reports whether the client asked for a model other than

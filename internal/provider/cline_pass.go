@@ -37,6 +37,16 @@ func NewClinePassProvider(atomic *config.AtomicConfig, capture *debug.CaptureLog
 
 func (p *ClinePassProvider) Name() string { return "cline-pass" }
 
+// Start begins the periodic channel-pin probe. It is a no-op unless pinning is
+// enabled, because the probe spends a real request against a metered quota and
+// there is nothing to explain when pinning is off.
+//
+// It is called once from main rather than from the constructor so that a
+// provider built in a test never starts a background loop.
+func (p *ClinePassProvider) Start(ctx context.Context) {
+	go p.channelPinProbeLoop(ctx)
+}
+
 // WireFormat is constant for this platform. Unlike CommandCode, whose `claude-`
 // models get native Messages, no ClinePass model has an Anthropic endpoint to
 // take, so the model id cannot change the answer.
@@ -64,12 +74,15 @@ func (p *ClinePassProvider) Execute(ctx context.Context, req *types.MessageReque
 	if len(response.Choices) == 0 {
 		return nil, fmt.Errorf("invalid cline-pass Chat Completions response")
 	}
+	// Read the channel after the body is drained: the gateway names it in the
+	// last metadata frame, so it does not exist before the stream ends.
+	channel := client.UpstreamChannelOf(body)
 	converted, err := transformer.NewResponseTransformer().TransformResponse(response, model.ModelID)
 	if err != nil {
 		return nil, fmt.Errorf("convert cline-pass response: %w", err)
 	}
 	raw, err := json.Marshal(converted)
-	return &core.ExecuteResult{Body: raw}, err
+	return &core.ExecuteResult{Body: raw, UpstreamChannel: channel}, err
 }
 
 func (p *ClinePassProvider) Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
@@ -158,9 +171,15 @@ func (p *ClinePassProvider) send(ctx context.Context, cfg *config.Config, key st
 		}
 		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: clineErrorBody(resp, body), RetryAfter: resp.Header.Get("Retry-After")}
 	}
+	// The observer is attached whether or not pinning is on. Pinning decides
+	// whether we ask for a channel; it does not decide whether we may see which
+	// one answered, and the caller records the observed value either way. With
+	// pinning off there is no target, so the observer only reports.
+	target := ""
 	if cfg.ClinePass.ChannelPinEnabled {
-		resp.Body = newClineChannelBody(resp.Body, cfg.ClinePass.ChannelPin, rid(ctx))
+		target = cfg.ClinePass.ChannelPin
 	}
+	resp.Body = newClineChannelBody(resp.Body, target, rid(ctx))
 	if p.capture != nil {
 		return client.CaptureBody(resp.Body, func(data []byte) {
 			p.capture.CaptureUpstreamResponse(rid(ctx), p.Name(), data)

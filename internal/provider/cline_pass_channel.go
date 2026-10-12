@@ -65,6 +65,15 @@ func (b *clineChannelBody) Close() error {
 	return err
 }
 
+// UpstreamChannel reports the channel the gateway named for this request, or ""
+// while the metadata frame has not arrived yet. It is the value the per-request
+// log line and the stored record both use, read from one place.
+func (b *clineChannelBody) UpstreamChannel() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.actual
+}
+
 type clineRoutingMetadata struct {
 	ProviderMetadata struct {
 		Gateway struct {
@@ -112,6 +121,12 @@ func (b *clineChannelBody) report() {
 		return
 	}
 	b.reported = true
+	// No target means pinning is off. There is then no verdict to give - the
+	// request was never pinned - and the observed channel is still recorded by
+	// the caller, so reporting one here would only be noise.
+	if b.target == "" {
+		return
+	}
 	status := "unverified"
 	if b.done && !b.incomplete && b.actual != "" {
 		status = "mismatch"

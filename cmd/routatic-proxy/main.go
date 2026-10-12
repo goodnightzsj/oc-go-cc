@@ -240,6 +240,11 @@ Press Ctrl+C to stop the server.`,
 				defer close(holidaysDone)
 				history.HolidayRefreshLoop(ctx, history.DefaultHolidayRefreshInterval, nil, logHolidayRefresh)
 			}()
+			// The ClinePass channel-pin probe reports whether the upstream still
+			// reads the pinning field. It is not a health check: a failed probe
+			// never fails a request, and the loop returns at once when pinning
+			// is off.
+			srv.StartChannelProbe(ctx)
 			defer func() {
 				cancel()
 				<-pricesDone

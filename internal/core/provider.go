@@ -43,6 +43,10 @@ func (w WireFormat) String() string {
 // ExecuteResult holds the result of a non-streaming provider call.
 type ExecuteResult struct {
 	Body []byte
+	// UpstreamChannel is the channel the upstream gateway reported serving this
+	// request, when that platform publishes one. Empty for every platform that
+	// does not, and empty when the gateway did not say.
+	UpstreamChannel string
 }
 
 // ResponsesStatusError retains a failed execution's reported usage across

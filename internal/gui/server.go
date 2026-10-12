@@ -469,8 +469,13 @@ type historyEntry struct {
 	// RequestedModel is the model the client named. Omitted when it matched the
 	// served model, so the field's presence is itself the signal that this
 	// request was routed somewhere other than what it asked for.
-	RequestedModel      string   `json:"requested_model,omitempty"`
-	Provider            string   `json:"provider"`
+	RequestedModel string `json:"requested_model,omitempty"`
+	Provider       string `json:"provider"`
+	// UpstreamChannel is the channel the upstream gateway reported serving the
+	// request on. Only ClinePass publishes one, so it is empty everywhere else -
+	// which is why the UI shows the badge for that platform only rather than
+	// rendering an empty marker on every row.
+	UpstreamChannel     string   `json:"upstream_channel,omitempty"`
 	Scenario            string   `json:"scenario"`
 	StartTime           string   `json:"start_time"` // RFC3339
 	DurationMs          int64    `json:"duration_ms"`
@@ -629,6 +634,7 @@ func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 			Model:               rec.Model,
 			RequestedModel:      rec.RequestedModel,
 			Provider:            rec.Provider,
+			UpstreamChannel:     rec.UpstreamChannel,
 			Scenario:            scenario,
 			StartTime:           rec.StartTime.Format("2006-01-02T15:04:05Z07:00"),
 			DurationMs:          rec.Duration.Milliseconds(),

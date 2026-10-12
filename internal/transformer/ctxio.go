@@ -52,6 +52,23 @@ func (c *ctxReadCloser) Close() error {
 	return c.closer.Close()
 }
 
+// UpstreamChannel forwards the wrapped body's channel report, when it has one.
+//
+// Embedding ctxReader promotes Read and nothing else, so without this the
+// wrapper erases UpstreamChannel and the streaming path - which reads the
+// channel from exactly this value - would always record an empty channel.
+//
+// The type assertion is on the interface, not on a concrete provider type:
+// transformer must not learn about providers, and a body without the method
+// simply reports no channel.
+func (c *ctxReadCloser) UpstreamChannel() string {
+	reporter, ok := c.closer.(interface{ UpstreamChannel() string })
+	if !ok {
+		return ""
+	}
+	return reporter.UpstreamChannel()
+}
+
 func (c *ctxReader) Read(p []byte) (int, error) {
 	select {
 	case <-c.ctx.Done():

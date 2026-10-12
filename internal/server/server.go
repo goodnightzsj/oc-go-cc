@@ -38,6 +38,9 @@ type Server struct {
 	// fallback is stored so the dashboard can read live circuit-breaker state.
 	// The handler owns that state; this is a reference to it, not a copy.
 	fallback *router.FallbackHandler
+	// clinePass is kept for the channel-pin probe, which has to outlive the
+	// request that would otherwise be its only caller.
+	clinePass *provider.ClinePassProvider
 }
 
 // NewServer creates a new proxy server.
@@ -74,7 +77,8 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 	_ = providerRegistry.Register(provider.NewOpenCodeZenProvider(atomic))
 	_ = providerRegistry.Register(provider.NewAWSBedrockProvider(atomic))
 	_ = providerRegistry.Register(provider.NewCommandCodeProvider(atomic, captureLogger))
-	_ = providerRegistry.Register(provider.NewClinePassProvider(atomic, captureLogger))
+	clinePassProvider := provider.NewClinePassProvider(atomic, captureLogger)
+	_ = providerRegistry.Register(clinePassProvider)
 	_ = providerRegistry.Register(provider.NewOpenRouterProvider(atomic, captureLogger))
 
 	// Create status store for the statusline endpoint.
@@ -174,6 +178,7 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 		storage:   db,
 		retention: retention,
 		fallback:  fallbackHandler,
+		clinePass: clinePassProvider,
 	}
 
 	// Register callback to update log level on config reload
@@ -200,6 +205,14 @@ func (s *Server) Storage() *storage.Database {
 // that state.
 func (s *Server) Fallback() *router.FallbackHandler {
 	return s.fallback
+}
+
+// StartChannelProbe starts the ClinePass channel-pin probe. It returns at once
+// when pinning is off, and a failed probe never affects a request.
+func (s *Server) StartChannelProbe(ctx context.Context) {
+	if s.clinePass != nil {
+		s.clinePass.Start(ctx)
+	}
 }
 
 // Start serves until Shutdown closes the listener. The application owns signals

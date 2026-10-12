@@ -308,6 +308,7 @@ const TRANSLATIONS = {
     'history.streaming': 'Streaming',
     'history.nonStreaming': 'Non-streaming',
     'history.peakWindow': 'Billed at this platform\'s peak rate for the hour of the request; the badge shows the multiplier',
+    'history.upstreamChannelHint': 'The upstream channel the gateway actually served this request on, as the gateway reported it. It is chosen by the gateway, not by us.',
     'filter.dateRange': 'Date range',
     'filter.today': 'Today',
     'filter.throughToday': 'Always end today',
@@ -327,6 +328,7 @@ const TRANSLATIONS = {
     'detail.requestedModel': 'Requested',
     'detail.reroutedHint': 'The client asked for this model; routing served the one shown above.',
     'detail.provider': 'Provider',
+    'detail.upstreamChannel': 'Upstream channel',
     'detail.scenario': 'Scenario',
     'detail.requestType': 'Request type',
     'detail.streaming': 'Streaming',
@@ -846,6 +848,7 @@ const TRANSLATIONS = {
     'history.streaming': '流式',
     'history.nonStreaming': '非流式',
     'history.peakWindow': '按请求时刻所在平台的峰时费率计费，倍率见徽标',
+    'history.upstreamChannelHint': '网关实际服务本次请求的上游渠道，取自网关自己的回报；渠道由网关选择，不由我们决定。',
     'filter.dateRange': '日期范围',
     'filter.today': '今天',
     'filter.throughToday': '结束日期始终为今天',
@@ -865,6 +868,7 @@ const TRANSLATIONS = {
     'detail.requestedModel': '请求的模型',
     'detail.reroutedHint': '客户端请求的是该模型，实际由上方显示的模型提供服务。',
     'detail.provider': '供应商',
+    'detail.upstreamChannel': '上游渠道',
     'detail.scenario': '使用场景',
     'detail.requestType': '请求类型',
     'detail.streaming': '流式请求',
@@ -2492,11 +2496,18 @@ function renderHistory() {
     const peakMark = pm > 1
       ? ' <span class="badge badge-peak" title="' + escapeHtml(t('history.peakWindow')) + '">' + escapeHtml(t('detail.peak')) + ' ×' + pm + '</span>'
       : '';
+    // The upstream channel is shown only where the platform publishes one.
+    // Rendering the badge on every row with an empty value would suggest the
+    // other platforms have a channel they are hiding; they simply do not
+    // report one.
+    const channelMark = h.upstream_channel
+      ? ' <span class="badge badge-channel" title="' + escapeHtml(t('history.upstreamChannelHint')) + '">' + escapeHtml(h.upstream_channel) + '</span>'
+      : '';
     return `
     <tr data-id="${escapeHtml(rowId)}" tabindex="0" aria-haspopup="dialog" data-provider="${escapeHtml(h.provider || '')}" style="cursor: pointer;">
       <td><time class="history-timestamp" datetime="${escapeHtml(h.start_time || '')}" title="${escapeHtml(h.start_time || '')}">${fmtRelativeTime(h.start_time)}<small>${fmtDate(h.start_time)}</small></time>${peakMark}</td>
       <td><div class="history-status-stack">${detailsKnown ? `<span class="badge ${h.success ? 'badge-success' : 'badge-error'}" title="${h.success ? t('badge.success') : t('badge.fail')}">${h.success ? t('badge.success') : t('badge.fail')}</span>` : `<span class="badge badge-unknown" title="${t('detail.unknown')}">${t('detail.unknown')}</span>`}<small class="history-stream-state">${streamLabel}</small></div></td>
-      <td><div class="history-model-cell"><strong title="${escapeHtml(h.model)}">${escapeHtml(h.model) || '—'}</strong><small>${escapeHtml(providerLabel(h.provider))}</small></div></td>
+      <td><div class="history-model-cell"><strong title="${escapeHtml(h.model)}">${escapeHtml(h.model) || '—'}</strong><small>${escapeHtml(providerLabel(h.provider))}${channelMark}</small></div></td>
       <td><span class="badge badge-scene" title="${t('detail.scenario')}: ${escapeHtml(h.scenario) || '—'}">${escapeHtml(h.scenario) || '—'}</span></td>
       <td><button type="button" class="history-token-trigger" data-token-id="${escapeHtml(rowId)}" aria-label="${t('detail.title')}">${totalTokens.toLocaleString()}</button><br><small>${tokenSplit}</small></td>
       <td>${cost}<br><small>${costSourceLabel(h.cost_source)}</small></td>
@@ -3995,6 +4006,7 @@ function showHistoryDetail(record) {
       <div class="detail-row"><span class="detail-label">${t('history.costSource')}</span><span class="detail-value">${costSourceLabel(record.cost_source)}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.billingWindow')}</span><span class="detail-value">${billingWindowLabel(record)}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.requestType')}</span><span class="detail-value">${detailsKnown ? t(record.streaming ? 'detail.streaming' : 'detail.nonStreaming') : t('detail.unavailable')}</span></div>
+      ${record.upstream_channel ? `<div class="detail-row"><span class="detail-label">${t('detail.upstreamChannel')}</span><span class="detail-value">${escapeHtml(record.upstream_channel)}</span></div>` : ''}
       <div class="detail-row"><span class="detail-label">${t('detail.attempt')}</span><span class="detail-value">${detailsKnown ? (record.attempt || 1) : t('detail.unavailable')}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.duration')}</span><span class="detail-value">${detailsKnown ? gradeDuration(record, fmtDuration(record.duration_ms)) : t('detail.unavailable')}</span></div>
       ${tpsOfRow == null ? '' : `<div class="detail-row"><span class="detail-label">${t('analytics.throughput')}</span><span class="detail-value" title="${escapeHtml(t('analytics.throughputHint'))}">${fmtThroughput(tpsOfRow)}</span></div>`}

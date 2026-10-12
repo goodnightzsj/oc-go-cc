@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/routatic/proxy/internal/catalog"
 	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/site"
@@ -72,10 +73,6 @@ func (p *ClinePassProvider) runChannelPinProbe(ctx context.Context) {
 	if len(keys) == 0 {
 		return
 	}
-	models := clinePassProbeModels(cfg)
-	if len(models) == 0 {
-		return
-	}
 	// The probe is a request against a paid quota. A pinned configuration is
 	// the only reason to spend it.
 	if !cfg.ClinePass.ChannelPinEnabled {
@@ -85,6 +82,11 @@ func (p *ClinePassProvider) runChannelPinProbe(ctx context.Context) {
 
 	probeCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
+
+	models := p.clinePassProbeModels(probeCtx, cfg)
+	if len(models) == 0 {
+		return
+	}
 
 	var wg sync.WaitGroup
 	for _, model := range models {
@@ -97,25 +99,45 @@ func (p *ClinePassProvider) runChannelPinProbe(ctx context.Context) {
 	wg.Wait()
 }
 
-// clinePassProbeModels lists the configured model ids belonging to this
-// platform. It reads the config rather than hard-coding a name, so renaming or
-// adding a model does not silently stop the probe.
-func clinePassProbeModels(cfg *config.Config) []string {
-	seen := make(map[string]bool)
-	var out []string
-	for _, model := range cfg.Models {
-		if site.Normalize(model.Provider) != site.ClinePass {
-			continue
-		}
-		id := strings.TrimSpace(model.ModelID)
-		if id == "" || seen[id] {
-			continue
-		}
-		seen[id] = true
-		out = append(out, id)
+// clinePassProbeModels lists the models to probe.
+//
+// It asks the platform for its own roster rather than reading cfg.Models or the
+// overrides. Both were wrong on the deployment this was written for: cfg.Models
+// held only CommandCode entries, and the ClinePass model ids arrived through
+// model_overrides, so a config scan found nothing to probe and the loop
+// silently did no work. The roster endpoint is the same source the model picker
+// uses, so it cannot disagree with what the platform actually serves.
+func (p *ClinePassProvider) clinePassProbeModels(ctx context.Context, cfg *config.Config) []string {
+	// Two steps, and both are required: ProviderModelEndpoint returns the
+	// platform's API endpoint, and SiteModelsURL derives the list URL from it.
+	// Passing the API endpoint straight to FetchSiteModels silently queries
+	// /chat/completions instead of the roster.
+	endpoint, err := catalog.SiteModelsURL(site.ClinePass, cfg.ProviderModelEndpoint(site.ClinePass))
+	if err != nil {
+		slog.Debug("cline-pass channel pin probe skipped: no model-list endpoint", "error", err)
+		return nil
 	}
-	sort.Strings(out)
-	return out
+	models, err := catalog.FetchSiteModels(ctx, p.httpClient, site.ClinePass, endpoint)
+	if err != nil {
+		// Not a verdict about pinning; the probe simply has nothing to ask about.
+		slog.Debug("cline-pass channel pin probe skipped: model list unavailable", "error", err)
+		return nil
+	}
+	ids := make([]string, 0, len(models))
+	for _, model := range models {
+		if id := strings.TrimSpace(model.ID); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	// A platform-wide probe costs one request per model. If the roster is large,
+	// probing all of it every cycle spends quota to answer a question one model
+	// answers just as well: the gateway applies the same policy to the platform.
+	const maxProbeModels = 3
+	if len(ids) > maxProbeModels {
+		ids = ids[:maxProbeModels]
+	}
+	return ids
 }
 
 func (p *ClinePassProvider) probeOneModel(ctx context.Context, cfg *config.Config, keys []string, model string) {

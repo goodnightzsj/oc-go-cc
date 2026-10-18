@@ -3,6 +3,7 @@ package catalog
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -64,4 +65,62 @@ func TestMaxOutputTokensIsZeroWhenUnknown(t *testing.T) {
 	if got := (Model{Limit: &Limit{Context: 500}}).MaxOutputTokens(); got != 0 {
 		t.Errorf("context-only limit = %d, want 0", got)
 	}
+}
+
+// models.dev qualifies the nested key for some providers and leaves it bare for
+// others, and the merge must not prefix a key that already carries its provider.
+//
+// This is the live shape: all 18 of cline-pass's nested keys are already
+// "cline-pass/<name>", so prefixing produced "cline-pass/cline-pass/<name>" as a
+// second entry beside the correct one. Both reached GET /v1/models, and the
+// doubled id was reachable rather than inert - ResolveShort matched it and
+// returned the whole doubled string as the upstream model id.
+func TestMergeDoesNotDoublePrefixAnAlreadyQualifiedNestedKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "catalog.json")
+	body := `{
+	  "providers": {
+	    "other": {"name": "Other"},
+	    "cline-pass": {
+	      "name": "ClinePass",
+	      "models": {
+	        "cline-pass/deepseek-v4.1-flash": {"name": "DeepSeek V4.1 Flash", "limit": {"context": 1000000, "output": 384000}, "tool_call": true},
+	        "glm-5.3": {"name": "GLM-5.3", "limit": {"context": 200000, "output": 8192}, "tool_call": true}
+	      }
+	    }
+	  },
+	  "models": {"other/model": {"name": "Other", "limit": {"context": 1000, "output": 100}}}
+	}`
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if _, ok := idx.Models["cline-pass/cline-pass/deepseek-v4.1-flash"]; ok {
+		t.Error("an already-qualified nested key must not be prefixed a second time")
+	}
+	model, ok := idx.Models["cline-pass/deepseek-v4.1-flash"]
+	if !ok {
+		t.Fatalf("the qualified nested key is missing; keys = %v", keysOf(idx.Models))
+	}
+	if got := model.MaxOutputTokens(); got != 384000 {
+		t.Errorf("max output = %d, want 384000", got)
+	}
+
+	// A bare nested key is still prefixed: both shapes occur in the same feed.
+	if _, ok := idx.Models["cline-pass/glm-5.3"]; !ok {
+		t.Errorf("a bare nested key must still be qualified; keys = %v", keysOf(idx.Models))
+	}
+}
+
+func keysOf(m map[string]Model) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	slices.Sort(out)
+	return out
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 )
 
 // IndexedCatalog is a Catalog with an additional index from provider name to
@@ -65,13 +66,24 @@ func Load(path string) (*IndexedCatalog, error) {
 // under its provider-qualified key, keeping whatever the top level already had
 // for that key. The top level wins because it is the view other code already
 // resolves against; the nested entry only fills ids it does not carry.
+//
+// The nested key is not always a bare model name. models.dev qualifies it for
+// some providers and not others - 15 of 232 do, including every cline-pass
+// entry, where the key is already "cline-pass/deepseek-v4-flash" - so prefixing
+// unconditionally produces "cline-pass/cline-pass/deepseek-v4-flash". That
+// double-prefixed key is not inert: it is a second, wrong entry in the same
+// listing, and a client that picked it would send the doubled string upstream.
+// A key that already carries its provider is therefore kept as it is.
 func mergeProviderModels(catalog *Catalog) {
 	if catalog.Models == nil {
 		catalog.Models = make(map[string]Model)
 	}
 	for providerName, provider := range catalog.Providers {
 		for name, model := range provider.Models {
-			key := providerName + "/" + name
+			key := name
+			if !strings.HasPrefix(name, providerName+"/") {
+				key = providerName + "/" + name
+			}
 			if _, exists := catalog.Models[key]; exists {
 				continue
 			}

@@ -122,7 +122,7 @@ func (s *Selector) resolveCandidates(scen config.CostScenario, constraints Scena
 			}
 			candidates = append(candidates, catalog.ResolvedModel{
 				Provider:               provider.Name,
-				ModelID:                catalog.ModelNameFromKey(modelKey),
+				ModelID:                catalog.WireModelID(modelKey),
 				CanonicalName:          modelKey,
 				DisplayName:            model.DisplayName(),
 				BaseURL:                provider.BaseURL,

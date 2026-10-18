@@ -3,6 +3,8 @@ package catalog
 import (
 	"slices"
 	"strings"
+
+	"github.com/routatic/proxy/internal/site"
 )
 
 // Catalog is the parsed contents of a models.dev catalog.
@@ -279,6 +281,27 @@ func ModelNameFromKey(key string) string {
 		return key
 	}
 	return key[idx+1:]
+}
+
+// WireModelID returns the model id to send upstream for a catalog key.
+//
+// For most platforms the key's first segment is a namespace: the catalog says
+// "opencode-go/deepseek-v4-flash" and the API wants "deepseek-v4-flash". For
+// ClinePass the first segment is not a namespace but the billing pool selector,
+// and the API rejects anything without one - a bare name answers
+// 400 "invalid model format. Expected format: modelType/model". So there the
+// whole key is the wire id.
+//
+// Every path that produces a ModelID for sending must go through this. When it
+// did not, a doubled catalog key ("cline-pass/cline-pass/...") made
+// ModelNameFromKey return the correct "cline-pass/..." by accident, and fixing
+// the doubling surfaced this as an outage: the same request started sending
+// "deepseek-v4.1-flash" and every ClinePass call failed with that 400.
+func WireModelID(key string) string {
+	if site.Normalize(ProviderFromModelKey(key)) == site.ClinePass {
+		return key
+	}
+	return ModelNameFromKey(key)
 }
 
 // modelNameFromKey is an alias for internal use.

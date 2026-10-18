@@ -64,7 +64,7 @@ func ExportJSON(ctx context.Context, db *storage.Database, jsonPath string) erro
 
 	for key, m := range idx.Models {
 		model := storageModelToCatalogModel(m)
-		model.ID = ModelNameFromKey(key)
+		model.ID = WireModelID(key)
 		catalog.Models[key] = model
 	}
 
@@ -96,7 +96,7 @@ func LoadFromSQLite(ctx context.Context, db *storage.Database) (*IndexedCatalog,
 
 	for key, m := range storageIdx.Models {
 		model := storageModelToCatalogModel(m)
-		model.ID = ModelNameFromKey(key)
+		model.ID = WireModelID(key)
 		cat.Models[key] = model
 	}
 

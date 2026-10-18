@@ -356,3 +356,57 @@ func TestListProviderModels(t *testing.T) {
 		}
 	}
 }
+
+// The wire model id must keep ClinePass's pool prefix.
+//
+// For every other platform the catalog key's first segment is a namespace and
+// must be stripped before sending. ClinePass is the opposite: the first segment
+// IS the billing pool selector, and the API answers a bare name with
+// 400 "invalid model format. Expected format: modelType/model".
+//
+// This is the regression the doubled-key bug was hiding. While the catalog held
+// "cline-pass/cline-pass/deepseek-v4.1-flash", stripping the first segment
+// happened to leave "cline-pass/deepseek-v4.1-flash" - correct by accident. Once
+// the doubling was fixed the same code started sending "deepseek-v4.1-flash"
+// and every ClinePass request failed.
+func TestWireModelIDKeepsTheClinePassPoolPrefix(t *testing.T) {
+	cases := []struct {
+		key  string
+		want string
+	}{
+		{"cline-pass/deepseek-v4.1-flash", "cline-pass/deepseek-v4.1-flash"},
+		{"cline-pass/glm-5.3", "cline-pass/glm-5.3"},
+		{"opencode-go/deepseek-v4-flash", "deepseek-v4-flash"},
+		{"commandcode/deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-pro"},
+		{"no-slash-model", "no-slash-model"},
+	}
+	for _, tc := range cases {
+		if got := WireModelID(tc.key); got != tc.want {
+			t.Errorf("WireModelID(%q) = %q, want %q", tc.key, got, tc.want)
+		}
+	}
+}
+
+// Resolution must carry the wire id, not just the canonical name: the two call
+// sites that build a ModelConfig from a catalog entry are what the provider
+// sends.
+func TestResolveReturnsASendableClinePassModelID(t *testing.T) {
+	cat := &IndexedCatalog{
+		Catalog: Catalog{
+			Providers: map[string]Provider{"cline-pass": {Name: "cline-pass"}},
+			Models: map[string]Model{
+				"cline-pass/deepseek-v4.1-flash": {Name: "DeepSeek V4.1 Flash"},
+			},
+		},
+	}
+	resolved, err := cat.Resolve(Selector{Provider: "cline-pass", Model: "deepseek-v4.1-flash"})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if resolved.ModelID != "cline-pass/deepseek-v4.1-flash" {
+		t.Errorf("ModelID = %q, want the pool-qualified wire id", resolved.ModelID)
+	}
+	if resolved.CanonicalName != "cline-pass/deepseek-v4.1-flash" {
+		t.Errorf("CanonicalName = %q", resolved.CanonicalName)
+	}
+}

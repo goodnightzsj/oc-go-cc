@@ -612,6 +612,26 @@ func PriceRefreshLoop(ctx context.Context, cfg PriceRefreshConfig, client *http.
 // clinePriceRowRE matches one Markdown table row, capturing its cells.
 var clinePriceRowRE = regexp.MustCompile(`(?m)^\|(.+)\|\s*$`)
 
+// clinePriceSeparatorRE matches a Markdown table's separator row, whose cells
+// are dashes with optional alignment colons. Both spellings the page has used
+// are covered: the padded "| ------- | ------- |" and the compact "| - | - |".
+// The compact form is what broke the parser - see isTableSeparator.
+var clinePriceSeparatorRE = regexp.MustCompile(`^\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?$`)
+
+// isTableSeparator reports whether a row is a table's header separator rather
+// than data.
+//
+// This must be recognized by shape, not by a "---" prefix. The page carried
+// "| ----------------- | ------------------------------ |" until 2026-10-16 and
+// then began emitting "| - | - |"; the prefix test missed the new form, so the
+// separator reached the model-id lookup, failed to match, and was reported as
+// "price row \"-\" names a model the id table does not list". Every refresh
+// after that failed, which leaves the seed table in place - a stale price
+// reads as a correct one, so the failure was invisible from the numbers.
+func isTableSeparator(label string) bool {
+	return clinePriceSeparatorRE.MatchString(strings.TrimSpace(label))
+}
+
 // clinePriceCellsRE pulls the dollar amounts out of a price row, in column
 // order. The page escapes the dollar sign in Markdown ("\$1.40") and writes a
 // dash for a column the model does not bill, so a missing amount is a dash
@@ -627,11 +647,20 @@ var clinePriceIDRE = regexp.MustCompile("`(cline-pass/[^`]+)`")
 var clinePriceBandRE = regexp.MustCompile(`(?i)^(.*?)\s*\((≤|>)\s*([0-9.]+\s*[KkMm])\s*tokens?\)\s*$`)
 
 // clinePriceTagRE strips the footnote the page attaches to the DeepSeek rows
-// ("DeepSeek V4 Pro (Off-peak)<sup>1</sup>"). The marker renders as an HTML tag
-// in the page source and as a bare digit once the tag is removed, so both are
-// cleaned - but only after the label's own "(...)" suffix, to keep a model
-// whose name ends in a number from losing it.
-var clinePriceTagRE = regexp.MustCompile(`<[^>]+>`)
+// ("DeepSeek V4 Pro (Off-peak)<sup>1</sup>").
+//
+// The sup element is removed together with its content, and that is the whole
+// point: stripping the tags alone leaves the marker's digit behind, so a label
+// with no "(...)" suffix to anchor to becomes "DeepSeek V4.1 Flash1" and stops
+// matching the id table. The paren form survived that only because
+// clinePriceFootnoteRE below expects a ")" immediately before the digit.
+//
+// The second alternative still removes any other tag the page carries.
+var clinePriceTagRE = regexp.MustCompile(`<sup[^>]*>[^<]*</sup>|<[^>]+>`)
+
+// clinePriceFootnoteRE cleans the same marker when the page emits it as a bare
+// digit with no element ("DeepSeek V4 Pro (Off-peak)1"). It requires the ")"
+// so that a model whose own name ends in a number keeps it.
 var clinePriceFootnoteRE = regexp.MustCompile(`\)\s*\d+\s*$`)
 
 // clinePricePeakSuffixRE removes the peak qualifier that distinguishes the two
@@ -675,7 +704,7 @@ func parseClinePassPricePage(body []byte) ([]priceEntry, error) {
 			continue
 		}
 		label := strings.TrimSpace(clinePriceFootnoteRE.ReplaceAllString(clinePriceTagRE.ReplaceAllString(cells[0], ""), ")"))
-		if label == "" || strings.EqualFold(label, "Model") || strings.HasPrefix(label, "---") {
+		if label == "" || strings.EqualFold(label, "Model") || isTableSeparator(label) {
 			continue
 		}
 		// The id table comes first; it is the only table with a backticked id.

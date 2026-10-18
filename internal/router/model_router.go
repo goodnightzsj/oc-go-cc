@@ -559,15 +559,39 @@ func (r *ModelRouter) ListModels(ctx context.Context) []ModelInfo {
 		add(alias, "", mc.Provider)
 	}
 
+	// A platform that publishes its own model list is the authority for its own
+	// models, and the catalog does not know it at all.
+	//
+	// It is also the authority on which of its models still exist. The catalog
+	// mirrors a third party and lags: models.dev still carries four cline-pass
+	// models the platform retired, and they would otherwise stay in the picker
+	// long after they stopped being callable. So a platform's own roster
+	// restricts what the catalog may contribute for that platform.
+	//
+	// Only a roster that arrived may restrict anything. An unreachable platform
+	// reports no models, and treating that as "the platform has none" would
+	// empty a picker every time the endpoint blipped - the same distinction
+	// FetchSiteModels draws between an empty list and a failed fetch.
+	siteModels := r.siteModels(ctx)
+	published := map[string]map[string]bool{}
+	for _, model := range siteModels {
+		if published[model.Provider] == nil {
+			published[model.Provider] = map[string]bool{}
+		}
+		published[model.Provider][model.ID] = true
+	}
+
 	if cat, err := r.catalog(ctx); err == nil && cat != nil {
 		for key, model := range cat.Models {
-			add(key, model.DisplayName(), catalog.ProviderFromModelKey(key))
+			provider := catalog.ProviderFromModelKey(key)
+			if known, ok := published[provider]; ok && !known[key] {
+				continue
+			}
+			add(key, model.DisplayName(), provider)
 		}
 	}
 
-	// A platform that publishes its own model list is the authority for its own
-	// models, and the catalog does not know it at all.
-	for _, model := range r.siteModels(ctx) {
+	for _, model := range siteModels {
 		add(model.ID, model.DisplayName, model.Provider)
 	}
 

@@ -3,6 +3,9 @@ package router
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -1179,5 +1182,92 @@ func TestListModels_NormalizesActiveSiteSpelling(t *testing.T) {
 	models := NewModelRouter(newTestAtomicConfig(cfg)).ListModels(context.Background())
 	if len(models) != 1 || models[0].ID != "go-model" {
 		t.Errorf("models = %+v, want only the opencode-go target", models)
+	}
+}
+
+// A platform's own roster is the authority on which of its models still exist.
+//
+// models.dev is a third-party mirror and lags: it still carried four cline-pass
+// models the platform had retired. Both sources reached the listing, so the
+// picker kept offering models that answer an error when called.
+//
+// The catalog here holds a live model and a retired one; the roster lists only
+// the live one.
+func TestListModels_DropsCatalogModelsThePlatformNoLongerPublishes(t *testing.T) {
+	const (
+		live    = "cline-pass/deepseek-v4.1-flash"
+		retired = "cline-pass/kimi-k2.6"
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/ai/cline/recommended-models" {
+			t.Errorf("roster requested from %q", r.URL.Path)
+			return
+		}
+		_, _ = io.WriteString(w, `{"clinePass":[{"id":"`+live+`","name":"DeepSeek V4.1 Flash"}]}`)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "catalog.json")
+	body := `{
+	  "providers": {"cline-pass": {"name": "cline-pass"}},
+	  "models": {
+	    "cline-pass/deepseek-v4.1-flash": {"name": "DeepSeek V4.1 Flash"},
+	    "cline-pass/kimi-k2.6": {"name": "Kimi K2.6"}
+	  }
+	}`
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		ClinePass: config.ClinePassConfig{
+			APIKey:  "synthetic-key",
+			BaseURL: srv.URL + "/api/v1/chat/completions",
+		},
+	}
+	router := NewModelRouterWithCatalog(newTestAtomicConfig(cfg), path)
+
+	byID := map[string]bool{}
+	for _, m := range router.ListModels(context.Background()) {
+		byID[m.ID] = true
+	}
+	if !byID[live] {
+		t.Errorf("the model the platform still publishes must be listed; got %v", byID)
+	}
+	if byID[retired] {
+		t.Error("a model the platform retired must not reach the picker, even though the catalog still carries it")
+	}
+}
+
+// A roster that could not be fetched must not restrict the catalog.
+//
+// An unreachable platform reports no models, and reading that as "the platform
+// has none" would empty its section of the picker on every blip - the same
+// distinction FetchSiteModels draws between an empty list and a failed fetch.
+func TestListModels_KeepsCatalogModelsWhenTheRosterIsUnreachable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	base := srv.URL + "/api/v1/chat/completions"
+	srv.Close() // now unreachable
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "catalog.json")
+	body := `{
+	  "providers": {"cline-pass": {"name": "cline-pass"}},
+	  "models": {"cline-pass/kimi-k2.6": {"name": "Kimi K2.6"}}
+	}`
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{ClinePass: config.ClinePassConfig{APIKey: "synthetic-key", BaseURL: base}}
+	router := NewModelRouterWithCatalog(newTestAtomicConfig(cfg), path)
+
+	byID := map[string]bool{}
+	for _, m := range router.ListModels(context.Background()) {
+		byID[m.ID] = true
+	}
+	if !byID["cline-pass/kimi-k2.6"] {
+		t.Error("an unreachable roster must leave the catalog's models alone, not empty the picker")
 	}
 }

@@ -125,6 +125,88 @@ func TestClinePassPricesRejectUnknownLabel(t *testing.T) {
 	}
 }
 
+// The page changed its table separators from "| ------- |" to "| - | - |" on
+// 2026-10-16 and every hourly refresh failed from then on, silently serving the
+// seed table. The old guard tested for a "---" prefix, so the compact form
+// reached the model-id lookup and was reported as a row named "-".
+//
+// The compact form is exercised on its own, because that is the shape that
+// broke and a padded fixture would not reproduce it.
+func TestClinePassPricesAcceptTheCompactSeparatorRow(t *testing.T) {
+	page := `
+| Model | Model ID |
+| - | - |
+| GLM-5.3 | ` + "`cline-pass/glm-5.3`" + ` |
+
+| Model | Input | Output | Cached Read | Cached Write |
+| - | - | - | - | - |
+| GLM-5.3 | \$1.40 | \$4.40 | \$0.26 | - |
+`
+	entries, err := parseClinePassPricePage([]byte(page))
+	if err != nil {
+		t.Fatalf("a compact separator row must not be read as data: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Match != "cline-pass/glm-5.3" {
+		t.Fatalf("entries = %+v, want one rule for glm-5.3", entries)
+	}
+	if entries[0].Input != 1.40 || entries[0].Output != 4.40 {
+		t.Errorf("rates = %v/%v, want 1.40/4.40", entries[0].Input, entries[0].Output)
+	}
+}
+
+// A footnote marker must be removed with its element, not just its tags.
+//
+// "DeepSeek V4.1 Flash<sup>1</sup>" has no "(...)" suffix for the bare-digit
+// cleanup to anchor to, so tag-only stripping left "DeepSeek V4.1 Flash1" and
+// the row stopped matching the id table - a second failure hiding behind the
+// separator one, on the same page.
+func TestClinePassPricesStripFootnoteWithItsElement(t *testing.T) {
+	page := `
+| Model | Model ID |
+| - | - |
+| DeepSeek V4.1 Flash | ` + "`cline-pass/deepseek-v4.1-flash`" + ` |
+| DeepSeek V4 Pro | ` + "`cline-pass/deepseek-v4-pro`" + ` |
+
+| Model | Input | Output | Cached Read | Cached Write |
+| - | - | - | - | - |
+| DeepSeek V4.1 Flash<sup>1</sup> | \$0.30 | \$1.20 | \$0.006 | - |
+| DeepSeek V4 Pro (Off-peak)<sup>1</sup> | \$0.66 | \$1.98 | \$0.022 | - |
+`
+	entries, err := parseClinePassPricePage([]byte(page))
+	if err != nil {
+		t.Fatalf("a footnote marker must not break the row: %v", err)
+	}
+	byMatch := map[string]priceEntry{}
+	for _, e := range entries {
+		byMatch[e.Match] = e
+	}
+	flash, ok := byMatch["cline-pass/deepseek-v4.1-flash"]
+	if !ok {
+		t.Fatalf("the sup-footnoted row without parens lost its id; entries = %+v", entries)
+	}
+	if flash.Input != 0.30 || flash.Output != 1.20 {
+		t.Errorf("flash = %v/%v, want 0.30/1.20", flash.Input, flash.Output)
+	}
+	if _, ok := byMatch["cline-pass/deepseek-v4-pro"]; !ok {
+		t.Error("the parenthesised off-peak row must still resolve")
+	}
+}
+
+// isTableSeparator must accept every separator spelling the page has used and
+// reject anything that could be a model label.
+func TestIsTableSeparator(t *testing.T) {
+	for _, yes := range []string{"-", " - ", "---", "-------", ":---:", "| - | - |"} {
+		if !isTableSeparator(yes) {
+			t.Errorf("isTableSeparator(%q) = false, want true", yes)
+		}
+	}
+	for _, no := range []string{"", "Model", "GLM-5.3", "- -", "a-b", "MiMo-V2.5"} {
+		if isTableSeparator(no) {
+			t.Errorf("isTableSeparator(%q) = true, want false", no)
+		}
+	}
+}
+
 // The embedded seed and the live page must agree: a drift between them means
 // one of the two is stale, and the seed is what a failed refresh falls back to.
 func TestClinePassSeedMatchesPublishedPage(t *testing.T) {

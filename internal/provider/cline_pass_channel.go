@@ -74,14 +74,45 @@ func (b *clineChannelBody) UpstreamChannel() string {
 	return b.actual
 }
 
+// clineRoutingMetadata is the routing block the gateway attaches to a response.
+// It is shared by the per-request observer and the pin probe because both read
+// the same block and must agree on what a field means.
+//
+// Three of the four fields are read even though a pinned request usually
+// reports nothing useful in them, and that is deliberate:
+//
+//   - FinalProvider is the channel that served the request.
+//   - ResolvedProvider is the same fact under the name the direct pipeline
+//     (OpenRouter) uses. Reading only finalProvider makes a direct-pipeline
+//     answer look like no metadata at all.
+//   - FallbacksAvailable is the channel list the gateway considered. It is the
+//     only place an *accepted* request names other channels, so it is what makes
+//     a pinnable account distinguishable from a private-route one without
+//     relying on a rejection.
+//   - CanonicalSlug names the upstream model, which is what ties a response to
+//     the model that produced it when the gateway rewrites the id.
 type clineRoutingMetadata struct {
 	ProviderMetadata struct {
 		Gateway struct {
 			Routing struct {
-				FinalProvider string `json:"finalProvider"`
+				FinalProvider      string   `json:"finalProvider"`
+				ResolvedProvider   string   `json:"resolvedProvider"`
+				CanonicalSlug      string   `json:"canonicalSlug"`
+				FallbacksAvailable []string `json:"fallbacksAvailable"`
 			} `json:"routing"`
 		} `json:"gateway"`
 	} `json:"provider_metadata"`
+}
+
+// channel returns the channel that served the request, under whichever name
+// this pipeline publishes it. Both spellings mean the same thing, and only one
+// is populated per response.
+func (m clineRoutingMetadata) channel() string {
+	routing := m.ProviderMetadata.Gateway.Routing
+	if routing.FinalProvider != "" {
+		return routing.FinalProvider
+	}
+	return routing.ResolvedProvider
 }
 
 func (b *clineChannelBody) observe(line []byte) {
@@ -105,7 +136,7 @@ func (b *clineChannelBody) observe(line []byte) {
 		return // Observation is advisory; the existing stream parser owns errors.
 	}
 	remember := func(m clineRoutingMetadata) {
-		if actual := m.ProviderMetadata.Gateway.Routing.FinalProvider; actual != "" {
+		if actual := m.channel(); actual != "" {
 			b.actual = actual
 		}
 	}

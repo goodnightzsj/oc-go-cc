@@ -189,3 +189,42 @@ func TestClinePassPlanURLKeepsOriginAndRejectsForeignPath(t *testing.T) {
 		}
 	}
 }
+
+// A rejection must carry the platform's own explanation. ClinePass answers a
+// request it will not serve with a reason - "no plan history found for user"
+// for an account with no subscription - and reporting the bare status text
+// instead names the symptom while hiding the cause: the credential is valid and
+// the account is not entitled, which is a different problem with a different
+// fix.
+func TestClinePassReportsThePlatformsReason(t *testing.T) {
+	const reason = "no plan history found for user"
+	body := `{"data":null,"error":"` + reason + `","success":false}`
+
+	// Both endpoints answer the same way, and both must say why.
+	usage := clinePassServer(t, http.StatusNotFound, body)
+	if _, err := FetchClinePass(context.Background(), usage.Client(), clinePassEndpoint(t, usage.URL), "cline-key"); err == nil || !strings.Contains(err.Error(), reason) {
+		t.Errorf("usage error = %v, want it to carry %q", err, reason)
+	}
+
+	plan := clinePassServer(t, http.StatusNotFound, body)
+	if _, err := FetchClinePassPlan(context.Background(), plan.Client(), plan.URL+"/api/v1/users/me/plan", "cline-key"); err == nil || !strings.Contains(err.Error(), reason) {
+		t.Errorf("plan error = %v, want it to carry %q", err, reason)
+	}
+}
+
+// A failure body that is not JSON, or carries no reason, still reports the
+// status rather than an empty message.
+func TestClinePassFallsBackToTheStatusText(t *testing.T) {
+	for name, body := range map[string]string{
+		"not json":  "<html>nope</html>",
+		"no reason": `{"data":null,"success":false}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			page := clinePassServer(t, http.StatusNotFound, body)
+			_, err := FetchClinePass(context.Background(), page.Client(), clinePassEndpoint(t, page.URL), "cline-key")
+			if err == nil || !strings.Contains(err.Error(), "404") {
+				t.Fatalf("error = %v, want an HTTP 404 report", err)
+			}
+		})
+	}
+}

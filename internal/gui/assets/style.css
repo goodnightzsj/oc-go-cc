@@ -201,20 +201,24 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
 .badge-unknown { background: rgba(154,163,173,.12); color: var(--ui-muted); }
 .badge-peak { background:#b45309; color:#fff; }
 /* The channel badge carries a machine value the reader scans down a column
-   looking for a change, so it is set in the monospace face the other
-   identifiers use and sized to sit on the platform line without reflowing it.
-   The tone is the platform accent, which keeps it reading as a ClinePass fact
-   rather than a status. */
+   looking for a change. It is set in the interface face rather than the
+   monospace one the other identifiers use: at 10px monospace a real channel
+   name like openai-compatible-private measures about 186px, wider than the
+   model cell it sits under, so the badge was always truncated and the value
+   was never fully readable. Proportional text fits it, and tabular figures keep
+   the digits aligned across rows without forcing every letter to a fixed
+   advance. The tone is the platform accent, which keeps it reading as a
+   ClinePass fact rather than a status. */
 .badge-channel {
   padding: 1px 6px;
   border: 1px solid color-mix(in srgb, var(--ui-cyan) 38%, transparent);
   background: color-mix(in srgb, var(--ui-cyan) 14%, transparent);
   color: var(--ui-cyan);
-  font-family: 'SF Mono','Menlo','Monaco',monospace;
   font-size: 10px;
   font-weight: 500;
-  letter-spacing: 0.02em;
-  max-width: 160px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: middle;
@@ -1277,7 +1281,11 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .price-seed { color: var(--ui-amber); font-weight: 600; cursor: help; }
 .analytics-retained-range { display: block; margin: 2px 0 8px; color: var(--ui-muted); font-size: 9px; text-align: right; font-variant-numeric: tabular-nums; }
 
-.history-model-cell { display: grid; gap: 2px; min-width: 140px; max-width: 220px; }
+/* The cell is sized for the model name and the platform line under it, which
+   can now carry a channel badge as well. A real channel name is 25 characters,
+   so the ceiling has to fit one or the badge truncates the value it exists to
+   report. */
+.history-model-cell { display: grid; gap: 2px; min-width: 140px; max-width: 300px; }
 .history-model-cell strong,
 .history-model-cell small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-model-cell strong { color: var(--ui-text); font-size: 11px; }

@@ -27,12 +27,51 @@ type Database struct {
 	// analyticsBaseline is the parsed Config.AnalyticsBaseline; zero means the
 	// full history is analysed.
 	analyticsBaseline time.Time
+
+	// summaries caches history summaries, keyed by the query that produced
+	// them, and is valid only while summaryRevision still matches the table.
+	// It lives here rather than on Requests because that type is built per HTTP
+	// request and would carry the cache to the grave with it.
+	summaryMu       sync.Mutex
+	summaries       map[string]*RequestSummary
+	summaryRevision string
 }
 
 // AnalyticsBaseline reports the configured cutoff for analytics aggregates.
 // The zero time means no cutoff.
 func (d *Database) AnalyticsBaseline() time.Time {
 	return d.analyticsBaseline
+}
+
+// summaryCacheLimit bounds the cache. The dashboard offers a handful of filter
+// combinations, so this is far more room than it needs; the limit exists so a
+// script sweeping query parameters cannot grow the map without bound.
+const summaryCacheLimit = 32
+
+// cachedSummary returns the summary stored for this filter, if the cache still
+// describes the same rows.
+//
+// The revision is held once for the whole map rather than per entry: a change
+// to the table invalidates every filter's answer at the same instant, so there
+// is nothing a per-entry copy could express that this cannot.
+func (d *Database) cachedSummary(key, revision string) (*RequestSummary, bool) {
+	d.summaryMu.Lock()
+	defer d.summaryMu.Unlock()
+	if d.summaryRevision != revision {
+		return nil, false
+	}
+	summary, ok := d.summaries[key]
+	return summary, ok
+}
+
+func (d *Database) storeSummary(key, revision string, summary *RequestSummary) {
+	d.summaryMu.Lock()
+	defer d.summaryMu.Unlock()
+	if d.summaryRevision != revision || len(d.summaries) >= summaryCacheLimit {
+		d.summaries = make(map[string]*RequestSummary, summaryCacheLimit)
+		d.summaryRevision = revision
+	}
+	d.summaries[key] = summary
 }
 
 type Config struct {

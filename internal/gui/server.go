@@ -929,6 +929,57 @@ func (s *Server) handleProxyStop(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// keyOriginView renders each platform's per-row key origin for the settings
+// response, keyed by the config block name ("" for the global pool).
+//
+// It is a sibling field rather than part of the config object: origins are
+// runtime knowledge, not configuration, and putting them inside the config
+// would let a client echo them back on save.
+func keyOriginView(cfg *config.Config) map[string][]string {
+	if cfg == nil {
+		return nil
+	}
+	view := map[string][]string{}
+	for block, pool := range cfg.KeyPools() {
+		if len(pool.Origins) != len(pool.Keys) || len(pool.Keys) == 0 {
+			continue
+		}
+		origins := make([]string, len(pool.Origins))
+		for i, origin := range pool.Origins {
+			origins[i] = string(origin)
+		}
+		view[block] = origins
+	}
+	return view
+}
+
+// writeSettingsPayload writes the redacted config with the key-origin map
+// merged in as an extra top-level field.
+//
+// The config is flattened rather than nested so the response keeps the shape
+// every existing client already reads: a settings save sends back a patch built
+// from these same top-level keys, and wrapping them would silently stop that
+// patch from addressing anything.
+func writeSettingsPayload(w http.ResponseWriter, cfg *config.Config, origins map[string][]string) {
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		writeSettingsError(w, http.StatusInternalServerError, "redaction_failed", "", false)
+		return
+	}
+	var flat map[string]json.RawMessage
+	if err := json.Unmarshal(data, &flat); err != nil {
+		writeSettingsError(w, http.StatusInternalServerError, "redaction_failed", "", false)
+		return
+	}
+	if len(origins) > 0 {
+		encoded, err := json.Marshal(origins)
+		if err == nil {
+			flat["key_origins"] = encoded
+		}
+	}
+	writeJSON(w, flat)
+}
+
 func (s *Server) handleProxyConfig(w http.ResponseWriter, r *http.Request) {
 	if s.atomicCfg == nil {
 		writeSettingsError(w, http.StatusServiceUnavailable, "config_unavailable", "", false)
@@ -949,7 +1000,7 @@ func (s *Server) handleProxyConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, redacted)
+		writeSettingsPayload(w, redacted, keyOriginView(s.atomicCfg.Get()))
 
 	case http.MethodPost:
 		// Decode only the fields the client sent (partial update).

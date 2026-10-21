@@ -95,10 +95,18 @@ vm.runInContext(` + "`" + `
   const ids = [...page.matchAll(/id="([^"]+)"/g)].map(match => match[1]);
   assert.equal(new Set(ids).size, ids.length, 'duplicate DOM identifiers');
   for (const [, id] of CONFIG_FIELDS) assert.ok(ids.includes(id), 'missing setting: ' + id);
-  for (const path of ['base_url', 'anthropic_base_url', 'api_key', 'api_keys', 'timeout_ms', 'stream_timeout_ms', 'streaming_timeout_ms', 'zero_data_retention']) {
+  for (const path of ['base_url', 'anthropic_base_url', 'api_keys', 'timeout_ms', 'stream_timeout_ms', 'streaming_timeout_ms', 'zero_data_retention']) {
     assert.ok(CONFIG_FIELDS.some(field => field[0] === 'commandcode.' + path), 'missing CommandCode config field: ' + path);
   }
   assert.ok(!CONFIG_FIELDS.some(field => field[0] === 'commandcode.zdr'), 'obsolete CommandCode config field');
+  // The single-key field is gone from the form: the pool list is the one place
+  // a credential is entered, and a second input would let the two disagree.
+  for (const platform of ['', 'opencode_go.', 'commandcode.', 'cline_pass.']) {
+    assert.ok(!CONFIG_FIELDS.some(field => field[0] === platform + 'api_key'),
+      'the single-key field must not be bound to the form: ' + (platform || 'global'));
+    assert.ok(CONFIG_FIELDS.some(field => field[0] === platform + 'api_keys'),
+      'missing key pool field: ' + (platform || 'global'));
+  }
   // Every visible platform's settings block must be bound to the save path.
   // A block with markup but no CONFIG_FIELDS entry renders fine and silently
   // drops whatever is typed into it, so the platform can never be given a
@@ -108,7 +116,7 @@ vm.runInContext(` + "`" + `
     assert.ok(CONFIG_FIELDS.some(field => field[0] === key + '.base_url'),
       'platform settings block is not bound to the save path: ' + descriptor);
   }
-  for (const path of ['base_url', 'api_key', 'api_keys', 'timeout_ms', 'stream_timeout_ms', 'streaming_timeout_ms']) {
+  for (const path of ['base_url', 'api_keys', 'timeout_ms', 'stream_timeout_ms', 'streaming_timeout_ms']) {
     assert.ok(CONFIG_FIELDS.some(field => field[0] === 'cline_pass.' + path), 'missing ClinePass config field: ' + path);
   }
   assert.ok(!CONFIG_FIELDS.some(field => field[0] === 'cline_pass.anthropic_base_url'), 'ClinePass has no Messages endpoint to configure');
@@ -181,8 +189,22 @@ vm.runInContext(` + "`" + `
   // operator opened and abandoned is dropped rather than posted as an empty key.
   const grown = [...keptRows, {label: '', kept: false, value: 'synthetic-b'}, {label: '', kept: false, value: '  '}];
   assert.equal(JSON.stringify(collectKeys(grown)), '[{"keep":0,"hint":"' + mask + '"},{"value":"synthetic-b"}]');
-  // Removing the stored row is how a key leaves the pool.
-  assert.equal(JSON.stringify(collectKeys([{label: '', kept: false, value: 'synthetic-only'}])), '[{"value":"synthetic-only"}]');
+
+  // An environment-backed row is displayed but is not part of the stored pool,
+  // so it must not consume a stored index: numbering by display position would
+  // shift every file row after it onto the wrong credential and the save would
+  // be refused as stale.
+  const mixed = describeKeys(['••••env1', '••••file1', '••••file2'], ['env', 'file', 'file']);
+  assert.equal(mixed[0].env, true);
+  assert.equal(mixed[0].index, undefined, 'an env row holds no stored index');
+  assert.equal(mixed[1].index, 0, 'the first file row is stored index 0, not 1');
+  assert.equal(mixed[2].index, 1);
+  // The env row is left out of the patch entirely: the credential is not in the
+  // file, so there is nothing for the server to keep, and the environment
+  // re-merges it on the next load.
+  assert.equal(JSON.stringify(collectKeys(mixed)), '[{"keep":0,"hint":"••••file1"},{"keep":1,"hint":"••••file2"}]');
+
+  // Removing the stored row is how a key leaves the pool.  assert.equal(JSON.stringify(collectKeys([{label: '', kept: false, value: 'synthetic-only'}])), '[{"value":"synthetic-only"}]');
   // An untouched pool must not be patched at all.
   keyEditors.set('cfg-commandcode-api-keys', {path: 'commandcode.api_keys', rows: describeKeys([mask])});
   assert.equal(readFieldValue(keysField), undefined);

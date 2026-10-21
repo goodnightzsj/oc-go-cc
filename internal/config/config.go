@@ -41,7 +41,72 @@ type Config struct {
 	Logging              LoggingConfig            `json:"logging"`
 	Catalog              CatalogConfig            `json:"catalog"`
 	Storage              *StorageConfig           `json:"storage,omitempty"`
+
+	// keyOrigins records, per platform, where each entry of that platform's
+	// effective pool came from. It is runtime-only: the loader fills it after
+	// the two key fields have been folded into one pool, and nothing writes it
+	// back to disk.
+	//
+	// It exists because the pool is a merge of two sources with different
+	// capabilities. A key read from the file can be kept, reordered and
+	// removed; a key supplied by an environment variable cannot, because it is
+	// not in the file to begin with and writing it there is exactly what the
+	// settings redaction round trip exists to prevent. Without this record the
+	// dashboard can only show the merged list and would offer an edit that
+	// silently does nothing.
+	keyOrigins map[string][]KeyOrigin
 }
+
+// KeyOrigin names where one pool entry came from. Only the two cases the
+// dashboard must tell apart are modelled; there is no third.
+type KeyOrigin string
+
+const (
+	// KeyOriginFile is a credential the config file holds, either literally or
+	// as a ${VAR} placeholder that resolved to it. It is editable.
+	KeyOriginFile KeyOrigin = "file"
+	// KeyOriginEnv is a credential that exists only because an environment
+	// variable supplied it. It is read-only in the dashboard.
+	KeyOriginEnv KeyOrigin = "env"
+)
+
+// KeyOrigins returns the recorded origin of each entry in a platform's
+// effective pool, in the same order as ProviderAPIKeys. A platform with no
+// recorded origins returns nil, which callers read as "unknown, treat every
+// entry as file-backed".
+//
+// provider is the site id, or "" for the global pool.
+func (c *Config) KeyOrigins(provider string) []KeyOrigin {
+	if c == nil || c.keyOrigins == nil {
+		return nil
+	}
+	return c.keyOrigins[keyOriginKey(provider)]
+}
+
+// SetKeyOrigins records the origin of each entry of a platform's pool. The
+// loader calls it; it is exported so tests can build a config that looks like a
+// loaded one without going through the file and environment.
+func (c *Config) SetKeyOrigins(provider string, origins []KeyOrigin) {
+	if c.keyOrigins == nil {
+		c.keyOrigins = map[string][]KeyOrigin{}
+	}
+	c.keyOrigins[keyOriginKey(provider)] = origins
+}
+
+// keyOriginKey names a pool for the origin map. An empty provider is the global
+// pool and must stay distinct from every platform: site.Normalize maps "" to
+// the default platform, which would file the global pool's origins under that
+// platform and report the wrong rows as editable.
+func keyOriginKey(provider string) string {
+	if provider == "" {
+		return globalKeyOriginKey
+	}
+	return site.Normalize(provider)
+}
+
+// globalKeyOriginKey is the origin map's key for the top-level pool. It is not
+// a site id and cannot collide with one.
+const globalKeyOriginKey = "global"
 
 // CostRoutingConfig controls cost-aware model selection.
 type CostRoutingConfig struct {
@@ -194,6 +259,187 @@ func (c AWSBillingConfig) Validate() error {
 		return invalid("aws_bedrock.billing.profile", "unresolved_env", "aws_bedrock.billing.profile contains an unresolved environment variable")
 	}
 	return nil
+}
+
+// FoldedForKeyDisplay returns a copy of the config with every platform's two
+// credential fields collapsed into the one array field, so a reader sees the
+// single list the runtime rotates through.
+//
+// It is a copy because the running config must keep serving: the receiver is
+// untouched and keeps its credentials where the loader put them. Callers use
+// this for display and for computing what to write; they must not treat the
+// result as the live configuration.
+func (c *Config) FoldedForKeyDisplay() *Config {
+	if c == nil {
+		return c
+	}
+	data, err := json.Marshal(c)
+	if err != nil {
+		return c
+	}
+	var copyCfg Config
+	if err := json.Unmarshal(data, &copyCfg); err != nil {
+		return c
+	}
+	pools := c.KeyPools()
+	for _, row := range keyPoolFields {
+		pool := pools[row.jsonKey].Keys
+		*row.single(&copyCfg) = ""
+		if len(pool) == 0 {
+			*row.many(&copyCfg) = nil
+			continue
+		}
+		*row.many(&copyCfg) = pool
+	}
+	return &copyCfg
+}
+
+// KeyPoolBlockNames lists the config-file block name of every object that holds
+// a credential pair, with "" for the top-level global pool. Callers that must
+// inspect the file's own JSON use it instead of repeating the platform list.
+func KeyPoolBlockNames() []string {
+	names := make([]string, 0, len(keyPoolFields))
+	for _, row := range keyPoolFields {
+		names = append(names, row.jsonKey)
+	}
+	return names
+}
+
+// KeyPoolView is one platform's effective credential pool, keyed by the block
+// name it has in the config file ("" for the global pool).
+type KeyPoolView struct {
+	// Keys is the pool in the order the runtime will try it: the single-key
+	// field's value first, then the array, trimmed and deduplicated.
+	Keys []string
+	// Origins is parallel to Keys. It is nil when nothing recorded an origin,
+	// which callers read as "unknown, assume every entry is file-backed".
+	Origins []KeyOrigin
+}
+
+// KeyPools returns every platform's effective pool. The dashboard reads this
+// rather than the two credential fields, so it shows the one list the runtime
+// actually rotates through - including a key that exists only because the
+// environment supplied it, which the single-key field alone would hide.
+func (c *Config) KeyPools() map[string]KeyPoolView {
+	if c == nil {
+		return nil
+	}
+	pools := make(map[string]KeyPoolView, len(keyPoolFields))
+	for _, row := range keyPoolFields {
+		pools[row.jsonKey] = KeyPoolView{
+			Keys:    appendAPIKeys(*row.single(c), *row.many(c)),
+			Origins: c.KeyOrigins(row.provider),
+		}
+	}
+	return pools
+}
+
+// keyPoolField is one row of the credential-pair table: where the pair lives in
+// the file (jsonKey), which platform it belongs to (provider), and how to reach
+// its two fields on a Config.
+type keyPoolField struct {
+	jsonKey  string
+	provider string
+	single   func(*Config) *string
+	many     func(*Config) *[]string
+}
+
+// keyPoolFields lists every (single, array) credential pair the config carries:
+// one row per platform, plus the global pool. It is the single place that knows
+// which fields hold a key pool, so origin recording and migration are written
+// once instead of once per platform.
+//
+// jsonKey is the block's name in the config file and provider is the site id;
+// they differ wherever the id carries a hyphen ("cline-pass" vs "cline_pass"),
+// so both are carried rather than derived by string surgery at each use.
+var keyPoolFields = []keyPoolField{
+	{"", "", func(c *Config) *string { return &c.APIKey }, func(c *Config) *[]string { return &c.APIKeys }},
+	{"opencode_go", site.OpenCodeGo, func(c *Config) *string { return &c.OpenCodeGo.APIKey }, func(c *Config) *[]string { return &c.OpenCodeGo.APIKeys }},
+	{"opencode_zen", site.OpenCodeZen, func(c *Config) *string { return &c.OpenCodeZen.APIKey }, func(c *Config) *[]string { return &c.OpenCodeZen.APIKeys }},
+	{"aws_bedrock", site.AWSBedrock, func(c *Config) *string { return &c.AWSBedrock.APIKey }, func(c *Config) *[]string { return &c.AWSBedrock.APIKeys }},
+	{"openrouter", site.OpenRouter, func(c *Config) *string { return &c.OpenRouter.APIKey }, func(c *Config) *[]string { return &c.OpenRouter.APIKeys }},
+	{"commandcode", site.CommandCode, func(c *Config) *string { return &c.CommandCode.APIKey }, func(c *Config) *[]string { return &c.CommandCode.APIKeys }},
+	{"cline_pass", site.ClinePass, func(c *Config) *string { return &c.ClinePass.APIKey }, func(c *Config) *[]string { return &c.ClinePass.APIKeys }},
+}
+
+// recordKeyOrigins notes, for every platform, where each entry of that
+// platform's effective pool came from. filePools is the pool as the config file
+// alone described it, captured before environment overrides ran: an entry
+// present there is file-backed and editable, and one only the environment
+// supplied is not.
+//
+// It deliberately does not touch the two credential fields. The runtime already
+// reads one merged pool through EffectiveAPIKeys, so the dashboard can show one
+// list by reading the same thing; rewriting the fields in memory would change a
+// contract that only the file is supposed to change, and every caller that
+// reads the single field would see it empty for no gain. Collapsing the file to
+// one field is the migration's job, and it happens on disk.
+func recordKeyOrigins(cfg *Config, filePools map[string][]string) {
+	for _, row := range keyPoolFields {
+		pool := appendAPIKeys(*row.single(cfg), *row.many(cfg))
+		if pool == nil {
+			cfg.SetKeyOrigins(row.provider, nil)
+			continue
+		}
+		// A key the file named is editable however it got there: a ${VAR}
+		// placeholder that resolved to this value is still a line in the file
+		// the settings round trip can keep. Only an entry with no file line
+		// behind it is environment-only.
+		fromFile := map[string]bool{}
+		for _, key := range filePools[keyOriginKey(row.provider)] {
+			fromFile[key] = true
+		}
+		origins := make([]KeyOrigin, len(pool))
+		for i, key := range pool {
+			if fromFile[key] {
+				origins[i] = KeyOriginFile
+				continue
+			}
+			origins[i] = KeyOriginEnv
+		}
+		cfg.SetKeyOrigins(row.provider, origins)
+	}
+}
+
+// snapshotKeyPoolsFromRaw reads the key pools out of the config file's own
+// bytes and resolves each entry the same way the loader will, so the result is
+// directly comparable with the merged pool.
+//
+// It exists because interpolation runs before unmarshalling: by the time a
+// Config exists, a value written as ${VAR} is indistinguishable from the same
+// value written literally, and a credential that only the environment supplied
+// would look like one the file holds. Reading the raw bytes keeps the
+// placeholder visible long enough to interpolate it deliberately, which is what
+// makes the comparison meaningful.
+func snapshotKeyPoolsFromRaw(data []byte) map[string][]string {
+	pools := make(map[string][]string, len(keyPoolFields))
+	var root map[string]json.RawMessage
+	if json.Unmarshal(data, &root) != nil {
+		return pools
+	}
+	for _, row := range keyPoolFields {
+		scope := root
+		if row.jsonKey != "" {
+			var block map[string]json.RawMessage
+			if json.Unmarshal(root[row.jsonKey], &block) != nil {
+				continue
+			}
+			scope = block
+		}
+		var single string
+		_ = json.Unmarshal(scope["api_key"], &single)
+		var many []string
+		_ = json.Unmarshal(scope["api_keys"], &many)
+
+		// Resolve the file's entries exactly as the loader will, so a
+		// placeholder compares equal to the value it expands to.
+		single = interpolateEnvVars(single)
+		for i, key := range many {
+			many[i] = interpolateEnvVars(key)
+		}
+		pools[keyOriginKey(row.provider)] = appendAPIKeys(single, many)
+	}
+	return pools
 }
 
 // appendAPIKeys builds one key pool from the two config fields that hold it.

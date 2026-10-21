@@ -25,8 +25,16 @@ func TestBedrockBillingConfigPatch(t *testing.T) {
 		t.Fatalf("billing patch failed: %d %s", rec.Code, rec.Body)
 	}
 	cfg := srv.atomicCfg.Get()
-	if !cfg.AWSBedrock.Billing.Enabled || cfg.AWSBedrock.Billing.Profile != "billing-test" || cfg.AWSBedrock.Billing.LinkedAccountID != "123456789012" || cfg.AWSBedrock.APIKey != "synthetic-bedrock" || cfg.AWSBedrock.TimeoutMs != 5000 || cfg.CommandCode.APIKey != "synthetic-command" {
+	if !cfg.AWSBedrock.Billing.Enabled || cfg.AWSBedrock.Billing.Profile != "billing-test" || cfg.AWSBedrock.Billing.LinkedAccountID != "123456789012" || cfg.AWSBedrock.TimeoutMs != 5000 {
 		t.Fatal("billing patch lost sibling configuration or modified inference")
+	}
+	// A save folds the credential fields, so assert on the pool that actually
+	// authenticates rather than on the field the key used to live in.
+	if pool := cfg.AWSBedrock.EffectiveAPIKeys(); len(pool) != 1 || pool[0] != "synthetic-bedrock" {
+		t.Fatalf("bedrock pool = %v, want [synthetic-bedrock]", pool)
+	}
+	if pool := cfg.CommandCode.EffectiveAPIKeys(); len(pool) != 1 || pool[0] != "synthetic-command" {
+		t.Fatalf("commandcode pool = %v, want [synthetic-command]", pool)
 	}
 	rec = httptest.NewRecorder()
 	srv.handleProxyConfig(rec, httptest.NewRequest(http.MethodGet, "/api/proxy/config", nil))

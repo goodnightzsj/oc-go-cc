@@ -49,8 +49,13 @@ func TestProxyConfigPatchPreservesProviderSiblings(t *testing.T) {
 		t.Fatal("save persisted a resolved secret or redaction mask")
 	}
 	got := srv.atomicCfg.Get().OpenCodeGo
-	if got.TimeoutMs != 9000 || got.APIKey != "synthetic-provider-key" || got.BaseURL != "https://example.invalid/chat" {
+	if got.TimeoutMs != 9000 || got.BaseURL != "https://example.invalid/chat" {
 		t.Fatal("saved provider settings were not published together")
+	}
+	// The save folds the two credential fields, so the key now lives in the
+	// array. What matters is that the pool still holds it exactly once.
+	if pool := got.EffectiveAPIKeys(); len(pool) != 1 || pool[0] != "synthetic-provider-key" {
+		t.Fatalf("provider pool = %v, want [synthetic-provider-key]", pool)
 	}
 }
 
@@ -101,8 +106,11 @@ func TestConfigImportPreviewUsesSaveValidationAndRedacts(t *testing.T) {
 			if strings.Contains(rec.Body.String(), "synthetic-import-key") || strings.Contains(rec.Body.String(), "synthetic-key") {
 				t.Fatal("preview response exposed credentials")
 			}
-			if tc.status == http.StatusOK && !strings.Contains(rec.Body.String(), keyMask) {
-				t.Fatal("preview response is missing the redaction mask")
+			// The preview carries the folded pool, so the credential shows up as
+			// a per-row label in api_keys rather than as the fixed-width mask in
+			// the now-empty single-key field.
+			if tc.status == http.StatusOK && !strings.Contains(rec.Body.String(), keyHintPrefix) {
+				t.Fatal("preview response is missing the redaction label")
 			}
 		})
 	}
@@ -226,8 +234,16 @@ func TestCommandCodeConfigRoundTripPreservesIndependentSecrets(t *testing.T) {
 			if fields["base_url"] != "https://commandcode.invalid/v1/chat/completions" || fields["anthropic_base_url"] != "https://commandcode.invalid/v1/messages" || fields["timeout_ms"] != float64(9000) || fields["stream_timeout_ms"] != float64(6000) || fields["streaming_timeout_ms"] != float64(7000) || fields["zero_data_retention"] != true {
 				t.Fatal("partial save lost CommandCode endpoint, timeout or ZDR settings")
 			}
-			if fields["api_key"] != keyMask || !bytes.Contains(response["commandcode"], []byte(keyMask)) {
-				t.Fatal("CommandCode keys were not redacted")
+			// The response carries one folded pool, so the credential appears
+			// in api_keys rather than in the now-empty single-key field.
+			pool, ok := fields["api_keys"].([]any)
+			if !ok || len(pool) == 0 {
+				t.Fatalf("CommandCode pool missing from %s: %v", endpoint, fields["api_keys"])
+			}
+			for _, entry := range pool {
+				if entry != keyMask && !strings.HasPrefix(entry.(string), keyHintPrefix) {
+					t.Fatalf("CommandCode key was not redacted in %s: %v", endpoint, entry)
+				}
 			}
 			for _, secret := range []string{"synthetic-global-key", "synthetic-commandcode-key", "synthetic-commandcode-pool"} {
 				if bytes.Contains(rec.Body.Bytes(), []byte(secret)) {

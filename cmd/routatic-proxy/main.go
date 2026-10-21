@@ -117,12 +117,24 @@ Press Ctrl+C to stop the server.`,
 				_ = os.Setenv("ROUTATIC_PROXY_CONFIG", configPath)
 			}
 
+			configPath = config.ResolveConfigPath()
+			// Collapse each platform's two credential fields into the one array
+			// field, so the file an operator opens matches the one pool the
+			// proxy uses. A failure here is not fatal: the runtime merges the
+			// two fields anyway, so the proxy keeps serving exactly as before
+			// and only the file shape is left for a later attempt.
+			if migrated, err := config.MigrateConfigFileOnDisk(configPath); err != nil {
+				slog.Warn("key pool migration skipped", "config", configPath, "error", err)
+			} else if migrated {
+				slog.Info("key pool migration: api_key folded into api_keys",
+					"config", configPath, "backup_dir", filepath.Dir(configPath))
+			}
+
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("failed to load config: %w", err)
 			}
 
-			configPath = config.ResolveConfigPath()
 			if err := ensureCatalogSynced(cmd.Context(), cfg, configPath, time.Now().UTC()); err != nil {
 				return fmt.Errorf("failed to sync catalog: %w", err)
 			}

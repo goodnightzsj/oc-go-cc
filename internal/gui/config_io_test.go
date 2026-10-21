@@ -36,8 +36,11 @@ func TestConfigExportAlwaysRedactsSecrets(t *testing.T) {
 				t.Errorf("GET %s leaked %q: %s", target, secret, body)
 			}
 		}
-		if !strings.Contains(body, keyMask) {
-			t.Errorf("GET %s did not contain the redaction mask: %s", target, body)
+		// The export carries the folded pool, so a credential appears as a
+		// per-row label in api_keys rather than as the fixed-width mask in the
+		// now-empty single-key field.
+		if !strings.Contains(body, keyHintPrefix) {
+			t.Errorf("GET %s did not contain a redaction label: %s", target, body)
 		}
 	}
 }

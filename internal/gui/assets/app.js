@@ -188,6 +188,8 @@ const TRANSLATIONS = {
     'keys.remove': 'Remove',
     'keys.none': 'No keys in this pool.',
     'keys.storedRow': 'Stored key — remove it to stop using it',
+    'keys.envRow': 'Provided by an environment variable; not stored in the config file',
+    'keys.envBadge': 'env',
     'keys.newRow': 'Paste a new key',
     'keys.primary': 'Primary',
     'keys.moveUp': 'Move up',
@@ -739,6 +741,8 @@ const TRANSLATIONS = {
     'keys.remove': '删除',
     'keys.none': '此密钥池为空。',
     'keys.storedRow': '已保存的密钥——删除即停止使用',
+    'keys.envRow': '由环境变量提供，不保存在配置文件里',
+    'keys.envBadge': '环境变量',
     'keys.newRow': '粘贴新密钥',
     'keys.primary': '主用',
     'keys.moveUp': '上移',
@@ -3348,7 +3352,6 @@ const CONFIG_FIELDS = [
   // Server
   ['host', 'cfg-host', 'string'],
   ['port', 'cfg-port', 'int'],
-  ['api_key', 'cfg-global-key', 'string'],
   ['api_keys', 'cfg-global-keys', 'keys'],
   ['hot_reload', 'cfg-hot-reload', 'bool'],
 
@@ -3356,7 +3359,6 @@ const CONFIG_FIELDS = [
   ['opencode_go.base_url', 'cfg-go-base-url', 'string'],
   ['opencode_go.anthropic_base_url', 'cfg-go-anthropic-url', 'string'],
   ['opencode_go.responses_base_url', 'cfg-go-responses-url', 'string'],
-  ['opencode_go.api_key', 'cfg-go-api-key', 'string'],
   ['opencode_go.api_keys', 'cfg-go-api-keys', 'keys'],
   ['opencode_go.timeout_ms', 'cfg-go-timeout', 'int'],
   ['opencode_go.stream_timeout_ms', 'cfg-go-stream-timeout', 'int'],
@@ -3365,7 +3367,6 @@ const CONFIG_FIELDS = [
   // CommandCode uses independent credentials and complete native API URLs.
   ['commandcode.base_url', 'cfg-commandcode-base-url', 'string'],
   ['commandcode.anthropic_base_url', 'cfg-commandcode-anthropic-url', 'string'],
-  ['commandcode.api_key', 'cfg-commandcode-api-key', 'string'],
   ['commandcode.api_keys', 'cfg-commandcode-api-keys', 'keys'],
   ['commandcode.timeout_ms', 'cfg-commandcode-timeout', 'int'],
   ['commandcode.stream_timeout_ms', 'cfg-commandcode-stream-timeout', 'int'],
@@ -3375,7 +3376,6 @@ const CONFIG_FIELDS = [
   // ClinePass. No anthropic_base_url: the Cline API publishes no Messages
   // endpoint, so there is nothing to point one at.
   ['cline_pass.base_url', 'cfg-cline-pass-base-url', 'string'],
-  ['cline_pass.api_key', 'cfg-cline-pass-api-key', 'string'],
   ['cline_pass.api_keys', 'cfg-cline-pass-api-keys', 'keys'],
   ['cline_pass.timeout_ms', 'cfg-cline-pass-timeout', 'int'],
   ['cline_pass.stream_timeout_ms', 'cfg-cline-pass-stream-timeout', 'int'],
@@ -3408,26 +3408,49 @@ function keyRowsOf(value) {
 // is one row.
 //
 // index is the row's position in the *stored* pool and is what the server
-// resolves a kept row against. It is assigned before any new rows are appended,
-// because a kept row must keep pointing at the credential it was drawn from.
-function describeKeys(value) {
-  return keyRowsOf(value).map((label, index) => ({
-    label,
-    index,
-    kept: label === '' || label.startsWith(keyHintPrefix),
-    value: '',
-  }));
+// resolves a kept row against. It counts only file-backed rows, because the
+// stored pool does not contain the environment's: an environment row occupies a
+// display position but no stored one, and numbering by display position would
+// shift every file row after it onto the wrong credential.
+//
+// origins is the server's per-row provenance. An "env" row is shown but cannot
+// be edited: the credential is not in the config file, so there is nothing to
+// keep, reorder or remove - and offering those controls would promise an edit
+// that cannot be written.
+function describeKeys(value, origins) {
+  let storedIndex = 0;
+  return keyRowsOf(value).map((label, index) => {
+    const origin = Array.isArray(origins) ? origins[index] : undefined;
+    const env = origin === 'env';
+    const row = {
+      label,
+      index: env ? undefined : storedIndex,
+      kept: label === '' || label.startsWith(keyHintPrefix),
+      env,
+      value: '',
+    };
+    if (!env) storedIndex++;
+    return row;
+  });
 }
 
 // collectKeys converts editor rows back into the wire shape, dropping a new row
 // the operator opened and left blank.
+//
+// An environment-backed row is left out entirely. The patch replaces the whole
+// array, and a keep reference can only address a credential the config file
+// holds - sending one for an env key would be refused as stale. The server
+// re-merges the environment afterwards, so the row reappears in its place
+// without the form having to describe it.
 function collectKeys(rows) {
-  return rows.filter(row => row.kept || row.value.trim() !== '').map(row =>
+  return rows.filter(row => !row.env && (row.kept || row.value.trim() !== '')).map(row =>
     row.kept ? {keep: row.index, hint: row.label} : {value: row.value.trim()});
 }
 
+// keysSignature identifies the rows an operator can actually change, so an
+// environment row appearing or disappearing does not look like a local edit.
 function keysSignature(rows) {
-  return JSON.stringify(rows.filter(row => row.kept || row.value.trim() !== '').map(row =>
+  return JSON.stringify(rows.filter(row => !row.env && (row.kept || row.value.trim() !== '')).map(row =>
     row.kept ? 'k:' + row.label : 'v:' + row.value.trim()));
 }
 
@@ -3440,22 +3463,6 @@ function keyEditorRows(id) {
   return editor ? editor.rows : null;
 }
 
-// singleKeyIdFor returns the element id of the one-key field that shares this
-// pool's platform, or null for the global pool's own field. appendAPIKeys puts
-// that single key ahead of the array, so it - not the array's first row - is
-// what Reserve actually tries first.
-function singleKeyIdFor(path) {
-  const single = path.replace(/\.?api_keys$/, m => (m.startsWith('.') ? '.api_key' : 'api_key'));
-  const entry = CONFIG_FIELDS.find(field => field[0] === single);
-  return entry ? entry[1] : null;
-}
-
-function poolStartsWithSingleKey(path) {
-  const id = singleKeyIdFor(path);
-  const el = id ? document.getElementById(id) : null;
-  return !!(el && String(el.value || '').trim() !== '');
-}
-
 // renderKeyEditor draws one row per key, laid out like the fallback chain: an
 // order number, the field, then a permanent ↑ ↓ × group whose ends are
 // disabled rather than missing, so a row's controls never move under the
@@ -3463,7 +3470,9 @@ function poolStartsWithSingleKey(path) {
 //
 // Row order is the pool's priority. Reserve is fill-first, so the first
 // non-resting key serves the request: "which key is primary" is a position, not
-// a second piece of state that could disagree with it.
+// a second piece of state that could disagree with it. The rows are the merged
+// pool the server sends, so row 1 is the credential that answers the first
+// request - there is no longer a field outside this list that could outrank it.
 function renderKeyEditor(id) {
   const editor = keyEditors.get(id);
   if (!editor) return;
@@ -3473,29 +3482,38 @@ function renderKeyEditor(id) {
     host.innerHTML = '<p class="text-xs text-[#98989d] py-1" data-key-empty="true">' + escapeHtml(t('keys.none')) + '</p>';
     return;
   }
-  // The single-key field, when filled in, is served ahead of this array
-  // (appendAPIKeys puts it first), so row 1 is only the pool's primary when
-  // that field is empty.
-  const hasSingle = poolStartsWithSingleKey(editor.path);
   const last = editor.rows.length - 1;
   host.innerHTML = editor.rows.map((row, index) => {
     const position = escapeHtml(String(index));
-    // A stored row is marked by its tint and by the tooltip, not by a prefix
-    // glyph: the label already starts with the mask.
-    const field = row.kept
-      ? '<input type="text" readonly value="' + escapeHtml(row.label) + '" aria-label="' + escapeHtml(t('keys.storedRow')) + '" title="' + escapeHtml(t('keys.storedRow')) + '" class="flex-1 min-w-0 px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#98989d] outline-none font-mono">'
-      : '<input type="password" autocomplete="new-password" value="' + escapeHtml(row.value) + '" placeholder="' + escapeHtml(t('keys.newRow')) + '" class="flex-1 min-w-0 px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none">';
-    const primary = index === 0 && !hasSingle
+    // An environment-backed row is shown, not edited: the credential is not in
+    // the config file, so there is nothing the form could write for it. It is
+    // still listed because it occupies a real position in the rotation - hiding
+    // it is what made the old single-key field invisible while it served the
+    // first request.
+    const field = row.env
+      ? '<input type="text" readonly value="' + escapeHtml(row.label) + '" aria-label="' + escapeHtml(t('keys.envRow')) + '" title="' + escapeHtml(t('keys.envRow')) + '" class="flex-1 min-w-0 px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#98989d] outline-none font-mono">'
+      : row.kept
+        ? '<input type="text" readonly value="' + escapeHtml(row.label) + '" aria-label="' + escapeHtml(t('keys.storedRow')) + '" title="' + escapeHtml(t('keys.storedRow')) + '" class="flex-1 min-w-0 px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#98989d] outline-none font-mono">'
+        : '<input type="password" autocomplete="new-password" value="' + escapeHtml(row.value) + '" placeholder="' + escapeHtml(t('keys.newRow')) + '" class="flex-1 min-w-0 px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none">';
+    const badge = row.env
+      ? '<span class="key-row-env">' + escapeHtml(t('keys.envBadge')) + '</span>'
+      : '';
+    const primary = index === 0
       ? ' data-key-primary="true" title="' + escapeHtml(t('keys.primary')) + '"'
       : '';
+    // An env row has no controls at all: the buttons could only fail, so they
+    // are omitted rather than shown disabled - a disabled control still reads
+    // as something the operator might be able to enable.
+    const actions = row.env
+      ? '<span class="key-row-actions" aria-hidden="true"></span>'
+      : '<span class="key-row-actions">' +
+          '<button type="button" class="key-row-move" data-key-up="' + position + '" aria-label="' + escapeHtml(t('keys.moveUp')) + '" title="' + escapeHtml(t('keys.moveUp')) + '"' + (index === 0 ? ' disabled' : '') + '>↑</button>' +
+          '<button type="button" class="key-row-move" data-key-down="' + position + '" aria-label="' + escapeHtml(t('keys.moveDown')) + '" title="' + escapeHtml(t('keys.moveDown')) + '"' + (index === last ? ' disabled' : '') + '>↓</button>' +
+          '<button type="button" class="key-row-remove" data-key-remove="' + position + '" aria-label="' + escapeHtml(t('keys.remove')) + '" title="' + escapeHtml(t('keys.remove')) + '">×</button>' +
+        '</span>';
     return '<div class="key-row" data-key-row="' + position + '"' + primary + '>' +
       '<span class="key-row-order" aria-hidden="true">' + escapeHtml(String(index + 1)) + '</span>' +
-      field +
-      '<span class="key-row-actions">' +
-        '<button type="button" class="key-row-move" data-key-up="' + position + '" aria-label="' + escapeHtml(t('keys.moveUp')) + '" title="' + escapeHtml(t('keys.moveUp')) + '"' + (index === 0 ? ' disabled' : '') + '>↑</button>' +
-        '<button type="button" class="key-row-move" data-key-down="' + position + '" aria-label="' + escapeHtml(t('keys.moveDown')) + '" title="' + escapeHtml(t('keys.moveDown')) + '"' + (index === last ? ' disabled' : '') + '>↓</button>' +
-        '<button type="button" class="key-row-remove" data-key-remove="' + position + '" aria-label="' + escapeHtml(t('keys.remove')) + '" title="' + escapeHtml(t('keys.remove')) + '">×</button>' +
-      '</span>' +
+      field + badge + actions +
       '</div>';
   }).join('');
 }
@@ -3615,10 +3633,10 @@ function addKeyRow(id) {
   updateConfigChangeCount();
 }
 
-function loadKeysIntoEditor(id, value) {
+function loadKeysIntoEditor(id, value, origins) {
   const editor = keyEditors.get(id);
   if (!editor) return;
-  editor.rows = describeKeys(value);
+  editor.rows = describeKeys(value, origins);
   renderKeyEditor(id);
 }
 
@@ -3675,8 +3693,16 @@ function readFieldValue(field) {
   return v === (current || '') ? undefined : v;
 }
 
-function configInputSnapshot() {
-  return new Map(CONFIG_FIELDS.map(([, id, type]) => {
+// keyOriginsFor returns the server's provenance list for a pool field's
+// platform, or undefined when the server did not report one. The key is the
+// config block name, which is the field path minus its trailing ".api_keys".
+function keyOriginsFor(path) {
+  const block = path.replace(/\.?api_keys$/, '');
+  const origins = currentProxyConfig && currentProxyConfig.key_origins;
+  return origins ? origins[block] : undefined;
+}
+
+function configInputSnapshot() {  return new Map(CONFIG_FIELDS.map(([, id, type]) => {
     const el = document.getElementById(id);
     if (type === 'keys') return [id, keysSignature(keyEditorRows(id) || [])];
     return [id, type === 'bool' ? el?.checked : el?.value];
@@ -3708,7 +3734,7 @@ async function loadProxyConfig({preserveInputs = configInputSnapshot(), quiet = 
       // A key pool has no single input to compare, so it is compared by the
       // rows it currently holds.
       if (type === 'keys') {
-        if (!keysTouchedSince(preserveInputs).has(id)) loadKeysIntoEditor(id, deepGet(currentProxyConfig, path));
+        if (!keysTouchedSince(preserveInputs).has(id)) loadKeysIntoEditor(id, deepGet(currentProxyConfig, path), keyOriginsFor(path));
         continue;
       }
       if ((type === 'bool' ? el.checked : el.value) !== preserveInputs.get(id)) continue;
@@ -3919,14 +3945,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   initChannelCombobox();
   initKeyEditors();
-  // A pool's primary badge depends on whether the platform's own single-key
-  // field is filled in, so that field has to redraw the rows when it changes.
-  for (const [, id, type] of CONFIG_FIELDS) {
-    if (type === 'keys') continue;
-    const single = CONFIG_FIELDS.find(field => field[2] === 'keys' && singleKeyIdFor(field[0]) === id);
-    if (!single) continue;
-    document.getElementById(id)?.addEventListener('input', () => renderKeyEditor(single[1]));
-  }
   document.addEventListener('click', event => {
     const add = event.target.closest('[data-key-add]');
     if (add) addKeyRow(add.dataset.keyAdd);

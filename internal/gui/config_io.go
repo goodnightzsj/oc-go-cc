@@ -26,7 +26,12 @@ var sensitiveKeyFragments = []string{
 // covered without per-field code, and it never mutates cfg — the running proxy
 // keeps using the real keys to authenticate.
 func anonymizeConfig(cfg *config.Config) (*config.Config, error) {
-	data, err := json.Marshal(cfg)
+	// Fold the two credential fields into one pool before redacting, so the
+	// settings form shows the list the runtime actually rotates through. Without
+	// this, a key living in the single-key field is served first and never
+	// appears in the list - the form would show a pool whose first row is not
+	// the credential that answers the request.
+	data, err := json.Marshal(cfg.FoldedForKeyDisplay())
 	if err != nil {
 		return nil, fmt.Errorf("marshal config for export: %w", err)
 	}
@@ -196,6 +201,19 @@ func (s *Server) updateProxyConfig(patch map[string]json.RawMessage, apply bool)
 	// on disk, not against the running config: the running copy may carry
 	// credentials injected from the environment, and writing one of those to
 	// the file would defeat the whole redaction round trip.
+	//
+	// The stored blocks are folded first so a row index means the same thing on
+	// both sides. The dashboard renders the merged pool, so its row 0 is the
+	// single key's value when that field is set; against an unfolded file that
+	// index would name a different credential, or be refused as stale.
+	//
+	// This also migrates the file: a save writes the folded shape, so the file
+	// an operator opens afterwards matches the one list the form shows. Whether
+	// it actually changed is what decides whether a backup is warranted.
+	before := string(raw)
+	if err := config.FoldKeyPoolBlocksInPlace(merged); err != nil {
+		return nil, err
+	}
 	if err := stripMaskedKeys(patch, merged); err != nil {
 		return nil, err
 	}
@@ -220,12 +238,56 @@ func (s *Server) updateProxyConfig(patch map[string]json.RawMessage, apply bool)
 		return nil, err
 	}
 	if apply {
+		// Only a save that reshapes the file earns a backup. Every save folds
+		// the pools, but once the file is already folded a later save writes the
+		// same shape again, and a backup per save would bury the one copy that
+		// matters under routine churn.
+		if reshapedKeyPools(before, string(data)) {
+			if _, err := config.BackupConfigFile(configPath, raw); err != nil {
+				return nil, err
+			}
+		}
 		if err := writeConfigFile(configPath, data); err != nil {
 			return nil, err
 		}
 		s.atomicCfg.ApplyLoaded(cfg)
 	}
 	return cfg, nil
+}
+
+// reshapedKeyPools reports whether a save changed the config file's key-pool
+// shape - that is, whether it folded a single-key field into its array. It
+// compares the decoded objects so formatting is not mistaken for a reshape.
+func reshapedKeyPools(before, after string) bool {
+	var beforeObj, afterObj map[string]json.RawMessage
+	if json.Unmarshal([]byte(before), &beforeObj) != nil || json.Unmarshal([]byte(after), &afterObj) != nil {
+		// An unreadable before-image is the case where a backup is most
+		// warranted, not least.
+		return true
+	}
+	for _, row := range config.KeyPoolBlockNames() {
+		if !sameKeyPoolShape(beforeObj, afterObj, row) {
+			return true
+		}
+	}
+	return false
+}
+
+// sameKeyPoolShape compares one block's single-key field before and after.
+func sameKeyPoolShape(before, after map[string]json.RawMessage, jsonKey string) bool {
+	read := func(root map[string]json.RawMessage) string {
+		if jsonKey != "" {
+			var block map[string]json.RawMessage
+			if json.Unmarshal(root[jsonKey], &block) != nil {
+				return ""
+			}
+			root = block
+		}
+		var single string
+		_ = json.Unmarshal(root["api_key"], &single)
+		return single
+	}
+	return read(before) == read(after)
 }
 
 // isPartialProviderBlock reports whether a top-level config key holds an object

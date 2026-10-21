@@ -93,6 +93,14 @@ func LoadFromPath(path string) (*Config, error) {
 // LoadJSON validates a config using the same environment and defaults as a
 // disk load. The input remains unchanged so callers can persist placeholders.
 func LoadJSON(data []byte) (*Config, error) {
+	// Snapshot the file's own key pools from the raw bytes, before
+	// interpolation. A ${VAR} placeholder is a line the file holds and the
+	// settings round trip can keep, so it must count as file-backed - but once
+	// interpolation has run, the placeholder is indistinguishable from a
+	// literal that happens to have the same value, and a credential supplied
+	// only by the environment would be misreported as editable.
+	filePools := snapshotKeyPoolsFromRaw(data)
+
 	var cfg Config
 	if err := json.Unmarshal([]byte(interpolateEnvVars(string(data))), &cfg); err != nil {
 		return nil, fmt.Errorf("parsing JSON: %w", err)
@@ -101,6 +109,8 @@ func LoadJSON(data []byte) (*Config, error) {
 	if err := applyEnvOverrides(&cfg); err != nil {
 		return nil, err
 	}
+	// Note where each pool entry came from, now that both sources have merged.
+	recordKeyOrigins(&cfg, filePools)
 	applyDefaults(&cfg)
 
 	if err := validate(&cfg); err != nil {

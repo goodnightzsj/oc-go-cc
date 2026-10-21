@@ -1607,6 +1607,10 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
    changes and the ends are disabled rather than absent. */
 .key-row { position: relative; display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px; }
 .key-row-order { flex: 0 0 18px; height: 18px; display: flex; align-items: center; justify-content: center; color: var(--ui-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+/* An environment-backed row is marked in place of the controls it cannot have,
+   so the row still explains itself without offering an edit that cannot be
+   written. */
+.key-row-env { flex: 0 0 auto; padding: 1px 6px; border: 1px solid var(--ui-line); border-radius: 4px; color: var(--ui-muted); background: var(--ui-surface-raised); font-size: 10px; letter-spacing: 0.02em; }
 .key-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .key-row-actions button { min-width: 28px; min-height: 28px; padding: 0; border: 1px solid var(--ui-line); border-radius: 4px; color: var(--ui-text); background: var(--ui-surface); font-size: 12px; line-height: 1; cursor: pointer; }
 .key-row-actions button:hover:not(:disabled) { background: var(--ui-line); }

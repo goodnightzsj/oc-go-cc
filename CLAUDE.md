@@ -129,13 +129,23 @@ Precedence: provider-specific pool → global pool. Within a scope the single ke
 - `internal/quota/` — OpenCode Go plan quota reader (5-hour rolling / weekly / monthly windows). Parsing rules ported from [ocusage](https://github.com/muzimu217/ocusage) (MIT).
 - `internal/history/` — In-memory ring buffer (1000 entries, O(1) insert, thread-safe).
 - `internal/metrics/` — In-process request counters (received, streamed, success, failed, model distribution).
-- `internal/storage/` — SQLite persistence layer for request history, latency samples, and analytics.
+- `internal/storage/` — SQLite persistence layer for request history, latency samples, and analytics. `requests.go` owns the history query and its summary cache; see "Request History (History tab)" below.
 
 ### Plan Quota (Quota tab)
 
 `GET /api/quota` reports the OpenCode Go plan windows for every configured Go key. The usage endpoint is derived from `opencode_go.base_url` by swapping the API suffix for `/usage`; a base URL that does not look like an OpenCode API endpoint is rejected instead of falling back to `opencode.ai`, so a key meant for a private mirror is never sent to the public host. Keys are fetched in parallel and each one's result (or error) is reported separately; the response carries only a masked key hint, never the key. Answers are cached for 30 seconds because the endpoint is undocumented and rate-limited — the dashboard's own poll never reaches upstream more often than that.
 
 The response also carries `model_limits`: the per-model monthly allowance table parsed from the Go docs pages (`internal/quota/limits.go`, `ParseModelLimits`), refreshed daily by `limitsLoop` (24h TTL, lazy first fetch via `ensureModelLimits`, zh page with en fallback). Pricing variants (Peak/Off-Peak, token-range splits) merge into one row per model. Since the upstream usage endpoint never reports per-model numbers, `model_usage` is built from this instance's own SQLite ledger (`monthlyModelUsage` — per-model stored cost within [monthly resets_at − 31d, resets_at), a 31-day subscription cycle, priced in the official Go price currency): each row's `used_usd` is calibrated against the official monthly total and then divided back by the model's pool multiplier (× 60/allowance), so row spend stays directly comparable to the docs allowance (a DeepSeek row reads ~$23 used of $30, not $46 — the ×2 pool conversion applies only to the table's total row, which reconstructs the pool-equivalent percent that reconciles with the endpoint's monthly percent, also shown on the account cards). The UI shows only models with ledger entries.
+
+### Request History (History tab)
+
+`GET /api/history` returns one server-side filtered page; `GET /api/history/summary` returns the matching aggregates and breakdowns. The dashboard fetches both in parallel and waits for the slower one, so the summary's cost is what the tab's load time is.
+
+The summary is one scan grouped by `model, provider, scenario, DATE(start_time)`, folded into each dimension in Go — it replaced five separate `GROUP BY` queries, each a full table scan. The scan is what costs, not the aggregation: `modernc.org/sqlite` is a pure-Go SQLite, and a full scan of a 60k-row history measures around 100ms through that driver against roughly 6ms through the C CLI. The result is then cached on `Database` until the row set changes, validated by `COUNT(*)` plus `MAX(rowid)` (~5ms); the dashboard polls every three seconds while the history grows by a few rows a minute, so nearly every poll would otherwise recompute an identical answer. `MAX(rowid)` is what stops a delete and an insert from cancelling out in the count. A pure `UPDATE` is not detected — the columns that would cover it cost more than the cache saves, and the one writer that updates costs runs at startup, before anything is cached.
+
+Search matches `id`, `model`, `requested_model`, `provider`, `scenario` and `error_msg` case-insensitively, using `LIKE` without a `LOWER()` wrapper: `LIKE` is already case-insensitive for ASCII, and the wrapper roughly doubled the search time by defeating the comparison's own fast path. FTS5 was measured and rejected — this history is overwhelmingly one model, so the terms people actually search match nearly every row, where a `MATCH` scan costs more than the `LIKE` it would replace, at the cost of an index larger than the table.
+
+`channel` filters on `requests.upstream_channel`, the upstream channel the gateway reported serving the request on. Only ClinePass publishes one, so it narrows that platform's rows; every other platform stores NULL. `GET /api/history/channels?provider=` reports the channels this instance actually recorded, not the gateway's advertised candidate list — filtering by a channel that never served a request returns an empty page. The dashboard offers the control only while a concrete platform is selected, since "all platforms" is not a platform whose channel this could be.
 
 ### GUI Config Editing
 
@@ -148,7 +158,7 @@ The Settings tab exposes all config fields as editable form inputs. On save, onl
 4. Backend validates essential fields (host, port)
 5. Backend writes merged config to disk and calls `atomicCfg.Reload()`
 
-**Nil safety:** The `/api/metrics` and `/api/history` handlers handle nil dependencies gracefully — they return zero values instead of panicking if the history or metrics instance is unavailable.
+**Nil safety:** the two dependency-backed handlers fail explicitly rather than serving a second, divergent answer. `/api/metrics` falls back to the persisted roll-up when the in-process counters are empty, and reports zero counters when the metrics instance is absent. The history endpoints (`/api/history`, `/api/history/summary`, `/api/history/channels`) return **HTTP 503** without storage: the in-memory ring buffer is a live tail, not a filterable or paginated dataset, so there is no queryable history to serve.
 
 ## Dual Release Channel System
 

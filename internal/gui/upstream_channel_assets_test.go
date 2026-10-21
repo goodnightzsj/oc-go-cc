@@ -30,6 +30,12 @@ func TestUpstreamChannelBadgeAppearsOnlyWhenAChannelWasObserved(t *testing.T) {
 	if !strings.Contains(source, "${channelMark}") {
 		t.Error("the row must render the channel badge")
 	}
+	// The badge is clamped so a long channel name cannot reflow the model cell,
+	// which means the visible text can be cut off. The tooltip has to lead with
+	// the value, or the clipped part is unrecoverable.
+	if !strings.Contains(source, `escapeHtml(h.upstream_channel + ' — ' + t('history.upstreamChannelHint'))`) {
+		t.Error("the channel badge tooltip must name the value before the explanation")
+	}
 
 	// The detail modal must show the channel as a labelled row, also conditional.
 	if !strings.Contains(source, "record.upstream_channel ?") {

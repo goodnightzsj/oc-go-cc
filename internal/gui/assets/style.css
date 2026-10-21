@@ -200,7 +200,25 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
 .badge-error { background: rgba(255,69,58,0.15); color: var(--ui-red); }
 .badge-unknown { background: rgba(154,163,173,.12); color: var(--ui-muted); }
 .badge-peak { background:#b45309; color:#fff; }
-.badge-channel { background: rgba(244,114,182,0.15); color: #f472b6; }
+/* The channel badge carries a machine value the reader scans down a column
+   looking for a change, so it is set in the monospace face the other
+   identifiers use and sized to sit on the platform line without reflowing it.
+   The tone is the platform accent, which keeps it reading as a ClinePass fact
+   rather than a status. */
+.badge-channel {
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--ui-cyan) 38%, transparent);
+  background: color-mix(in srgb, var(--ui-cyan) 14%, transparent);
+  color: var(--ui-cyan);
+  font-family: 'SF Mono','Menlo','Monaco',monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
 
 /* Duration grading. Colour carries the judgement, so the three levels are also
    named in a title attribute and never rely on hue alone. */
@@ -585,15 +603,23 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: none;
 .token-breakdown-band .metric-value { font-size: 18px; font-weight: 600; }
 
 .history-filter-band {
-  display: grid;
-  grid-template-columns: minmax(200px, 1.6fr) minmax(164px, 1.2fr) minmax(144px, 1fr) minmax(132px, .9fr) auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 10px;
   padding: 16px;
   border: 1px solid var(--ui-line);
   border-radius: 10px;
   background: var(--ui-surface);
 }
-.history-filter-band .theme-select { min-width: 0; }
+/* Search takes the room the controls leave, so the row fills its width whatever
+   is present. That matters because the channel filter is only offered for a
+   platform that records a channel: a fixed column count would leave a gap every
+   time the platform changed. */
+.history-filter-band .history-search-wrap { flex: 1 1 260px; }
+.history-filter-band .history-date-range { flex: 0 1 auto; }
+.history-filter-band .theme-select { flex: 0 1 auto; min-width: 0; }
+.history-filter-band #history-reset { margin-left: auto; }
 .history-advanced-filters { margin: 0 0 20px; }
 .history-advanced-filters > summary { width: fit-content; color: var(--ui-muted); font-size: 13px; }
 .filter-count:not(:empty) { display: inline-block; margin-left: 8px; min-width: 20px; padding: 0 6px; border-radius: 10px; color: var(--ui-indigo); background: var(--ui-active); text-align: center; }
@@ -1688,8 +1714,10 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
 #quota-local > .metric-band .metric-cell:last-child { border-right: 0; }
 #quota-local > .metric-band .metric-value { font-size: 20px; }
 @media (max-width: 1280px) {
-  .history-filter-band { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .history-filter-band .history-search-wrap { grid-column: span 2; }
+  /* The band is a wrapping flex row, so narrowing it needs no column count:
+     the controls wrap on their own. Only the search field's basis is relaxed so
+     it stops claiming a whole row before the others get a chance. */
+  .history-filter-band .history-search-wrap { flex-basis: 200px; }
   .routing-layout { grid-template-columns: minmax(0, 1fr); }
   .routing-notes { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 12px 20px; padding-top: 0; }
   .routing-notes .section-heading, .routing-notes h3 { margin: 0; }
@@ -1738,10 +1766,13 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
   .metric-cell { min-height: 76px; padding: 12px 10px; }
   .metric-value, .overview-metric [class~="text-[26px]"] { font-size: 20px; }
   .metric-secondary .metric-value { font-size: 17px; }
-  .history-filter-band { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 8px; }
-  .history-filter-band > * { grid-column: auto; }
-  .history-filter-band .history-search-wrap, .history-filter-band .history-date-range { grid-column: 1 / -1; }
-  .history-filter-band .theme-select { min-width: 0; }
+  .history-filter-band { padding: 8px; }
+  /* On a phone the search field and the date range take a full row each, so the
+     remaining controls wrap below them rather than being squeezed. */
+  .history-filter-band .history-search-wrap,
+  .history-filter-band .history-date-range { flex: 1 1 100%; }
+  .history-filter-band .theme-select { flex: 1 1 auto; }
+  .history-filter-band #history-reset { margin-left: 0; }
   .history-advanced-grid { grid-template-columns: minmax(0, 1fr); padding: 12px; }
   .history-pager { flex-wrap: wrap; gap: 8px; padding: 12px 0; }
   .history-pager-nav { gap: 8px; }

@@ -348,6 +348,21 @@ func (d *Database) migrateColumns(ctx context.Context) error {
 		SET cost_source = 'estimated'
 		WHERE cost_usd IS NOT NULL AND (cost_source IS NULL OR cost_source = '')
 	`)
+	if err != nil {
+		return err
+	}
+
+	// Index the upstream channel, after the column above exists. A partial index
+	// because only ClinePass ever writes one: the other platforms store NULL on
+	// every row, and indexing those would grow the index for values no filter can
+	// ask for. It lives here rather than in initSchema for the same reason the
+	// column does - a database created before the column existed cannot be
+	// indexed on it, and CREATE INDEX in the schema block would fail on exactly
+	// the older installs the index is meant to help.
+	_, err = d.db.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_requests_upstream_channel
+		ON requests(upstream_channel) WHERE upstream_channel IS NOT NULL
+	`)
 	return err
 }
 

@@ -388,6 +388,8 @@ const TRANSLATIONS = {
     'empty.noData': 'No data yet',
     'filter.allModels': 'All Models',
     'filter.allProviders': 'All platforms',
+    'filter.channel': 'Upstream channel',
+    'filter.allChannels': 'All channels',
     'filter.model': 'Model',
     'filter.provider': 'Provider',
     'clinepass.accountScope': 'Official plan usage. ClinePass is a flat monthly subscription measured against reference rates, so these are percentages of each window, not an amount owed. Each key is shown separately.',
@@ -941,6 +943,8 @@ const TRANSLATIONS = {
     'empty.noData': '暂无数据',
     'filter.allModels': '全部模型',
     'filter.allProviders': '全部平台',
+    'filter.channel': '上游渠道',
+    'filter.allChannels': '全部渠道',
     'filter.model': '模型',
     'filter.provider': '供应商',
     'clinepass.accountScope': '官方套餐用量。ClinePass 是按月固定订阅、以参考价折算，因此这里是各窗口的百分比，而不是应付金额。每个密钥分别显示。',
@@ -1163,6 +1167,9 @@ function toggleLanguage() {
   FallbackModule.renderChain();
   updateConfigChangeCount();
   loadChannelCatalog();
+  // The channel filter's own labels are translated text, so a language switch
+  // has to rebuild them rather than leave the previous language in place.
+  syncChannelFilter();
   if (lastOverviewView) renderOverviewUsage(lastOverviewView.data, lastOverviewView.trend, lastOverviewView.latency);
 }
 
@@ -1257,6 +1264,13 @@ window.CustomSelect = {
     wrapper.className = 'theme-select';
     if (select.classList.contains('flex-1')) wrapper.classList.add('theme-select-flex');
     if (select.classList.contains('w-full')) wrapper.classList.add('theme-select-full');
+    // A select that ships hidden gets a hidden wrapper. The enhancement replaces
+    // the native control with a button, so hiding only the select would leave the
+    // button standing where the select was meant to be absent - and the code that
+    // reveals such a control later runs before this enhancement exists, so it has
+    // no wrapper to reveal. Carrying the state across at enhance time is what
+    // makes "hidden until revealed" work for any control, not just one.
+    wrapper.hidden = select.hidden;
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'theme-select-trigger';
@@ -1951,6 +1965,11 @@ const MODEL_DISTRIBUTION_LIMIT = 5;
 
 function startPolling() {
   refreshAll();
+  // The observed-channel list is derived from the same rows the history table
+  // shows, so it is fetched alongside the first load rather than on the 3s
+  // loop: a new channel appears when the gateway first serves one, which is
+  // not a change worth re-querying every three seconds.
+  syncChannelFilter();
   PerfModule.init();
   PerfModule.refresh();
   // The active site is not a metric: it changes when an operator changes it,
@@ -2261,6 +2280,10 @@ function historyQueryParams(page = historyPage, size = historySize) {
     success: document.getElementById('status-filter')?.value,
     streaming: document.getElementById('streaming-filter')?.value,
     cost_source: document.getElementById('cost-source-filter')?.value,
+    // Only sent while the control is offered. A channel survives in the URL
+    // when the platform changes, and sending it then would filter another
+    // platform's rows by a channel it never records - a silent empty page.
+    channel: channelFilterActive() ? document.getElementById('channel-filter')?.value.trim() : '',
   };
   Object.entries(values).forEach(([key, value]) => {
     if (value) params.set(key, value);
@@ -2274,15 +2297,84 @@ function historyQueryParams(page = historyPage, size = historySize) {
   return params;
 }
 
+/* ── Upstream channel filter ─────────────────────────────────────
+   Only ClinePass publishes an upstream channel, so this control appears only
+   while a platform that actually recorded one is selected. Its options are the
+   channels this instance observed, not the gateway's advertised candidate list:
+   filtering by a channel that never served a request returns an empty page,
+   which reads as a broken filter rather than an unused channel.
+
+   It deliberately has no URL parameter. Its options arrive asynchronously while
+   the rest of the view state is restored synchronously from the hash, and a
+   value restored into a select with no matching option is silently dropped to
+   the empty default. The platform it belongs to is in the URL, so a link still
+   reproduces the platform; the channel choice is per session. */
+function channelFilterActive() {
+  const select = document.getElementById('channel-filter');
+  return !!select && !select.hidden;
+}
+
+// The control is wrapped by CustomSelect, so hiding the native select alone
+// would leave the visible button in place.
+function setChannelFilterVisible(visible) {
+  const select = document.getElementById('channel-filter');
+  if (!select) return;
+  const wrapper = window.CustomSelect?.instances.get(select)?.wrapper;
+  select.hidden = !visible;
+  if (wrapper) wrapper.hidden = !visible;
+}
+
+async function syncChannelFilter() {
+  const select = document.getElementById('channel-filter');
+  if (!select) return;
+  const provider = document.getElementById('provider-filter')?.value.trim() || '';
+  const chosen = select.value;
+  // Withdrawn before the request: the platform has already changed, so a
+  // channel left in place would be sent with the query that follows.
+  setChannelFilterVisible(false);
+  select.value = '';
+  // A concrete platform is required. The question the filter answers is "which
+  // upstream channel served this platform's traffic", and with no platform
+  // chosen there is no such platform - the rows behind "all platforms" mostly
+  // belong to platforms that record no channel at all. The endpoint's own
+  // answer decides the rest, so nothing here names a platform.
+  if (!provider) return;
+  try {
+    const r = await fetch(`/api/history/channels?provider=${encodeURIComponent(provider)}`);
+    if (!r.ok) return;
+    const data = await r.json();
+    const channels = Array.isArray(data.channels) ? data.channels : [];
+    if (!channels.length) return;
+    // Built from createElement rather than the Option constructor, matching how
+    // CustomSelect renders its own list, and rebuilt on every sync so a
+    // language switch or a platform change cannot accumulate stale options.
+    const option = (label, value) => {
+      const item = document.createElement('option');
+      item.value = value;
+      item.textContent = label;
+      return item;
+    };
+    select.replaceChildren(option(t('filter.allChannels'), ''), ...channels.map(name => option(name, name)));
+    // Restored only if this platform still offers it. A platform change drops a
+    // channel that does not belong to it; a language switch keeps the reader's
+    // choice, since the options are the same ones under a different label.
+    select.value = channels.includes(chosen) ? chosen : '';
+    setChannelFilterVisible(true);
+    window.CustomSelect?.sync(select);
+  } catch (_) {
+    // Nothing to offer; the control stays hidden and no channel is sent.
+  }
+}
+
 function historyHasFilters() {
   return ['history-search', 'history-start', 'history-end', 'model-filter', 'provider-filter',
-    'scenario-filter', 'status-filter', 'streaming-filter', 'cost-source-filter']
+    'scenario-filter', 'status-filter', 'streaming-filter', 'cost-source-filter', 'channel-filter']
     .some(id => document.getElementById(id)?.value);
 }
 
 function resetHistoryFilters(refresh = true) {
   ['history-search', 'history-start', 'history-end', 'model-filter', 'provider-filter',
-    'scenario-filter', 'status-filter', 'streaming-filter', 'cost-source-filter'].forEach(id => {
+    'scenario-filter', 'status-filter', 'streaming-filter', 'cost-source-filter', 'channel-filter'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = '';
   });
@@ -2526,8 +2618,12 @@ function renderHistory() {
     // Rendering the badge on every row with an empty value would suggest the
     // other platforms have a channel they are hiding; they simply do not
     // report one.
+    //
+    // The tooltip leads with the value, because the badge is clamped to keep a
+    // long channel from reflowing the model cell and the clipped text would
+    // otherwise be unrecoverable. The explanation follows it.
     const channelMark = h.upstream_channel
-      ? ' <span class="badge badge-channel" title="' + escapeHtml(t('history.upstreamChannelHint')) + '">' + escapeHtml(h.upstream_channel) + '</span>'
+      ? ' <span class="badge badge-channel" title="' + escapeHtml(h.upstream_channel + ' — ' + t('history.upstreamChannelHint')) + '">' + escapeHtml(h.upstream_channel) + '</span>'
       : '';
     return `
     <tr data-id="${escapeHtml(rowId)}" tabindex="0" aria-haspopup="dialog" data-provider="${escapeHtml(h.provider || '')}" style="cursor: pointer;">
@@ -4234,6 +4330,12 @@ function scheduleHistoryRefresh(event) {
 ['history-start', 'history-end', 'provider-filter', 'status-filter', 'streaming-filter', 'cost-source-filter'].forEach(id => {
   document.getElementById(id)?.addEventListener('change', scheduleHistoryRefresh);
 });
+// The channel options are a function of the selected platform, so the platform
+// is what has to be watched. Both listeners fire on a platform change: the
+// options are refreshed first and the history load follows, so a query is never
+// sent with a channel that the platform just stopped offering.
+document.getElementById('provider-filter')?.addEventListener('change', syncChannelFilter);
+document.getElementById('channel-filter')?.addEventListener('change', scheduleHistoryRefresh);
 document.getElementById('history-reset')?.addEventListener('click', () => resetHistoryFilters());
 document.getElementById('history-page-size')?.addEventListener('change', event => {
   const nextSize = Number(event.target.value);

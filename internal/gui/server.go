@@ -204,6 +204,7 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 	mux.HandleFunc("/api/metrics", s.handleMetrics)
 	mux.HandleFunc("/api/history", s.handleHistory)
 	mux.HandleFunc("/api/history/summary", s.handleHistorySummary)
+	mux.HandleFunc("/api/history/channels", s.handleHistoryChannels)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/proxy/config", s.handleProxyConfig)
 	mux.HandleFunc("/api/cline-pass/channels", s.handleChannelCatalog)
@@ -557,6 +558,30 @@ func (s *Server) handleHistorySummary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, summary)
 }
 
+// handleHistoryChannels reports which upstream channels this instance actually
+// recorded, so the history filter can offer real choices instead of the
+// gateway's advertised candidate list.
+//
+// Scoped by platform, because the answer is: only ClinePass publishes a
+// channel. Asking for another platform honestly returns none, and the panel
+// then shows no channel filter at all rather than an empty dropdown.
+func (s *Server) handleHistoryChannels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.storage == nil {
+		http.Error(w, "history storage is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	channels, err := storage.NewRequests(s.storage).ObservedChannels(r.URL.Query().Get("provider"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"channels": channels})
+}
+
 func historyRequestQuery(r *http.Request, page, size int) (storage.RequestQuery, error) {
 	values := r.URL.Query()
 	q := storage.RequestQuery{
@@ -566,6 +591,7 @@ func historyRequestQuery(r *http.Request, page, size int) (storage.RequestQuery,
 		Model:      strings.TrimSpace(values.Get("model")),
 		Provider:   strings.TrimSpace(values.Get("provider")),
 		Scenario:   strings.TrimSpace(values.Get("scenario")),
+		Channel:    strings.TrimSpace(values.Get("channel")),
 		CostSource: strings.TrimSpace(values.Get("cost_source")),
 		SortBy:     values.Get("sort"),
 		SortOrder:  values.Get("order"),

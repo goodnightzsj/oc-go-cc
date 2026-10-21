@@ -56,4 +56,19 @@ func TestUpstreamChannelBadgeAppearsOnlyWhenAChannelWasObserved(t *testing.T) {
 	if !strings.Contains(css, ".badge-channel") {
 		t.Error("style.css must define the channel badge rule")
 	}
+
+	// A real channel name has to fit. The badge was set in the monospace face at
+	// 10px, which made openai-compatible-private about 186px wide - wider than
+	// the model cell it sits in - so the value was always truncated and the
+	// badge reported less than it existed to report. Monospace is the thing
+	// that made it too wide; the check is that the face is gone and the cell can
+	// hold a name of that length.
+	rule := cssSection(css, ".badge-channel {")
+	if strings.Contains(rule, "monospace") {
+		t.Error("the channel badge must not use a monospace face: a real channel name does not fit")
+	}
+	cell := cssSection(css, ".history-model-cell {")
+	if !strings.Contains(cell, "max-width: 300px") {
+		t.Errorf("the model cell must be wide enough for a channel badge; got %q", cell)
+	}
 }

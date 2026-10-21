@@ -101,6 +101,50 @@ var clinePassWindowType = map[string]string{
 	"last30daysUsageCostUSDPerUser": "monthly",
 }
 
+// clinePassErrorText extracts the platform's own explanation from a failed
+// response body, so a rejection says why instead of only how.
+//
+// ClinePass answers a request it will not serve with a JSON envelope carrying a
+// human-readable reason - "no plan history found for user" for an account with
+// no subscription. Reporting the bare status text instead ("HTTP 404: Not
+// Found") names the symptom and hides the cause, which is the one thing the
+// operator needs: the credential is valid but the account is not entitled.
+//
+// The field is a plain string in the responses observed so far, but an object
+// with a message is also accepted: the endpoint is undocumented, so both shapes
+// are read rather than betting on one.
+func clinePassErrorText(body []byte) string {
+	var envelope struct {
+		Error json.RawMessage `json:"error"`
+		Message string        `json:"message"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return ""
+	}
+	if len(envelope.Error) > 0 {
+		var text string
+		if json.Unmarshal(envelope.Error, &text) == nil {
+			return strings.TrimSpace(text)
+		}
+		var object struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(envelope.Error, &object) == nil {
+			return strings.TrimSpace(object.Message)
+		}
+	}
+	return strings.TrimSpace(envelope.Message)
+}
+
+// clinePassStatusError builds the error for a non-2xx response, preferring the
+// platform's explanation and falling back to the status text.
+func clinePassStatusError(status int, body []byte) error {
+	if detail := clinePassErrorText(body); detail != "" {
+		return fmt.Errorf("HTTP %d: %s", status, detail)
+	}
+	return fmt.Errorf("HTTP %d: %s", status, http.StatusText(status))
+}
+
 // FetchClinePassPlan reads the plan's absolute per-window ceilings.
 //
 // A missing or disabled entitlement is reported as an error rather than as
@@ -133,7 +177,9 @@ func FetchClinePassPlan(parent context.Context, client *http.Client, endpoint, a
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+		// The body carries the platform's reason; read it before reporting.
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+		return nil, clinePassStatusError(resp.StatusCode, detail)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
@@ -213,9 +259,6 @@ type clinePassLimits struct {
 			ResetsAt    *string  `json:"resetsAt"`
 		} `json:"limits"`
 	} `json:"data"`
-	Error *struct {
-		Message string `json:"message"`
-	} `json:"error"`
 }
 
 // FetchClinePass reads the plan's usage windows from the already-derived
@@ -261,7 +304,9 @@ func FetchClinePass(parent context.Context, client *http.Client, endpoint, apiKe
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+		// The body carries the platform's reason; read it before reporting.
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+		return nil, clinePassStatusError(resp.StatusCode, detail)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
@@ -275,8 +320,12 @@ func FetchClinePass(parent context.Context, client *http.Client, endpoint, apiKe
 		return nil, errors.New("invalid account JSON or field type")
 	}
 	if payload.Success == nil || !*payload.Success {
-		if payload.Error != nil && payload.Error.Message != "" {
-			return nil, fmt.Errorf("account request rejected: %s", payload.Error.Message)
+		// A 200 that reports failure carries the same explanation field as a
+		// rejection, so it is read the same way rather than through the
+		// envelope's own typed field - which only matches one of the two
+		// shapes the platform uses.
+		if detail := clinePassErrorText(body); detail != "" {
+			return nil, fmt.Errorf("account request rejected: %s", detail)
 		}
 		return nil, errors.New("account response did not report success")
 	}

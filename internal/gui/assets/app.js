@@ -6385,8 +6385,16 @@ const QuotaModule = {
   renderCommandCodeAccount(account) {
     const head = `<div class="quota-account-head"><span class="quota-key">${t('quota.keyLabel')} <code>${escapeHtml(account.key_hint || '—')}</code></span></div>`;
     const data = account.commandcode;
-    const error = message => `<div class="quota-notice is-error" role="alert">${escapeHtml(message)}</div>`;
-    if (account.error || !data) return `<section class="quota-account analytics-section">${head}${error(account.error || t('data.invalid'))}</section>`;
+    // A failed account renders through the same shell as a healthy one: the
+    // card head, then one bordered block holding the message. The analytics
+    // section class it used before brought its own border and bottom margin,
+    // so a failing key sat at a different height and wore a different frame
+    // than the key beside it.
+    const error = message => `<section class="quota-account commandcode-account">${head}
+      <div class="commandcode-panels">
+        <section class="commandcode-block"><div class="quota-notice is-error" role="alert"><strong>${t('quota.loadFail')}</strong><span>${escapeHtml(message)}</span></div></section>
+      </div></section>`;
+    if (account.error || !data) return error(account.error || t('data.invalid'));
     const figures = rows => `<dl class="quota-figures">${rows.map(([label, value]) => `<div><dt>${t(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl>`;
     const section = (title, content, className = '') => `<section class="commandcode-block ${className}"><h3 class="section-heading">${t(title)}</h3>${content}</section>`;
     const utc = value => {
@@ -6482,8 +6490,16 @@ const QuotaModule = {
   renderClinePassAccount(account) {
     const head = `<div class="quota-account-head"><span class="quota-key">${t('quota.keyLabel')} <code>${escapeHtml(account.key_hint || '—')}</code></span></div>`;
     const data = account.cline_pass;
-    const error = message => `<div class="quota-notice is-error" role="alert">${escapeHtml(message)}</div>`;
-    if (account.error || !data) return `<section class="quota-account analytics-section">${head}${error(account.error || t('data.invalid'))}</section>`;
+    // A failed account renders through the same shell as a healthy one: the
+    // card head, then one bordered block holding the message. The analytics
+    // section class it used before brought its own border and bottom margin,
+    // so a failing key sat at a different height and wore a different frame
+    // than the key beside it.
+    const error = message => `<section class="quota-account commandcode-account">${head}
+      <div class="commandcode-panels commandcode-panels-single">
+        <section class="commandcode-block"><div class="quota-notice is-error" role="alert"><strong>${t('quota.loadFail')}</strong><span>${escapeHtml(message)}</span></div></section>
+      </div></section>`;
+    if (account.error || !data) return error(account.error || t('data.invalid'));
     const windows = (data.windows || []).map(window => {
       const percent = Number.isFinite(window.percent_used) ? window.percent_used : null;
       const level = percent == null ? 'ok' : this.levelOf(percent);

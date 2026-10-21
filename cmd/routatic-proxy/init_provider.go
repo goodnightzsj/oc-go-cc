@@ -83,7 +83,7 @@ func getProviderConfig(provider string) (string, error) {
 // getOpenRouterConfig returns a config optimized for OpenRouter.
 func getOpenRouterConfig() string {
 	return `{
-  "api_key": "${ROUTATIC_PROXY_API_KEY}",
+  "api_keys": ["${ROUTATIC_PROXY_API_KEY}"],
   "host": "127.0.0.1",
   "port": 3456,
   "hot_reload": false,
@@ -154,8 +154,7 @@ func getOpenRouterConfig() string {
 
   "openrouter": {
     "base_url": "https://openrouter.ai/api/v1/chat/completions",
-    "api_key": "${ROUTATIC_PROXY_OPENROUTER_API_KEY}",
-    "api_keys": [],
+    "api_keys": ["${ROUTATIC_PROXY_OPENROUTER_API_KEY}"],
     "timeout_ms": 300000,
     "stream_timeout_ms": 60000,
     "streaming_timeout_ms": 600000
@@ -172,7 +171,7 @@ func getOpenRouterConfig() string {
 // getAWSBedrockConfig returns a config optimized for AWS Bedrock.
 func getAWSBedrockConfig() string {
 	return `{
-  "api_key": "${ROUTATIC_PROXY_API_KEY}",
+  "api_keys": ["${ROUTATIC_PROXY_API_KEY}"],
   "host": "127.0.0.1",
   "port": 3456,
   "hot_reload": false,
@@ -244,8 +243,7 @@ func getAWSBedrockConfig() string {
   "aws_bedrock": {
     "base_url": "https://bedrock-mantle.us-east-1.api.aws/v1/chat/completions",
     "anthropic_base_url": "https://bedrock-mantle.us-east-1.api.aws/v1/messages",
-    "api_key": "${ROUTATIC_PROXY_AWS_BEDROCK_API_KEY}",
-    "api_keys": [],
+    "api_keys": ["${ROUTATIC_PROXY_AWS_BEDROCK_API_KEY}"],
     "project_id": "",
     "wire_format": "openai",
     "timeout_ms": 300000,
@@ -264,7 +262,7 @@ func getAWSBedrockConfig() string {
 // getOpenCodeZenConfig returns a config optimized for OpenCode Zen.
 func getOpenCodeZenConfig() string {
 	return `{
-  "api_key": "${ROUTATIC_PROXY_API_KEY}",
+  "api_keys": ["${ROUTATIC_PROXY_API_KEY}"],
   "host": "127.0.0.1",
   "port": 3456,
   "hot_reload": false,
@@ -372,8 +370,7 @@ func getOpenCodeZenConfig() string {
     "anthropic_base_url": "https://opencode.ai/zen/v1/messages",
     "responses_base_url": "https://opencode.ai/zen/v1/responses",
     "gemini_base_url": "https://opencode.ai/zen/v1/models",
-    "api_key": "${ROUTATIC_PROXY_OPENCODE_ZEN_API_KEY}",
-    "api_keys": [],
+    "api_keys": ["${ROUTATIC_PROXY_OPENCODE_ZEN_API_KEY}"],
     "timeout_ms": 300000,
     "streaming_timeout_ms": 600000
   },
@@ -415,8 +412,7 @@ func getCommandCodeConfig() string {
   "commandcode": {
     "base_url": "https://api.commandcode.ai/provider/v1/chat/completions",
     "anthropic_base_url": "https://api.commandcode.ai/provider/v1/messages",
-    "api_key": "${ROUTATIC_PROXY_COMMANDCODE_API_KEY}",
-    "api_keys": [],
+    "api_keys": ["${ROUTATIC_PROXY_COMMANDCODE_API_KEY}"],
     "timeout_ms": 300000,
     "stream_timeout_ms": 60000,
     "streaming_timeout_ms": 600000,
@@ -455,8 +451,7 @@ func getClinePassConfig() string {
   },
   "cline_pass": {
     "base_url": "https://api.cline.bot/api/v1/chat/completions",
-    "api_key": "${ROUTATIC_PROXY_CLINE_PASS_API_KEY}",
-    "api_keys": [],
+    "api_keys": ["${ROUTATIC_PROXY_CLINE_PASS_API_KEY}"],
     "timeout_ms": 300000,
     "stream_timeout_ms": 60000,
     "streaming_timeout_ms": 600000

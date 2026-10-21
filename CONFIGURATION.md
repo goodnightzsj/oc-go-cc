@@ -12,7 +12,7 @@ For migration, `~/.config/oc-go-cc/config.json` is loaded when the new config fi
 
 ```json
 {
-  "api_key": "${ROUTATIC_PROXY_API_KEY}",
+  "api_keys": ["${ROUTATIC_PROXY_API_KEY}"],
   "host": "127.0.0.1",
   "port": 3456,
   "hot_reload": false,
@@ -199,7 +199,7 @@ routatic-proxy supports three providers for upstream API calls:
   "aws_bedrock": {
     "base_url": "https://bedrock-mantle.us-east-1.api.aws/v1/chat/completions",
     "anthropic_base_url": "https://bedrock-mantle.us-east-1.api.aws/v1/messages",
-    "api_key": "${BEDROCK_API_KEY}",
+    "api_keys": ["${BEDROCK_API_KEY}"],
     "project_id": "proj_xxx",
     "wire_format": "openai",
     "timeout_ms": 300000,
@@ -225,7 +225,6 @@ Set `wire_format: "anthropic"` for models that need raw Anthropic Messages forma
   "openrouter": {
     "name": "openrouter",
     "base_url": "https://openrouter.ai/api/v1",
-    "api_key": "${OPENROUTER_API_KEY}",
     "api_keys": ["${OPENROUTER_KEY_1}", "${OPENROUTER_KEY_2}"],
     "enabled": true,
     "timeout_ms": 300000,
@@ -238,39 +237,39 @@ Set `wire_format: "anthropic"` for models that need raw Anthropic Messages forma
 |-------|------|----------|-------------|
 | `name` | `string` | No | Provider display name (defaults to "openrouter") |
 | `base_url` | `string` | No | API endpoint base URL. Default: `https://openrouter.ai/api/v1` |
-| `api_key` | `string` | Yes* | Single API key for authentication. Required if `api_keys` not set |
-| `api_keys` | `string[]` | Yes* | Multiple API keys for round-robin rotation. Required if `api_key` not set |
+| `api_keys` | `string[]` | Yes | API keys for fill-first rotation. The order is the order requests are tried in |
+| `api_key` | `string` | No | Compatibility read path for a single key. Folded into `api_keys` on load and on save |
 | `enabled` | `bool` | No | Whether this provider is active. Default: `true` |
 | `timeout_ms` | `int` | No | Request timeout in milliseconds. Default: `300000` (5 minutes) |
 | `stream_timeout_ms` | `int` | No | Per-chunk timeout during streaming. Default: `60000` (1 minute) |
 
-*At least one of `api_key` or `api_keys` must be configured.
+*At least one of `api_keys` or `api_key` must be configured.
 
 #### Environment Variable Overrides
 
 | Variable | Description | Precedence |
 |----------|-------------|------------|
-| `ROUTATIC_PROXY_OPENROUTER_API_KEY` | Single API key override | Highest |
-| `ROUTATIC_PROXY_OPENROUTER_API_KEYS` | Comma-separated keys for round-robin | Highest |
+| `ROUTATIC_PROXY_OPENROUTER_API_KEYS` | Comma-separated keys for the pool | Highest |
+| `ROUTATIC_PROXY_OPENROUTER_API_KEY` | Single key; folded into the pool | Highest |
 | `ROUTATIC_PROXY_OPENROUTER_BASE_URL` | Custom base URL override | Highest |
 
 Environment variables take precedence over config file values. Config values support `${VAR}` interpolation.
 
-Precedence order: `*_API_KEYS` → `*_API_KEY` → config file `api_keys` → config file `api_key`
+Precedence order: `*_API_KEYS` → `*_API_KEY` → config file `api_keys` → config file `api_key`. The last two are one pool, not alternatives: the single key leads and the array follows.
 
 #### Example Configurations
 
-**Single-key setup:**
+**Single key:**
 
 ```json
 {
   "openrouter": {
-    "api_key": "sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxx"
+    "api_keys": ["sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxx"]
   }
 }
 ```
 
-**Multi-key round-robin for load balancing:**
+**A pool tried in order:**
 
 ```json
 {
@@ -284,13 +283,15 @@ Precedence order: `*_API_KEYS` → `*_API_KEY` → config file `api_keys` → co
 }
 ```
 
+The first key that is neither resting nor saturated serves the request. Reordering the list is how a key is promoted.
+
 **Custom base URL (for enterprise/self-hosted):**
 
 ```json
 {
   "openrouter": {
     "base_url": "https://openrouter.mycompany.com/api/v1",
-    "api_key": "${OPENROUTER_API_KEY}",
+    "api_keys": ["${OPENROUTER_API_KEY}"],
     "enabled": true
   }
 }
@@ -686,7 +687,7 @@ Discovery only runs when all of these hold: `ANTHROPIC_BASE_URL` is set, `CLAUDE
    These are the exact two environment variables the proxy relies on — the same ones from the manual quickstart in the [README](README.md).
 3. **Enable** the provider. Claude Code hot-reloads it, so no restart is needed.
 
-> **About the API Key field:** the token in `ANTHROPIC_AUTH_TOKEN` is what Claude Code sends to the *proxy*, not what the proxy sends upstream. Your real upstream keys live in the proxy's own config (`opencode_go.api_key`, `openrouter.api_key`, etc.) or environment (`ROUTATIC_PROXY_*`). If you set `api_key` / `api_keys` in the proxy config, that value must match what CC-Switch sends; if you leave proxy auth unset, any non-empty token works.
+> **About the API Key field:** the token in `ANTHROPIC_AUTH_TOKEN` is what Claude Code sends to the *proxy*, not what the proxy sends upstream. Your real upstream keys live in the proxy's own config (`opencode_go.api_keys`, `openrouter.api_keys`, etc.) or environment (`ROUTATIC_PROXY_*`). The top-level `api_keys` / `api_key` serve both purposes at once — they are the proxy's own inbound credential and the fallback upstream pool — so a value set there must match what CC-Switch sends; if you leave proxy auth unset, any non-empty token works. Upstream keys belong in a platform's own block, where they never act as inbound auth.
 
 ### Configure specific models
 

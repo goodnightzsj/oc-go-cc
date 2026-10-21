@@ -56,7 +56,7 @@ function node(id) {
     innerHTML: '', textContent: '', dataset: {}, style: {}, children: [], listeners: {},
     classList: {add(){},remove(){},toggle(){},contains(){return false}},
     addEventListener(type, handler){(this.listeners[type] ||= []).push(handler)}, setAttribute(){}, querySelectorAll(){return []},
-    querySelector(selector){return selector === '.modal-content' ? node('modal-content') : null}, focus(){},
+    querySelector(selector){return selector === '.modal-content' ? node('modal-content') : (selector === '.modal-subtitle' ? node('modal-subtitle') : null)}, focus(){},
     appendChild(child){this.children.push(child)}, insertAdjacentHTML(_, html){this.innerHTML += html},
   });
   return nodes.get(id);
@@ -168,13 +168,75 @@ vm.runInContext(` + "`" + `
 
   const mask = '••••••••••••••••';
   currentProxyConfig = {commandcode: {api_keys: [mask], timeout_ms: 1000}};
-  document.getElementById('cfg-commandcode-api-keys').value = mask;
   const keysField = CONFIG_FIELDS.find(field => field[0] === 'commandcode.api_keys');
+  // A pool is edited as rows: a kept row carries only the label the redacted
+  // GET supplied, so it can be re-stated without the operator ever seeing - or
+  // retyping - the credential.
+  const keptRows = describeKeys([mask]);
+  assert.equal(keptRows.length, 1);
+  assert.equal(keptRows[0].kept, true);
+  assert.equal(keptRows[0].index, 0);
+  assert.equal(JSON.stringify(collectKeys(keptRows)), '[{"keep":0,"hint":"' + mask + '"}]');
+  // A new row must never be turned into a keep reference, and a blank one the
+  // operator opened and abandoned is dropped rather than posted as an empty key.
+  const grown = [...keptRows, {label: '', kept: false, value: 'synthetic-b'}, {label: '', kept: false, value: '  '}];
+  assert.equal(JSON.stringify(collectKeys(grown)), '[{"keep":0,"hint":"' + mask + '"},{"value":"synthetic-b"}]');
+  // Removing the stored row is how a key leaves the pool.
+  assert.equal(JSON.stringify(collectKeys([{label: '', kept: false, value: 'synthetic-only'}])), '[{"value":"synthetic-only"}]');
+  // An untouched pool must not be patched at all.
+  keyEditors.set('cfg-commandcode-api-keys', {path: 'commandcode.api_keys', rows: describeKeys([mask])});
   assert.equal(readFieldValue(keysField), undefined);
-  document.getElementById('cfg-commandcode-api-keys').value = 'synthetic-a, synthetic-b';
-  assert.equal(JSON.stringify(readFieldValue(keysField)), '["synthetic-a","synthetic-b"]');
-  document.getElementById('cfg-commandcode-api-keys').value = '';
-  assert.equal(JSON.stringify(readFieldValue(keysField)), '[]');
+  keyEditors.get('cfg-commandcode-api-keys').rows = describeKeys([mask]).concat([{label: '', kept: false, value: 'synthetic-c'}]);
+  assert.equal(JSON.stringify(readFieldValue(keysField)), '[{"keep":0,"hint":"' + mask + '"},{"value":"synthetic-c"}]');
+
+  // Row order is the pool's priority (Reserve is fill-first), so moving a row
+  // must change the order that gets saved - including moving a brand-new key
+  // to the top so it is the one served first.
+  const movable = keyEditors.get('cfg-commandcode-api-keys');
+  movable.rows = describeKeys([mask]).concat([{label: '', kept: false, value: 'synthetic-top', index: undefined}]);
+  moveKeyRow('cfg-commandcode-api-keys', 1, 0);
+  assert.equal(JSON.stringify(readFieldValue(keysField)), '[{"value":"synthetic-top"},{"keep":0,"hint":"' + mask + '"}]');
+  moveKeyRow('cfg-commandcode-api-keys', 0, 1);
+  assert.equal(JSON.stringify(readFieldValue(keysField)), '[{"keep":0,"hint":"' + mask + '"},{"value":"synthetic-top"}]');
+  // Moving a kept row must not change which stored key it points at.
+  movable.rows = describeKeys(['••••aaaa', '••••bbbb']);
+  moveKeyRow('cfg-commandcode-api-keys', 1, 0);
+  assert.equal(JSON.stringify(readFieldValue(keysField)), '[{"keep":1,"hint":"••••bbbb"},{"keep":0,"hint":"••••aaaa"}]');
+  assert.equal(movable.rows[0].index, 1, 'a moved row keeps the stored index it was drawn from');
+  // Moving past either end is a no-op rather than a lost row.
+  moveKeyRow('cfg-commandcode-api-keys', 0, -1);
+  moveKeyRow('cfg-commandcode-api-keys', 1, 2);
+  assert.equal(JSON.stringify(readFieldValue(keysField)), '[{"keep":1,"hint":"••••bbbb"},{"keep":0,"hint":"••••aaaa"}]');
+  assert.deepEqual(Object.keys(keyEditors.get('cfg-commandcode-api-keys').rows).length, 2);
+
+  // Removing a stored credential must be confirmed, and the row must survive
+  // until the operator agrees: an accidental click on × cannot drop an account.
+  const removable = keyEditors.get('cfg-commandcode-api-keys');
+  removable.rows = describeKeys(['••••aaaa', '••••bbbb']);
+  renderKeyEditor('cfg-commandcode-api-keys');
+  let asked = null;
+  confirmKeyRemoval(removable.rows[0], () => { asked = 'accepted'; });
+  assert.equal(asked, null, 'a stored key must not be removed without confirmation');
+  // The dialog only stages the edit; the row is still there while it is open.
+  assert.equal(removable.rows.length, 2);
+  // A row that was never saved carries no credential, so it goes without a prompt.
+  let discarded = false;
+  confirmKeyRemoval({label: '', kept: false, value: ''}, () => { discarded = true; });
+  assert.equal(discarded, true, 'a blank draft row must not prompt');
+
+  // The confirmation must not wear the detail dialog's subtitle, and must not
+  // take it away from that dialog either: the two share one modal element.
+  const subtitle = document.getElementById('modal-subtitle');
+  openHistoryModal('detail.title');
+  assert.equal(subtitle.hidden, false, 'the detail dialog keeps its subtitle');
+  assert.ok(subtitle.textContent.length > 0, 'the detail dialog must show its subtitle text');
+  const detailSubtitle = subtitle.textContent;
+  openHistoryModal('keys.removeTitle', '');
+  assert.equal(subtitle.hidden, true, 'a confirm dialog must not show the detail subtitle');
+  assert.equal(subtitle.textContent, '');
+  openHistoryModal('detail.title');
+  assert.equal(subtitle.hidden, false, 'the detail subtitle must come back after a confirm dialog');
+  assert.equal(subtitle.textContent, detailSubtitle, 'the restored subtitle must be the real one, not blank');
   document.getElementById('cfg-commandcode-timeout').value = '1.5';
   assert.throws(() => readFieldValue(CONFIG_FIELDS.find(field => field[0] === 'commandcode.timeout_ms')));
   document.getElementById('cfg-commandcode-streaming-timeout').value = '';

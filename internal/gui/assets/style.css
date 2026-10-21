@@ -108,6 +108,18 @@ dialog.modal-overlay::backdrop { background: transparent; }
 .modal-close:focus-visible { outline: 2px solid var(--ui-action); outline-offset: 1px; }
 .modal-body { padding: 18px; overflow-y: auto; flex: 1; }
 
+/* ── Confirm Dialog ───────────────────────────────────────── */
+/* An icon, one bold question, then when the change takes effect. The key label
+   is monospaced so it reads as data rather than as part of the sentence.
+   The variant override that sizes this dialog lives beside
+   .history-detail-content, after the rule it overrides. */
+.confirm-dialog { display: flex; gap: 12px; align-items: flex-start; }
+.confirm-icon { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 9px; background: color-mix(in srgb, var(--ui-red) 14%, transparent); color: var(--ui-red); }
+.confirm-copy { min-width: 0; padding-top: 1px; }
+.confirm-title { margin: 0 0 6px; color: var(--ui-text); font-size: 13px; font-weight: 600; line-height: 1.5; }
+.confirm-key { display: inline-block; margin: 0 0 8px; padding: 2px 7px; border: 1px solid var(--ui-line); border-radius: 5px; background: var(--ui-surface-raised); color: var(--ui-text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; letter-spacing: 0.02em; }
+.confirm-note { margin: 0; color: var(--ui-muted); font-size: 11px; line-height: 1.6; }
+
 /* ── Status Dot ───────────────────────────────────────────── */
 .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ui-muted); transition: background 0.3s; }
 .status-dot.running { background: var(--ui-green); }
@@ -235,6 +247,11 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
 .btn-small:hover { background: var(--ui-line); }
 .btn-primary.btn-small { background: var(--ui-action); color: #ffffff; border-color: var(--ui-action); }
 .btn-primary.btn-small:hover { background: var(--ui-action-hover); border-color: var(--ui-action-hover); }
+/* Destructive confirmation. The fill is the red token at low strength so the
+   button reads as dangerous without competing with the dialog's own text. */
+.btn-danger { background: color-mix(in srgb, var(--ui-red) 16%, transparent); color: var(--ui-red); border: 1px solid color-mix(in srgb, var(--ui-red) 42%, transparent); }
+.btn-danger:hover { background: color-mix(in srgb, var(--ui-red) 26%, transparent); }
+.btn-danger:focus-visible { outline: 2px solid var(--ui-red); outline-offset: 1px; }
 
 /* ── Form Helpers ─────────────────────────────────────────── */
 .checkbox-group label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ui-text); font-weight: 400; }
@@ -1058,6 +1075,13 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .history-detail-content .modal-header { padding: 16px 20px; border-color: var(--ui-line); }
 .modal-subtitle { margin: 3px 0 0; color: var(--ui-muted); font-size: 11px; }
 .history-detail-content .modal-body { padding: 0; }
+/* The shell above is a 720px two-column table and gives its body no padding. A
+   short confirmation must not inherit either: it would stretch to a table's
+   width and sit against its left edge. This is the variant override, and it is
+   kept after the rule it overrides. */
+.modal-overlay[data-variant="confirm"] .history-detail-content { width: min(400px, calc(100vw - 28px)); max-width: 400px; }
+.modal-overlay[data-variant="confirm"] .modal-body { padding: 18px; }
+.modal-overlay[data-variant="confirm"] .modal-footer { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 18px; border-top: 1px solid var(--ui-line); }
 .detail-summary { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 20px; border-bottom: 1px solid var(--ui-line); }
 .detail-model { margin-bottom: 6px; font-size: 16px; font-weight: 650; overflow-wrap: anywhere; }
 .detail-context { display: flex; flex-wrap: wrap; gap: 6px 12px; color: var(--ui-muted); font-size: 11px; }
@@ -1577,6 +1601,29 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
 .chain-actions button { min-width: 32px; min-height: 32px; border: 1px solid var(--ui-line); border-radius: 4px; color: var(--ui-text); background: var(--ui-surface); cursor: pointer; }
 .chain-actions .chain-remove { color: var(--ui-red); }
 .chain-actions button:disabled { opacity: .4; cursor: not-allowed; }
+
+/* Key pool rows. Same shape as .fallback-item: order number, field, action
+   group. The group keeps all three buttons at every row so its width never
+   changes and the ends are disabled rather than absent. */
+.key-row { position: relative; display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px; }
+.key-row-order { flex: 0 0 18px; height: 18px; display: flex; align-items: center; justify-content: center; color: var(--ui-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.key-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.key-row-actions button { min-width: 28px; min-height: 28px; padding: 0; border: 1px solid var(--ui-line); border-radius: 4px; color: var(--ui-text); background: var(--ui-surface); font-size: 12px; line-height: 1; cursor: pointer; }
+.key-row-actions button:hover:not(:disabled) { background: var(--ui-line); }
+.key-row-actions button:disabled { opacity: .35; cursor: not-allowed; }
+.key-row-actions .key-row-remove { color: var(--ui-red); }
+
+/* The first row is the one Reserve tries first. It is marked by filling its
+   order badge, and nothing else: a tinted row read as a muddy rectangle on the
+   dark surface, and a left rule fought with the rounded input beside it. A
+   filled token is legible in both themes and adds no geometry, so promoting or
+   demoting a row never shifts the field next to it. */
+.key-row[data-key-primary] .key-row-order {
+  color: #ffffff;
+  font-weight: 600;
+  background: var(--ui-action);
+  border-radius: 9px;
+}
 .fallback-preview { box-shadow: none; border: 0; border-top: 1px solid var(--ui-line); border-radius: 0; background: transparent; }
 .quota-source-details { color: var(--ui-muted); font-size: 12px; }
 .quota-source-details > summary { padding: 4px 0; color: inherit; font-weight: 400; }
@@ -1733,7 +1780,7 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
   .btn, .btn-small, .btn-icon, .sort-button, .chain-actions button, .theme-select-trigger,
   .theme-select-option, .date-range-trigger, .date-range-actions button, .date-range-presets button,
   .usage-legend-toggle, .legend-item, .metric-segment button, .app-nav .tab { min-height: 44px; }
-  .btn-icon, .chain-actions button, .btn-show-hide, .modal-close { min-width: 44px; min-height: 44px; }
+  .btn-icon, .chain-actions button, .btn-show-hide, .modal-close, .key-row-actions button { min-width: 44px; min-height: 44px; }
   .theme-select { height: 44px; }
   /* 16px keeps iOS from zooming the page when a field takes focus; it is the
      same size the rest of the scale uses, so nothing looks out of place. */

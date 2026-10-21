@@ -58,9 +58,23 @@ func anonymizeMap(m map[string]interface{}) {
 					m[key] = keyMask
 				}
 			case []interface{}:
-				if len(v) > 0 {
-					m[key] = []string{keyMask}
+				// One hint per key, not one hint for the array. Collapsing a
+				// pool of N keys into a single placeholder hid both the size of
+				// the pool and which key a row stood for, so editing any one of
+				// them meant retyping all of them blind. The hint is a label,
+				// never a credential: it leaves only the last four characters,
+				// and resolveKeyPatch maps it back to the stored key on save.
+				hints := make([]string, 0, len(v))
+				for _, item := range v {
+					if text, ok := item.(string); ok && text != "" {
+						hints = append(hints, maskKeyHint(text))
+					}
 				}
+				if len(hints) == 0 {
+					m[key] = []string{}
+					continue
+				}
+				m[key] = hints
 			}
 		} else if nested, ok := value.(map[string]interface{}); ok {
 			anonymizeMap(nested)
@@ -159,9 +173,6 @@ func (s *Server) updateProxyConfig(patch map[string]json.RawMessage, apply bool)
 	if patch == nil {
 		return nil, &config.ValidationError{Code: "object_required", Err: errors.New("config must be a JSON object")}
 	}
-	if err := stripMaskedKeys(patch); err != nil {
-		return nil, err
-	}
 	s.proxyConfigMu.Lock()
 	defer s.proxyConfigMu.Unlock()
 
@@ -180,6 +191,13 @@ func (s *Server) updateProxyConfig(patch map[string]json.RawMessage, apply bool)
 	}
 	if merged == nil {
 		return nil, &config.ValidationError{Code: "stored_config_invalid", Err: errors.New("current config must be a JSON object")}
+	}
+	// Redaction placeholders and kept-key references resolve against what is
+	// on disk, not against the running config: the running copy may carry
+	// credentials injected from the environment, and writing one of those to
+	// the file would defeat the whole redaction round trip.
+	if err := stripMaskedKeys(patch, merged); err != nil {
+		return nil, err
 	}
 	for field, value := range patch {
 		// Settings sends partial provider/connection objects. Routing maps and

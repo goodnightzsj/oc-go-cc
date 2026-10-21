@@ -152,6 +152,19 @@ func interpolateEnvVars(s string) string {
 	})
 }
 
+// InterpolateEnvVars exposes the loader's ${VAR} substitution so callers can
+// compare a value read from disk against one the process is actually using.
+//
+// The settings API needs this: keys leave the process as labels derived from
+// the resolved credential, while the file may still hold a ${VAR} placeholder.
+// Comparing a label against the unresolved text would report every
+// environment-backed key as changed. Callers must not use the result for
+// anything but comparison - writing it back would put the resolved secret on
+// disk, which is exactly what the redaction round trip exists to prevent.
+func InterpolateEnvVars(value string) string {
+	return interpolateEnvVars(value)
+}
+
 // applyEnvOverrides applies environment variable overrides to the config.
 func applyEnvOverrides(cfg *Config) error {
 	// Global API keys (backward compatibility)

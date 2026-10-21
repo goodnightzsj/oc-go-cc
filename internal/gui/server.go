@@ -704,19 +704,45 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// keyMask is the fixed-width placeholder substituted for every secret value
-// that leaves the process (settings GET and config export). The frontend only
-// needs to know whether a key is set, and sending the real key would leak it in
-// the DevTools network tab and to any script on the page. When the user saves
-// without editing a masked field, the frontend omits it from the PATCH, and
-// stripMaskedKeys drops it server-side if it comes back anyway.
+// keyMask is the fixed-width placeholder substituted for a *single* secret
+// value that leaves the process (settings GET and config export). The frontend
+// only needs to know whether a key is set, and sending the real key would leak
+// it in the DevTools network tab and to any script on the page.
+//
+// Key *pools* are not rendered with this mask: one mask for N keys cannot say
+// how large the pool is or which row a key occupies, so every pool element gets
+// its own maskKeyHint label instead (see anonymizeMap).
 const keyMask = "••••••••••••••••"
 
-// stripMaskedKeys removes from a config PATCH any field whose value is still
-// the keyMask placeholder, recursively. This is a server-side guard against the
-// masked GET response being replayed: if the client never edited a key field,
-// its mask must not overwrite the real key on disk.
-func stripMaskedKeys(patch map[string]json.RawMessage) error {
+// keyHintPrefix marks a per-row key label. maskKeyHint leaves the last four
+// characters, so a label is stable across page loads without being a credential.
+const keyHintPrefix = "••••"
+
+// keySlot is one element of an api_keys array in a settings PATCH. Exactly one
+// of Keep and Value is set: Keep re-states an existing credential that the
+// client only ever saw as a hint, Value supplies a literal new one.
+//
+// Hint is required alongside Keep and is verified against the stored key. An
+// index alone would silently address the wrong credential if the pool changed
+// between the GET that rendered the row and the POST that saved it; the hint
+// turns that race into a refusal instead of a rename.
+type keySlot struct {
+	Keep  *int   `json:"keep,omitempty"`
+	Hint  string `json:"hint,omitempty"`
+	Value string `json:"value,omitempty"`
+}
+
+// stripMaskedKeys removes from a config PATCH any field whose value is still a
+// redaction placeholder, recursively, and expands per-row key slots against the
+// stored pool. This is a server-side guard against the masked GET response
+// being replayed: if the client never edited a key field, its mask must not
+// overwrite the real key on disk.
+//
+// stored is the on-disk config the patch is about to be merged onto, and is the
+// only source a keep reference may resolve against. Resolving against the
+// running config instead would resolve env-overridden credentials and write
+// them to disk, which is exactly what the redaction round trip must never do.
+func stripMaskedKeys(patch, stored map[string]json.RawMessage) error {
 	for field, raw := range patch {
 		// A bare masked string at this level: drop the whole field.
 		var asString string
@@ -727,18 +753,31 @@ func stripMaskedKeys(patch map[string]json.RawMessage) error {
 			continue
 		}
 
-		// An array whose every element is the mask: drop the whole field.
-		var asArray []string
+		// An array of key slots, or a legacy array of literal keys.
+		var asArray []json.RawMessage
 		if json.Unmarshal(raw, &asArray) == nil {
-			if len(asArray) > 0 && allMasked(asArray) {
-				delete(patch, field)
-			} else {
-				for _, value := range asArray {
-					if value == keyMask {
-						return &config.ValidationError{Field: field, Code: "masked_keys_mixed", Err: fmt.Errorf("%s mixes redacted and new values; replace the complete list", field)}
-					}
+			keys, err := resolveKeyPatch(json.RawMessage(raw), stored[field])
+			if err != nil {
+				// The slot parser works on elements and cannot name the field,
+				// so name it here; the enclosing recursion prefixes the rest of
+				// the path. Letting AtField prefix an already-named field would
+				// report "cline_pass.api_keys.api_keys".
+				var validation *config.ValidationError
+				if errors.As(err, &validation) && validation.Field == "" {
+					validation.Field = field
+					return err
 				}
+				return config.AtField(field, err)
 			}
+			if keys == nil {
+				delete(patch, field)
+				continue
+			}
+			encoded, err := json.Marshal(keys)
+			if err != nil {
+				return config.AtField(field, err)
+			}
+			patch[field] = encoded
 			continue
 		}
 
@@ -751,7 +790,11 @@ func stripMaskedKeys(patch map[string]json.RawMessage) error {
 		if len(nested) == 0 {
 			continue // An explicit empty object resets that section.
 		}
-		if err := stripMaskedKeys(nested); err != nil {
+		var storedNested map[string]json.RawMessage
+		if len(stored[field]) > 0 {
+			_ = json.Unmarshal(stored[field], &storedNested)
+		}
+		if err := stripMaskedKeys(nested, storedNested); err != nil {
 			return config.AtField(field, err)
 		}
 		if len(nested) == 0 {
@@ -765,13 +808,89 @@ func stripMaskedKeys(patch map[string]json.RawMessage) error {
 	return nil
 }
 
-func allMasked(values []string) bool {
-	for _, v := range values {
-		if v != keyMask {
-			return false
-		}
+// resolveKeyPatch turns one api_keys array from a PATCH into literal keys.
+// A nil result with a nil error means "drop the field": every element was a
+// replay of the redacted GET response, so the stored pool is left untouched.
+//
+// Masked elements that are not expressible as slots are refused rather than
+// guessed. Persisting a hint would store a placeholder as a credential, and
+// substituting "some stored key" for an ambiguous hint would rotate an account
+// the operator did not select.
+func resolveKeyPatch(raw, storedRaw json.RawMessage) ([]string, error) {
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, err
 	}
-	return true
+	if items == nil {
+		return nil, nil // explicit null: reset the pool
+	}
+	if len(items) == 0 {
+		return []string{}, nil // explicit empty list: clear the pool
+	}
+	var stored []string
+	if len(storedRaw) > 0 {
+		_ = json.Unmarshal(storedRaw, &stored)
+	}
+
+	keys := make([]string, 0, len(items))
+	placeholders := 0
+	for _, item := range items {
+		var literal string
+		if json.Unmarshal(item, &literal) == nil {
+			// A legacy client sends plain strings. One that still carries a
+			// redaction label is a replay, not a credential.
+			if isKeyPlaceholder(literal) {
+				placeholders++
+				continue
+			}
+			keys = append(keys, literal)
+			continue
+		}
+		slot, ok := decodeKeySlot(item)
+		if !ok {
+			return nil, &config.ValidationError{Code: "invalid_type", Err: fmt.Errorf("api_keys entries must be strings or {keep|value} objects")}
+		}
+		if slot.Keep == nil {
+			keys = append(keys, slot.Value)
+			continue
+		}
+		index := *slot.Keep
+		if index < 0 || index >= len(stored) {
+			return nil, &config.ValidationError{Code: "stale_key_pool", Err: fmt.Errorf("kept key %d is outside the stored pool of %d; reload the settings before saving", index, len(stored))}
+		}
+		// The label was rendered from the resolved credential, while the file
+		// may still hold a ${VAR} placeholder. Resolve before comparing, or
+		// every environment-backed key looks stale. The placeholder itself is
+		// what gets kept, so a resolved secret never reaches disk.
+		if slot.Hint != maskKeyHint(config.InterpolateEnvVars(stored[index])) {
+			return nil, &config.ValidationError{Code: "stale_key_pool", Err: fmt.Errorf("kept key %d no longer matches the stored credential; reload the settings before saving", index)}
+		}
+		keys = append(keys, stored[index])
+	}
+	if placeholders > 0 {
+		if len(keys) > 0 {
+			return nil, &config.ValidationError{Code: "masked_keys_mixed", Err: fmt.Errorf("api_keys mixes redacted and new values; keep the stored key by index instead of resending its label")}
+		}
+		return nil, nil // every element was a replay: leave the stored pool alone
+	}
+	return keys, nil
+}
+
+// isKeyPlaceholder reports whether a value is a redaction label rather than a
+// credential. Both the legacy single mask and the per-row hints are labels.
+func isKeyPlaceholder(value string) bool {
+	return value == keyMask || strings.HasPrefix(value, keyHintPrefix)
+}
+
+func decodeKeySlot(item json.RawMessage) (keySlot, bool) {
+	var slot keySlot
+	if json.Unmarshal(item, &slot) != nil {
+		return keySlot{}, false
+	}
+	if (slot.Keep == nil) == (slot.Value == "") {
+		return keySlot{}, false // exactly one of the two forms
+	}
+	return slot, true
 }
 
 func (s *Server) handleProxyStart(w http.ResponseWriter, r *http.Request) {

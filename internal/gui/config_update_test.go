@@ -273,3 +273,136 @@ func TestProxyConfigRejectsMixedRedactedKeyPool(t *testing.T) {
 		t.Fatal("rejected key pool changed persisted configuration")
 	}
 }
+
+// The row UI never sees a credential, so an unedited row can only round-trip as
+// a {keep, hint} reference. This drives the whole HTTP path to prove the stored
+// pool is preserved while a new row is appended - and that no label reaches disk.
+func TestKeyPoolRowsRoundTripThroughTheSettingsAPI(t *testing.T) {
+	t.Setenv("GUI_TEST_POOL_A", "sk-stored-first-aaaa")
+	t.Setenv("GUI_TEST_POOL_B", "sk-stored-second-bbbb")
+	original := `{"api_key":"synthetic-global-key","host":"127.0.0.1","port":3456,"cline_pass":{"api_key":"","api_keys":["${GUI_TEST_POOL_A}","${GUI_TEST_POOL_B}"],"channel_pin_enabled":false}}`
+	srv, path := configTestServer(t, original)
+
+	// The GET must expose one row per key, carrying no credential.
+	rec := httptest.NewRecorder()
+	srv.handleProxyConfig(rec, httptest.NewRequest(http.MethodGet, "/api/proxy/config", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("read status = %d", rec.Code)
+	}
+	var loaded struct {
+		ClinePass struct {
+			APIKeys []string `json:"api_keys"`
+		} `json:"cline_pass"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &loaded); err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.ClinePass.APIKeys) != 2 {
+		t.Fatalf("pool rendered %d rows, want 2: %v", len(loaded.ClinePass.APIKeys), loaded.ClinePass.APIKeys)
+	}
+	for _, secret := range []string{"sk-stored-first-aaaa", "sk-stored-second-bbbb"} {
+		if bytes.Contains(rec.Body.Bytes(), []byte(secret)) {
+			t.Fatalf("GET exposed %q", secret)
+		}
+	}
+
+	// Save: keep both rows as drawn, append one new key.
+	patch := `{"cline_pass":{"api_keys":[` +
+		`{"keep":0,"hint":"` + loaded.ClinePass.APIKeys[0] + `"},` +
+		`{"keep":1,"hint":"` + loaded.ClinePass.APIKeys[1] + `"},` +
+		`{"value":"sk-added-third-cccc"}]}}`
+	rec = httptest.NewRecorder()
+	srv.handleProxyConfig(rec, httptest.NewRequest(http.MethodPost, "/api/proxy/config", strings.NewReader(patch)))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("save status = %d: %s", rec.Code, rec.Body)
+	}
+
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The two stored rows keep their original placeholders: a kept key is not
+	// expanded into the file. The appended literal is written as given.
+	for _, want := range []string{"${GUI_TEST_POOL_A}", "${GUI_TEST_POOL_B}", "sk-added-third-cccc"} {
+		if !bytes.Contains(saved, []byte(want)) {
+			t.Fatalf("saved config lost %q: %s", want, saved)
+		}
+	}
+	if bytes.Contains(saved, []byte(keyMask)) || bytes.Contains(saved, []byte(keyHintPrefix)) {
+		t.Fatalf("a redaction label reached disk: %s", saved)
+	}
+
+	// And the running pool resolves to both stored keys plus the new one.
+	pool := srv.atomicCfg.Get().ClinePass.EffectiveAPIKeys()
+	if len(pool) != 3 || pool[0] != "sk-stored-first-aaaa" || pool[1] != "sk-stored-second-bbbb" || pool[2] != "sk-added-third-cccc" {
+		t.Fatalf("effective pool = %v", pool)
+	}
+}
+
+// Reordering is how a key is promoted: Reserve is fill-first, so the row order
+// saved here is the order requests are tried in. The pool must come back in the
+// new order, with every credential intact.
+func TestKeyPoolReorderChangesTheSavedPriority(t *testing.T) {
+	t.Setenv("GUI_TEST_ORDER_A", "sk-order-first-aaaa")
+	t.Setenv("GUI_TEST_ORDER_B", "sk-order-second-bbbb")
+	t.Setenv("GUI_TEST_ORDER_C", "sk-order-third-cccc")
+	original := `{"api_key":"synthetic-global-key","host":"127.0.0.1","port":3456,"cline_pass":{"base_url":"https://cline.invalid/chat","api_key":"","api_keys":["${GUI_TEST_ORDER_A}","${GUI_TEST_ORDER_B}","${GUI_TEST_ORDER_C}"],"channel_pin_enabled":false}}`
+	srv, path := configTestServer(t, original)
+
+	rec := httptest.NewRecorder()
+	srv.handleProxyConfig(rec, httptest.NewRequest(http.MethodGet, "/api/proxy/config", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("read status = %d", rec.Code)
+	}
+	var loaded struct {
+		ClinePass struct {
+			APIKeys []string `json:"api_keys"`
+		} `json:"cline_pass"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &loaded); err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.ClinePass.APIKeys) != 3 {
+		t.Fatalf("pool rendered %d rows: %v", len(loaded.ClinePass.APIKeys), loaded.ClinePass.APIKeys)
+	}
+
+	// Promote the last row to the top, exactly as the ↑ button does.
+	hints := loaded.ClinePass.APIKeys
+	patch := `{"cline_pass":{"api_keys":[` +
+		`{"keep":2,"hint":"` + hints[2] + `"},` +
+		`{"keep":0,"hint":"` + hints[0] + `"},` +
+		`{"keep":1,"hint":"` + hints[1] + `"}]}}`
+	rec = httptest.NewRecorder()
+	srv.handleProxyConfig(rec, httptest.NewRequest(http.MethodPost, "/api/proxy/config", strings.NewReader(patch)))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("save status = %d: %s", rec.Code, rec.Body)
+	}
+
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The file keeps its placeholders, in the new order. It is re-serialized
+	// with indentation on write, so compare the decoded values, not the bytes.
+	var persisted struct {
+		ClinePass struct {
+			APIKeys []string `json:"api_keys"`
+		} `json:"cline_pass"`
+	}
+	if err := json.Unmarshal(saved, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"${GUI_TEST_ORDER_C}", "${GUI_TEST_ORDER_A}", "${GUI_TEST_ORDER_B}"}
+	if len(persisted.ClinePass.APIKeys) != len(want) {
+		t.Fatalf("persisted pool = %v, want %v", persisted.ClinePass.APIKeys, want)
+	}
+	for i := range want {
+		if persisted.ClinePass.APIKeys[i] != want[i] {
+			t.Fatalf("persisted pool = %v, want %v", persisted.ClinePass.APIKeys, want)
+		}
+	}
+	pool := srv.atomicCfg.Get().ClinePass.EffectiveAPIKeys()
+	if len(pool) != 3 || pool[0] != "sk-order-third-cccc" || pool[1] != "sk-order-first-aaaa" || pool[2] != "sk-order-second-bbbb" {
+		t.Fatalf("effective order = %v", pool)
+	}
+}

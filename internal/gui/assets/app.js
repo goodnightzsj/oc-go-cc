@@ -184,6 +184,17 @@ const TRANSLATIONS = {
     'label.apiKeys': 'API keys (comma-separated)',
     'label.apiKeysHint': 'Both fields are one key pool: the single key above is used on its own when this list is empty, and leads the list when it is not. A key written in both appears once. Replace the entire list to edit masked keys.',
     'label.apiKeysPoolHint': 'Added to the single key above to form one pool; requests rotate through it in this order.',
+    'keys.add': 'Add key',
+    'keys.remove': 'Remove',
+    'keys.none': 'No keys in this pool.',
+    'keys.storedRow': 'Stored key — remove it to stop using it',
+    'keys.newRow': 'Paste a new key',
+    'keys.primary': 'Primary',
+    'keys.moveUp': 'Move up',
+    'keys.moveDown': 'Move down',
+    'keys.removeTitle': 'Remove key',
+    'keys.removeConfirm': 'Remove this key from the pool?',
+    'keys.removePending': 'The key is not deleted until you save the settings.',
     'commandcode.keyHint': 'Uses its own API key; global keys are never sent to CommandCode.',
     'commandcode.quotaHint': 'Queries the official Alpha account endpoints with this platform’s API key. No browser session is required. Alpha response fields may change.',
     'commandcode.accountScope': 'Official Alpha account data · USD-denominated usage credits, not cash or this instance’s ledger. Each key is shown separately; balances are not added together.',
@@ -724,6 +735,17 @@ const TRANSLATIONS = {
     'label.apiKeys': 'API Keys（逗号分隔）',
     'label.apiKeysHint': '两个字段同属一个密钥池：此列表为空时只用上方单个密钥，非空时单个密钥排在最前。两处都填写的密钥只计一次。修改已脱敏的密钥时请替换完整列表。',
     'label.apiKeysPoolHint': '与上方单个密钥合并为同一个密钥池；请求按此顺序轮转使用。',
+    'keys.add': '添加密钥',
+    'keys.remove': '删除',
+    'keys.none': '此密钥池为空。',
+    'keys.storedRow': '已保存的密钥——删除即停止使用',
+    'keys.newRow': '粘贴新密钥',
+    'keys.primary': '主用',
+    'keys.moveUp': '上移',
+    'keys.moveDown': '下移',
+    'keys.removeTitle': '移除密钥',
+    'keys.removeConfirm': '要从密钥池移除这个密钥吗？',
+    'keys.removePending': '保存设置后才会真正移除；取消不会改动任何内容。',
     'commandcode.keyHint': '使用独立 API 密钥；不会向 CommandCode 发送全局密钥。',
     'commandcode.quotaHint': '使用本平台 API 密钥查询官方 Alpha 账户接口，无需浏览器登录态；Alpha 响应字段可能变化。',
     'commandcode.accountScope': '官方 Alpha 账户数据 · 美元计价用量点数，不是现金余额或本实例账本。每个密钥分别展示，不合计余额。',
@@ -3370,7 +3392,238 @@ const CONFIG_FIELDS = [
   ['logging.level', 'cfg-log-level', 'string'],
 ];
 
+// Key pools are edited as rows, one per credential, so a pool can be grown or
+// pruned without retyping the keys the operator cannot see. Each row is either
+// a kept credential (its label came from the redacted GET) or a literal new
+// key. What crosses the wire is {keep,hint} / {value}, never the labels alone;
+// see stripMaskedKeys in internal/gui/server.go for the receiving side.
+const keyHintPrefix = '••••';
+
+function keyRowsOf(value) {
+  return Array.isArray(value) ? value.map(text => String(text)) : [];
+}
+
+// describeKeys turns whatever the config carries into editor rows. A field that
+// still holds a bare string (an older config, or a value the form just wrote)
+// is one row.
+//
+// index is the row's position in the *stored* pool and is what the server
+// resolves a kept row against. It is assigned before any new rows are appended,
+// because a kept row must keep pointing at the credential it was drawn from.
+function describeKeys(value) {
+  return keyRowsOf(value).map((label, index) => ({
+    label,
+    index,
+    kept: label === '' || label.startsWith(keyHintPrefix),
+    value: '',
+  }));
+}
+
+// collectKeys converts editor rows back into the wire shape, dropping a new row
+// the operator opened and left blank.
+function collectKeys(rows) {
+  return rows.filter(row => row.kept || row.value.trim() !== '').map(row =>
+    row.kept ? {keep: row.index, hint: row.label} : {value: row.value.trim()});
+}
+
+function keysSignature(rows) {
+  return JSON.stringify(rows.filter(row => row.kept || row.value.trim() !== '').map(row =>
+    row.kept ? 'k:' + row.label : 'v:' + row.value.trim()));
+}
+
+// keyEditor is the DOM behind one api_keys field, keyed by the field's element
+// id so the editor survives a config reload that leaves the rows untouched.
+const keyEditors = new Map();
+
+function keyEditorRows(id) {
+  const editor = keyEditors.get(id);
+  return editor ? editor.rows : null;
+}
+
+// singleKeyIdFor returns the element id of the one-key field that shares this
+// pool's platform, or null for the global pool's own field. appendAPIKeys puts
+// that single key ahead of the array, so it - not the array's first row - is
+// what Reserve actually tries first.
+function singleKeyIdFor(path) {
+  const single = path.replace(/\.?api_keys$/, m => (m.startsWith('.') ? '.api_key' : 'api_key'));
+  const entry = CONFIG_FIELDS.find(field => field[0] === single);
+  return entry ? entry[1] : null;
+}
+
+function poolStartsWithSingleKey(path) {
+  const id = singleKeyIdFor(path);
+  const el = id ? document.getElementById(id) : null;
+  return !!(el && String(el.value || '').trim() !== '');
+}
+
+// renderKeyEditor draws one row per key, laid out like the fallback chain: an
+// order number, the field, then a permanent ↑ ↓ × group whose ends are
+// disabled rather than missing, so a row's controls never move under the
+// cursor as rows are added, removed or reordered.
+//
+// Row order is the pool's priority. Reserve is fill-first, so the first
+// non-resting key serves the request: "which key is primary" is a position, not
+// a second piece of state that could disagree with it.
+function renderKeyEditor(id) {
+  const editor = keyEditors.get(id);
+  if (!editor) return;
+  const host = document.getElementById(id);
+  if (!host) return;
+  if (editor.rows.length === 0) {
+    host.innerHTML = '<p class="text-xs text-[#98989d] py-1" data-key-empty="true">' + escapeHtml(t('keys.none')) + '</p>';
+    return;
+  }
+  // The single-key field, when filled in, is served ahead of this array
+  // (appendAPIKeys puts it first), so row 1 is only the pool's primary when
+  // that field is empty.
+  const hasSingle = poolStartsWithSingleKey(editor.path);
+  const last = editor.rows.length - 1;
+  host.innerHTML = editor.rows.map((row, index) => {
+    const position = escapeHtml(String(index));
+    // A stored row is marked by its tint and by the tooltip, not by a prefix
+    // glyph: the label already starts with the mask.
+    const field = row.kept
+      ? '<input type="text" readonly value="' + escapeHtml(row.label) + '" aria-label="' + escapeHtml(t('keys.storedRow')) + '" title="' + escapeHtml(t('keys.storedRow')) + '" class="flex-1 min-w-0 px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#98989d] outline-none font-mono">'
+      : '<input type="password" autocomplete="new-password" value="' + escapeHtml(row.value) + '" placeholder="' + escapeHtml(t('keys.newRow')) + '" class="flex-1 min-w-0 px-2 py-1.5 text-xs border border-[#48484a] rounded bg-[#3a3a3c] text-[#f5f5f7] outline-none">';
+    const primary = index === 0 && !hasSingle
+      ? ' data-key-primary="true" title="' + escapeHtml(t('keys.primary')) + '"'
+      : '';
+    return '<div class="key-row" data-key-row="' + position + '"' + primary + '>' +
+      '<span class="key-row-order" aria-hidden="true">' + escapeHtml(String(index + 1)) + '</span>' +
+      field +
+      '<span class="key-row-actions">' +
+        '<button type="button" class="key-row-move" data-key-up="' + position + '" aria-label="' + escapeHtml(t('keys.moveUp')) + '" title="' + escapeHtml(t('keys.moveUp')) + '"' + (index === 0 ? ' disabled' : '') + '>↑</button>' +
+        '<button type="button" class="key-row-move" data-key-down="' + position + '" aria-label="' + escapeHtml(t('keys.moveDown')) + '" title="' + escapeHtml(t('keys.moveDown')) + '"' + (index === last ? ' disabled' : '') + '>↓</button>' +
+        '<button type="button" class="key-row-remove" data-key-remove="' + position + '" aria-label="' + escapeHtml(t('keys.remove')) + '" title="' + escapeHtml(t('keys.remove')) + '">×</button>' +
+      '</span>' +
+      '</div>';
+  }).join('');
+}
+
+// confirmKeyRemoval asks before a stored credential leaves the pool. A row that
+// was never saved (a blank new row, or one whose key was never filled in) is
+// discarded silently: there is nothing to lose, and prompting for it would
+// train the operator to dismiss the prompt that does matter.
+//
+// The confirmation is deliberately about the row, not about the file: removing
+// a row is an unsaved edit that only takes effect on Save. The dialog says so,
+// because "Delete" that silently means "stage a deletion" is the kind of label
+// that makes people distrust the whole form.
+function confirmKeyRemoval(row, done) {
+  if (!row.kept) {
+    done();
+    return;
+  }
+  const footer = modal.querySelector('.modal-footer');
+  if (footer) footer.remove();
+
+  // The label that will be lost is shown, not just described: the whole reason
+  // this dialog exists is that the key is otherwise invisible.
+  modalBody.innerHTML = `
+    <div class="confirm-dialog">
+      <div class="confirm-icon" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1L5 6"/>
+          <path d="M10 11v6M14 11v6"/>
+        </svg>
+      </div>
+      <div class="confirm-copy">
+        <p class="confirm-title">${escapeHtml(t('keys.removeConfirm'))}</p>
+        <p class="confirm-key">${escapeHtml(row.label)}</p>
+        <p class="confirm-note">${escapeHtml(t('keys.removePending'))}</p>
+      </div>
+    </div>
+  `;
+  modal.querySelector('.modal-content').insertAdjacentHTML('beforeend', `
+    <div class="modal-footer confirm-actions">
+      <button class="btn btn-small" id="btn-key-remove-cancel">${escapeHtml(t('btn.cancel'))}</button>
+      <button class="btn btn-small btn-danger" id="btn-key-remove-confirm">${escapeHtml(t('keys.remove'))}</button>
+    </div>
+  `);
+  openHistoryModal('keys.removeTitle', '', 'confirm');
+
+  document.getElementById('btn-key-remove-cancel').onclick = () => closeHistoryModal();
+  document.getElementById('btn-key-remove-confirm').onclick = () => {
+    closeHistoryModal();
+    done();
+  };
+  // Cancel is the safe action, so it takes focus and Escape stays a no-op on
+  // the key itself: Enter must not remove a credential the operator was only
+  // reading about.
+  document.getElementById('btn-key-remove-cancel').focus();
+}
+
+// moveKeyRow swaps a row with its neighbour. The row's index field is left
+// alone: it names a position in the *stored* pool, which is reordering nothing
+// the server can see, only the order it is asked to keep them in.
+function moveKeyRow(id, from, to) {
+  const editor = keyEditors.get(id);
+  if (!editor || to < 0 || to >= editor.rows.length) return;
+  const rows = editor.rows;
+  [rows[from], rows[to]] = [rows[to], rows[from]];
+  renderKeyEditor(id);
+  updateConfigChangeCount();
+}
+
+function initKeyEditors() {
+  for (const [path, id, type] of CONFIG_FIELDS) {
+    if (type !== 'keys' || keyEditors.has(id)) continue;
+    const host = document.getElementById(id);
+    if (!host) continue;
+    keyEditors.set(id, {path, rows: []});
+    host.addEventListener('input', event => {
+      const row = event.target.closest('[data-key-row]');
+      if (!row) return;
+      const entry = keyEditors.get(id).rows[Number(row.dataset.keyRow)];
+      if (entry && !entry.kept) entry.value = event.target.value;
+      updateConfigChangeCount();
+    });    host.addEventListener('click', event => {
+      const remove = event.target.closest('[data-key-remove]');
+      if (remove) {
+        const editor = keyEditors.get(id);
+        const at = Number(remove.dataset.keyRemove);
+        confirmKeyRemoval(editor.rows[at], () => {
+          editor.rows.splice(at, 1);
+          renderKeyEditor(id);
+          updateConfigChangeCount();
+        });
+        return;
+      }
+      const up = event.target.closest('[data-key-up]');
+      if (up) {
+        const from = Number(up.dataset.keyUp);
+        moveKeyRow(id, from, from - 1);
+        return;
+      }
+      const down = event.target.closest('[data-key-down]');
+      if (down) {
+        const from = Number(down.dataset.keyDown);
+        moveKeyRow(id, from, from + 1);
+      }
+    });
+  }
+}
+
+// The add button sits outside the row container (the container's innerHTML is
+// rewritten on every render, which would take a nested button with it), so its
+// clicks are delegated from the document.
+function addKeyRow(id) {
+  const editor = keyEditors.get(id);
+  if (!editor) return;
+  editor.rows.push({label: '', kept: false, value: ''});
+  renderKeyEditor(id);
+  updateConfigChangeCount();
+}
+
+function loadKeysIntoEditor(id, value) {
+  const editor = keyEditors.get(id);
+  if (!editor) return;
+  editor.rows = describeKeys(value);
+  renderKeyEditor(id);
+}
+
 // Deep-set a value in an object by dot-separated path.
+
 function deepSet(obj, path, value) {
   const parts = path.split('.');
   let cur = obj;
@@ -3405,9 +3658,16 @@ function readFieldValue(field) {
     return v === current ? undefined : v;
   }
   if (field[2] === 'keys') {
-    const keys = raw.split(/[,\n]/).map(key => key.trim()).filter(Boolean);
+    // The editor's rows are the truth for this field, not the text content of a
+    // single input: keeping a stored row must be expressible without knowing
+    // its credential, which a comma-joined string cannot carry.
+    const rows = keyEditorRows(field[1]);
+    if (!rows) return undefined;
+    const next = collectKeys(rows);
     const current = deepGet(currentProxyConfig, field[0]) || [];
-    return JSON.stringify(keys) === JSON.stringify(current) ? undefined : keys;
+    const untouched = next.length === current.length &&
+      next.every((slot, i) => slot.keep === i && slot.hint === String(current[i]));
+    return untouched ? undefined : next;
   }
   // string
   const v = raw;
@@ -3418,8 +3678,20 @@ function readFieldValue(field) {
 function configInputSnapshot() {
   return new Map(CONFIG_FIELDS.map(([, id, type]) => {
     const el = document.getElementById(id);
+    if (type === 'keys') return [id, keysSignature(keyEditorRows(id) || [])];
     return [id, type === 'bool' ? el?.checked : el?.value];
   }));
+}
+
+// The rows an operator touched while a save was in flight. A reload may replace
+// a row that was not touched (its label comes from the server), but it must not
+// erase a new key that was typed in the meantime.
+function keysTouchedSince(snapshot) {
+  const touched = new Set();
+  for (const [id, signature] of snapshot) {
+    if (keysSignature(keyEditorRows(id) || []) !== signature) touched.add(id);
+  }
+  return touched;
 }
 
 async function loadProxyConfig({preserveInputs = configInputSnapshot(), quiet = false} = {}) {
@@ -3433,14 +3705,18 @@ async function loadProxyConfig({preserveInputs = configInputSnapshot(), quiet = 
       const el = document.getElementById(id);
       if (!el) continue;
       // An acknowledged save must not erase edits made while it was in flight.
+      // A key pool has no single input to compare, so it is compared by the
+      // rows it currently holds.
+      if (type === 'keys') {
+        if (!keysTouchedSince(preserveInputs).has(id)) loadKeysIntoEditor(id, deepGet(currentProxyConfig, path));
+        continue;
+      }
       if ((type === 'bool' ? el.checked : el.value) !== preserveInputs.get(id)) continue;
       const val = deepGet(currentProxyConfig, path);
       if (type === 'bool') {
         el.checked = !!val;
       } else if (type === 'int') {
         el.value = val != null ? val : '';
-      } else if (type === 'keys') {
-        el.value = (val || []).join(', ');
       } else {
         if (id === 'cfg-active-site') {
           el.querySelectorAll('option[data-current-site]').forEach(option => option.remove());
@@ -3642,6 +3918,19 @@ document.addEventListener('DOMContentLoaded', () => {
     updateConfigChangeCount();
   });
   initChannelCombobox();
+  initKeyEditors();
+  // A pool's primary badge depends on whether the platform's own single-key
+  // field is filled in, so that field has to redraw the rows when it changes.
+  for (const [, id, type] of CONFIG_FIELDS) {
+    if (type === 'keys') continue;
+    const single = CONFIG_FIELDS.find(field => field[2] === 'keys' && singleKeyIdFor(field[0]) === id);
+    if (!single) continue;
+    document.getElementById(id)?.addEventListener('input', () => renderKeyEditor(single[1]));
+  }
+  document.addEventListener('click', event => {
+    const add = event.target.closest('[data-key-add]');
+    if (add) addKeyRow(add.dataset.keyAdd);
+  });
   loadChannelCatalog();
   setInterval(loadChannelCatalog, 60 * 60 * 1000);
   applySelectableSites();
@@ -3769,7 +4058,13 @@ async function saveProxyConfig() {
     }, true);
     confirmed = true;
     // Record exactly what was acknowledged, even if the follow-up GET fails.
-    for (const [path] of CONFIG_FIELDS) {
+    // Key pools are deliberately left out: the saved form is an instruction to
+    // the server, not a description of the pool, and the server's label for a
+    // brand-new key is not known here. The reload below is what publishes the
+    // real rows. If it fails, the rows stay as typed and a second save resends
+    // the same request, which the server resolves identically.
+    for (const [path, , type] of CONFIG_FIELDS) {
+      if (type === 'keys') continue;
       const value = deepGet(patch, path);
       if (value !== undefined) deepSet(currentProxyConfig, path, value);
     }
@@ -4016,10 +4311,31 @@ function showHistoryDetail(record) {
   openHistoryModal('detail.title');
 }
 
-function openHistoryModal(titleKey) {
+// openHistoryModal titles the shared modal. subtitleKey is optional: a dialog
+// that is not request details must not inherit "Routing, billing, and token
+// details" from the markup, so passing an empty subtitle hides the line instead
+// of leaving another dialog's description above this one's content.
+function openHistoryModal(titleKey, subtitleKey = 'detail.subtitle', variant = 'detail') {
   const title = document.getElementById('modal-title');
   title.dataset.i18n = titleKey;
   title.textContent = t(titleKey);
+  // The shared modal element carries the history-detail sizing, which is a
+  // 720px two-column table shell. A short dialog must not inherit it: the
+  // variant attribute lets each kind of dialog own its own box, and the detail
+  // dialog keeps the one it has always had. It lives on the dialog, not on the
+  // content box, because it describes which dialog this is.
+  if (modal) modal.dataset.variant = variant;
+  const subtitle = modal?.querySelector('.modal-subtitle');
+  if (subtitle) {
+    // data-i18n stays pointed at whichever line this dialog owns, so a language
+    // toggle refills the right one; hidden is what actually removes it from the
+    // layout. Clearing the attribute instead left the next detail dialog with
+    // no text to restore.
+    const show = !!subtitleKey;
+    subtitle.dataset.i18n = show ? subtitleKey : 'detail.subtitle';
+    subtitle.textContent = show ? t(subtitleKey) : '';
+    subtitle.hidden = !show;
+  }
   modalReturnFocus = document.activeElement;
   if (typeof modal?.showModal === 'function' && !modal.open) modal.showModal();
   else modal?.classList.add('visible');

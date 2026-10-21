@@ -66,6 +66,33 @@ func TestAnonymizeConfigPreservesEmptyKeyPool(t *testing.T) {
 	}
 }
 
+// A pool must come back as one labelled row per key. Collapsing it to a single
+// mask hid how many keys were configured and which row a key occupied, so the
+// only available edit was retyping the whole pool blind.
+func TestAnonymizeConfigGivesEachPoolEntryItsOwnHint(t *testing.T) {
+	cfg := &config.Config{APIKeys: []string{"sk-first-aaaa", "sk-second-bbbb", "sk-third-cccc"}}
+	got, err := anonymizeConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{maskKeyHint("sk-first-aaaa"), maskKeyHint("sk-second-bbbb"), maskKeyHint("sk-third-cccc")}
+	if len(got.APIKeys) != len(want) {
+		t.Fatalf("pool rendered %d rows, want %d: %v", len(got.APIKeys), len(want), got.APIKeys)
+	}
+	for i := range want {
+		if got.APIKeys[i] != want[i] {
+			t.Errorf("row %d = %q, want %q", i, got.APIKeys[i], want[i])
+		}
+	}
+	for _, key := range cfg.APIKeys {
+		for _, hint := range got.APIKeys {
+			if hint != "" && bytesContains([]byte(key), hint) {
+				t.Errorf("hint %q reveals a whole key", hint)
+			}
+		}
+	}
+}
+
 // TestStripMaskedKeys_DropsMaskedFields asserts a replayed masked GET response
 // cannot overwrite the real key on disk, at any nesting depth.
 func TestStripMaskedKeys_DropsMaskedFields(t *testing.T) {
@@ -82,7 +109,7 @@ func TestStripMaskedKeys_DropsMaskedFields(t *testing.T) {
 		t.Fatalf("unmarshal patch: %v", err)
 	}
 
-	if err := stripMaskedKeys(patch); err != nil {
+	if err := stripMaskedKeys(patch, nil); err != nil {
 		t.Fatalf("strip masked keys: %v", err)
 	}
 
@@ -115,4 +142,90 @@ func TestStripMaskedKeys_DropsMaskedFields(t *testing.T) {
 
 func bytesContains(b []byte, sub string) bool {
 	return bytes.Contains(b, []byte(sub))
+}
+
+// TestResolveKeyPatchKeepsUneditedRows is the contract the row UI depends on:
+// a row the operator did not touch comes back as {keep, hint}, and the stored
+// credential is what gets persisted - never the label.
+func TestResolveKeyPatchKeepsUneditedRows(t *testing.T) {
+	stored := []string{"sk-first-aaaa", "sk-second-bbbb", "sk-third-cccc"}
+	storedRaw, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch := `[
+		{"keep":0,"hint":"` + maskKeyHint(stored[0]) + `"},
+		{"value":"sk-replacement-zzzz"},
+		{"keep":2,"hint":"` + maskKeyHint(stored[2]) + `"}
+	]`
+	got, err := resolveKeyPatch(json.RawMessage(patch), storedRaw)
+	if err != nil {
+		t.Fatalf("resolve key patch: %v", err)
+	}
+	want := []string{stored[0], "sk-replacement-zzzz", stored[2]}
+	if len(got) != len(want) {
+		t.Fatalf("pool = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("key %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestResolveKeyPatchRefusesAStaleIndex covers the race the hint exists for: the
+// pool changed between the GET that drew the rows and the POST that saved them.
+// Resolving the index anyway would swap the operator's kept key for a different
+// account without saying so.
+func TestResolveKeyPatchRefusesAStaleIndex(t *testing.T) {
+	stored := []string{"sk-first-aaaa", "sk-second-bbbb"}
+	storedRaw, _ := json.Marshal(stored)
+	for name, patch := range map[string]string{
+		"hint moved":    `[{"keep":0,"hint":"` + maskKeyHint(stored[1]) + `"}]`,
+		"index beyond":  `[{"keep":7,"hint":"` + maskKeyHint(stored[0]) + `"}]`,
+		"negative":      `[{"keep":-1,"hint":"` + maskKeyHint(stored[0]) + `"}]`,
+		"both forms":    `[{"keep":0,"hint":"` + maskKeyHint(stored[0]) + `","value":"sk-new"}]`,
+		"neither form":  `[{"hint":"` + maskKeyHint(stored[0]) + `"}]`,
+		"label literal": `["` + maskKeyHint(stored[0]) + `","sk-new"]`,
+		"wrong shape":   `[42]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := resolveKeyPatch(json.RawMessage(patch), storedRaw); err == nil {
+				t.Fatalf("accepted %s, which would write the wrong credential", patch)
+			}
+		})
+	}
+}
+
+// A replay of the redacted GET response must still leave the stored pool alone,
+// in both the legacy all-mask shape and the per-row label shape.
+func TestResolveKeyPatchDropsAReplayedPool(t *testing.T) {
+	stored := []string{"sk-first-aaaa", "sk-second-bbbb"}
+	storedRaw, _ := json.Marshal(stored)
+	for name, patch := range map[string]string{
+		"legacy mask": `["` + keyMask + `","` + keyMask + `"]`,
+		"row labels":  `["` + maskKeyHint(stored[0]) + `","` + maskKeyHint(stored[1]) + `"]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := resolveKeyPatch(json.RawMessage(patch), storedRaw)
+			if err != nil {
+				t.Fatalf("replayed pool must be ignored, not rejected: %v", err)
+			}
+			if got != nil {
+				t.Fatalf("replayed pool produced %v; the stored pool must be left untouched", got)
+			}
+		})
+	}
+}
+
+// An explicitly empty list clears the pool; it must not be read as "no change".
+func TestResolveKeyPatchAllowsClearingThePool(t *testing.T) {
+	storedRaw, _ := json.Marshal([]string{"sk-first-aaaa"})
+	got, err := resolveKeyPatch(json.RawMessage(`[]`), storedRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || len(got) != 0 {
+		t.Fatalf("explicit empty list = %v, want an empty slice", got)
+	}
 }

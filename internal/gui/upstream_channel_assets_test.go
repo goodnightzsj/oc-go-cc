@@ -85,14 +85,14 @@ func TestUpstreamModelBadgeOnlyForARealRewrite(t *testing.T) {
 	source := string(app)
 	// The condition, stated once. A badge rendered unconditionally would pass
 	// any assertion that only looks for the class name.
-	// The model column names what ran; the requested id stays beneath it, since
-	// routing and billing key on that one and an operator comparing a row
-	// against config needs both.
+	// The model column names what ran and nothing else: the id we sent is a
+	// routing detail the gateway already resolved, and a second line under
+	// every row doubles its height to show a string the reader never acts on.
 	if !strings.Contains(source, "const servedModel = h.upstream_model || h.model") {
 		t.Error("the model column must show the observed model when one was recorded")
 	}
-	if !strings.Contains(source, "history-requested-model") {
-		t.Error("the requested id must stay visible when the gateway ran something else")
+	if strings.Contains(source, "history-requested-model") {
+		t.Error("the model column must not carry the requested id as a second line")
 	}
 	// The channel badge is unchanged: it answers which upstream served the
 	// request, which is a different question from which model ran.

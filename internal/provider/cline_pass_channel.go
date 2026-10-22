@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"time"
 )
 
 type clineChannelOptions struct {
@@ -27,6 +28,9 @@ type clineChannelBody struct {
 	// produced the answer. Observing it is the only way to report that without
 	// changing the response the client already received.
 	upstreamModel string
+	// firstByteAt is when the upstream's first byte arrived, set by the peek.
+	// Zero means it was not measured.
+	firstByteAt time.Time
 	// servedModel is the OpenAI chunk's `model` field as the gateway filled it,
 	// which is available before any content is written. UpstreamModel is the
 	// same fact from the routing block at the end of the stream; ServedModel()
@@ -92,6 +96,25 @@ func (b *clineChannelBody) UpstreamChannel() string {
 // This is the value a response can honestly carry: message_start has to be
 // emitted before the body is forwarded, and this is the one model field
 // knowable at that moment. See ServedModelReader.
+// MarkFirstByte stamps the moment the upstream's first byte was observed. The
+// peek calls it once; a second call is ignored so a later peek cannot move the
+// timestamp forward.
+func (b *clineChannelBody) MarkFirstByte() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.firstByteAt.IsZero() {
+		b.firstByteAt = time.Now()
+	}
+}
+
+// FirstByteAt reports when the upstream's first byte arrived, or the zero time
+// when it was never observed.
+func (b *clineChannelBody) FirstByteAt() time.Time {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.firstByteAt
+}
+
 func (b *clineChannelBody) ServedModel() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()

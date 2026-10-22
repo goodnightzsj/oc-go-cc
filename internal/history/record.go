@@ -11,22 +11,32 @@ import (
 
 // RequestRecord holds metadata for a single completed proxy request.
 type RequestRecord struct {
-	ID                  string        // unique request ID
-	Model               string        // actual upstream model used (e.g. "kimi-k2.6")
-	RequestedModel      string        // model the client asked for, when it differs from Model
-	Provider            string        // provider name (e.g. "opencode-go")
-	Scenario            string        // routing scenario (e.g. "default", "complex")
-	StartTime           time.Time     // when the request started
-	Duration            time.Duration // total latency
-	InputTokens         int           // raw (non-cache) input tokens from SSE usage event
-	OutputTokens        int           // output tokens from SSE usage event
-	CacheReadTokens     int           // prompt-cache read tokens
-	CacheCreationTokens int           // prompt-cache write tokens
-	CostUSD             float64       // provider cost in USD, estimated when CostSource is "estimated"
-	CostKnown           bool          // whether CostUSD is available
-	CostSource          string        // "estimated" or "provider"
-	DetailsKnown        bool          // whether routing/status/latency fields were observed locally
-	Streaming           bool          // whether this was a streaming request
+	ID             string        // unique request ID
+	Model          string        // actual upstream model used (e.g. "kimi-k2.6")
+	RequestedModel string        // model the client asked for, when it differs from Model
+	Provider       string        // provider name (e.g. "opencode-go")
+	Scenario       string        // routing scenario (e.g. "default", "complex")
+	StartTime      time.Time     // when the request started
+	Duration       time.Duration // total latency
+	// FirstByte is how long the upstream took to send its first byte, for a
+	// request where that was observed. Zero means "not measured" - a
+	// non-streaming request has no first byte to speak of, and an attempt that
+	// failed before the body opened never had one.
+	//
+	// It is stored separately from Duration because the two answer different
+	// questions: the total includes the model's thinking time, while this is
+	// the part the gateway controls. On a proxied provider the gap between them
+	// is where queueing and fallback attempts show up.
+	FirstByte           time.Duration
+	InputTokens         int     // raw (non-cache) input tokens from SSE usage event
+	OutputTokens        int     // output tokens from SSE usage event
+	CacheReadTokens     int     // prompt-cache read tokens
+	CacheCreationTokens int     // prompt-cache write tokens
+	CostUSD             float64 // provider cost in USD, estimated when CostSource is "estimated"
+	CostKnown           bool    // whether CostUSD is available
+	CostSource          string  // "estimated" or "provider"
+	DetailsKnown        bool    // whether routing/status/latency fields were observed locally
+	Streaming           bool    // whether this was a streaming request
 
 	Success  bool   // whether it completed successfully
 	ErrorMsg string // error message if failed

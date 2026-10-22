@@ -370,6 +370,11 @@ func (d *Database) migrateColumns(ctx context.Context) error {
 		// asked for, or the row predates the column - all three read as "the
 		// recorded model is what ran".
 		`ALTER TABLE requests ADD COLUMN upstream_model TEXT`,
+		// Milliseconds from request start to the upstream's first byte. NULL
+		// means it was not measured - a non-streaming request has no first byte,
+		// and an attempt that failed before the body opened never had one. Zero
+		// is not used for that: it would read as an instant response.
+		`ALTER TABLE requests ADD COLUMN first_byte_ms INTEGER`,
 		// Existing rows keep NULL, which reads back as "unknown ceiling" - the
 		// same answer they gave before the column existed. The next catalog sync
 		// fills them in.

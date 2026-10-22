@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"time"
 )
 
 // ErrStreamReadCanceled is returned by ctxReader.Read when its context is canceled
@@ -86,6 +87,16 @@ func (c *ctxReadCloser) UpstreamModel() string {
 // separate from UpstreamModel on purpose: that one is the routing block's
 // canonical slug, which arrives at the END of the stream, while this one is the
 // chunk-level model that is knowable before any content is written.
+// FirstByteAt forwards the first-byte timestamp, for the same reason as the
+// observations above: embedding promotes Read alone.
+func (c *ctxReadCloser) FirstByteAt() time.Time {
+	reporter, ok := c.closer.(interface{ FirstByteAt() time.Time })
+	if !ok {
+		return time.Time{}
+	}
+	return reporter.FirstByteAt()
+}
+
 func (c *ctxReadCloser) ServedModel() string {
 	reporter, ok := c.closer.(interface{ ServedModel() string })
 	if !ok {

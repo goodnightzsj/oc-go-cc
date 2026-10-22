@@ -109,7 +109,15 @@ func (p *ClinePassProvider) Stream(ctx context.Context, req *types.MessageReques
 	// and correcting it later - is impossible: message_start goes out first.
 	// This costs the wait for the upstream's first byte, which the caller was
 	// going to wait for anyway before writing anything.
-	peeked, _ := peekServedModel(body, maxServedModelPeekBytes)
+	peeked, _, firstByteArrived := peekServedModel(body, maxServedModelPeekBytes)
+	if firstByteArrived {
+		// Recorded on the body rather than returned: Stream's signature is the
+		// shared provider contract, and only this platform can answer the
+		// question at all.
+		if recorder, ok := peeked.(interface{ MarkFirstByte() }); ok {
+			recorder.MarkFirstByte()
+		}
+	}
 	return peeked, nil
 }
 

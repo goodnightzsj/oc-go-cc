@@ -45,7 +45,7 @@ func TestUIUXSemanticControls(t *testing.T) {
 	}
 	page := string(data)
 	headers := regexp.MustCompile(`(?s)<th\b[^>]*class="sortable[^>]*>.*?</th>`).FindAllString(page, -1)
-	// History carries seven and Performance seven; the rest are the analytics
+	// History carries eight and Performance seven; the rest are the analytics
 	// tables. The count is asserted rather than derived so that adding a sortable
 	// column is a deliberate edit here, not a silent increment - but it only
 	// catches the header, which is why history_columns_test.go pairs this header
@@ -54,8 +54,8 @@ func TestUIUXSemanticControls(t *testing.T) {
 	// History dropped one when its Scenario column went: every request on this
 	// instance is the "override" kind, so that column held the same string on
 	// every row.
-	if len(headers) != 14 {
-		t.Fatalf("sortable header count = %d, want 14", len(headers))
+	if len(headers) != 15 {
+		t.Fatalf("sortable header count = %d, want 15", len(headers))
 	}
 	for _, header := range headers {
 		if !strings.Contains(header, `<button type="button" class="sort-button">`) || !strings.Contains(header, `<span data-i18n=`) || !strings.Contains(header, `aria-sort=`) {

@@ -490,7 +490,10 @@ type historyEntry struct {
 	// id that was requested. A gateway can answer one id by running a virtual
 	// model behind its own fallback chain, so the model column stops describing
 	// what produced the response; this is the field that does.
-	UpstreamModel       string   `json:"upstream_model,omitempty"`
+	UpstreamModel string `json:"upstream_model,omitempty"`
+	// FirstByteMs is how long the upstream took to send its first byte. Omitted
+	// when it was not measured, which is a different answer from zero.
+	FirstByteMs         int64    `json:"first_byte_ms,omitempty"`
 	Scenario            string   `json:"scenario"`
 	StartTime           string   `json:"start_time"` // RFC3339
 	DurationMs          int64    `json:"duration_ms"`
@@ -676,6 +679,7 @@ func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 			Provider:            rec.Provider,
 			UpstreamChannel:     rec.UpstreamChannel,
 			UpstreamModel:       rec.UpstreamModel,
+			FirstByteMs:         rec.FirstByte.Milliseconds(),
 			Scenario:            scenario,
 			StartTime:           rec.StartTime.Format("2006-01-02T15:04:05Z07:00"),
 			DurationMs:          rec.Duration.Milliseconds(),

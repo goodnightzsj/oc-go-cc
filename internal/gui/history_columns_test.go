@@ -47,7 +47,7 @@ func TestHistoryHeaderColumnsMatchTheRow(t *testing.T) {
 	// worth a slot when it cannot vary.
 	want := []string{
 		"th.time", "th.status", "th.modelPlatform",
-		"th.tokens", "th.cost", "th.duration", "th.tokensPerSecond",
+		"th.tokens", "th.cost", "th.firstByte", "th.duration", "th.tokensPerSecond",
 	}
 	prev := -1
 	for _, key := range want {

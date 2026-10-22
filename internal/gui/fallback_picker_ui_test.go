@@ -141,11 +141,17 @@ func TestUnpricedModelsShowADashNotZero(t *testing.T) {
 func TestPlatformFilterThenPickerListsThatPlatformsModels(t *testing.T) {
 	runPlatformBehavior(t, platformBehaviorDOMScript+`
 async function checks() {
-  FallbackModule.availableModels = [
-    {provider:'cline-pass', model_id:'deepseek-v4.1-flash', input_per_m:0.15, output_per_m:0.6},
-    {provider:'cline-pass', model_id:'kimi-k3', input_per_m:3, output_per_m:15},
-    {provider:'commandcode', model_id:'deepseek/deepseek-v4-pro', input_per_m:0.66, output_per_m:1.98},
+  // Shaped exactly as /api/catalog/models returns it: the field is named id,
+  // not model_id. A fixture that pre-mapped it hid a crash for a whole round.
+  const listing = [
+    {id:'deepseek-v4.1-flash', provider:'cline-pass', input_per_m:0.15, output_per_m:0.6, context_window:1000000},
+    {id:'kimi-k3', provider:'cline-pass', input_per_m:3, output_per_m:15, context_window:1000000},
+    {id:'deepseek/deepseek-v4-pro', provider:'commandcode', input_per_m:0.66, output_per_m:1.98, context_window:1000000},
   ];
+  // Go through the real merge, not a hand-built array: that is the code that
+  // dropped the field, and a fixture that maps it by hand cannot see it.
+  FallbackModule.availableModels = [...FallbackModule.mergeReachable(listing).values()];
+  assert.equal(FallbackModule.availableModels[0].model_id, 'deepseek-v4.1-flash', 'merge must set model_id');
   FallbackModule.chains = {default:[]};
   FallbackModule.currentScenario = 'default';
   FallbackModule.platformFilter = '';
@@ -154,6 +160,10 @@ async function checks() {
   FallbackModule.renderPickerList('');
   const count = () => (document.getElementById('fallback-add-list').innerHTML.match(/class="picker-row"/g) || []).length;
   assert.equal(count(), 3, 'all platforms before filtering');
+  // The comparator reads model_id; a record without it throws and the whole
+  // list fails to draw, which surfaces to the reader as "no matching models".
+  assert.ok(document.getElementById('fallback-add-list').innerHTML.includes('picker-row'),
+    'the list must render rows, not fail on a missing field');
 
   // Select cline-pass the way the dropdown does, then redraw.
   FallbackModule.platformFilter = 'cline-pass';

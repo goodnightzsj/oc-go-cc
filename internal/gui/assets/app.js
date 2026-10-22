@@ -5103,14 +5103,7 @@ const FallbackModule = {
         }
         this.listingError = true;
       }
-      for (const m of reachable) {
-        if (!m.id || !m.provider) continue;
-        // Keep the whole record. Rebuilding it as {provider, model_id} threw
-        // away the rates, context window and capability flags, so every row in
-        // the picker rendered with no price - the data was there and the merge
-        // discarded it.
-        modelMap.set(configModelKey({ provider: m.provider, model_id: m.id }), { ...m });
-      }
+      this.mergeReachable(reachable, modelMap);
       // Anything already configured stays selectable even if the listing is
       // momentarily unavailable, so an existing chain is never silently
       // rewritten just because the picker could not be refreshed.
@@ -5175,6 +5168,26 @@ const FallbackModule = {
   // actually have reachable models. Choosing one narrows the picker to it,
   // which is how an operator thinks: "fall back to a different provider" is a
   // platform decision before it is a model decision.
+  // mergeReachable folds the listing into the candidate map.
+  //
+  // Two field shapes meet here. The listing calls the model's id `id`; every
+  // consumer in this module calls it `model_id`. Spreading the record alone
+  // leaves model_id undefined, and the sort then throws on
+  // undefined.localeCompare - which surfaced as "no matching models" on every
+  // platform, because the list never drew at all.
+  //
+  // The whole record is kept rather than {provider, model_id}: the rates,
+  // context window and capability flags are what each row renders.
+  mergeReachable(reachable, target) {
+    const map = target || new Map();
+    for (const m of reachable || []) {
+      if (!m || !m.id || !m.provider) continue;
+      const entry = { ...m, provider: m.provider, model_id: m.id };
+      map.set(configModelKey(entry), entry);
+    }
+    return map;
+  },
+
   populatePlatformFilter() {
     const sel = document.getElementById('fallback-platform-filter');
     if (!sel) return;

@@ -108,7 +108,7 @@ var registry = []Descriptor{
 	// per model rather than per platform. They are transcribed there, not read
 	// at runtime: models.dev, the catalog this proxy syncs, carries no overrides
 	// at all.
-	{ID: OpenRouter, DisplayName: "OpenRouter", Order: 5, PeakPriced: true},
+	{ID: OpenRouter, DisplayName: "OpenRouter", Order: 5, RateTable: OpenRouter, PeakPriced: true},
 }
 
 // All returns every descriptor in presentation order. Callers must not assume

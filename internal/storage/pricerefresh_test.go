@@ -31,6 +31,10 @@ func TestRefreshPricesInstallsBothTables(t *testing.T) {
 			_, _ = w.Write([]byte(clinePricePageFixture))
 			return
 		}
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			_, _ = w.Write([]byte(`{"data":[{"id":"loop/model","pricing":{"prompt":"0.0000002","completion":"0.0000008"}}]}`))
+			return
+		}
 		_, _ = w.Write([]byte(commandCodePage(t, `[
 			{"id":"deepseek/deepseek-v4-flash","inputCost":0.15,"outputCost":0.60,"cacheReadCost":0.003,
 			 "tiers":[{"context":"≤ 256K","rates":{"input":0.15,"output":0.60,"cacheRead":0.003}}]},
@@ -89,9 +93,14 @@ func TestRefreshKeepsGoodTablesWhenOnePlatformFails(t *testing.T) {
 		CatalogPath:    catalog,
 		CommandCodeURL: "http://127.0.0.1:1/nope",     // nothing listens here
 		ClinePassURL:   "http://127.0.0.1:1/nope-too", // nor here
+		OpenRouterURL:  "http://127.0.0.1:1/nope-three",
 	}, &http.Client{Timeout: 2 * time.Second})
-	if len(errs1) != 2 || errs1[site.CommandCode] == nil || errs1[site.ClinePass] == nil {
-		t.Fatalf("want commandcode and cline-pass errors, got %v", errs1)
+	// Every platform with its own rate source must report its own failure; a
+	// missing entry would mean the refresh never tried it.
+	for _, table := range []string{site.CommandCode, site.ClinePass, site.OpenRouter} {
+		if errs1[table] == nil {
+			t.Errorf("want an error for %s, got %v", table, errs1)
+		}
 	}
 	if len(ok1[site.OpenCodeGo]) == 0 {
 		t.Fatal("opencode-go must still refresh when commandcode fails")
@@ -160,6 +169,10 @@ func TestRefreshPricesSyncsCatalogAndIsolatesSyncFailure(t *testing.T) {
 			_, _ = w.Write([]byte(clinePricePageFixture))
 			return
 		}
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			_, _ = w.Write([]byte(`{"data":[{"id":"loop/model","pricing":{"prompt":"0.0000002","completion":"0.0000008"}}]}`))
+			return
+		}
 		_, _ = w.Write([]byte(commandCodePage(t, `[{"id":"fresh-model","inputCost":0.2,"outputCost":0.8}]`)))
 	}))
 	defer page.Close()
@@ -204,6 +217,10 @@ func TestPriceRefreshLoopRepeatsAndStops(t *testing.T) {
 			_, _ = w.Write([]byte(clinePricePageFixture))
 			return
 		}
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			_, _ = w.Write([]byte(`{"data":[{"id":"loop/model","pricing":{"prompt":"0.0000002","completion":"0.0000008"}}]}`))
+			return
+		}
 		_, _ = w.Write([]byte(commandCodePage(t, `[{"id":"loop-model","inputCost":0.2,"outputCost":0.8}]`)))
 	}))
 	defer page.Close()
@@ -211,10 +228,11 @@ func TestPriceRefreshLoopRepeatsAndStops(t *testing.T) {
 	defer cancel()
 	preparations, rounds := 0, 0
 	PriceRefreshLoop(ctx, PriceRefreshConfig{
-		CatalogPath: path, CommandCodeURL: page.URL, ClinePassURL: page.URL + "/cline", Interval: time.Millisecond,
+		CatalogPath: path, CommandCodeURL: page.URL, ClinePassURL: page.URL + "/cline",
+		OpenRouterURL: page.URL + "/models", Interval: time.Millisecond,
 		RefreshCatalog: func(context.Context) error { preparations++; return nil },
 	}, page.Client(), func(counts map[string]int, errs map[string]error) {
-		if len(errs) != 0 || counts[site.OpenCodeGo] != 1 || counts[site.CommandCode] != 1 || counts[site.ClinePass] == 0 {
+		if len(errs) != 0 || counts[site.OpenCodeGo] != 1 || counts[site.CommandCode] != 1 || counts[site.ClinePass] == 0 || counts[site.OpenRouter] == 0 {
 			t.Errorf("refresh result: %v / %v", counts, errs)
 		}
 		rounds++

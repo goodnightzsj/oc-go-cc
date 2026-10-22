@@ -51,6 +51,13 @@ const (
 	// wrong, so it is not a substitute.
 	ClinePassPricesURL = "https://docs.cline.bot/getting-started/clinepass.md"
 
+	// OpenRouterPricesURL is the platform's own model listing, which carries a
+	// per-token price for every model it serves. There is no embedded table for
+	// this platform because it is a router: the model set and the prices behind
+	// it both change without notice, so a transcribed copy would be stale by the
+	// time it shipped.
+	OpenRouterPricesURL = "https://openrouter.ai/api/v1/models"
+
 	// DefaultPriceRefreshInterval matches the published cadence of both pages:
 	// neither has a documented update schedule, and price moves are rare, so an
 	// hour is responsiveness without being abusive.
@@ -536,6 +543,8 @@ type PriceRefreshConfig struct {
 	CommandCodeURL string
 	// ClinePassURL is the docs page carrying ClinePass's table.
 	ClinePassURL string
+	// OpenRouterURL is the platform's own model listing. Empty uses the default.
+	OpenRouterURL string
 	// Interval is how long to wait between refreshes.
 	Interval time.Duration
 }
@@ -568,6 +577,15 @@ func RefreshPrices(ctx context.Context, cfg PriceRefreshConfig, client *http.Cli
 		errs[site.ClinePass] = err
 	} else {
 		fetched[site.ClinePass] = clEntries
+	}
+	orURL := cfg.OpenRouterURL
+	if orURL == "" {
+		orURL = OpenRouterPricesURL
+	}
+	if orEntries, err := FetchOpenRouterPrices(ctx, client, orURL); err != nil {
+		errs[site.OpenRouter] = err
+	} else {
+		fetched[site.OpenRouter] = orEntries
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, map[string]error{site.OpenCodeGo: err, site.CommandCode: err, site.ClinePass: err}
@@ -892,4 +910,94 @@ func FetchClinePassPrices(ctx context.Context, client *http.Client, url string) 
 		return nil, fmt.Errorf("read price page: %w", err)
 	}
 	return parseClinePassPricePage(body)
+}
+
+// FetchOpenRouterPrices reads the platform's own model listing.
+//
+// OpenRouter is a router rather than a vendor: it resells other providers'
+// models and passes their prices through without markup. The listing is the
+// only machine-readable statement of those prices, and it moves whenever an
+// upstream does - which is why this platform has no embedded table to fall back
+// on, and why a failed refresh keeps the previous one rather than emptying it.
+//
+// Prices arrive as strings holding the cost of a single token, so they are
+// scaled to this package's per-million convention. A model with a blank or
+// unparsable rate is skipped rather than recorded as free: zero is a real price
+// on this platform, and the two must not be confused.
+func FetchOpenRouterPrices(ctx context.Context, client *http.Client, url string) ([]priceEntry, error) {
+	if url == "" {
+		url = OpenRouterPricesURL
+	}
+	if client == nil {
+		client = &http.Client{Timeout: priceFetchTimeout}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("openrouter prices: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("openrouter prices: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("openrouter prices: HTTP %d", resp.StatusCode)
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxPricePageBytes))
+	if err != nil {
+		return nil, fmt.Errorf("openrouter prices: %w", err)
+	}
+
+	var payload struct {
+		Data []struct {
+			ID      string `json:"id"`
+			Pricing struct {
+				Prompt     string `json:"prompt"`
+				Completion string `json:"completion"`
+			} `json:"pricing"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, fmt.Errorf("openrouter prices: %w", err)
+	}
+
+	entries := make([]priceEntry, 0, len(payload.Data))
+	for _, m := range payload.Data {
+		id := strings.TrimSpace(m.ID)
+		if id == "" {
+			continue
+		}
+		in, inOK := perTokenToPerMillion(m.Pricing.Prompt)
+		out, outOK := perTokenToPerMillion(m.Pricing.Completion)
+		if !inOK && !outOK {
+			continue
+		}
+		entries = append(entries, priceEntry{
+			// The match is the full id, which is what OpenRouter's own listing
+			// and therefore this proxy's model ids use.
+			Match:  id,
+			Input:  in,
+			Output: out,
+		})
+	}
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("openrouter prices: no usable rows")
+	}
+	return entries, nil
+}
+
+// perTokenToPerMillion converts a per-token price to the per-million convention
+// this package uses. It reports false for a value that is missing, unparsable,
+// or negative - never 0, because 0 is a price the platform really charges.
+func perTokenToPerMillion(raw string) (float64, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(trimmed, 64)
+	if err != nil || v < 0 {
+		return 0, false
+	}
+	return v * 1e6, true
 }

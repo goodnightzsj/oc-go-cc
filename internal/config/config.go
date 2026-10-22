@@ -55,6 +55,7 @@ type Config struct {
 	// dashboard can only show the merged list and would offer an edit that
 	// silently does nothing.
 	keyOrigins map[string][]KeyOrigin
+	keyIndices map[string][]*int
 }
 
 // KeyOrigin names where one pool entry came from. Only the two cases the
@@ -343,10 +344,11 @@ func (c *Config) KeyPools() map[string]KeyPoolView {
 // the file (jsonKey), which platform it belongs to (provider), and how to reach
 // its two fields on a Config.
 type keyPoolField struct {
-	jsonKey  string
-	provider string
-	single   func(*Config) *string
-	many     func(*Config) *[]string
+	jsonKey   string
+	provider  string
+	envPrefix string
+	single    func(*Config) *string
+	many      func(*Config) *[]string
 }
 
 // keyPoolFields lists every (single, array) credential pair the config carries:
@@ -358,70 +360,42 @@ type keyPoolField struct {
 // they differ wherever the id carries a hyphen ("cline-pass" vs "cline_pass"),
 // so both are carried rather than derived by string surgery at each use.
 var keyPoolFields = []keyPoolField{
-	{"", "", func(c *Config) *string { return &c.APIKey }, func(c *Config) *[]string { return &c.APIKeys }},
-	{"opencode_go", site.OpenCodeGo, func(c *Config) *string { return &c.OpenCodeGo.APIKey }, func(c *Config) *[]string { return &c.OpenCodeGo.APIKeys }},
-	{"opencode_zen", site.OpenCodeZen, func(c *Config) *string { return &c.OpenCodeZen.APIKey }, func(c *Config) *[]string { return &c.OpenCodeZen.APIKeys }},
-	{"aws_bedrock", site.AWSBedrock, func(c *Config) *string { return &c.AWSBedrock.APIKey }, func(c *Config) *[]string { return &c.AWSBedrock.APIKeys }},
-	{"openrouter", site.OpenRouter, func(c *Config) *string { return &c.OpenRouter.APIKey }, func(c *Config) *[]string { return &c.OpenRouter.APIKeys }},
-	{"commandcode", site.CommandCode, func(c *Config) *string { return &c.CommandCode.APIKey }, func(c *Config) *[]string { return &c.CommandCode.APIKeys }},
-	{"cline_pass", site.ClinePass, func(c *Config) *string { return &c.ClinePass.APIKey }, func(c *Config) *[]string { return &c.ClinePass.APIKeys }},
+	{"", "", "ROUTATIC_PROXY", func(c *Config) *string { return &c.APIKey }, func(c *Config) *[]string { return &c.APIKeys }},
+	{"opencode_go", site.OpenCodeGo, "ROUTATIC_PROXY_OPENCODE_GO", func(c *Config) *string { return &c.OpenCodeGo.APIKey }, func(c *Config) *[]string { return &c.OpenCodeGo.APIKeys }},
+	{"opencode_zen", site.OpenCodeZen, "ROUTATIC_PROXY_OPENCODE_ZEN", func(c *Config) *string { return &c.OpenCodeZen.APIKey }, func(c *Config) *[]string { return &c.OpenCodeZen.APIKeys }},
+	{"aws_bedrock", site.AWSBedrock, "ROUTATIC_PROXY_AWS_BEDROCK", func(c *Config) *string { return &c.AWSBedrock.APIKey }, func(c *Config) *[]string { return &c.AWSBedrock.APIKeys }},
+	{"openrouter", site.OpenRouter, "ROUTATIC_PROXY_OPENROUTER", func(c *Config) *string { return &c.OpenRouter.APIKey }, func(c *Config) *[]string { return &c.OpenRouter.APIKeys }},
+	{"commandcode", site.CommandCode, "ROUTATIC_PROXY_COMMANDCODE", func(c *Config) *string { return &c.CommandCode.APIKey }, func(c *Config) *[]string { return &c.CommandCode.APIKeys }},
+	{"cline_pass", site.ClinePass, "ROUTATIC_PROXY_CLINE_PASS", func(c *Config) *string { return &c.ClinePass.APIKey }, func(c *Config) *[]string { return &c.ClinePass.APIKeys }},
 }
 
-// recordKeyOrigins notes, for every platform, where each entry of that
-// platform's effective pool came from. filePools is the pool as the config file
-// alone described it, captured before environment overrides ran: an entry
-// present there is file-backed and editable, and one only the environment
-// supplied is not.
-//
-// It deliberately does not touch the two credential fields. The runtime already
-// reads one merged pool through EffectiveAPIKeys, so the dashboard can show one
-// list by reading the same thing; rewriting the fields in memory would change a
-// contract that only the file is supposed to change, and every caller that
-// reads the single field would see it empty for no gain. Collapsing the file to
-// one field is the migration's job, and it happens on disk.
-func recordKeyOrigins(cfg *Config, filePools map[string][]string) {
+// KeyPoolIndices maps display rows to the raw array after safe migration.
+// -1 names api_key; nil names an environment-only row. No credential is exposed.
+func (c *Config) KeyPoolIndices() map[string][]*int { return c.keyIndices }
+
+// KeyPoolOverrides reports the independently overridden fields of a known block.
+func KeyPoolOverrides(block string) (single, many bool) {
 	for _, row := range keyPoolFields {
-		pool := appendAPIKeys(*row.single(cfg), *row.many(cfg))
-		if pool == nil {
-			cfg.SetKeyOrigins(row.provider, nil)
-			continue
+		if row.jsonKey == block {
+			return envValue(row.envPrefix+"_API_KEY") != "", envValue(row.envPrefix+"_API_KEYS") != ""
 		}
-		// A key the file named is editable however it got there: a ${VAR}
-		// placeholder that resolved to this value is still a line in the file
-		// the settings round trip can keep. Only an entry with no file line
-		// behind it is environment-only.
-		fromFile := map[string]bool{}
-		for _, key := range filePools[keyOriginKey(row.provider)] {
-			fromFile[key] = true
-		}
-		origins := make([]KeyOrigin, len(pool))
-		for i, key := range pool {
-			if fromFile[key] {
-				origins[i] = KeyOriginFile
-				continue
-			}
-			origins[i] = KeyOriginEnv
-		}
-		cfg.SetKeyOrigins(row.provider, origins)
 	}
+	return false, false
 }
 
-// snapshotKeyPoolsFromRaw reads the key pools out of the config file's own
-// bytes and resolves each entry the same way the loader will, so the result is
-// directly comparable with the merged pool.
-//
-// It exists because interpolation runs before unmarshalling: by the time a
-// Config exists, a value written as ${VAR} is indistinguishable from the same
-// value written literally, and a credential that only the environment supplied
-// would look like one the file holds. Reading the raw bytes keeps the
-// placeholder visible long enough to interpolate it deliberately, which is what
-// makes the comparison meaningful.
-func snapshotKeyPoolsFromRaw(data []byte) map[string][]string {
-	pools := make(map[string][]string, len(keyPoolFields))
+// recordKeySources derives both provenance and editing identity from the same
+// raw snapshot. Distinct placeholders that resolve equally keep their original
+// slots; display deduplication must not rewrite that file intent.
+func recordKeySources(cfg *Config, data []byte) error {
 	var root map[string]json.RawMessage
-	if json.Unmarshal(data, &root) != nil {
-		return pools
+	if err := json.Unmarshal(data, &root); err != nil {
+		return err
 	}
+	// Saves resolve indices after this same safe fold. It never interpolates.
+	if err := FoldKeyPoolBlocksInPlace(root); err != nil {
+		return err
+	}
+	cfg.keyIndices = make(map[string][]*int, len(keyPoolFields))
 	for _, row := range keyPoolFields {
 		scope := root
 		if row.jsonKey != "" {
@@ -432,19 +406,39 @@ func snapshotKeyPoolsFromRaw(data []byte) map[string][]string {
 			scope = block
 		}
 		var single string
-		_ = json.Unmarshal(scope["api_key"], &single)
 		var many []string
+		_ = json.Unmarshal(scope["api_key"], &single)
 		_ = json.Unmarshal(scope["api_keys"], &many)
-
-		// Resolve the file's entries exactly as the loader will, so a
-		// placeholder compares equal to the value it expands to.
-		single = interpolateEnvVars(single)
-		for i, key := range many {
-			many[i] = interpolateEnvVars(key)
+		singleEnv, manyEnv := KeyPoolOverrides(row.jsonKey)
+		positions := make(map[string]int)
+		add := func(raw string, index int) {
+			value := strings.TrimSpace(interpolateEnvVars(raw))
+			if _, exists := positions[value]; value != "" && !exists {
+				positions[value] = index
+			}
 		}
-		pools[keyOriginKey(row.provider)] = appendAPIKeys(single, many)
+		if !singleEnv {
+			add(single, -1)
+		}
+		if !manyEnv {
+			for i, value := range many {
+				add(value, i)
+			}
+		}
+		keys := appendAPIKeys(*row.single(cfg), *row.many(cfg))
+		origins := make([]KeyOrigin, len(keys))
+		indices := make([]*int, len(keys))
+		for i, key := range keys {
+			if index, exists := positions[key]; exists {
+				origins[i], indices[i] = KeyOriginFile, &index
+			} else {
+				origins[i] = KeyOriginEnv
+			}
+		}
+		cfg.SetKeyOrigins(row.provider, origins)
+		cfg.keyIndices[row.jsonKey] = indices
 	}
-	return pools
+	return nil
 }
 
 // appendAPIKeys builds one key pool from the two config fields that hold it.

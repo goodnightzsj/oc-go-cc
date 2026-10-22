@@ -230,33 +230,19 @@ func boolArg(b *bool) string {
 	}
 }
 
-// historyRevision is a cheap fingerprint of the rows a summary would read.
-//
-// It exists because the dashboard polls this endpoint every three seconds while
-// the history grows by a few rows a minute: nearly every poll recomputed an
-// identical answer, and the computation is a full scan whose cost is dominated
-// by the scan itself rather than by the aggregation.
-//
-// COUNT(*) plus MAX(rowid) is two columns over an index-free scan and measures
-// about 5ms against the ~400ms it guards. The pair covers insertion and
-// deletion, the two operations that change which rows exist - MAX(rowid) is
-// what keeps a delete and an insert from cancelling out in the count. It does
-// not cover a pure UPDATE, which can move a cost figure without changing the
-// row set; the columns that would cover it cost more than the cache saves, and
-// the one writer that updates costs (BackfillRequestCosts) runs at startup,
-// before any summary has been cached.
+// historyRevision reads the transactional change counter in constant time.
+// Unlike a row-count fingerprint it covers UPDATE, replacement and rowid reuse,
+// including writes committed by a separate costs-reconcile process.
 func (r *Requests) historyRevision(ctx context.Context) (string, error) {
-	var rows, maxRowID int64
-	if err := r.db.DB().QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(MAX(rowid), 0) FROM requests`).Scan(&rows, &maxRowID); err != nil {
+	var revision int64
+	if err := r.db.DB().QueryRowContext(ctx, "SELECT revision FROM history_revision WHERE id = 1").Scan(&revision); err != nil {
 		return "", err
 	}
-	return strconv.FormatInt(rows, 10) + ":" + strconv.FormatInt(maxRowID, 10), nil
+	return strconv.FormatInt(revision, 10), nil
 }
 
 // Summary aggregates the exact same population as Query, without pagination.
-//
-// One scan, four dimensions, folded here, and the result is cached until the
-// table's row set changes. See historyRevision for why the cache exists.
+// It uses one scan and caches until any committed request-table change.
 //
 // This replaced five separate GROUP BY queries - one per dimension plus a total
 // - each of which scanned the whole table. The scan, not the aggregation, is
@@ -614,18 +600,10 @@ func requestSortColumn(field string) string {
 	case "cost_usd":
 		return "COALESCE(cost_usd, 0)"
 	case "reasoning_effort":
-		// A row where the client asked for no level sorts last rather than
-		// first: the cell shows a dash, and "no request" is not the weakest
-		// level. COALESCE to a value above every level name keeps the blanks at
-		// one end in both directions.
-		return "COALESCE(NULLIF(LOWER(reasoning_effort), ''), '~')"
+		// Pin missing observations last independently of the value direction.
+		return "(CASE WHEN COALESCE(reasoning_effort, '') = '' THEN 1 ELSE 0 END) ASC, LOWER(reasoning_effort)"
 	case "first_byte_ms":
-		// A row without a measurement sorts as the slowest thing there is, in
-		// both directions: the cell shows a dash, and "no data" is not the
-		// fastest response. The sentinel has to live in the expression rather
-		// than in a second ORDER BY term, because orderBy appends the direction
-		// once and a comma here would leave the sentinel unsorted.
-		return "COALESCE(first_byte_ms, 9223372036854775807)"
+		return "(CASE WHEN first_byte_ms IS NULL THEN 1 ELSE 0 END) ASC, first_byte_ms"
 	case "duration_ms":
 		return "COALESCE(duration_ms, 0)"
 	case "tokens_per_second":

@@ -95,7 +95,7 @@ func (t *RequestTransformer) TransformRequest(
 	model config.ModelConfig,
 ) (*types.ChatCompletionRequest, error) {
 	// Transform messages
-	messages, err := t.transformMessages(anthropicReq, model.ModelID, model.Vision)
+	messages, err := t.transformMessages(anthropicReq, model.ModelID, imageHandlingFor(model))
 	if err != nil {
 		return nil, fmt.Errorf("failed to transform messages: %w", err)
 	}
@@ -430,8 +430,35 @@ func hasAssistantMessages(messages []types.Message) bool {
 	return false
 }
 
+// imagePolicy says what to do with an image block for a given model.
+//
+// It replaced a plain "vision bool", which could not distinguish "this model
+// refuses images" from "nothing here says" - and the zero value fell on the
+// refusing side. That is how a vision-capable model ended up sent a "[Image]"
+// placeholder instead of the picture: the request succeeded and the model
+// answered about seven characters of text.
+type imagePolicy int
+
+const (
+	// imagesForward sends the bytes upstream. Both a known-capable and an
+	// unknown model get this: the platform is the only party that actually
+	// knows, and a wrong guess costs a 400 the client can read, where a
+	// placeholder costs a confident answer about nothing.
+	imagesForward imagePolicy = iota
+	// imagesPlaceholder replaces the image with "[Image]" for a model known to
+	// refuse them, so the rest of the conversation still reaches the model.
+	imagesPlaceholder
+)
+
+func imageHandlingFor(model config.ModelConfig) imagePolicy {
+	if vision, known := config.ModelHasVision(model); known && !vision {
+		return imagesPlaceholder
+	}
+	return imagesForward
+}
+
 // transformMessages converts Anthropic messages to OpenAI format.
-func (t *RequestTransformer) transformMessages(anthropicReq *types.MessageRequest, modelID string, vision bool) ([]types.ChatMessage, error) {
+func (t *RequestTransformer) transformMessages(anthropicReq *types.MessageRequest, modelID string, images imagePolicy) ([]types.ChatMessage, error) {
 	hasThinking := HasThinkingBlocks(anthropicReq.Messages)
 
 	var result []types.ChatMessage
@@ -502,7 +529,7 @@ func (t *RequestTransformer) transformMessages(anthropicReq *types.MessageReques
 			})
 			continue
 		}
-		openaiMsgs, err := t.transformMessage(msg, modelID, hasThinking, vision)
+		openaiMsgs, err := t.transformMessage(msg, modelID, hasThinking, images)
 		if err != nil {
 			return nil, err
 		}
@@ -514,12 +541,12 @@ func (t *RequestTransformer) transformMessages(anthropicReq *types.MessageReques
 
 // transformMessage converts a single Anthropic message to one or more OpenAI messages.
 // Tool_use and tool_result require special handling to map to OpenAI's function calling format.
-func (t *RequestTransformer) transformMessage(msg types.Message, modelID string, hasThinkingInHistory bool, vision bool) ([]types.ChatMessage, error) {
+func (t *RequestTransformer) transformMessage(msg types.Message, modelID string, hasThinkingInHistory bool, images imagePolicy) ([]types.ChatMessage, error) {
 	blocks := msg.ContentBlocks()
 
 	switch msg.Role {
 	case "user":
-		return t.transformUserMessage(blocks, vision)
+		return t.transformUserMessage(blocks, images)
 	case "assistant":
 		return t.transformAssistantMessage(blocks, modelID, hasThinkingInHistory)
 	default:
@@ -539,7 +566,7 @@ func (t *RequestTransformer) transformMessage(msg types.Message, modelID string,
 // with image_url parts) so that vision-capable models receive the actual image data.
 // For models without vision support, image blocks are replaced with a "[Image]" text
 // placeholder to prevent upstream 400 errors from unsupported image_url parts.
-func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, vision bool) ([]types.ChatMessage, error) {
+func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, images imagePolicy) ([]types.ChatMessage, error) {
 	var result []types.ChatMessage
 	var textParts []string
 	var parts []types.ChatContentPart
@@ -574,7 +601,8 @@ func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, v
 			if block.Source == nil {
 				return nil, fmt.Errorf("image source is required")
 			}
-			if vision {
+			switch images {
+			case imagesForward:
 				imageURL, err := imageSourceURL(block.Source)
 				if err != nil {
 					return nil, err
@@ -586,7 +614,7 @@ func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, v
 						URL: imageURL,
 					},
 				})
-			} else {
+			default:
 				hasImage = true
 			}
 		}

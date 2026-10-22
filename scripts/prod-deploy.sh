@@ -50,6 +50,26 @@ prune_releases() {
 
 GO_BIN="$(resolve_go_bin)"
 HASHER="$(hash_cmd)"
+
+# This script builds whatever is checked out here; it never fetches. That is a
+# silent failure mode: a deploy started right after a push would rebuild the
+# previous commit, report success, pass the health check, and leave the fix
+# undeployed - which is exactly how one shipped fix was reported as live while
+# the old binary was still serving. Staying quiet about a stale checkout is the
+# problem, not a missing pull: whether to fetch is the operator's call, so this
+# refuses instead of deciding for them.
+if [[ "${OC_GO_CC_ALLOW_STALE:-0}" != "1" ]] && git -C "${ROOT_DIR}" rev-parse --git-dir >/dev/null 2>&1; then
+	if git -C "${ROOT_DIR}" fetch --quiet origin 2>/dev/null; then
+		head_sha="$(git -C "${ROOT_DIR}" rev-parse HEAD)"
+		upstream_sha="$(git -C "${ROOT_DIR}" rev-parse '@{upstream}' 2>/dev/null || echo "${head_sha}")"
+		if [[ "${head_sha}" != "${upstream_sha}" ]]; then
+			echo "[prod] refusing to deploy: HEAD ${head_sha:0:12} is not its upstream ${upstream_sha:0:12}" >&2
+			echo "[prod] run 'git -C ${ROOT_DIR} pull --ff-only' first, or set OC_GO_CC_ALLOW_STALE=1" >&2
+			exit 1
+		fi
+	fi
+fi
+
 VERSION="$(git -C "${ROOT_DIR}" describe --tags --always --dirty 2>/dev/null || echo dev)"
 COMMIT="$(git -C "${ROOT_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)"
 BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

@@ -131,8 +131,9 @@ func TestActiveSitePublishedModelsRespectCapacity(t *testing.T) {
 				t.Fatalf("primary=%s, want %s", chain[0].ModelID, tc.wantPrimary)
 			}
 			for _, model := range chain {
+				vision, visionKnown := config.ModelHasVision(model)
 				if model.Provider != site.CommandCode || model.MaxTokens != 64 ||
-					(tc.vision && !model.Vision) || (tc.tools && !config.SupportsTools(model)) {
+					(tc.vision && visionKnown && !vision) || (tc.tools && !config.SupportsTools(model)) {
 					t.Fatalf("request constraints bypassed: %+v", model)
 				}
 			}
@@ -162,7 +163,7 @@ func TestPublishedModelRetainsSameTargetConfiguration(t *testing.T) {
 		t.Run(source, func(t *testing.T) {
 			cfg := siteConfig(t, site.CommandCode)
 			requested := "deepseek/deepseek-v4-flash"
-			model := config.ModelConfig{Provider: site.CommandCode, ModelID: requested, Vision: true, MaxTokens: 32, ContextWindow: 32000}
+			model := config.ModelConfig{Provider: site.CommandCode, ModelID: requested, Vision: config.BoolPtr(true), MaxTokens: 32, ContextWindow: 32000}
 			delete(cfg.ModelOverrides, requested)
 			if source == "models" {
 				cfg.Models[requested] = model

@@ -42,7 +42,7 @@ func newResponsesTestHandler(t *testing.T, upstream http.Handler) (*MessagesHand
 	t.Cleanup(server.Close)
 	cfg := config.NewAtomicConfig(&config.Config{
 		CommandCode:           config.CommandCodeConfig{APIKey: "synthetic-test-key", BaseURL: server.URL + "/chat/completions", AnthropicBaseURL: server.URL + "/messages"},
-		Models:                map[string]config.ModelConfig{"default": {Provider: "commandcode", ModelID: "synthetic-model", MaxTokens: 8192, Vision: true}},
+		Models:                map[string]config.ModelConfig{"default": {Provider: "commandcode", ModelID: "synthetic-model", MaxTokens: 8192, Vision: config.BoolPtr(true)}},
 		RespectRequestedModel: boolPtr(false),
 	}, "")
 	registry := core.NewProviderRegistry()

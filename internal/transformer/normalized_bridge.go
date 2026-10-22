@@ -96,7 +96,10 @@ func AnthropicToResponses(anthropicReq *types.MessageRequest, model config.Model
 				responsesReq.Input = append(responsesReq.Input, types.ResponsesInput{Type: "function_call_output", CallID: block.GetToolID(), Output: rawJSONString(block.TextContent())})
 			case "image":
 				flushText()
-				if !model.Vision {
+				// Only a model known to refuse images fails here. An unstated
+				// capability is forwarded: the Responses upstream is the party
+				// that knows, and it can say no more accurately than a guess can.
+				if vision, known := config.ModelHasVision(model); known && !vision {
 					return nil, fmt.Errorf("responses image input requires a vision-capable model")
 				}
 				url, err := imageSourceURL(block.Source)

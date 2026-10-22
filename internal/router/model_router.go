@@ -232,7 +232,10 @@ func (r *ModelRouter) resolveRequestedModel(cfg *config.Config, requestedModel s
 		}
 	}
 	primary = config.ResolveModelConfig(primary)
-	if needsVision && !primary.Vision {
+	// Only a model known to lack vision is refused here. An unstated capability
+	// must not refuse the request - the platform can say no itself, and it is the
+	// only party that actually knows.
+	if vision, known := config.ModelHasVision(primary); needsVision && known && !vision {
 		return RouteResult{}, false, fmt.Errorf("requested model %s does not support vision", primary.ModelID)
 	}
 
@@ -249,11 +252,12 @@ func (r *ModelRouter) resolveRequestedModel(cfg *config.Config, requestedModel s
 // ModelConfig used by the router.
 func resolvedModelToConfig(resolved catalog.ResolvedModel) config.ModelConfig {
 	supportsTools := resolved.Tools
+	vision := resolved.Vision
 	return config.ModelConfig{
 		Provider:      resolved.Provider,
 		ModelID:       resolved.ModelID,
 		ModelRef:      resolved.CanonicalName,
-		Vision:        resolved.Vision,
+		Vision:        &vision,
 		ContextWindow: int(resolved.ContextWindow),
 		// Carried so clampOutputTokens can honour the upstream's real ceiling
 		// instead of clamping a client's request down to the built-in default.
@@ -342,12 +346,7 @@ func (r *ModelRouter) resolveFromCatalog(cat *catalog.IndexedCatalog, requestedM
 			// built-in family table.
 			ModelRef: platform + "/" + short,
 		}
-		target.Vision = model.SupportsVision()
-		target.ContextWindow = int(model.ContextWindow())
-		target.MaxOutputTokens = int(model.MaxOutputTokens())
-		supportsTools := model.SupportsTools()
-		target.SupportsTools = &supportsTools
-		return target, true
+		return applyCatalogModel(target, model), true
 	}
 
 	cfg := resolvedModelToConfig(resolved)
@@ -849,10 +848,24 @@ func (r *ModelRouter) catalogResolved(ctx context.Context, provider, modelID str
 // that is not even the same billing pool. The listing decides where the request
 // goes; the catalog only fills in what the model can do.
 func applyCatalogCapabilities(target config.ModelConfig, resolved catalog.ResolvedModel) config.ModelConfig {
-	target.Vision = resolved.Vision
+	vision := resolved.Vision
+	target.Vision = &vision
 	target.ContextWindow = int(resolved.ContextWindow)
 	target.MaxOutputTokens = int(resolved.MaxOutputTokens)
 	supportsTools := resolved.Tools
+	target.SupportsTools = &supportsTools
+	return target
+}
+
+// applyCatalogModel is applyCatalogCapabilities for a raw catalog entry. Both
+// exist because the caller may hold either a resolved model (which carries a
+// provider) or the model alone (when only the name was looked up).
+func applyCatalogModel(target config.ModelConfig, model catalog.Model) config.ModelConfig {
+	vision := model.SupportsVision()
+	target.Vision = &vision
+	target.ContextWindow = int(model.ContextWindow())
+	target.MaxOutputTokens = int(model.MaxOutputTokens())
+	supportsTools := model.SupportsTools()
 	target.SupportsTools = &supportsTools
 	return target
 }

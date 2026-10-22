@@ -84,8 +84,9 @@ func ResolveModelConfig(model ModelConfig) ModelConfig {
 			if model.MaxOutputTokens == 0 {
 				model.MaxOutputTokens = meta.MaxOutputTokens
 			}
-			if !model.Vision {
-				model.Vision = meta.Vision
+			if model.Vision == nil {
+				v := meta.Vision
+				model.Vision = &v
 			}
 			if model.SupportsTools == nil {
 				v := meta.SupportsTools
@@ -112,3 +113,27 @@ func SupportsTools(model ModelConfig) bool {
 	model = ResolveModelConfig(model)
 	return model.SupportsTools == nil || *model.SupportsTools
 }
+
+// ModelHasVision reports whether a model accepts image input, and whether that
+// is known at all.
+//
+// The second return is the point. A model no source describes is not a model
+// that refuses images, and treating the two the same is what stopped a
+// vision-capable model from serving any request with a new image: the capacity
+// filter read the absent capability as a refusal and dropped the only model in
+// the chain.
+//
+// Callers decide what to do with "unknown". The capacity filter keeps the model
+// and lets the platform answer; the image transform forwards the bytes rather
+// than replacing them with a "[Image]" placeholder nobody can look at.
+func ModelHasVision(model ModelConfig) (vision bool, known bool) {
+	model = ResolveModelConfig(model)
+	if model.Vision == nil {
+		return false, false
+	}
+	return *model.Vision, true
+}
+
+// BoolPtr returns a pointer to v, for the tri-state capability fields. Their
+// zero value means "no source said", which a plain bool cannot express.
+func BoolPtr(v bool) *bool { return &v }

@@ -2,6 +2,7 @@ package transformer
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/routatic/proxy/internal/config"
@@ -16,7 +17,7 @@ func TestRequestPreservesImageSourcesAndOrder(t *testing.T) {
 		{"type":"image","source":{"type":"base64","media_type":"image/png","data":"YWJj"}},
 		{"type":"text","text":"last"}
 	]`)}}}
-	got, err := AnthropicToChatCompletion(req, config.ModelConfig{ModelID: "vision-model", Vision: true})
+	got, err := AnthropicToChatCompletion(req, config.ModelConfig{ModelID: "vision-model", Vision: config.BoolPtr(true)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +49,7 @@ func TestRequestDropsUnrepresentableToolResultParts(t *testing.T) {
 	req := &types.MessageRequest{Messages: []types.Message{{Role: "user", Content: json.RawMessage(`[
 		{"type":"tool_result","tool_use_id":"call_1","content":[{"type":"text","text":"screenshot"},{"type":"image","source":{"type":"url","url":"https://example.test/one.png"}}]}
 	]`)}}}
-	got, err := AnthropicToChatCompletion(req, config.ModelConfig{ModelID: "vision-model", Vision: true})
+	got, err := AnthropicToChatCompletion(req, config.ModelConfig{ModelID: "vision-model", Vision: config.BoolPtr(true)})
 	if err != nil {
 		t.Fatalf("an unrepresentable part must not fail the request: %v", err)
 	}
@@ -115,5 +116,57 @@ func TestRequestCarriesToolChoiceParallelAndEffort(t *testing.T) {
 	}
 	if wire.ToolChoice.Type != "function" || wire.ToolChoice.Function.Name != "read_file" || wire.Parallel == nil || *wire.Parallel || wire.Effort != "high" {
 		t.Fatalf("request constraints lost: %s", raw)
+	}
+}
+
+// An unstated vision capability must forward the image, not replace it.
+//
+// The alternative is the failure this replaced: the model was sent the literal
+// text "[Image]", answered confidently about seven characters, and nothing
+// reported that the picture never left. A 400 from the platform is a far better
+// outcome than a plausible answer about nothing.
+func TestUnstatedVisionForwardsTheImageRatherThanAPlaceholder(t *testing.T) {
+	req := &types.MessageRequest{Messages: []types.Message{{Role: "user", Content: json.RawMessage(`[
+		{"type":"text","text":"what is this"},
+		{"type":"image","source":{"type":"url","url":"https://example.test/one.png"}}
+	]`)}}}
+	got, err := AnthropicToChatCompletion(req, config.ModelConfig{ModelID: "unknown-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Messages) != 1 {
+		t.Fatalf("messages = %d, want 1", len(got.Messages))
+	}
+	var parts []types.ChatContentPart
+	if err := json.Unmarshal(got.Messages[0].Content, &parts); err != nil {
+		t.Fatalf("content is not a multimodal array, so the image was dropped: %s", got.Messages[0].Content)
+	}
+	found := false
+	for _, p := range parts {
+		if p.Type == "image_url" && p.ImageURL != nil && p.ImageURL.URL == "https://example.test/one.png" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("image not forwarded: %+v", parts)
+	}
+}
+
+// A model known to refuse images still gets the placeholder, which keeps the
+// rest of the conversation usable on a platform that cannot see.
+func TestKnownTextOnlyModelStillGetsThePlaceholder(t *testing.T) {
+	req := &types.MessageRequest{Messages: []types.Message{{Role: "user", Content: json.RawMessage(`[
+		{"type":"text","text":"what is this"},
+		{"type":"image","source":{"type":"url","url":"https://example.test/one.png"}}
+	]`)}}}
+	got, err := AnthropicToChatCompletion(req, config.ModelConfig{
+		ModelID: "text-only", Vision: config.BoolPtr(false),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(got.Messages[0].Content)
+	if !strings.Contains(content, "[Image]") {
+		t.Errorf("expected the placeholder for a known text-only model, got %s", content)
 	}
 }

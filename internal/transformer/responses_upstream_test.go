@@ -25,7 +25,7 @@ func TestResponsesRequestPreservesStructuredHistory(t *testing.T) {
 			{Role: "user", Content: json.RawMessage(`[{"type":"tool_result","tool_use_id":"call_1","content":"result"},{"type":"text","text":"caption"},{"type":"image","source":{"type":"url","url":"https://example.invalid/image.png"}}]`)},
 		},
 	}
-	got, err := AnthropicToResponses(req, config.ModelConfig{ModelID: "synthetic", Vision: true})
+	got, err := AnthropicToResponses(req, config.ModelConfig{ModelID: "synthetic", Vision: config.BoolPtr(true)})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -238,7 +238,7 @@ Set `wire_format: "anthropic"` for models that need raw Anthropic Messages forma
 | `name` | `string` | No | Provider display name (defaults to "openrouter") |
 | `base_url` | `string` | No | API endpoint base URL. Default: `https://openrouter.ai/api/v1` |
 | `api_keys` | `string[]` | Yes | API keys for fill-first rotation. The order is the order requests are tried in |
-| `api_key` | `string` | No | Compatibility read path for a single key. Folded into `api_keys` on load and on save |
+| `api_key` | `string` | No | Single-key compatibility field. Startup migration and settings saves fold it into `api_keys` only when neither credential field is overridden by the environment |
 | `enabled` | `bool` | No | Whether this provider is active. Default: `true` |
 | `timeout_ms` | `int` | No | Request timeout in milliseconds. Default: `300000` (5 minutes) |
 | `stream_timeout_ms` | `int` | No | Per-chunk timeout during streaming. Default: `60000` (1 minute) |
@@ -255,7 +255,11 @@ Set `wire_format: "anthropic"` for models that need raw Anthropic Messages forma
 
 Environment variables take precedence over config file values. Config values support `${VAR}` interpolation.
 
-Precedence order: `*_API_KEYS` → `*_API_KEY` → config file `api_keys` → config file `api_key`. The last two are one pool, not alternatives: the single key leads and the array follows.
+Each environment variable overrides only its matching field: `*_API_KEY` replaces `api_key`, and `*_API_KEYS` replaces `api_keys`. The resulting single key leads the resulting array; blanks and duplicate values are omitted from the effective pool. Setting both variables combines their values rather than choosing one variable over the other.
+
+Migration preserves the original field layout whenever either override is active, so moving a file key cannot change override behavior. Placeholders remain placeholders on disk. Startup migration and dashboard saves follow existing config symlinks and replace the target atomically, retaining a backup before a migration.
+
+The dashboard displays the effective pool but sends file-slot references from `key_indices`, not display row numbers (`-1` identifies the retained single-key field). Keeping a deduplicated row preserves all its original file entries, including distinct placeholders that currently resolve to the same key. Row-edit patches carry `key_pool_edit: true` in the affected block; this marker and runtime metadata are never persisted. Environment-only rows are read-only. When `*_API_KEYS` overrides the array, the editor can change at most the one unoverridden single-key slot; additional keys must be configured in the environment. Ordinary config imports remain field-based.
 
 #### Example Configurations
 

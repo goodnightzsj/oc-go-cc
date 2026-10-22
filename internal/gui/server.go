@@ -1214,6 +1214,16 @@ func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wanted := strings.TrimSpace(r.URL.Query().Get("provider"))
+	scopeAll := strings.TrimSpace(r.URL.Query().Get("scope")) == "all"
+	if scopeAll {
+		// The fallback picker asks a different question than the test picker:
+		// "which platforms could I fall back to", not "what is routed right
+		// now". /v1/models answers the second - it hides platforms outside the
+		// active site - so using it here offered only the current platform and
+		// made a cross-platform fallback impossible to configure.
+		s.serveAllReachableModels(w, wanted)
+		return
+	}
 
 	resp, err := s.fetchProxyModels(r.Context())
 	if err != nil {
@@ -1356,6 +1366,77 @@ type proxyModel struct {
 
 type proxyModelListing struct {
 	Data []proxyModel `json:"data"`
+}
+
+// serveAllReachableModels lists every model on every platform that holds a
+// credential, ignoring the active site.
+//
+// Only platforms with a key are included: a fallback there could never be sent,
+// and offering it would produce a chain that reads as protected and fails on the
+// attempt that needed it.
+func (s *Server) serveAllReachableModels(w http.ResponseWriter, wanted string) {
+	cfg := s.configSnapshot()
+	if cfg == nil {
+		http.Error(w, "config unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	cat := s.catalogIndex()
+	entries := []catalogModelEntry{}
+	for _, descriptor := range site.All() {
+		if wanted != "" && site.Normalize(descriptor.ID) != site.Normalize(wanted) {
+			continue
+		}
+		if len(cfg.ProviderAPIKeys(descriptor.ID)) == 0 {
+			continue
+		}
+		if cat == nil {
+			continue
+		}
+		for _, resolved := range cat.ListProviderModels(descriptor.ID) {
+			// The id a client sends is the key's wire form, not its canonical
+			// name: ClinePass requires the pool prefix, everything else drops it.
+			// CanonicalName is the key; ModelID may be blank for an entry that
+			// came from a provider's nested map.
+			id := catalog.WireModelID(resolved.CanonicalName)
+			if resolved.CanonicalName == "" {
+				id = resolved.ModelID
+			}
+			if id == "" {
+				continue
+			}
+			e := catalogModelEntry{
+				ID:            id,
+				Name:          resolved.DisplayName,
+				Provider:      descriptor.ID,
+				ContextWindow: resolved.ContextWindow,
+				MaxOutput:     resolved.MaxOutputTokens,
+				ToolCall:      resolved.Tools,
+				Vision:        resolved.Vision,
+				Reasoning:     resolved.Reasoning,
+			}
+			if e.Name == "" {
+				e.Name = id
+			}
+			if in, out, _, _, ok := storage.PriceForProviderModel(descriptor.ID, id, 0); ok {
+				e.InputPerM = in
+				e.OutputPerM = out
+			}
+			entries = append(entries, e)
+		}
+	}
+	writeJSON(w, map[string]any{
+		"models": entries,
+		"scope":  "",
+		"total":  len(entries),
+	})
+}
+
+// configSnapshot returns the live config, or nil when the server has none.
+func (s *Server) configSnapshot() *config.Config {
+	if s.atomicCfg == nil {
+		return nil
+	}
+	return s.atomicCfg.Get()
 }
 
 // fetchProxyModels asks the running proxy for its model list.

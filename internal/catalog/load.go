@@ -54,9 +54,17 @@ func Load(path string) (*IndexedCatalog, error) {
 
 	for key, model := range catalog.Models {
 		provider := ProviderFromModelKey(key)
-		if provider != "" {
-			idx.ProviderModels[provider] = append(idx.ProviderModels[provider], model)
+		if provider == "" {
+			continue
 		}
+		// Stamp the key onto the model. Callers read Model.ID to learn which
+		// model this is, and an entry folded in from a provider's nested map
+		// carries no id of its own - leaving it blank made those models
+		// unaddressable, silently, for every provider that publishes that way.
+		if model.ID == "" {
+			model.ID = key
+		}
+		idx.ProviderModels[provider] = append(idx.ProviderModels[provider], model)
 	}
 
 	return idx, nil

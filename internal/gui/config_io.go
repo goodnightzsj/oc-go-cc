@@ -217,6 +217,11 @@ func (s *Server) updateProxyConfig(patch map[string]json.RawMessage, apply bool)
 	if err := stripMaskedKeys(patch, merged); err != nil {
 		return nil, err
 	}
+	if err := routeKeyPoolEdits(patch); err != nil {
+		return nil, err
+	}
+	delete(patch, "key_indices")
+	delete(patch, "key_origins")
 	for field, value := range patch {
 		// Settings sends partial provider/connection objects. Routing maps and
 		// arrays are full replacements, so removed entries stay removed.
@@ -247,12 +252,69 @@ func (s *Server) updateProxyConfig(patch map[string]json.RawMessage, apply bool)
 				return nil, err
 			}
 		}
-		if err := writeConfigFile(configPath, data); err != nil {
+		if err := config.WriteFileAtomic(configPath, data); err != nil {
 			return nil, err
 		}
 		s.atomicCfg.ApplyLoaded(cfg)
 	}
 	return cfg, nil
+}
+
+// Row edits describe the editable portion of the effective pool, not a raw
+// config field. Keep ordinary config imports field-based, while routing editor
+// changes only into fields that the environment has not overridden.
+func routeKeyPoolEdits(patch map[string]json.RawMessage) error {
+	for _, block := range config.KeyPoolBlockNames() {
+		scope := patch
+		if block != "" {
+			var nested map[string]json.RawMessage
+			if json.Unmarshal(patch[block], &nested) != nil {
+				continue
+			}
+			scope = nested
+		}
+		flag, exists := scope["key_pool_edit"]
+		if !exists {
+			continue
+		}
+		var edit bool
+		if json.Unmarshal(flag, &edit) != nil || !edit {
+			return config.AtField(block, &config.ValidationError{Field: "key_pool_edit", Code: "invalid_type", Err: errors.New("key_pool_edit must be true")})
+		}
+		delete(scope, "key_pool_edit")
+		var keys []string
+		if err := json.Unmarshal(scope["api_keys"], &keys); err != nil {
+			return config.AtField(block, &config.ValidationError{Field: "api_keys", Code: "invalid_type", Err: errors.New("key pool edit requires an array")})
+		}
+		singleEnv, manyEnv := config.KeyPoolOverrides(block)
+		if manyEnv {
+			limit := 1
+			if singleEnv {
+				limit = 0
+			}
+			if len(keys) > limit {
+				return config.AtField(block, &config.ValidationError{Field: "api_keys", Code: "invalid_environment", Err: errors.New("API_KEYS is overridden by the environment; only the unoverridden single-key slot can be edited")})
+			}
+			delete(scope, "api_keys")
+			if !singleEnv {
+				value := ""
+				if len(keys) == 1 {
+					value = keys[0]
+				}
+				scope["api_key"], _ = json.Marshal(value)
+			}
+		} else if !singleEnv {
+			scope["api_key"] = json.RawMessage(`""`)
+		}
+		if block != "" {
+			encoded, err := json.Marshal(scope)
+			if err != nil {
+				return err
+			}
+			patch[block] = encoded
+		}
+	}
+	return nil
 }
 
 // reshapedKeyPools reports whether a save changed the config file's key-pool
@@ -323,26 +385,4 @@ func mergeConfigSettings(current, patch json.RawMessage) (json.RawMessage, error
 		oldFields[field] = merged
 	}
 	return json.Marshal(oldFields)
-}
-
-func writeConfigFile(path string, data []byte) error {
-	file, err := os.CreateTemp(filepath.Dir(path), ".routatic-config-*.tmp")
-	if err != nil {
-		return fmt.Errorf("failed to create config file: %w", err)
-	}
-	defer func() { _ = os.Remove(file.Name()) }()
-	defer func() { _ = file.Close() }()
-	if _, err := file.Write(data); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
-	}
-	if err := file.Sync(); err != nil {
-		return fmt.Errorf("failed to sync config file: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("failed to close config file: %w", err)
-	}
-	if err := os.Rename(file.Name(), path); err != nil {
-		return fmt.Errorf("failed to replace config file: %w", err)
-	}
-	return nil
 }

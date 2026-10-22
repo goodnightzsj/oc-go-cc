@@ -805,7 +805,10 @@ func stripMaskedKeys(patch, stored map[string]json.RawMessage) error {
 		// An array of key slots, or a legacy array of literal keys.
 		var asArray []json.RawMessage
 		if json.Unmarshal(raw, &asArray) == nil {
-			keys, err := resolveKeyPatch(json.RawMessage(raw), stored[field])
+			if field != "api_keys" {
+				continue // Routing chains and other arrays are not credential slots.
+			}
+			keys, err := resolveKeyPatch(json.RawMessage(raw), stored[field], stored["api_key"])
 			if err != nil {
 				// The slot parser works on elements and cannot name the field,
 				// so name it here; the enclosing recursion prefixes the rest of
@@ -819,6 +822,10 @@ func stripMaskedKeys(patch, stored map[string]json.RawMessage) error {
 				return config.AtField(field, err)
 			}
 			if keys == nil {
+				// Replaying a folded display must not clear an unfurled file key.
+				if field == "api_keys" && len(asArray) > 0 && string(patch["api_key"]) == `""` {
+					delete(patch, "api_key")
+				}
 				delete(patch, field)
 				continue
 			}
@@ -865,7 +872,7 @@ func stripMaskedKeys(patch, stored map[string]json.RawMessage) error {
 // guessed. Persisting a hint would store a placeholder as a credential, and
 // substituting "some stored key" for an ambiguous hint would rotate an account
 // the operator did not select.
-func resolveKeyPatch(raw, storedRaw json.RawMessage) ([]string, error) {
+func resolveKeyPatch(raw, storedRaw, singleRaw json.RawMessage) ([]string, error) {
 	var items []json.RawMessage
 	if err := json.Unmarshal(raw, &items); err != nil {
 		return nil, err
@@ -882,6 +889,7 @@ func resolveKeyPatch(raw, storedRaw json.RawMessage) ([]string, error) {
 	}
 
 	keys := make([]string, 0, len(items))
+	keptIndices := make(map[int]bool)
 	placeholders := 0
 	for _, item := range items {
 		var literal string
@@ -904,17 +912,40 @@ func resolveKeyPatch(raw, storedRaw json.RawMessage) ([]string, error) {
 			continue
 		}
 		index := *slot.Keep
-		if index < 0 || index >= len(stored) {
+		var retained string
+		if index == -1 {
+			_ = json.Unmarshal(singleRaw, &retained)
+		} else if index >= 0 && index < len(stored) {
+			retained = stored[index]
+		}
+		if retained == "" {
 			return nil, &config.ValidationError{Code: "stale_key_pool", Err: fmt.Errorf("kept key %d is outside the stored pool of %d; reload the settings before saving", index, len(stored))}
 		}
 		// The label was rendered from the resolved credential, while the file
 		// may still hold a ${VAR} placeholder. Resolve before comparing, or
 		// every environment-backed key looks stale. The placeholder itself is
 		// what gets kept, so a resolved secret never reaches disk.
-		if slot.Hint != maskKeyHint(config.InterpolateEnvVars(stored[index])) {
+		if slot.Hint != maskKeyHint(strings.TrimSpace(config.InterpolateEnvVars(retained))) {
 			return nil, &config.ValidationError{Code: "stale_key_pool", Err: fmt.Errorf("kept key %d no longer matches the stored credential; reload the settings before saving", index)}
 		}
-		keys = append(keys, stored[index])
+		if !keptIndices[index] {
+			keys = append(keys, retained)
+			keptIndices[index] = true
+		}
+		// One displayed row can represent several raw placeholders with equal
+		// current values. Keeping that row keeps its whole group; otherwise an
+		// unrelated addition would silently discard hidden file configuration.
+		// A single-field reference never absorbs the shadowed array: an active
+		// array override is exactly why that field was not folded.
+		if index >= 0 {
+			resolved := strings.TrimSpace(config.InterpolateEnvVars(retained))
+			for other, candidate := range stored {
+				if !keptIndices[other] && strings.TrimSpace(config.InterpolateEnvVars(candidate)) == resolved {
+					keys = append(keys, candidate)
+					keptIndices[other] = true
+				}
+			}
+		}
 	}
 	if placeholders > 0 {
 		if len(keys) > 0 {
@@ -1009,7 +1040,7 @@ func keyOriginView(cfg *config.Config) map[string][]string {
 // every existing client already reads: a settings save sends back a patch built
 // from these same top-level keys, and wrapping them would silently stop that
 // patch from addressing anything.
-func writeSettingsPayload(w http.ResponseWriter, cfg *config.Config, origins map[string][]string) {
+func writeSettingsPayload(w http.ResponseWriter, cfg *config.Config, origins map[string][]string, indices map[string][]*int) {
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		writeSettingsError(w, http.StatusInternalServerError, "redaction_failed", "", false)
@@ -1025,6 +1056,9 @@ func writeSettingsPayload(w http.ResponseWriter, cfg *config.Config, origins map
 		if err == nil {
 			flat["key_origins"] = encoded
 		}
+	}
+	if encoded, err := json.Marshal(indices); err == nil {
+		flat["key_indices"] = encoded
 	}
 	writeJSON(w, flat)
 }
@@ -1042,14 +1076,15 @@ func (s *Server) handleProxyConfig(w http.ResponseWriter, r *http.Request) {
 		// settings form only needs to know whether a key is set, so send a
 		// fixed-width mask instead. Saving an unchanged masked field is a no-op
 		// because the frontend only patches fields the user actually edited.
-		redacted, err := anonymizeConfig(s.atomicCfg.Get())
+		current := s.atomicCfg.Get()
+		redacted, err := anonymizeConfig(current)
 		if err != nil {
 			// Fail closed: an unredactable config is never sent unredacted.
 			writeSettingsError(w, http.StatusInternalServerError, "redaction_failed", "", false)
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		writeSettingsPayload(w, redacted, keyOriginView(s.atomicCfg.Get()))
+		writeSettingsPayload(w, redacted, keyOriginView(current), current.KeyPoolIndices())
 
 	case http.MethodPost:
 		// Decode only the fields the client sent (partial update).

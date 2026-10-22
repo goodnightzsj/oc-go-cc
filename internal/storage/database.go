@@ -234,13 +234,15 @@ func Open(cfg Config) (*Database, error) {
 // Persistent triggers cover every writer, including another process or older
 // CLI. The revision commits (or rolls back) with its request rows. Install the
 // counter and triggers atomically so no writer can slip between them.
+//
+// The statements are already idempotent (IF NOT EXISTS / INSERT OR IGNORE), so
+// contention is the only failure left, and it is not a failure: another opener
+// is doing the same work. SQLITE_BUSY therefore retries rather than aborting -
+// several processes opening one database at once is normal after a restart
+// while an old CLI is still running, and failing the open there would take the
+// service down over a table that is about to exist.
 func (d *Database) initHistoryRevision(ctx context.Context) error {
-	tx, err := d.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `
+	const ddl = `
 		CREATE TABLE IF NOT EXISTS history_revision (
 			id INTEGER PRIMARY KEY CHECK (id = 1),
 			revision INTEGER NOT NULL
@@ -252,10 +254,52 @@ func (d *Database) initHistoryRevision(ctx context.Context) error {
 		BEGIN UPDATE history_revision SET revision = revision + 1 WHERE id = 1; END;
 		CREATE TRIGGER IF NOT EXISTS requests_revision_delete AFTER DELETE ON requests
 		BEGIN UPDATE history_revision SET revision = revision + 1 WHERE id = 1; END;
-	`); err != nil {
+	`
+	var lastErr error
+	for attempt := 0; attempt < 8; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := d.applyHistoryRevision(ctx, ddl); err != nil {
+			if !isBusy(err) {
+				return err
+			}
+			lastErr = err
+			time.Sleep(time.Duration(20*(attempt+1)) * time.Millisecond)
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("install history revision after retries: %w", lastErr)
+}
+
+func (d *Database) applyHistoryRevision(ctx context.Context, ddl string) error {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, ddl); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// isBusy reports whether a SQLite error means "another writer holds the lock",
+// which is transient.
+//
+// modernc.org/sqlite does not export its busy/locked codes, so the message is
+// what is left. That is the error-text matching this package removed from the
+// column migration, and the difference is the consequence: a miss here fails an
+// open that used to succeed, where a miss there silently skipped a schema
+// change. The retry loop means a miss costs latency, not correctness, and the
+// wait is bounded.
+func isBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "database is locked") || strings.Contains(msg, "SQLITE_BUSY")
 }
 
 func prepareDatabaseFile(path string) error {
@@ -456,7 +500,18 @@ func (d *Database) migrateColumns(ctx context.Context) error {
 			continue
 		}
 		if _, err := d.db.ExecContext(ctx, m.ddl); err != nil {
-			return fmt.Errorf("%s: %w", m.ddl, err)
+			// Two connections opening the same file at once both see the column
+			// missing, and the second ALTER fails. That is not a broken schema -
+			// the column exists, which is what this migration wanted. Ask SQLite
+			// rather than reading the error text: the driver owns that wording.
+			after, recheckErr := d.tableColumns(ctx, m.table)
+			if recheckErr != nil {
+				return fmt.Errorf("%s: %w", m.ddl, err)
+			}
+			if !after[m.column] {
+				return fmt.Errorf("%s: %w", m.ddl, err)
+			}
+			slog.Info("column created by a concurrent opener", "table", m.table, "column", m.column)
 		}
 		// Record it so a second ADD to the same table in this pass cannot
 		// depend on the cache having been written before the DDL ran.

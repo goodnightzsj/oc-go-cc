@@ -48,32 +48,6 @@ func TestNormalizeRequestNeverStoresAModeAsEffort(t *testing.T) {
 	}
 }
 
-// The normalized request and the transformer must convert a budget the same
-// way. If they drift, one reader is told "medium" while the upstream is told
-// "high" for the same request, and nothing reports the disagreement.
-func TestEffortFromBudgetMatchesTheTransformPath(t *testing.T) {
-	// Mirrors transformer.budgetTokensToEffort. Duplicated rather than imported
-	// because core must not depend on transformer; this test is what keeps the
-	// two in step.
-	transformPath := func(budget int) string {
-		switch {
-		case budget <= 2048:
-			return "low"
-		case budget <= 8192:
-			return "medium"
-		case budget <= 32768:
-			return "high"
-		default:
-			return "max"
-		}
-	}
-	for _, budget := range []int{1, 1024, 2048, 2049, 4096, 8192, 8193, 16384, 32768, 32769, 63999, 200000} {
-		if got, want := EffortFromBudget(budget), transformPath(budget); got != want {
-			t.Errorf("budget %d: core says %q, transformer says %q", budget, got, want)
-		}
-	}
-}
-
 // A zero budget means the client expressed no intent, which is not the same as
 // asking for the weakest level.
 func TestEffortFromBudgetReportsNothingForAZeroBudget(t *testing.T) {

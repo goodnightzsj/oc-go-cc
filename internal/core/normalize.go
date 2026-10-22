@@ -233,10 +233,8 @@ func NormalizeEffort(effort string) (string, bool) {
 //
 // The bands are a judgement, not a published conversion: Anthropic documents
 // budget_tokens as a token target and OpenAI documents effort as a discrete
-// level, and neither says how one becomes the other. They are kept identical to
-// transformer.budgetTokensToEffort on purpose - two conversions of the same
-// budget that disagreed would tell a capture reader and the upstream different
-// levels for one request, and nothing would flag it.
+// level, and neither says how one becomes the other. Normalization, upstream
+// transformation and history recording share this conversion.
 //
 // The ladder stops at "max" rather than reaching OpenAI's "none"/"minimal":
 // those mean "do not reason", and a request that carried a positive thinking

@@ -48,3 +48,25 @@ func TestFallbackAddHintElementExists(t *testing.T) {
 		t.Error("the add-model hint element is missing; the picker would have nowhere to explain an empty list")
 	}
 }
+
+// The cross-platform switch has to exist and be wired into the save patch: an
+// operator who cannot see it cannot learn the feature exists, and one that
+// saves but is not sent is worse - it looks enabled.
+func TestCrossPlatformToggleIsWired(t *testing.T) {
+	html := readEmbeddedAsset(t, "assets/index.html")
+	if !strings.Contains(html, `id="fallback-cross-platform"`) {
+		t.Fatal("the cross-platform toggle is missing from the Fallback tab")
+	}
+	js := readEmbeddedAsset(t, "assets/app.js")
+	if !strings.Contains(js, "enable_cross_platform_fallback") {
+		t.Error("the toggle is not written into the settings patch")
+	}
+	if !strings.Contains(js, "patch.enable_cross_platform_fallback = crossNow") {
+		t.Error("toggling it alone would save nothing; the patch must carry it")
+	}
+	for _, key := range []string{"fallback.crossPlatform", "fallback.crossPlatformHint"} {
+		if n := strings.Count(js, "'"+key+"':"); n < 2 {
+			t.Errorf("%q needs an English and a Chinese entry, found %d", key, n)
+		}
+	}
+}

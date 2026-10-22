@@ -511,6 +511,8 @@ const TRANSLATIONS = {
     'fallback.empty': 'No models configured',
     'fallback.previewTitle': 'Fallback Chain Preview',
     'fallback.selectModel': 'Select a model',
+    'fallback.crossPlatform': 'Allow fallbacks on other platforms',
+    'fallback.crossPlatformHint': 'Off by default. Entries on another platform are skipped and counted in the log, so you can see how often it would fire before spending another account\'s quota.',
     'fallback.addHint': 'Grouped by platform; only platforms holding a credential are listed ({n}).',
     'fallback.unreachable': 'Inactive',
     'fallback.unreachableHint': 'This platform is outside the active site, so this entry is skipped and never serves a request.',
@@ -1119,6 +1121,8 @@ const TRANSLATIONS = {
     'fallback.empty': '未配置模型',
     'fallback.previewTitle': '降级链预览',
     'fallback.selectModel': '选择模型',
+    'fallback.crossPlatform': '允许跨平台降级',
+    'fallback.crossPlatformHint': '默认关闭。其他平台的条目会被跳过并在日志中计数，这样可以在消耗另一个账号额度之前先看清它有多频繁。',
     'fallback.addHint': '按平台分组，只列出持有可用凭据的平台（{n} 个）。',
     'fallback.unreachable': '不生效',
     'fallback.unreachableHint': '该平台不在当前 active site 内，此条目会被跳过，永远不会承接请求。',
@@ -5105,6 +5109,8 @@ const FallbackModule = {
       }
 
       this.populateAddSelect();
+      const crossBox = document.getElementById('fallback-cross-platform');
+      if (crossBox) crossBox.checked = config.enable_cross_platform_fallback === true;
       this.originalChains = JSON.parse(JSON.stringify(this.chains));
       this.renderChain();
     } catch (e) {
@@ -5153,6 +5159,16 @@ const FallbackModule = {
         ? t('fallback.noReachableModels')
         : t('fallback.addHint').replace('{n}', String(groups.length));
     }
+  },
+
+  onCrossPlatformChange() {
+    const box = document.getElementById('fallback-cross-platform');
+    if (!box) return;
+    // Saved with the chain: the switch and the entries it governs belong to one
+    // decision, and splitting them across two save actions invites a state
+    // where the chain says one thing and the switch another.
+    this.crossPlatformDirty = true;
+    updateConfigChangeCount();
   },
 
   onAddSelectChange() {
@@ -5330,9 +5346,12 @@ const FallbackModule = {
   },
 
   async save() {
-    const hasChanges = this.originalChains && (
+    const crossBox = document.getElementById('fallback-cross-platform');
+    const crossNow = !!(crossBox && crossBox.checked);
+    const crossChanged = crossNow !== (currentProxyConfig?.enable_cross_platform_fallback === true);
+    const hasChanges = crossChanged || (this.originalChains && (
       JSON.stringify(this.chains) !== JSON.stringify(this.originalChains)
-    );
+    ));
 
     if (!hasChanges) {
       this.setStatus(t('fallback.noChanges'));
@@ -5349,13 +5368,17 @@ const FallbackModule = {
     try {
       const submitted = JSON.parse(JSON.stringify(this.chains));
       const patch = { fallbacks: submitted };
+      if (crossChanged) patch.enable_cross_platform_fallback = crossNow;
       await settingsRequest('/api/proxy/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch)
       }, true);
       this.originalChains = submitted;
-      if (currentProxyConfig) currentProxyConfig.fallbacks = submitted;
+      if (currentProxyConfig) {
+        currentProxyConfig.fallbacks = submitted;
+        currentProxyConfig.enable_cross_platform_fallback = crossNow;
+      }
       const pending = JSON.stringify(this.chains) !== JSON.stringify(submitted);
       this.setStatus(t('fallback.saved') + (pending ? ' ' + t('fallback.unsaved') : ''), 'success');
     } catch (e) {

@@ -454,6 +454,13 @@
   <div class="tab-content flex-1 overflow-y-auto" id="tab-fallback">
     <div class="page-shell fallback-page">
       <div class="page-heading"><div><h1 data-i18n="tab.fallback">Fallback</h1><p class="page-meta" data-i18n="fallback.description">Set the model order for each routing scenario.</p></div></div>
+      <div class="fallback-cross-platform">
+        <label class="toggle-row">
+          <input type="checkbox" id="fallback-cross-platform" onchange="FallbackModule.onCrossPlatformChange()">
+          <span data-i18n="fallback.crossPlatform">Allow fallbacks on other platforms</span>
+        </label>
+        <p class="page-meta" data-i18n="fallback.crossPlatformHint">Off by default. Entries on another platform are skipped and counted in the log, so you can see how often it would fire before spending another account's quota.</p>
+      </div>
       <div class="fallback-toolbar">
         <div>
           <label for="fallback-scenario" data-i18n="fallback.scenario">Scenario</label>

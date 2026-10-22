@@ -80,3 +80,23 @@ func TestApplyConfigPatch_RejectsInvalidPort(t *testing.T) {
 		t.Errorf("a rejected patch must leave the file untouched, got:\n%s", saved)
 	}
 }
+
+func TestProxyConfigSavePreservesSymlink(t *testing.T) {
+	srv, target := configTestServer(t, `{"api_keys":["synthetic-key"]}`)
+	link := filepath.Join(filepath.Dir(target), "link.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	srv.atomicCfg = config.NewAtomicConfig(srv.atomicCfg.Get(), link)
+	if _, err := srv.updateProxyConfig(map[string]json.RawMessage{"port": json.RawMessage(`4321`)}, true); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(link)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("save replaced symlink")
+	}
+	raw, err := os.ReadFile(target)
+	if err != nil || !strings.Contains(string(raw), "4321") {
+		t.Fatal("target not updated")
+	}
+}

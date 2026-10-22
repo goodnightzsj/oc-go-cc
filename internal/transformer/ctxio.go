@@ -87,6 +87,15 @@ func (c *ctxReadCloser) UpstreamModel() string {
 // separate from UpstreamModel on purpose: that one is the routing block's
 // canonical slug, which arrives at the END of the stream, while this one is the
 // chunk-level model that is knowable before any content is written.
+// MarkFirstByte forwards the first-byte stamp. The reader asks for it by
+// interface, so a wrapper that does not declare it makes the whole chain look
+// like a body that never reports one.
+func (c *ctxReadCloser) MarkFirstByte() {
+	if recorder, ok := c.closer.(interface{ MarkFirstByte() }); ok {
+		recorder.MarkFirstByte()
+	}
+}
+
 // FirstByteAt forwards the first-byte timestamp, for the same reason as the
 // observations above: embedding promotes Read alone.
 func (c *ctxReadCloser) FirstByteAt() time.Time {

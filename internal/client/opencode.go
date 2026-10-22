@@ -54,6 +54,25 @@ func (t *captureReadCloser) ServedModel() string {
 	return ""
 }
 
+// MarkFirstByte and FirstByteAt forward the first-byte observation. They are
+// here for the reason the methods above are: embedding promotes Read and Close
+// only, so a wrapper that forwards one observation and not the others erases
+// the rest. This one was missed on the first pass and the field stored empty on
+// every production row - the test fixture had capture disabled, so the wrapper
+// was not in the path there.
+func (t *captureReadCloser) MarkFirstByte() {
+	if recorder, ok := t.ReadCloser.(interface{ MarkFirstByte() }); ok {
+		recorder.MarkFirstByte()
+	}
+}
+
+func (t *captureReadCloser) FirstByteAt() time.Time {
+	if reporter, ok := t.ReadCloser.(interface{ FirstByteAt() time.Time }); ok {
+		return reporter.FirstByteAt()
+	}
+	return time.Time{}
+}
+
 // CaptureBody wraps body so that all bytes read from it are delivered (async)
 // to capture. Returns body unchanged when capture is nil.
 func CaptureBody(body io.ReadCloser, capture func(data []byte)) io.ReadCloser {

@@ -4,6 +4,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/routatic/proxy/internal/transformer"
 )
@@ -12,13 +13,16 @@ import (
 // and the model the gateway said it ran.
 type channelBody struct {
 	io.Reader
-	channel string
-	model   string
+	channel   string
+	model     string
+	firstByte time.Time
 }
 
 func (c *channelBody) Close() error            { return nil }
 func (c *channelBody) UpstreamChannel() string { return c.channel }
 func (c *channelBody) UpstreamModel() string   { return c.model }
+func (c *channelBody) MarkFirstByte()          { c.firstByte = time.Unix(1700000000, 0) }
+func (c *channelBody) FirstByteAt() time.Time  { return c.firstByte }
 
 // The channel has to survive every wrapper the request path puts around the
 // body. It does not survive by default: embedding an io.ReadCloser promotes only
@@ -62,6 +66,18 @@ func TestUpstreamChannelSurvivesTheWrapperChain(t *testing.T) {
 			// chain rather than a separate one that could drift.
 			if got := UpstreamModelOf(wrapped); got != wantModel {
 				t.Errorf("upstream model = %q, want %q through the %s wrapper", got, wantModel, tc.name)
+			}
+			// The first-byte timestamp is a third observation on the same body
+			// and is erased by the same wrappers. It was missed on the first
+			// pass: production had capture on, the test fixture had it off, and
+			// every stored row came back empty while this test stayed green.
+			if marker, ok := wrapped.(interface{ MarkFirstByte() }); ok {
+				marker.MarkFirstByte()
+			} else {
+				t.Fatalf("the %s wrapper does not expose MarkFirstByte", tc.name)
+			}
+			if got := FirstByteAtOf(wrapped); got.IsZero() {
+				t.Errorf("first byte timestamp lost through the %s wrapper", tc.name)
 			}
 		})
 	}

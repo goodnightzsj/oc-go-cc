@@ -1959,6 +1959,13 @@ function buildViewHash() {
     if (currentSort.field !== 'start_time') params.set('sort', currentSort.field);
     if (currentSort.dir !== 'desc') params.set('dir', currentSort.dir);
   }
+  // The Fallback tab's platform filter is its own parameter. It is not the
+  // global `platform` key - that one narrows history and analytics - so sharing
+  // it would make choosing a platform to browse fallback models silently filter
+  // every other tab.
+  if (activeTab === 'fallback' && FallbackModule.platformFilter) {
+    params.set('fplatform', FallbackModule.platformFilter);
+  }
   const query = params.toString();
   return '#' + (activeTab || 'overview') + (query ? '?' + query : '');
 }
@@ -1986,6 +1993,10 @@ function applyViewState(params) {
   suppressViewStateSync = true;
   try {
     setViewPlatform(params.has('platform') ? params.get('platform') : null);
+    // Restored here rather than in FallbackModule.loadConfig: the hash is read
+    // once at boot, and the listing may not have arrived yet, so the module
+    // decides when it can act on the value.
+    FallbackModule.applyPendingPlatform(params.get('fplatform') || '');
     const changed = [];
     for (const [key, ids] of Object.entries(VIEW_CONTROLS)) {
       if (key === 'platform') continue;
@@ -5146,6 +5157,9 @@ const FallbackModule = {
       }
       if (scenarioField) scenarioField.hidden = scenarioKeys.length <= 1;
       this.populatePlatformFilter(scenarioKeys);
+      // A restored platform has to reach the URL even when nothing else changed,
+      // or a reload of a link that named one would drop it on the next sync.
+      if (activeTab === 'fallback') syncViewState({replace: true});
 
       this.populateAddSelect();
       const crossBox = document.getElementById('fallback-cross-platform');
@@ -5195,7 +5209,14 @@ const FallbackModule = {
       .map(m => m.provider || 'opencode-go')
       .concat((this.addCandidates || []).map(m => m.provider || 'opencode-go')))]
       .sort(compareProviderDisplay);
-    const previous = sel.value || this.platformFilter || '';
+    // A value restored from the URL wins on the first pass; after that the
+    // control's own selection does.
+    //
+    // The hash is applied in a microtask that can run after this module has
+    // already loaded, so a restored value may arrive later. It is consumed
+    // rather than cleared so a second call still sees it, and
+    // applyPendingPlatform re-runs the filter when that happens.
+    const previous = this.pendingPlatform ?? (sel.value || this.platformFilter || '');
     const mkOption = (label, value) => {
       const item = document.createElement('option');
       item.value = value;
@@ -5206,9 +5227,24 @@ const FallbackModule = {
       mkOption(t('filter.allProviders'), ''),
       ...providers.map(p => mkOption(platformLabel(p), p)),
     );
+    // A platform that is no longer reachable falls back to "all": keeping a
+    // filter whose options vanished would show an empty list with no way to
+    // tell why.
     sel.value = providers.includes(previous) ? previous : '';
     this.platformFilter = sel.value;
+    this.pendingPlatform = '';
+    this.pendingPlatformConsumed = true;
     window.CustomSelect?.sync(sel);
+  },
+
+  // applyPendingPlatform consumes a platform restored from the URL. Called by
+  // the view-state applier, which may run before or after the config loads.
+  applyPendingPlatform(value) {
+    this.pendingPlatform = value || '';
+    const sel = document.getElementById('fallback-platform-filter');
+    if (!sel || sel.options.length === 0) return; // the listing has not arrived yet
+    this.populatePlatformFilter();
+    this.populateAddSelect();
   },
 
   onPlatformFilterChange() {
@@ -5221,6 +5257,10 @@ const FallbackModule = {
     const search = document.getElementById('fallback-add-search');
     if (search) search.value = '';
     this.populateAddSelect();
+    // The choice is view state, not configuration: it belongs in the URL so a
+    // reload or a shared link lands on the same platform, and nothing is
+    // written to the config file.
+    syncViewState({replace: true});
   },
 
   // The add-model picker: a searchable popover rather than a native select.

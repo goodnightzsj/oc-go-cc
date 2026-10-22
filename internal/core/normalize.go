@@ -169,10 +169,39 @@ func DenormalizeResponse(nr *NormalizedResponse) *types.MessageResponse {
 	return resp
 }
 
-// EffortLevels are the values OpenAI's reasoning_effort accepts, weakest
-// first, quoted from OpenAI's reasoning guide. Availability is per-model, so a
-// value from here is a request, not a guarantee.
-var EffortLevels = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+// effortLevels are the values the proxy accepts as a reasoning effort: the
+// union of what Anthropic documents (low/medium/high/xhigh/max) and what
+// OpenAI documents (which adds none/minimal). The two lowest are accepted and
+// raised to "low" by the callers, because the Anthropic ladder has no rung
+// below it - see NormalizeEffort.
+var effortLevels = map[string]bool{
+	"none": true, "minimal": true, "low": true, "medium": true,
+	"high": true, "xhigh": true, "max": true,
+}
+
+// NormalizeEffort returns the level to send upstream, and whether the input was
+// a level at all.
+//
+// "none" and "minimal" are OpenAI's lowest rungs and have no Anthropic
+// equivalent, so they become "low": the request asked for as little reasoning
+// as possible and gets the least this ladder offers. Raising a level costs more
+// tokens than the caller wanted; rejecting the request delivers nothing.
+//
+// Anything that is not a level - notably the thinking config's own
+// "enabled"/"disabled" - reports false, so a caller can fail instead of sending
+// a value no provider accepts.
+func NormalizeEffort(effort string) (string, bool) {
+	if effort == "" {
+		return "", true
+	}
+	if !effortLevels[effort] {
+		return "", false
+	}
+	if effort == "none" || effort == "minimal" {
+		return "low", true
+	}
+	return effort, true
+}
 
 // EffortFromBudget maps an Anthropic thinking budget to an OpenAI effort level.
 //
@@ -199,16 +228,4 @@ func EffortFromBudget(budget int) string {
 	default:
 		return "max"
 	}
-}
-
-// IsEffortLevel reports whether value is one of EffortLevels. Anything else -
-// including the thinking config's own "enabled"/"disabled" - is not an effort
-// value and must not be sent as one.
-func IsEffortLevel(value string) bool {
-	for _, level := range EffortLevels {
-		if value == level {
-			return true
-		}
-	}
-	return false
 }

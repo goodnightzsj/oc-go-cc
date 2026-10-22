@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/internal/models"
 	"github.com/routatic/proxy/pkg/types"
 )
@@ -198,12 +199,17 @@ func (t *RequestTransformer) TransformRequest(
 			}
 			openaiReq.ResponseFormat = responseFormat
 		}
-		switch output.Effort {
-		case "":
-		case "low", "medium", "high", "xhigh", "max":
-			openaiReq.ReasoningEffort = &output.Effort
-		default:
+		// Same ladder as the Responses inbound path, for the same reason: a level
+		// the caller could legally send must not turn into a failed request.
+		// "none" and "minimal" are OpenAI's, not Anthropic's, so they arrive here
+		// only through a Responses client; raising them to "low" is the closest
+		// thing this ladder can express.
+		effort, ok := core.NormalizeEffort(output.Effort)
+		if !ok {
 			return nil, fmt.Errorf("unsupported output_config.effort %q", output.Effort)
+		}
+		if effort != "" {
+			openaiReq.ReasoningEffort = &effort
 		}
 	}
 

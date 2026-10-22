@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/pkg/types"
 )
 
@@ -164,22 +165,22 @@ func ResponsesToMessageRequest(raw []byte) (*types.MessageRequest, error) {
 		if in.Reasoning.Summary != "" {
 			return nil, fmt.Errorf("reasoning.summary is not supported by this adapter")
 		}
-		// Accept the levels OpenAI documents, minus the two that mean "do not
-		// reason": this adapter has no way to express "skip thinking" downstream
-		// (the Anthropic request carries no thinking field to disable), so
-		// accepting them would silently upgrade a request that asked for none.
-		switch in.Reasoning.Effort {
-		case "":
-		case "low", "medium", "high", "max":
-			out.OutputConfig, _ = json.Marshal(map[string]string{"effort": in.Reasoning.Effort})
-		case "none", "minimal":
-			return nil, fmt.Errorf("reasoning.effort %q asks for no reasoning, which this adapter cannot express", in.Reasoning.Effort)
-		case "xhigh":
-			// Supported downstream (output_config.effort accepts it). Rejecting
-			// it here turned a request the pipeline handles into a 400.
-			out.OutputConfig, _ = json.Marshal(map[string]string{"effort": in.Reasoning.Effort})
-		default:
+		// Every level OpenAI documents is accepted. The two lowest - "none" and
+		// "minimal", which ask for little or no reasoning - are raised to "low"
+		// because Anthropic has no equivalent rung: its ladder is
+		// low/medium/high/xhigh/max. Rejecting them made a Codex request fail
+		// outright, and a client that cannot send its normal settings cannot use
+		// the proxy at all. Raising a level spends more tokens than the caller
+		// asked for; failing spends none and delivers nothing.
+		//
+		// The loss is real and one-directional: a request that asked for the
+		// least possible reasoning gets the least Anthropic offers, not none.
+		effort, ok := core.NormalizeEffort(in.Reasoning.Effort)
+		if !ok {
 			return nil, fmt.Errorf("reasoning.effort %q has no supported upstream mapping", in.Reasoning.Effort)
+		}
+		if effort != "" {
+			out.OutputConfig, _ = json.Marshal(map[string]string{"effort": effort})
 		}
 	}
 	tools, err := flattenTools(in.Tools)

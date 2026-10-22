@@ -46,8 +46,8 @@ func TestHistoryHeaderColumnsMatchTheRow(t *testing.T) {
 	// value is still recorded and still filterable; it is just not a column
 	// worth a slot when it cannot vary.
 	want := []string{
-		"th.time", "th.status", "th.modelPlatform",
-		"th.tokens", "th.cost", "th.effort", "th.firstByte", "th.duration", "th.tokensPerSecond",
+		"th.time", "th.status", "th.modelPlatform", "th.effort",
+		"th.tokens", "th.cost", "th.firstByte", "th.duration", "th.tokensPerSecond",
 	}
 	prev := -1
 	for _, key := range want {

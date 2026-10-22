@@ -1293,14 +1293,33 @@ func TestPublishedByActiveSite_ResolvesCapabilitiesAcrossNamespaces(t *testing.T
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "catalog.json")
+	// Several providers carry this model, exactly as the real catalog does - it
+	// lists the id under 38 of them. One row would not reproduce the defect:
+	// ResolveShort answers a single match and only refuses a tie.
 	body := `{
 	  "providers": {
-	    "cline-pass": {"name": "cline-pass", "enabled": true},
-	    "deepseek":   {"name": "deepseek",   "enabled": true}
+	    "cline-pass":   {"name": "cline-pass",   "enabled": true},
+	    "deepseek":     {"name": "deepseek",     "enabled": true},
+	    "nearai":       {"name": "nearai",       "enabled": true},
+	    "fireworks-ai": {"name": "fireworks-ai", "enabled": true}
 	  },
 	  "models": {
 	    "deepseek/deepseek-v4.1-flash-1017": {
 	      "id": "deepseek/deepseek-v4.1-flash-1017",
+	      "name": "DeepSeek V4.1 Flash 1017",
+	      "limit": {"context": 1000000, "output": 384000},
+	      "tool_call": true,
+	      "modalities": {"input": ["text", "image"], "output": ["text"]}
+	    },
+	    "nearai/deepseek-v4.1-flash-1017": {
+	      "id": "nearai/deepseek-v4.1-flash-1017",
+	      "name": "DeepSeek V4.1 Flash 1017",
+	      "limit": {"context": 1000000, "output": 384000},
+	      "tool_call": true,
+	      "modalities": {"input": ["text", "image"], "output": ["text"]}
+	    },
+	    "fireworks-ai/deepseek-v4.1-flash-1017": {
+	      "id": "fireworks-ai/deepseek-v4.1-flash-1017",
 	      "name": "DeepSeek V4.1 Flash 1017",
 	      "limit": {"context": 1000000, "output": 384000},
 	      "tool_call": true,
@@ -1381,11 +1400,19 @@ func TestResolveRequestedModel_ResolvesPlatformPrefixedId(t *testing.T) {
 	body := `{
 	  "providers": {
 	    "cline-pass": {"name": "cline-pass", "enabled": true},
-	    "deepseek":   {"name": "deepseek",   "enabled": true}
+	    "deepseek":   {"name": "deepseek",   "enabled": true},
+	    "nearai":     {"name": "nearai",     "enabled": true}
 	  },
 	  "models": {
 	    "deepseek/deepseek-v4.1-flash-1017": {
 	      "id": "deepseek/deepseek-v4.1-flash-1017",
+	      "name": "DeepSeek V4.1 Flash 1017",
+	      "limit": {"context": 1000000, "output": 384000},
+	      "tool_call": true,
+	      "modalities": {"input": ["text", "image"], "output": ["text"]}
+	    },
+	    "nearai/deepseek-v4.1-flash-1017": {
+	      "id": "nearai/deepseek-v4.1-flash-1017",
 	      "name": "DeepSeek V4.1 Flash 1017",
 	      "limit": {"context": 1000000, "output": 384000},
 	      "tool_call": true,

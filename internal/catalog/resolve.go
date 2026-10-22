@@ -153,6 +153,38 @@ func (ic *IndexedCatalog) resolveFromMatches(short string, matches []string) (Re
 	return ResolvedModel{}, fmt.Errorf("ambiguous model %q: available on multiple providers [%s] - use provider/model-id format", short, strings.Join(providers, ", "))
 }
 
+// ModelByName returns a model entry for a bare model name without insisting on
+// a provider. Use it when only the model's capabilities are wanted - never to
+// decide where a request goes, because the answer names whoever happened to
+// win the tie.
+//
+// A real catalog is ambiguous here rather than merely under-specified: 38
+// providers list "deepseek-v4.1-flash-1017", and ResolveShort reports that as
+// an error, which is right for routing and useless for capabilities. The rows
+// describe one model, so the question is only which numbers to believe. The
+// widest context window wins, and ties break on the key so the choice is
+// stable: under-reporting the window makes the capacity filter refuse a request
+// the platform would have served, while over-reporting lets the platform answer
+// for itself.
+func (ic *IndexedCatalog) ModelByName(name string) (Model, bool) {
+	if model, ok := ic.Models[name]; ok {
+		return model, true
+	}
+
+	bestKey := ""
+	var best Model
+	for key, model := range ic.Models {
+		if modelNameFromKey(key) != name && model.Name != name {
+			continue
+		}
+		if bestKey == "" || model.ContextWindow() > best.ContextWindow() ||
+			(model.ContextWindow() == best.ContextWindow() && key < bestKey) {
+			bestKey, best = key, model
+		}
+	}
+	return best, bestKey != ""
+}
+
 // ListProviderModels returns a slice of ResolvedModel for every model that supports the
 // named provider. The iteration order follows the underlying map and is non-deterministic.
 // If the provider is unknown, nil is returned.

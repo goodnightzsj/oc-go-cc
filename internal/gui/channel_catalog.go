@@ -187,7 +187,7 @@ func (c *channelCatalog) refresh(ctx context.Context, directory string) (err err
 	after, _ := json.MarshalIndent(next, "", "  ")
 	canonical, _ := json.Marshal(next)
 	if !bytes.Equal(before, canonical) {
-		if err := writeConfigFile(cachePath, append(after, '\n')); err != nil {
+		if err := config.WriteFileAtomic(cachePath, append(after, '\n')); err != nil {
 			return err
 		}
 	}

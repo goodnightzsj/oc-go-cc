@@ -158,7 +158,7 @@ func TestResolveKeyPatchKeepsUneditedRows(t *testing.T) {
 		{"value":"sk-replacement-zzzz"},
 		{"keep":2,"hint":"` + maskKeyHint(stored[2]) + `"}
 	]`
-	got, err := resolveKeyPatch(json.RawMessage(patch), storedRaw)
+	got, err := resolveKeyPatch(json.RawMessage(patch), storedRaw, nil)
 	if err != nil {
 		t.Fatalf("resolve key patch: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestResolveKeyPatchRefusesAStaleIndex(t *testing.T) {
 		"wrong shape":   `[42]`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := resolveKeyPatch(json.RawMessage(patch), storedRaw); err == nil {
+			if _, err := resolveKeyPatch(json.RawMessage(patch), storedRaw, nil); err == nil {
 				t.Fatalf("accepted %s, which would write the wrong credential", patch)
 			}
 		})
@@ -207,7 +207,7 @@ func TestResolveKeyPatchDropsAReplayedPool(t *testing.T) {
 		"row labels":  `["` + maskKeyHint(stored[0]) + `","` + maskKeyHint(stored[1]) + `"]`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			got, err := resolveKeyPatch(json.RawMessage(patch), storedRaw)
+			got, err := resolveKeyPatch(json.RawMessage(patch), storedRaw, nil)
 			if err != nil {
 				t.Fatalf("replayed pool must be ignored, not rejected: %v", err)
 			}
@@ -221,7 +221,7 @@ func TestResolveKeyPatchDropsAReplayedPool(t *testing.T) {
 // An explicitly empty list clears the pool; it must not be read as "no change".
 func TestResolveKeyPatchAllowsClearingThePool(t *testing.T) {
 	storedRaw, _ := json.Marshal([]string{"sk-first-aaaa"})
-	got, err := resolveKeyPatch(json.RawMessage(`[]`), storedRaw)
+	got, err := resolveKeyPatch(json.RawMessage(`[]`), storedRaw, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

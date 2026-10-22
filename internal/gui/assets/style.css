@@ -1901,6 +1901,25 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
 /* The credential that carried the request, masked to its last four characters.
    Monospaced so equal-length labels line up column-wise, which is what makes a
    change of account visible at a glance. */
+.fallback-cross-platform {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--ui-border, #3a3a3c);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ui-text-secondary, #98989d) 6%, transparent);
+}
+
+.fallback-cross-platform .toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.fallback-cross-platform .page-meta {
+  margin: 6px 0 0 24px;
+}
+
 .chain-unreachable {
   padding: 0 5px;
   border: 1px solid color-mix(in srgb, var(--ui-orange, #ff9f0a) 40%, transparent);

@@ -5459,30 +5459,10 @@ const FallbackModule = {
   renderChain() {
     const list = document.getElementById('fallback-chain');
     const chain = this.chains[this.currentScenario];
-    const primary = currentProxyConfig?.models?.[this.currentScenario];
-    const primaryEl = document.getElementById('fallback-primary');
-    // The primary is not editable here: it comes from the scenario's own model
-    // config, and on this instance requests are routed by override anyway - the
-    // client names the model, so this entry never runs. Showing it as a value
-    // invited the reading that the page had selected it.
-    //
-    // With no primary configured the card shows a dash and nothing else. An
-    // explanation of "this is read-only" answers a question nobody asked when
-    // there is no value to be confused about.
-    const hasPrimary = !!primary;
-    const tag = document.getElementById('fallback-primary-tag');
-    if (primaryEl) {
-      primaryEl.textContent = hasPrimary ? configModelKey(primary) : '—';
-      primaryEl.title = hasPrimary ? t('fallback.primaryReadOnly') : '';
-    }
-    if (tag) tag.hidden = !hasPrimary;
-    const primaryNote = document.getElementById('fallback-primary-note');
-    if (primaryNote) {
-      primaryNote.hidden = !hasPrimary;
-      primaryNote.textContent = hasPrimary
-        ? t('fallback.primaryNote').replace('{model}', configModelKey(primary))
-        : '';
-    }
+    // No primary card. It showed models.default, which on this instance never
+    // runs: requests are routed by the model the client names, so the entry was
+    // a value nobody could act on that read as a current selection. The chain
+    // below is the part of this page that actually decides anything.
     this.setStatus(t(this.originalChains && JSON.stringify(this.chains) !== JSON.stringify(this.originalChains)
       ? 'fallback.unsaved' : 'fallback.noChanges'));
 

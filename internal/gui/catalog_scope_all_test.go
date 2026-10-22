@@ -74,12 +74,24 @@ func TestCatalogModelsScopeAllIgnoresTheActiveSite(t *testing.T) {
 				t.Error("empty model id")
 			}
 		}
+		// The id must be what a chain entry stores: the model's name within its
+		// platform, with the vendor path kept where the platform uses one.
 		wantIDs := map[string]string{
 			"cline-pass":  "deepseek-v4.1-flash",
 			"commandcode": "deepseek/deepseek-v4-pro",
 		}
 		for _, m := range payload.Models {
-			if want, ok := wantIDs[m.Provider]; ok && m.ID != want {
+			want, ok := wantIDs[m.Provider]
+			if !ok {
+				continue
+			}
+			// cline-pass also carries the 1017 variant the override table adds;
+			// any of that platform's ids must still be prefixed by its own name.
+			if m.Provider == "cline-pass" && !strings.HasPrefix(m.ID, "deepseek") {
+				t.Errorf("cline-pass id = %q, want a deepseek model", m.ID)
+				continue
+			}
+			if m.Provider != "cline-pass" && m.ID != want {
 				t.Errorf("%s id = %q, want %q", m.Provider, m.ID, want)
 			}
 		}

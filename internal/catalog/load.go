@@ -47,6 +47,16 @@ func Load(path string) (*IndexedCatalog, error) {
 	// how cline-pass's capabilities went missing while its models still listed.
 	mergeProviderModels(&catalog)
 
+	// Fill the gaps the mirror does not cover, before the index is built - the
+	// index is a snapshot of this map, so an entry added afterwards would be
+	// resolvable by name and absent from the provider's own listing.
+	//
+	// This runs here as well as at import time because there are two readers:
+	// the SQLite importer writes what every routing path uses, and the dashboard
+	// reads this JSON directly. Applying it in only one place left the picker
+	// offering a roster that did not match what the proxy would accept.
+	applyProviderOverrides(&catalog)
+
 	idx := &IndexedCatalog{
 		Catalog:        catalog,
 		ProviderModels: make(map[string][]Model, len(catalog.Providers)),

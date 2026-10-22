@@ -76,7 +76,7 @@ func TestUIUXSemanticControls(t *testing.T) {
 			t.Errorf("unnamed service control: %s", name)
 		}
 	}
-	for _, id := range []string{"settings-provider-jump", "config-change-count", "fallback-status", "fallback-primary", "quota-commandcode", "quota-commandcode-accounts", "quota-open-settings"} {
+	for _, id := range []string{"settings-provider-jump", "config-change-count", "fallback-status", "quota-commandcode", "quota-commandcode-accounts", "quota-open-settings"} {
 		if !strings.Contains(page, `id="`+id+`"`) {
 			t.Errorf("missing interaction target: %s", id)
 		}

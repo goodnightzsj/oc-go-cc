@@ -199,15 +199,13 @@ func (t *RequestTransformer) TransformRequest(
 			}
 			openaiReq.ResponseFormat = responseFormat
 		}
-		// This is output_config, the Anthropic spelling, so the ladder here is
-		// Anthropic's and "none"/"minimal" are raised rather than refused - a
-		// level the caller could legally send must not become a failed request.
+		// MessageRequest also carries Responses input; OpenAI output preserves
+		// its effort level. Only native Anthropic output needs a mapping.
 		effort, ok := core.NormalizeEffort(output.Effort)
 		if !ok {
 			return nil, fmt.Errorf("unsupported output_config.effort %q", output.Effort)
 		}
 		if effort != "" {
-			effort = core.AnthropicEffort(effort)
 			openaiReq.ReasoningEffort = &effort
 		}
 	}

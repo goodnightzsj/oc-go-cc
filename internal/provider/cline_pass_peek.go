@@ -173,10 +173,7 @@ func peekServedModel(ctx context.Context, cancel context.CancelFunc, body io.Rea
 			return nil, "", consumed.Len() > 0, transformer.ErrStreamIdle
 		}
 		if err := ctx.Err(); err != nil {
-			// The caller's deadline is the honest end of a stalled peek: the
-			// bytes already consumed are still replayed, so the forward loses
-			// nothing it had, and the stream stops where it stopped.
-			break
+			return nil, "", consumed.Len() > 0, err
 		}
 		n, err := body.Read(buf)
 		if n > 0 {
@@ -193,17 +190,22 @@ func peekServedModel(ctx context.Context, cancel context.CancelFunc, body io.Rea
 			}
 			ping()
 			consumed.Write(buf[:n])
-			if model := reporter.ServedModel(); model != "" {
-				return &peekedBody{ReadCloser: body, pending: consumed.Bytes()}, model, true, nil
-			}
 		}
-		if err != nil {
-			// The read failed. If it failed because the watchdog fired, that is
-			// a stalled upstream and has to be reported as such - breaking out
-			// here would hand the caller a body that reads like a clean end.
-			if idleFired.Load() {
-				return nil, "", consumed.Len() > 0, transformer.ErrStreamIdle
-			}
+		// Read may return a model frame and an error together. Do not publish a
+		// successful stream before checking the failure and its cancellation cause.
+		if idleFired.Load() {
+			return nil, "", consumed.Len() > 0, transformer.ErrStreamIdle
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, "", consumed.Len() > 0, ctxErr
+		}
+		if err != nil && err != io.EOF {
+			return nil, "", consumed.Len() > 0, err
+		}
+		if model := reporter.ServedModel(); model != "" {
+			return &peekedBody{ReadCloser: body, pending: consumed.Bytes()}, model, consumed.Len() > 0, nil
+		}
+		if err == io.EOF {
 			break
 		}
 	}

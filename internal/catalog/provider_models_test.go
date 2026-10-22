@@ -49,10 +49,14 @@ func TestLoadFoldsProviderNestedModels(t *testing.T) {
 	if got := model.ContextWindow(); got != 1000000 {
 		t.Errorf("context = %d, want 1000000", got)
 	}
-	// The top-level map is the view other code already resolves against, so a
-	// key present in both must keep the top level's entry.
-	if len(idx.Models) != 2 {
-		t.Errorf("merged catalog holds %d models, want 2", len(idx.Models))
+	// The fixture's own entries are what this asserts. A total count would also
+	// count the entries the override table adds, and would break every time that
+	// table grows - it is not what this test is about.
+	if _, ok := idx.Models["other/model"]; !ok {
+		t.Error("the top-level model is missing")
+	}
+	if got, want := len(idx.Models), 2+overrideEntryCount("cline-pass"); got != want {
+		t.Errorf("merged catalog holds %d models, want %d (fixture + overrides)", got, want)
 	}
 }
 

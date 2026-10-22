@@ -21,20 +21,19 @@ func TestPickerKeepsTheListingFields(t *testing.T) {
 	}
 }
 
-// The primary comes from the scenario config and is not editable here. Showing
-// it as a bare value implied this page had selected it.
-func TestPrimaryIsLabelledReadOnly(t *testing.T) {
+// The page showed a "primary model" card carrying models.default. On this
+// instance that entry never runs - requests are routed by the model the client
+// names - so it displayed a value nobody could act on that read as a current
+// selection. The card is gone; the chain is the part that decides anything.
+func TestNoPrimaryCardIsShown(t *testing.T) {
 	html := readEmbeddedAsset(t, "assets/index.html")
-	if !strings.Contains(html, `id="fallback-primary-note"`) {
-		t.Error("the primary has no explanatory note")
-	}
-	if !strings.Contains(html, `data-i18n="fallback.readOnly"`) {
-		t.Error("the primary is not marked read-only")
+	for _, stale := range []string{"fallback-primary-card", "fallback-primary-note", `id="fallback-primary"`} {
+		if strings.Contains(html, stale) {
+			t.Errorf("the primary card is still present: %s", stale)
+		}
 	}
 	js := readEmbeddedAsset(t, "assets/app.js")
-	for _, key := range []string{"fallback.readOnly", "fallback.primaryReadOnly", "fallback.primaryNote"} {
-		if n := strings.Count(js, "'"+key+"':"); n < 2 {
-			t.Errorf("%q needs an English and a Chinese entry, found %d", key, n)
-		}
+	if strings.Contains(js, "fallback-primary") {
+		t.Error("the renderer still looks for the removed card")
 	}
 }

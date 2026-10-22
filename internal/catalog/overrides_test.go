@@ -88,3 +88,45 @@ func TestOverrideNeverReplacesAPublishedModel(t *testing.T) {
 		t.Errorf("context = %d, want the mirror's 111 - a published entry must win", got)
 	}
 }
+
+// overrideEntryCount reports how many entries the table adds for a platform.
+func overrideEntryCount(provider string) int {
+	return len(providerModelOverrides[provider])
+}
+
+// The dashboard reads the JSON catalog directly, while routing reads what the
+// importer wrote to SQLite. Applying the override table in only one of those
+// places left the picker offering a roster that did not match what the proxy
+// accepts - the platform's own 1017 model was missing from it.
+func TestLoadAppliesTheOverrideTableToo(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "catalog.json")
+	body := `{
+	  "providers": {
+	    "cline-pass": {"name": "cline-pass", "enabled": true},
+	    "other": {"name": "other", "enabled": true}
+	  },
+	  "models": {"other/m": {"name": "M", "limit": {"context": 1, "output": 1}}}
+	}`
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const key = "cline-pass/deepseek-v4.1-flash-1017"
+	if _, ok := idx.Models[key]; !ok {
+		t.Fatalf("%s is missing: the dashboard would offer a roster that excludes a model the proxy serves", key)
+	}
+	// It also has to appear in the provider's own index, not only in the map.
+	found := false
+	for _, m := range idx.ListProviderModels("cline-pass") {
+		if m.CanonicalName == key {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the entry is resolvable by key but absent from the provider's listing")
+	}
+}

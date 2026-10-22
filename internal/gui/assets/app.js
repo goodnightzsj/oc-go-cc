@@ -5053,11 +5053,15 @@ const FallbackModule = {
       const modelMap = new Map();
       let reachable = [];
       try {
-        const listing = await fetch('/api/catalog/models');
+        // scope=all: the fallback picker asks which platforms this instance
+        // could reach, not which one is routed right now. The default listing
+        // hides every platform outside the active site, which made a
+        // cross-platform fallback impossible to configure at all.
+        const listing = await fetch('/api/catalog/models?scope=all');
         if (listing.ok) {
           const payload = await listing.json();
           reachable = payload.models || [];
-          this.activeSite = payload.scope || '';
+          this.activeSite = payload.scope || config.active_site || '';
         }
       } catch (_) { /* fall back to configured models below */ }
       for (const m of reachable) {

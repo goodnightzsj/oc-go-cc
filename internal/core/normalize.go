@@ -205,17 +205,17 @@ var effortLevels = map[string]bool{
 	"high": true, "xhigh": true, "max": true,
 }
 
-// NormalizeEffort returns the level to send upstream, and whether the input was
-// a level at all.
+// NormalizeEffort validates a level and reports it unchanged.
 //
-// "none" and "minimal" are OpenAI's lowest rungs and have no Anthropic
-// equivalent, so they become "low": the request asked for as little reasoning
-// as possible and gets the least this ladder offers. Raising a level costs more
-// tokens than the caller wanted; rejecting the request delivers nothing.
+// It used to also raise "none"/"minimal" to "low" here, which conflated two
+// different jobs: deciding whether a value is a level at all, and translating
+// it for a protocol that has no rung for it. Doing both in one place meant a
+// Responses request going out as Responses - same protocol in and out, nothing
+// to translate - was rewritten to "low" anyway, and the client's actual
+// intent was unrecoverable from the record.
 //
-// Anything that is not a level - notably the thinking config's own
-// "enabled"/"disabled" - reports false, so a caller can fail instead of sending
-// a value no provider accepts.
+// Callers that cross into Anthropic apply the raise themselves, once, at the
+// boundary that needs it. See AnthropicEffort.
 func NormalizeEffort(effort string) (string, bool) {
 	if effort == "" {
 		return "", true
@@ -223,10 +223,22 @@ func NormalizeEffort(effort string) (string, bool) {
 	if !effortLevels[effort] {
 		return "", false
 	}
-	if effort == "none" || effort == "minimal" {
-		return "low", true
-	}
 	return effort, true
+}
+
+// AnthropicEffort maps a validated level onto the Anthropic ladder, whose
+// lowest rung is "low".
+//
+// "none" and "minimal" are OpenAI's rungs below it. A request that asked for
+// as little reasoning as possible gets the least Anthropic offers: raising a
+// level spends more tokens than the caller wanted, while rejecting the request
+// delivers nothing at all. The loss is real and one-directional, so it is
+// confined to this function rather than applied to every reader of the value.
+func AnthropicEffort(level string) string {
+	if level == "none" || level == "minimal" {
+		return "low"
+	}
+	return level
 }
 
 // EffortFromBudget maps an Anthropic thinking budget to an OpenAI effort level.

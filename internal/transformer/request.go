@@ -199,16 +199,15 @@ func (t *RequestTransformer) TransformRequest(
 			}
 			openaiReq.ResponseFormat = responseFormat
 		}
-		// Same ladder as the Responses inbound path, for the same reason: a level
-		// the caller could legally send must not turn into a failed request.
-		// "none" and "minimal" are OpenAI's, not Anthropic's, so they arrive here
-		// only through a Responses client; raising them to "low" is the closest
-		// thing this ladder can express.
+		// This is output_config, the Anthropic spelling, so the ladder here is
+		// Anthropic's and "none"/"minimal" are raised rather than refused - a
+		// level the caller could legally send must not become a failed request.
 		effort, ok := core.NormalizeEffort(output.Effort)
 		if !ok {
 			return nil, fmt.Errorf("unsupported output_config.effort %q", output.Effort)
 		}
 		if effort != "" {
+			effort = core.AnthropicEffort(effort)
 			openaiReq.ReasoningEffort = &effort
 		}
 	}

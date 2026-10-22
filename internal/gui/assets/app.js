@@ -5201,10 +5201,13 @@ const FallbackModule = {
   onPlatformFilterChange() {
     const sel = document.getElementById('fallback-platform-filter');
     this.platformFilter = sel ? sel.value : '';
+    // The search box is cleared because a query typed against the previous
+    // platform usually matches nothing in the new one, and an empty list reads
+    // as "this platform has no models" rather than "your filter no longer
+    // applies". populateAddSelect re-renders with the cleared box.
+    const search = document.getElementById('fallback-add-search');
+    if (search) search.value = '';
     this.populateAddSelect();
-    if (document.getElementById('fallback-add-popover')?.hidden === false) {
-      this.renderPickerList(document.getElementById('fallback-add-search')?.value || '');
-    }
   },
 
   // The add-model picker: a searchable popover rather than a native select.
@@ -5409,13 +5412,21 @@ const FallbackModule = {
     // config, and on this instance requests are routed by override anyway - the
     // client names the model, so this entry never runs. Showing it as a value
     // invited the reading that the page had selected it.
+    //
+    // With no primary configured the card shows a dash and nothing else. An
+    // explanation of "this is read-only" answers a question nobody asked when
+    // there is no value to be confused about.
+    const hasPrimary = !!primary;
+    const tag = document.getElementById('fallback-primary-tag');
     if (primaryEl) {
-      primaryEl.textContent = primary ? configModelKey(primary) : '—';
-      primaryEl.title = t('fallback.primaryReadOnly');
+      primaryEl.textContent = hasPrimary ? configModelKey(primary) : '—';
+      primaryEl.title = hasPrimary ? t('fallback.primaryReadOnly') : '';
     }
+    if (tag) tag.hidden = !hasPrimary;
     const primaryNote = document.getElementById('fallback-primary-note');
     if (primaryNote) {
-      primaryNote.textContent = primary
+      primaryNote.hidden = !hasPrimary;
+      primaryNote.textContent = hasPrimary
         ? t('fallback.primaryNote').replace('{model}', configModelKey(primary))
         : '';
     }

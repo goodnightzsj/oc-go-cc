@@ -1636,16 +1636,19 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
 .fallback-toolbar > div:first-child { display: grid; gap: 6px; }
 /* Two labelled controls side by side: the scenario (only when there is more
    than one) and the platform, which is what narrows the model list. */
-.fallback-toolbar-fields { display: flex; gap: 14px; align-items: flex-end; }
-.fallback-toolbar-fields > div { display: grid; gap: 6px; }
+/* Chips, not full-width fields: two short values do not need half the row, and
+   a stretched select reads as a text input waiting for long content. */
+.fallback-toolbar-fields { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.fallback-toolbar-fields > div { display: grid; gap: 4px; }
 .fallback-toolbar-fields > div[hidden] { display: none; }
 .fallback-toolbar-fields label {
-  font-size: 11px;
-  letter-spacing: 0.03em;
+  font-size: 10px;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--ui-muted);
 }
-.fallback-toolbar-fields .theme-select { min-width: 180px; }
+.fallback-toolbar-fields .theme-select { min-width: 0; width: auto; }
+.fallback-toolbar-fields .theme-select-trigger { min-width: 132px; max-width: 220px; }
 .fallback-actions { display: flex; gap: 8px; }
 .routing-layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; align-items: start; gap: 24px; }
 .routing-workspace { min-width: 0; padding: 20px; border: 1px solid var(--ui-line); border-radius: 10px; background: var(--ui-surface); }

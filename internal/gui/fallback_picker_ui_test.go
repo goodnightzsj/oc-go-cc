@@ -134,3 +134,38 @@ func TestUnpricedModelsShowADashNotZero(t *testing.T) {
 		}
 	}
 }
+
+// Choosing a platform then opening the picker must list that platform's models.
+// The failure this guards is silent: the list renders empty and reads as "this
+// platform has no models" rather than "the filter is stale".
+func TestPlatformFilterThenPickerListsThatPlatformsModels(t *testing.T) {
+	runPlatformBehavior(t, platformBehaviorDOMScript+`
+async function checks() {
+  FallbackModule.availableModels = [
+    {provider:'cline-pass', model_id:'deepseek-v4.1-flash', input_per_m:0.15, output_per_m:0.6},
+    {provider:'cline-pass', model_id:'kimi-k3', input_per_m:3, output_per_m:15},
+    {provider:'commandcode', model_id:'deepseek/deepseek-v4-pro', input_per_m:0.66, output_per_m:1.98},
+  ];
+  FallbackModule.chains = {default:[]};
+  FallbackModule.currentScenario = 'default';
+  FallbackModule.platformFilter = '';
+  FallbackModule.populateAddSelect();
+  FallbackModule.togglePicker(true);
+  FallbackModule.renderPickerList('');
+  const count = () => (document.getElementById('fallback-add-list').innerHTML.match(/class="picker-row"/g) || []).length;
+  assert.equal(count(), 3, 'all platforms before filtering');
+
+  // Select cline-pass the way the dropdown does, then redraw.
+  FallbackModule.platformFilter = 'cline-pass';
+  FallbackModule.populateAddSelect();
+  FallbackModule.renderPickerList('');
+  assert.equal(count(), 2, 'only the chosen platform remains');
+
+  // Each row must carry its price and context window; rebuilding the record as
+  // {provider, model_id} silently dropped both.
+  const rows = document.getElementById('fallback-add-list').innerHTML;
+  assert.ok(rows.includes('$0.15'), 'priced rows must show the rate');
+  assert.ok(!rows.includes('picker-price-none'), 'a priced model must not render as unpriced');
+}
+`)
+}

@@ -85,3 +85,52 @@ func TestFallbackPickerSearchIsLabelled(t *testing.T) {
 		t.Error("the search input has no accessible name")
 	}
 }
+
+// The platform filter is what keeps the model list short. It has to exist, and
+// the candidate list has to actually be narrowed by it - a control that only
+// changes its own label would be worse than none.
+func TestFallbackPlatformFilterNarrowsTheModelList(t *testing.T) {
+	html := readEmbeddedAsset(t, "assets/index.html")
+	if !strings.Contains(html, `id="fallback-platform-filter"`) {
+		t.Fatal("the platform filter is missing")
+	}
+	js := readEmbeddedAsset(t, "assets/app.js")
+	if !strings.Contains(js, "populatePlatformFilter") || !strings.Contains(js, "onPlatformFilterChange") {
+		t.Error("the platform filter is not wired")
+	}
+	// The narrowing has to happen in the candidate computation, not in drawing.
+	if !strings.Contains(js, "this.platformFilter || ''") {
+		t.Error("populateAddSelect does not read the selected platform")
+	}
+}
+
+// A single-option scenario dropdown asks the operator a question with one
+// answer. It is hidden unless the config really does have several.
+func TestScenarioDropdownHidesWhenThereIsOnlyOne(t *testing.T) {
+	html := readEmbeddedAsset(t, "assets/index.html")
+	if !strings.Contains(html, `id="fallback-scenario-field"`) {
+		t.Fatal("the scenario field wrapper is missing; hiding needs a container")
+	}
+	js := readEmbeddedAsset(t, "assets/app.js")
+	if !strings.Contains(js, "scenarioField.hidden = scenarioKeys.length <= 1") {
+		t.Error("the scenario dropdown is shown even when it has one option")
+	}
+}
+
+// An unpriced model must not render as $0 - zero is a real rate for a free
+// model, and conflating the two makes a platform with no price table look like
+// the cheapest thing on the page.
+func TestUnpricedModelsShowADashNotZero(t *testing.T) {
+	js := readEmbeddedAsset(t, "assets/app.js")
+	if !strings.Contains(js, "picker-price-none") {
+		t.Error("unpriced rows have no distinct presentation")
+	}
+	if !strings.Contains(js, "fallback.priceUnknown") {
+		t.Error("unpriced rows do not explain themselves")
+	}
+	for _, key := range []string{"fallback.priceUnknown", "fallback.platformFilter"} {
+		if n := strings.Count(js, "'"+key+"':"); n < 2 {
+			t.Errorf("%q needs an English and a Chinese entry, found %d", key, n)
+		}
+	}
+}

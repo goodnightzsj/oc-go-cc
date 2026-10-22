@@ -344,6 +344,9 @@ const TRANSLATIONS = {
     'detail.reroutedHint': 'The client asked for this model; routing served the one shown above.',
     'detail.provider': 'Provider',
     'detail.upstreamChannel': 'Upstream channel',
+    'detail.upstreamModel': 'Upstream model',
+    'detail.effort': 'Reasoning effort',
+    'detail.firstByte': 'Time to first byte',
     'detail.scenario': 'Scenario',
     'detail.requestType': 'Request type',
     'detail.streaming': 'Streaming',
@@ -917,6 +920,9 @@ const TRANSLATIONS = {
     'detail.reroutedHint': '客户端请求的是该模型，实际由上方显示的模型提供服务。',
     'detail.provider': '供应商',
     'detail.upstreamChannel': '上游渠道',
+    'detail.upstreamModel': '上游模型',
+    'detail.effort': '思考强度',
+    'detail.firstByte': '首字节时间',
     'detail.scenario': '使用场景',
     'detail.requestType': '请求类型',
     'detail.streaming': '流式请求',
@@ -2710,9 +2716,9 @@ function renderHistory() {
       <td><time class="history-timestamp" datetime="${escapeHtml(h.start_time || '')}" title="${escapeHtml(h.start_time || '')}">${fmtRelativeTime(h.start_time)}<small>${fmtDate(h.start_time)}</small></time>${peakMark}</td>
       <td><div class="history-status-stack">${detailsKnown ? `<span class="badge ${h.success ? 'badge-success' : 'badge-error'}" title="${h.success ? t('badge.success') : t('badge.fail')}">${h.success ? t('badge.success') : t('badge.fail')}</span>` : `<span class="badge badge-unknown" title="${t('detail.unknown')}">${t('detail.unknown')}</span>`}<small class="history-stream-state">${streamLabel}</small></div></td>
       <td><div class="history-model-cell"><strong title="${escapeHtml(servedModel)}">${escapeHtml(servedModel) || '—'}</strong><small>${escapeHtml(providerLabel(h.provider))}${channelMark}</small></div></td>
+      <td>${h.reasoning_effort ? `<span class="badge badge-effort" title="${escapeHtml(t('th.effortHint'))}">${escapeHtml(h.reasoning_effort)}</span>` : '—'}</td>
       <td><button type="button" class="history-token-trigger" data-token-id="${escapeHtml(rowId)}" aria-label="${t('detail.title')}">${totalTokens.toLocaleString()}</button><br><small>${tokenSplit}</small></td>
       <td>${cost}<br><small>${costSourceLabel(h.cost_source)}</small></td>
-      <td>${h.reasoning_effort ? `<span class="badge badge-effort" title="${escapeHtml(t('th.effortHint'))}">${escapeHtml(h.reasoning_effort)}</span>` : '—'}</td>
       <td>${h.first_byte_ms ? fmtDuration(h.first_byte_ms) : '—'}</td>
       <td>${detailsKnown ? gradeDuration(h, fmtDuration(h.duration_ms)) : '—'}</td>
       <td title="${escapeHtml(t('analytics.throughputHint'))}">${detailsKnown && h.success ? fmtThroughput(requestThroughput(h)) : '—'}</td>
@@ -4639,6 +4645,9 @@ function showHistoryDetail(record) {
       <div class="detail-row"><span class="detail-label">${t('detail.billingWindow')}</span><span class="detail-value">${billingWindowLabel(record)}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.requestType')}</span><span class="detail-value">${detailsKnown ? t(record.streaming ? 'detail.streaming' : 'detail.nonStreaming') : t('detail.unavailable')}</span></div>
       ${record.upstream_channel ? `<div class="detail-row"><span class="detail-label">${t('detail.upstreamChannel')}</span><span class="detail-value">${escapeHtml(record.upstream_channel)}</span></div>` : ''}
+      ${record.upstream_model ? `<div class="detail-row"><span class="detail-label">${t('detail.upstreamModel')}</span><span class="detail-value">${escapeHtml(record.upstream_model)}</span></div>` : ''}
+      ${record.reasoning_effort ? `<div class="detail-row"><span class="detail-label">${t('detail.effort')}</span><span class="detail-value" title="${escapeHtml(t('th.effortHint'))}">${escapeHtml(record.reasoning_effort)}</span></div>` : ''}
+      ${record.first_byte_ms ? `<div class="detail-row"><span class="detail-label">${t('detail.firstByte')}</span><span class="detail-value">${fmtDuration(record.first_byte_ms)}</span></div>` : ''}
       <div class="detail-row"><span class="detail-label">${t('detail.attempt')}</span><span class="detail-value">${detailsKnown ? (record.attempt || 1) : t('detail.unavailable')}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.duration')}</span><span class="detail-value">${detailsKnown ? gradeDuration(record, fmtDuration(record.duration_ms)) : t('detail.unavailable')}</span></div>
       ${tpsOfRow == null ? '' : `<div class="detail-row"><span class="detail-label">${t('analytics.throughput')}</span><span class="detail-value" title="${escapeHtml(t('analytics.throughputHint'))}">${fmtThroughput(tpsOfRow)}</span></div>`}

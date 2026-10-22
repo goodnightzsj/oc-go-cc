@@ -473,8 +473,9 @@ vm.runInContext(` + "`" + `
   // value - a fixture without them must not read as instant or as effort-free.
   assert.equal(cellText(historyCells[6]), '—',
     'a row with no first-byte measurement must show a dash, not 0ms; got ' + historyCells[6]);
-  assert.equal(cellText(unknownCells[5]), '—',
-    'a row with no effort must show a dash; got ' + unknownCells[5]);
+  // Effort sits directly after Model / Platform, so it is cell 4 (index 3).
+  assert.equal(cellText(unknownCells[3]), '—',
+    'a row with no effort must show a dash; got ' + unknownCells[3]);
 
   showHistoryDetail(unknownRecord);
   assert.ok(document.getElementById('modal-body').innerHTML.includes('detail-status unknown'));

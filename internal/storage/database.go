@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -342,39 +343,52 @@ func (d *Database) initSchema(ctx context.Context) error {
 	return err
 }
 
+// columnMigration is one column an older database may be missing.
+//
+// The table and column are named separately from the DDL so the migration can
+// ask SQLite what exists instead of provoking an error and reading its text.
+// Matching "duplicate column" in the driver's message worked, but it tied
+// startup to a phrase modernc.org/sqlite happens to use today: a release that
+// reworded it would make every ADD COLUMN look like a real failure and no
+// database would open.
+type columnMigration struct {
+	table  string
+	column string
+	ddl    string
+}
+
 // migrateColumns adds every column that a database created by an older version
-// may be missing. Idempotent: SQLite reports "duplicate column name" when the
-// column is already there, and that is the only error tolerated — anything else
-// (locked, corrupt, missing table) aborts startup rather than leaving the schema
-// half-migrated.
+// may be missing. Idempotent: columns already present are skipped by asking the
+// table's own schema, and any error from an ADD COLUMN aborts startup rather
+// than leaving the schema half-migrated.
 func (d *Database) migrateColumns(ctx context.Context) error {
-	for _, alter := range []string{
-		`ALTER TABLE requests ADD COLUMN attempt INTEGER DEFAULT 1`,
-		`ALTER TABLE requests ADD COLUMN cache_read_tokens INTEGER DEFAULT 0`,
-		`ALTER TABLE requests ADD COLUMN cache_creation_tokens INTEGER DEFAULT 0`,
-		`ALTER TABLE requests ADD COLUMN cost_usd REAL`,
-		`ALTER TABLE requests ADD COLUMN cost_source TEXT`,
-		`ALTER TABLE requests ADD COLUMN details_known INTEGER NOT NULL DEFAULT 1`,
-		`ALTER TABLE requests ADD COLUMN usage_trusted INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE requests ADD COLUMN peak_multiplier REAL NOT NULL DEFAULT 1`,
+	migrations := []columnMigration{
+		{"requests", "attempt", `ALTER TABLE requests ADD COLUMN attempt INTEGER DEFAULT 1`},
+		{"requests", "cache_read_tokens", `ALTER TABLE requests ADD COLUMN cache_read_tokens INTEGER DEFAULT 0`},
+		{"requests", "cache_creation_tokens", `ALTER TABLE requests ADD COLUMN cache_creation_tokens INTEGER DEFAULT 0`},
+		{"requests", "cost_usd", `ALTER TABLE requests ADD COLUMN cost_usd REAL`},
+		{"requests", "cost_source", `ALTER TABLE requests ADD COLUMN cost_source TEXT`},
+		{"requests", "details_known", `ALTER TABLE requests ADD COLUMN details_known INTEGER NOT NULL DEFAULT 1`},
+		{"requests", "usage_trusted", `ALTER TABLE requests ADD COLUMN usage_trusted INTEGER NOT NULL DEFAULT 0`},
+		{"requests", "peak_multiplier", `ALTER TABLE requests ADD COLUMN peak_multiplier REAL NOT NULL DEFAULT 1`},
 		// Existing rows keep NULL, meaning "the client asked for the model that
 		// served it, or the request predates the column". Both read as no
 		// reroute, which is the honest answer for a row that never recorded one.
-		`ALTER TABLE requests ADD COLUMN requested_model TEXT`,
+		{"requests", "requested_model", `ALTER TABLE requests ADD COLUMN requested_model TEXT`},
 		// The channel the upstream gateway reported serving the request on.
 		// NULL means "this platform does not publish one, or the row predates
 		// the column" - not "the channel was empty". Only ClinePass fills it.
-		`ALTER TABLE requests ADD COLUMN upstream_channel TEXT`,
+		{"requests", "upstream_channel", `ALTER TABLE requests ADD COLUMN upstream_channel TEXT`},
 		// The model the gateway says it actually ran, when that is not the id we
 		// sent. NULL means the platform publishes none, the gateway ran what was
 		// asked for, or the row predates the column - all three read as "the
 		// recorded model is what ran".
-		`ALTER TABLE requests ADD COLUMN upstream_model TEXT`,
+		{"requests", "upstream_model", `ALTER TABLE requests ADD COLUMN upstream_model TEXT`},
 		// Milliseconds from request start to the upstream's first byte. NULL
 		// means it was not measured - a non-streaming request has no first byte,
 		// and an attempt that failed before the body opened never had one. Zero
 		// is not used for that: it would read as an instant response.
-		`ALTER TABLE requests ADD COLUMN first_byte_ms INTEGER`,
+		{"requests", "first_byte_ms", `ALTER TABLE requests ADD COLUMN first_byte_ms INTEGER`},
 		// The reasoning level the client asked for, after normalization. NULL
 		// means the client expressed no level - which is not the same as asking
 		// for the weakest one, so an empty string is stored as NULL.
@@ -382,30 +396,66 @@ func (d *Database) migrateColumns(ctx context.Context) error {
 		// This records intent, not effect: a provider that ignores the field
 		// leaves the column populated and the response unchanged. Reading it as
 		// "how much this request reasoned" would be wrong for those upstreams.
-		`ALTER TABLE requests ADD COLUMN reasoning_effort TEXT`,
+		{"requests", "reasoning_effort", `ALTER TABLE requests ADD COLUMN reasoning_effort TEXT`},
 		// Existing rows keep NULL, which reads back as "unknown ceiling" - the
 		// same answer they gave before the column existed. The next catalog sync
 		// fills them in.
-		`ALTER TABLE models ADD COLUMN max_output_tokens INTEGER`,
+		{"models", "max_output_tokens", `ALTER TABLE models ADD COLUMN max_output_tokens INTEGER`},
 		// Long-context price bands, as a JSON array. A column rather than a
 		// table because the bands are only ever read with their model, never
 		// queried across models, and a join for a handful of rows would cost
 		// more than the JSON does. Existing rows keep NULL, which reads back as
 		// "no tiers" - the same answer they gave before the column existed, and
 		// the next catalog sync fills in the ones that have them.
-		`ALTER TABLE models ADD COLUMN cost_tiers TEXT`,
-	} {
-		if _, err := d.db.ExecContext(ctx, alter); err != nil && !strings.Contains(err.Error(), "duplicate column") {
-			return fmt.Errorf("%s: %w", alter, err)
-		}
+		{"models", "cost_tiers", `ALTER TABLE models ADD COLUMN cost_tiers TEXT`},
 	}
-	// Rows priced before cost_source existed were all estimates.
-	_, err := d.db.ExecContext(ctx, `
-		UPDATE requests
-		SET cost_source = 'estimated'
-		WHERE cost_usd IS NOT NULL AND (cost_source IS NULL OR cost_source = '')
-	`)
-	if err != nil {
+
+	present := map[string]map[string]bool{}
+	for _, m := range migrations {
+		columns, ok := present[m.table]
+		if !ok {
+			var err error
+			columns, err = d.tableColumns(ctx, m.table)
+			if err != nil {
+				return err
+			}
+			present[m.table] = columns
+		}
+		if columns[m.column] {
+			continue
+		}
+		if _, err := d.db.ExecContext(ctx, m.ddl); err != nil {
+			return fmt.Errorf("%s: %w", m.ddl, err)
+		}
+		// Record it so a second ADD to the same table in this pass cannot
+		// depend on the cache having been written before the DDL ran.
+		columns[m.column] = true
+	}
+
+	// Rows priced before cost_source existed were all estimates. Run once: on
+	// this instance the statement scanned 64k rows on every startup to change
+	// nothing, because every row written since has carried a source.
+	// The migration is marked done only when it actually matched something.
+	// A fresh database has no priced rows at startup, and marking the work
+	// complete there would mean a database restored from an old backup - or one
+	// whose history was imported later - never gets the backfill at all.
+	if err := d.runOnce(ctx, "cost_source_backfill", func() (bool, error) {
+		result, err := d.db.ExecContext(ctx, `
+			UPDATE requests
+			SET cost_source = 'estimated'
+			WHERE cost_usd IS NOT NULL AND (cost_source IS NULL OR cost_source = '')
+		`)
+		if err != nil {
+			return false, err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			// The count is an optimisation, not a correctness requirement:
+			// without it the statement simply runs on the next startup too.
+			return true, nil
+		}
+		return changed > 0, nil
+	}); err != nil {
 		return err
 	}
 
@@ -416,11 +466,61 @@ func (d *Database) migrateColumns(ctx context.Context) error {
 	// column does - a database created before the column existed cannot be
 	// indexed on it, and CREATE INDEX in the schema block would fail on exactly
 	// the older installs the index is meant to help.
-	_, err = d.db.ExecContext(ctx, `
+	_, err := d.db.ExecContext(ctx, `
 		CREATE INDEX IF NOT EXISTS idx_requests_upstream_channel
 		ON requests(upstream_channel) WHERE upstream_channel IS NOT NULL
 	`)
 	return err
+}
+
+// tableColumns reports which columns a table has, read from SQLite's own
+// schema rather than inferred from an error message.
+func (d *Database) tableColumns(ctx context.Context, table string) (map[string]bool, error) {
+	rows, err := d.db.QueryContext(ctx, "SELECT name FROM pragma_table_info(?)", table)
+	if err != nil {
+		return nil, fmt.Errorf("read columns of %s: %w", table, err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out[name] = true
+	}
+	return out, rows.Err()
+}
+
+// runOnce runs a data migration at most once per database, remembering it in
+// schema_info. The statement stays in the binary so a database that predates
+// the migration still gets it; only the repeat is skipped.
+//
+// A failure leaves no mark, so the next startup retries rather than skipping a
+// migration that never completed. So does a run that changed nothing: an empty
+// history at startup must not consume the one chance to backfill rows that
+// arrive later.
+func (d *Database) runOnce(ctx context.Context, key string, run func() (bool, error)) error {
+	const prefix = "migration:"
+	var done string
+	err := d.db.QueryRowContext(ctx,
+		`SELECT value FROM schema_info WHERE key = ?`, prefix+key).Scan(&done)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("read migration mark %s: %w", key, err)
+	}
+	applied, err := run()
+	if err != nil || !applied {
+		return err
+	}
+	_, err = d.db.ExecContext(ctx,
+		`INSERT OR REPLACE INTO schema_info (key, value) VALUES (?, 'done')`, prefix+key)
+	if err != nil {
+		return fmt.Errorf("record migration mark %s: %w", key, err)
+	}
+	return nil
 }
 
 // clearCatalogAPIKeys removes credentials written by versions that treated the

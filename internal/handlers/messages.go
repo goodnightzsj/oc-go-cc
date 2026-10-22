@@ -725,7 +725,7 @@ func (h *MessagesHandler) handleStreaming(
 		// variable: the gateway names it in the last frame, so the only correct
 		// moment to ask is after the stream has ended. Reading it earlier would
 		// record an empty channel for every request.
-		recordStreamSuccess := func(model config.ModelConfig, upstreamChannel, upstreamModel string, firstByte time.Time) {
+		recordStreamSuccess := func(model config.ModelConfig, upstreamChannel, upstreamModel string, keyHint string, firstByte time.Time) {
 			cancelAttempt()
 			complete(clientCtx, nil)
 			latency := time.Since(streamStart)
@@ -758,6 +758,7 @@ func (h *MessagesHandler) handleStreaming(
 				PeakMultiplier:      history.ProviderPeakMultiplier(providerName, model.ModelID, streamStart),
 				UpstreamChannel:     upstreamChannel,
 				UpstreamModel:       upstreamModel,
+				KeyHint:             keyHint,
 				FirstByte:           firstByteDuration(firstByte, streamStart),
 				ReasoningEffort:     clientEffort,
 			}
@@ -821,6 +822,7 @@ func (h *MessagesHandler) handleStreaming(
 				PeakMultiplier:      history.ProviderPeakMultiplier(providerName, model.ModelID, streamStart),
 				UpstreamChannel:     client.UpstreamChannelOf(currentStream),
 				UpstreamModel:       client.UpstreamModelOf(currentStream),
+				KeyHint:             client.KeyHintOf(currentStream),
 				FirstByte:           firstByteDuration(firstByte, streamStart),
 				ReasoningEffort:     clientEffort,
 			}
@@ -876,7 +878,7 @@ func (h *MessagesHandler) handleStreaming(
 			if err := rw.finish(); err != nil {
 				return handleStreamError(err, model, action)
 			}
-			recordStreamSuccess(model, client.UpstreamChannelOf(currentStream), client.UpstreamModelOf(currentStream), client.FirstByteAtOf(currentStream))
+			recordStreamSuccess(model, client.UpstreamChannelOf(currentStream), client.UpstreamModelOf(currentStream), client.KeyHintOf(currentStream), client.FirstByteAtOf(currentStream))
 			return false
 		}
 
@@ -1044,7 +1046,7 @@ func (h *MessagesHandler) handleNonStreaming(
 
 	// Set by the attempt that succeeds, then stored. Empty for every platform
 	// whose upstream does not name a channel.
-	var upstreamChannel, upstreamModel string
+	var upstreamChannel, upstreamModel, keyHint string
 	clientEffort := history.RequestedEffort(anthropicReq)
 
 	result, responseBody, err := h.fallbackHandler.ExecuteWithFallback(
@@ -1085,6 +1087,7 @@ func (h *MessagesHandler) handleNonStreaming(
 			// gateway named in its last frame is available now.
 			upstreamChannel = execResult.UpstreamChannel
 			upstreamModel = execResult.UpstreamModel
+			keyHint = execResult.KeyHint
 			return execResult.Body, nil
 		},
 	)
@@ -1140,6 +1143,7 @@ func (h *MessagesHandler) handleNonStreaming(
 		PeakMultiplier:      history.ProviderPeakMultiplier(result.Provider, result.ModelID, startTime),
 		UpstreamChannel:     upstreamChannel,
 		UpstreamModel:       upstreamModel,
+		KeyHint:             keyHint,
 		ReasoningEffort:     clientEffort,
 	}
 	if h.storage != nil {

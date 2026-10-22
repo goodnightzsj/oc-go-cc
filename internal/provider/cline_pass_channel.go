@@ -36,10 +36,19 @@ type clineChannelBody struct {
 	// same fact from the routing block at the end of the stream; ServedModel()
 	// prefers this one because it is the only one a response can carry.
 	servedModel string
+	// keyHint labels the credential this attempt used, for the history record.
+	keyHint string
 }
 
 func newClineChannelBody(body io.ReadCloser, target, requestID string) *clineChannelBody {
 	return &clineChannelBody{ReadCloser: body, target: target, requestID: requestID}
+}
+
+// KeyHint reports the masked label of the credential that carried this attempt.
+func (b *clineChannelBody) KeyHint() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.keyHint
 }
 
 func (b *clineChannelBody) Read(p []byte) (int, error) {

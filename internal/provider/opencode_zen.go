@@ -120,7 +120,8 @@ func (p *OpenCodeZenProvider) executeOpenAI(ctx context.Context, req *types.Mess
 	}
 
 	return &core.ExecuteResult{
-		Body: resultBody,
+		Body:    resultBody,
+		KeyHint: sel.KeyHint(),
 	}, nil
 }
 
@@ -145,7 +146,7 @@ func (p *OpenCodeZenProvider) streamOpenAI(ctx context.Context, req *types.Messa
 		return nil, err
 	}
 
-	return resp.Body, nil
+	return p.withKeyHint(resp.Body, sel), nil
 }
 
 // ── Anthropic Messages ────────────────────────────────────────────────
@@ -190,7 +191,7 @@ func (p *OpenCodeZenProvider) executeAnthropic(ctx context.Context, req *types.M
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	return &core.ExecuteResult{Body: body}, nil
+	return &core.ExecuteResult{Body: body, KeyHint: sel.KeyHint()}, nil
 }
 
 func (p *OpenCodeZenProvider) streamAnthropic(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
@@ -229,7 +230,7 @@ func (p *OpenCodeZenProvider) streamAnthropic(ctx context.Context, req *types.Me
 		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
 	}
 
-	return resp.Body, nil
+	return p.withKeyHint(resp.Body, sel), nil
 }
 
 // ── OpenAI Responses ──────────────────────────────────────────────────
@@ -276,7 +277,8 @@ func (p *OpenCodeZenProvider) executeResponses(ctx context.Context, req *types.M
 	}
 
 	return &core.ExecuteResult{
-		Body: resultBody,
+		Body:    resultBody,
+		KeyHint: sel.KeyHint(),
 	}, nil
 }
 
@@ -300,7 +302,7 @@ func (p *OpenCodeZenProvider) streamResponses(ctx context.Context, req *types.Me
 		return nil, err
 	}
 
-	return resp.Body, nil
+	return p.withKeyHint(resp.Body, sel), nil
 }
 
 // ── Gemini ────────────────────────────────────────────────────────────
@@ -341,7 +343,8 @@ func (p *OpenCodeZenProvider) executeGemini(ctx context.Context, req *types.Mess
 	}
 
 	return &core.ExecuteResult{
-		Body: resultBody,
+		Body:    resultBody,
+		KeyHint: sel.KeyHint(),
 	}, nil
 }
 
@@ -362,7 +365,7 @@ func (p *OpenCodeZenProvider) streamGemini(ctx context.Context, req *types.Messa
 		return nil, err
 	}
 
-	return resp.Body, nil
+	return p.withKeyHint(resp.Body, sel), nil
 }
 
 // ── HTTP helpers ──────────────────────────────────────────────────────

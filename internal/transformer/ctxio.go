@@ -114,6 +114,16 @@ func (c *ctxReadCloser) ServedModel() string {
 	return reporter.ServedModel()
 }
 
+// KeyHint forwards the credential label for the same reason as the observations
+// above: embedding promotes Read and Close only, so a wrapper that omits this
+// erases it for everything downstream.
+func (c *ctxReadCloser) KeyHint() string {
+	if r, ok := c.closer.(interface{ KeyHint() string }); ok {
+		return r.KeyHint()
+	}
+	return ""
+}
+
 func (c *ctxReader) Read(p []byte) (int, error) {
 	select {
 	case <-c.ctx.Done():

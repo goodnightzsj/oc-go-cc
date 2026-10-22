@@ -80,6 +80,17 @@ type RequestRecord struct {
 	// column keeps the id the client asked for - it is what the dashboard and
 	// the billing rules key on - so this is the only place the real one lives.
 	UpstreamModel string `json:"upstream_model,omitempty"`
+
+	// KeyHint identifies which credential in a pool carried the request, as a
+	// masked label - the last four characters. Never the credential itself.
+	//
+	// Attribution used to be unknowable after the fact. A pool rotates on
+	// health, several accounts can serve one platform, and a request that
+	// failed or was billed unexpectedly gave no way to tell which account it
+	// belonged to. The hint is not unique by construction: two keys sharing
+	// their last four characters report the same label, which is the price of
+	// never writing a credential to the history database.
+	KeyHint string `json:"key_hint,omitempty"`
 }
 
 // RequestedModelDiffers reports whether the client asked for a model other than

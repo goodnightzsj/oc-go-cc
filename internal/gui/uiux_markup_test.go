@@ -54,8 +54,8 @@ func TestUIUXSemanticControls(t *testing.T) {
 	// History dropped one when its Scenario column went: every request on this
 	// instance is the "override" kind, so that column held the same string on
 	// every row.
-	if len(headers) != 16 {
-		t.Fatalf("sortable header count = %d, want 16", len(headers))
+	if len(headers) != 17 {
+		t.Fatalf("sortable header count = %d, want 17", len(headers))
 	}
 	for _, header := range headers {
 		if !strings.Contains(header, `<button type="button" class="sort-button">`) || !strings.Contains(header, `<span data-i18n=`) || !strings.Contains(header, `aria-sort=`) {

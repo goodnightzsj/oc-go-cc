@@ -57,7 +57,7 @@ func (p *CommandCodeProvider) Execute(ctx context.Context, req *types.MessageReq
 		if err := json.Unmarshal(raw, &response); err != nil || response.Type != "message" {
 			return nil, fmt.Errorf("invalid commandcode Messages response")
 		}
-		return &core.ExecuteResult{Body: raw}, nil
+		return &core.ExecuteResult{Body: raw, KeyHint: client.KeyHintOf(body)}, nil
 	}
 	var response types.ChatCompletionResponse
 	if err := json.Unmarshal(raw, &response); err != nil || len(response.Choices) == 0 {
@@ -68,7 +68,7 @@ func (p *CommandCodeProvider) Execute(ctx context.Context, req *types.MessageReq
 		return nil, fmt.Errorf("convert commandcode response: %w", err)
 	}
 	raw, err = json.Marshal(converted)
-	return &core.ExecuteResult{Body: raw}, err
+	return &core.ExecuteResult{Body: raw, KeyHint: client.KeyHintOf(body)}, err
 }
 
 func (p *CommandCodeProvider) Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
@@ -140,5 +140,5 @@ func (p *CommandCodeProvider) request(ctx context.Context, req *types.MessageReq
 			p.capture.CaptureUpstreamResponse(rid(ctx), p.Name(), data)
 		}), nil
 	}
-	return resp.Body, nil
+	return p.withKeyHint(resp.Body, sel), nil
 }

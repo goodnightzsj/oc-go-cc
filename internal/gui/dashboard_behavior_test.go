@@ -441,42 +441,42 @@ vm.runInContext(` + "`" + `
   renderHistory();
   const historyHTML = document.getElementById('history-tbody').innerHTML;
   const historyCells = historyHTML.slice(0, historyHTML.indexOf('</tr>')).split('<td').slice(1);
-  // Nine: Scenario was removed, TTFT and Effort were added. Asserted as a
+  // Ten: Scenario was removed; TTFT, Effort and Key were added. Asserted as a
   // number rather than derived so that adding a column is a deliberate edit
   // here.
-  assert.equal(historyCells.length, 9, 'a History row must carry nine cells');
+  assert.equal(historyCells.length, 10, 'a History row must carry ten cells');
   // Asserted on each cell's own markup rather than on a digit: the Duration cell
   // carries the same tok/s figure in its grading tooltip, so a numeric search
   // matches whichever of the two cells it lands in and cannot see them swap.
   // The timing class is emitted only by gradeDuration, and the throughput hint
   // only by the Tok/s cell, so each identifies exactly one column.
   const timingClass = 'class=' + String.fromCharCode(34) + 'timing';
-  assert.ok(historyCells[7].includes(timingClass),
-    'cell 8 must be the graded Duration figure; got ' + historyCells[7]);
-  assert.ok(historyCells[8].includes('Output tokens divided by'),
-    'cell 9 must carry the Tok/s cell, whose tooltip is the throughput hint; got ' + historyCells[8]);
-  assert.ok(!historyCells[8].includes(timingClass),
-    'cell 9 must not be the Duration cell - the two are adjacent and swapping them still counts nine');
+  assert.ok(historyCells[8].includes(timingClass),
+    'cell 9 must be the graded Duration figure; got ' + historyCells[8]);
+  assert.ok(historyCells[9].includes('Output tokens divided by'),
+    'cell 10 must carry the Tok/s cell, whose tooltip is the throughput hint; got ' + historyCells[9]);
+  assert.ok(!historyCells[9].includes(timingClass),
+    'cell 10 must not be the Duration cell - the two are adjacent and swapping them still counts ten');
   // 400 output tokens over 2000 ms is 200 tok/s.
   assert.equal(Math.round(requestThroughput(measured)), 200, 'the row helper and the cell must use one definition');
 
   allHistory = [unknownRecord];
   renderHistory();
   const unknownCells = document.getElementById('history-tbody').innerHTML.slice(0, document.getElementById('history-tbody').innerHTML.indexOf('</tr>')).split('<td').slice(1);
-  assert.equal(unknownCells.length, 9, 'an unknown row still carries nine cells');
+  assert.equal(unknownCells.length, 10, 'an unknown row still carries ten cells');
   // Compared against the cell's text, not the raw markup: splitting on "<td"
   // leaves that cell's own opening-tag attributes in the segment, so the tooltip
   // text is present even for a correctly blank cell. Take the content after the
   // opening tag's ">" and strip any nested tags.
   const cellText = cell => cell.slice(cell.indexOf('>') + 1).replace(/<[^>]*>/g, '').trim();
-  assert.equal(cellText(unknownCells[8]), '—',
-    'an unmeasured row must show a dash, not a fabricated rate; got ' + unknownCells[8]);
-  assert.equal(cellText(historyCells[8]), '200',
-    'the measured row must show its own rate under the Tok/s heading; got ' + historyCells[8]);
+  assert.equal(cellText(unknownCells[9]), '—',
+    'an unmeasured row must show a dash, not a fabricated rate; got ' + unknownCells[9]);
+  assert.equal(cellText(historyCells[9]), '200',
+    'the measured row must show its own rate under the Tok/s heading; got ' + historyCells[9]);
   // TTFT and Effort sit left of Duration. Both show a dash when the row has no
   // value - a fixture without them must not read as instant or as effort-free.
-  assert.equal(cellText(historyCells[6]), '—',
-    'a row with no first-byte measurement must show a dash, not 0ms; got ' + historyCells[6]);
+  assert.equal(cellText(historyCells[7]), '—',
+    'a row with no first-byte measurement must show a dash, not 0ms; got ' + historyCells[7]);
   // Effort sits directly after Model / Platform, so it is cell 4 (index 3).
   assert.equal(cellText(unknownCells[3]), '—',
     'a row with no effort must show a dash; got ' + unknownCells[3]);

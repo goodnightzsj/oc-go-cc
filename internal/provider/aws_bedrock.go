@@ -120,7 +120,8 @@ func (p *AWSBedrockProvider) executeOpenAI(ctx context.Context, req *types.Messa
 	}
 
 	return &core.ExecuteResult{
-		Body: resultBody,
+		Body:    resultBody,
+		KeyHint: sel.KeyHint(),
 	}, nil
 }
 
@@ -145,7 +146,7 @@ func (p *AWSBedrockProvider) streamOpenAI(ctx context.Context, req *types.Messag
 		return nil, err
 	}
 
-	return resp.Body, nil
+	return p.withKeyHint(resp.Body, sel), nil
 }
 
 // ── OpenAI Responses API ──────────────────────────────────────────────
@@ -191,7 +192,8 @@ func (p *AWSBedrockProvider) executeResponses(ctx context.Context, req *types.Me
 	}
 
 	return &core.ExecuteResult{
-		Body: resultBody,
+		Body:    resultBody,
+		KeyHint: sel.KeyHint(),
 	}, nil
 }
 
@@ -215,7 +217,7 @@ func (p *AWSBedrockProvider) streamResponses(ctx context.Context, req *types.Mes
 		return nil, err
 	}
 
-	return resp.Body, nil
+	return p.withKeyHint(resp.Body, sel), nil
 }
 
 // ── Anthropic Messages ────────────────────────────────────────────────
@@ -266,7 +268,7 @@ func (p *AWSBedrockProvider) executeAnthropic(ctx context.Context, req *types.Me
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	return &core.ExecuteResult{Body: body}, nil
+	return &core.ExecuteResult{Body: body, KeyHint: sel.KeyHint()}, nil
 }
 
 func (p *AWSBedrockProvider) streamAnthropic(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
@@ -311,7 +313,7 @@ func (p *AWSBedrockProvider) streamAnthropic(ctx context.Context, req *types.Mes
 		return nil, apiErr
 	}
 
-	return resp.Body, nil
+	return p.withKeyHint(resp.Body, sel), nil
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────

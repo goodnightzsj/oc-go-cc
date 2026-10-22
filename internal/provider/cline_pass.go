@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
@@ -83,11 +84,18 @@ func (p *ClinePassProvider) Execute(ctx context.Context, req *types.MessageReque
 	// caller reading `model` from the response would otherwise be told a model
 	// that never executed.
 	//
-	// The drift aggregates the whole drained stream, so the first-chunk model
-	// (ServedModel) is no longer reachable here - the routing block's
-	// canonicalSlug is. Either answer beats the request id; only the streaming
-	// path has to settle for the first chunk, because there it has no choice.
+	// Three sources, in order of authority. The routing block's canonicalSlug is
+	// the gateway's own statement about what it ran. The aggregated stream's
+	// `model` field is what the upstream chunks carried, which is available even
+	// when the routing block is absent - and it was being ignored: a response
+	// that named its model was overwritten with the requested id. Only when
+	// neither exists does the request id stand in, which is a guess and is why
+	// it goes last. ServedModel is not reachable here; the aggregate holds the
+	// last chunk's value rather than the first's.
 	responseModel := model.ModelID
+	if response.Model != "" {
+		responseModel = response.Model
+	}
 	if upstreamModel != "" {
 		responseModel = upstreamModel
 	}
@@ -100,8 +108,18 @@ func (p *ClinePassProvider) Execute(ctx context.Context, req *types.MessageReque
 }
 
 func (p *ClinePassProvider) Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
-	body, err := p.request(ctx, req, model, true)
+	// The peek below reads ahead, so it needs the same idle bound the caller is
+	// about to install on the body it gets back - otherwise a stalled upstream
+	// is held for the platform-wide total timeout instead of the idle one.
+	idleTimeout := p.streamIdleTimeout(model)
+	// Deliberately not deferred: the returned body stays bound to this context,
+	// and cancelling it on the way out would break every later read. Only the
+	// idle watchdog cancels it, which is the one case where stopping is right.
+	peekCtx, cancelPeek := context.WithCancel(ctx)
+
+	body, err := p.request(peekCtx, req, model, true)
 	if err != nil {
+		cancelPeek()
 		return nil, err
 	}
 	// Read ahead to the frame that names the model, then hand back a body that
@@ -109,16 +127,85 @@ func (p *ClinePassProvider) Stream(ctx context.Context, req *types.MessageReques
 	// and correcting it later - is impossible: message_start goes out first.
 	// This costs the wait for the upstream's first byte, which the caller was
 	// going to wait for anyway before writing anything.
-	peeked, _, firstByteArrived := peekServedModel(body, maxServedModelPeekBytes)
+	peeked, _, firstByteArrived := peekServedModel(peekCtx, cancelPeek, body, maxServedModelPeekBytes, idleTimeout)
+	// The peek stamps the first byte as it reads, so this only covers the case
+	// where it never read one. MarkFirstByte ignores a second call, so the two
+	// cannot disagree about when the byte arrived.
+	//
+	// The peek's own context is cancelled on return: the body must not inherit
+	// a deadline that was only there to bound the read-ahead. The caller wraps
+	// it in attemptCtx immediately, which is the real bound from here on.
 	if firstByteArrived {
-		// Recorded on the body rather than returned: Stream's signature is the
-		// shared provider contract, and only this platform can answer the
-		// question at all.
 		if recorder, ok := peeked.(interface{ MarkFirstByte() }); ok {
 			recorder.MarkFirstByte()
 		}
 	}
-	return peeked, nil
+	// The context outlives this call because the body depends on it; closing the
+	// body is what releases it, so the watchdog's cancel does not leak a
+	// context that nothing would ever finish.
+	return &cancelOnClose{ReadCloser: peeked, cancel: cancelPeek}, nil
+}
+
+// cancelOnClose ties the peek context's lifetime to the body's.
+type cancelOnClose struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnClose) Close() error {
+	err := c.ReadCloser.Close()
+	c.cancel()
+	return err
+}
+
+// The observation methods must be forwarded: embedding promotes Read and Close
+// only, and every wrapper in this chain has erased one at some point.
+func (c *cancelOnClose) ServedModel() string {
+	if r, ok := c.ReadCloser.(interface{ ServedModel() string }); ok {
+		return r.ServedModel()
+	}
+	return ""
+}
+
+func (c *cancelOnClose) UpstreamChannel() string {
+	if r, ok := c.ReadCloser.(interface{ UpstreamChannel() string }); ok {
+		return r.UpstreamChannel()
+	}
+	return ""
+}
+
+func (c *cancelOnClose) UpstreamModel() string {
+	if r, ok := c.ReadCloser.(interface{ UpstreamModel() string }); ok {
+		return r.UpstreamModel()
+	}
+	return ""
+}
+
+func (c *cancelOnClose) MarkFirstByte() {
+	if r, ok := c.ReadCloser.(interface{ MarkFirstByte() }); ok {
+		r.MarkFirstByte()
+	}
+}
+
+func (c *cancelOnClose) FirstByteAt() time.Time {
+	if r, ok := c.ReadCloser.(interface{ FirstByteAt() time.Time }); ok {
+		return r.FirstByteAt()
+	}
+	return time.Time{}
+}
+
+// streamIdleTimeout is the gap between bytes this platform tolerates. It is the
+// value the handler installs on the body it forwards, read here so the peek
+// ahead of that body is held to the same bound rather than to the total.
+func (p *ClinePassProvider) streamIdleTimeout(model config.ModelConfig) time.Duration {
+	const fallback = 5 * time.Minute
+	if p.atomic == nil {
+		return fallback
+	}
+	if ms := p.atomic.Get().ProviderTimeouts(p.Name()).StreamIdleMs; ms > 0 {
+		return time.Duration(ms) * time.Millisecond
+	}
+	return fallback
 }
 
 // request sends one attempt upstream. stream is the upstream's flag; the

@@ -328,14 +328,20 @@ func TestResponsesInboundAcceptsTheLevelsThePipelineSupports(t *testing.T) {
 		}
 	}
 
-	// "Do not reason" has no downstream expression here, so it must fail loudly
-	// rather than quietly become a normal thinking request.
+	// "none" and "minimal" are OpenAI's lowest rungs and have no Anthropic
+	// equivalent. They are accepted and raised to "low" rather than rejected:
+	// a Codex client that cannot send its normal settings cannot use the proxy
+	// at all, and spending a few more tokens beats delivering nothing. The loss
+	// is one-directional and is the reason this is asserted explicitly.
 	for _, level := range []string{"none", "minimal"} {
 		body := `{"model":"m","input":"hi","reasoning":{"effort":"` + level + `"}}`
-		if _, err := ResponsesToMessageRequest([]byte(body)); err == nil {
-			t.Errorf("effort %q must be rejected: this adapter cannot express it", level)
-		} else if !strings.Contains(err.Error(), "no reasoning") {
-			t.Errorf("effort %q: error should say why, got %v", level, err)
+		req, err := ResponsesToMessageRequest([]byte(body))
+		if err != nil {
+			t.Errorf("effort %q must not fail the request: %v", level, err)
+			continue
+		}
+		if !strings.Contains(string(req.OutputConfig), `"low"`) {
+			t.Errorf("effort %q should arrive as low, got %q", level, req.OutputConfig)
 		}
 	}
 }

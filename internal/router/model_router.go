@@ -914,11 +914,22 @@ func RestrictToActiveSite(active string, chain []config.ModelConfig) []config.Mo
 // Same-platform fallbacks stay first: quota already paid for should be spent
 // before reaching into another account, and only then the cross-platform ones.
 func SplitPrimaryAndFallbacks(active string, primary config.ModelConfig, fallbacks []config.ModelConfig) (config.ModelConfig, []config.ModelConfig) {
+	_, ordered := ClassifyChain(active, primary, fallbacks)
+	return primary, ordered
+}
+
+// ClassifyChain orders the fallbacks and reports which ones cross the active
+// site boundary.
+//
+// The count is what makes the feature measurable before it is enabled: an
+// operator can watch how often a cross-platform fallback would have been used
+// without spending another account's quota to find out.
+func ClassifyChain(active string, primary config.ModelConfig, fallbacks []config.ModelConfig) (crossPlatform int, ordered []config.ModelConfig) {
 	if active == "" {
-		return primary, fallbacks
+		return 0, fallbacks
 	}
 	samePlatform := make([]config.ModelConfig, 0, len(fallbacks))
-	crossPlatform := make([]config.ModelConfig, 0, len(fallbacks))
+	cross := make([]config.ModelConfig, 0, len(fallbacks))
 	for _, target := range fallbacks {
 		if config.ModelKey(target) == config.ModelKey(primary) {
 			continue
@@ -927,7 +938,7 @@ func SplitPrimaryAndFallbacks(active string, primary config.ModelConfig, fallbac
 			samePlatform = append(samePlatform, target)
 			continue
 		}
-		crossPlatform = append(crossPlatform, target)
+		cross = append(cross, target)
 	}
-	return primary, append(samePlatform, crossPlatform...)
+	return len(cross), append(samePlatform, cross...)
 }

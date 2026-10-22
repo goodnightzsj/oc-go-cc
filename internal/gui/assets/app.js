@@ -511,6 +511,10 @@ const TRANSLATIONS = {
     'fallback.empty': 'No models configured',
     'fallback.previewTitle': 'Fallback Chain Preview',
     'fallback.selectModel': 'Select a model',
+    'fallback.addHint': 'Grouped by platform; only platforms holding a credential are listed ({n}).',
+    'fallback.unreachable': 'Inactive',
+    'fallback.unreachableHint': 'This platform is outside the active site, so this entry is skipped and never serves a request.',
+    'fallback.noReachableModels': 'No platform currently has a usable credential, so there is nothing to fall back to.',
     'fallback.saving': 'Saving fallback chain...',
     'fallback.saved': 'Fallback chain saved successfully!',
     'fallback.saveFailed': 'Failed to save fallback chain',
@@ -1115,6 +1119,10 @@ const TRANSLATIONS = {
     'fallback.empty': '未配置模型',
     'fallback.previewTitle': '降级链预览',
     'fallback.selectModel': '选择模型',
+    'fallback.addHint': '按平台分组，只列出持有可用凭据的平台（{n} 个）。',
+    'fallback.unreachable': '不生效',
+    'fallback.unreachableHint': '该平台不在当前 active site 内，此条目会被跳过，永远不会承接请求。',
+    'fallback.noReachableModels': '当前没有平台持有可用凭据，无法配置降级模型。',
     'fallback.saving': '保存中...',
     'fallback.saved': '降级链保存成功！',
     'fallback.saveFailed': '保存失败',
@@ -5037,8 +5045,29 @@ const FallbackModule = {
       if (!r.ok) return;
       const config = await r.json();
 
-      // Keep the complete model config, including its protocol and capabilities.
+      // The picker offers what this instance can actually send to, which is the
+      // proxy's own model listing - it already applies the routing rules and
+      // only carries platforms holding a credential. Building the list from the
+      // config file instead offered models whose platform has no key, so the
+      // chain looked configured and could never serve a request.
       const modelMap = new Map();
+      let reachable = [];
+      try {
+        const listing = await fetch('/api/catalog/models');
+        if (listing.ok) {
+          const payload = await listing.json();
+          reachable = payload.models || [];
+          this.activeSite = payload.scope || '';
+        }
+      } catch (_) { /* fall back to configured models below */ }
+      for (const m of reachable) {
+        if (!m.id || !m.provider) continue;
+        const entry = { provider: m.provider, model_id: m.id };
+        modelMap.set(configModelKey(entry), entry);
+      }
+      // Anything already configured stays selectable even if the listing is
+      // momentarily unavailable, so an existing chain is never silently
+      // rewritten just because the picker could not be refreshed.
       const candidates = [
         ...Object.values(config.models || {}),
         ...Object.values(config.model_overrides || {}),
@@ -5049,6 +5078,10 @@ const FallbackModule = {
         if (model.model_id && !modelMap.has(configModelKey(model))) modelMap.set(configModelKey(model), { ...model });
       }
       this.availableModels = [...modelMap.values()];
+      this.platformHasKey = {};
+      for (const m of reachable) {
+        if (m.provider) this.platformHasKey[m.provider] = true;
+      }
 
       // Discover all scenario keys from config.models
       const scenarioKeys = [...new Set([...Object.keys(config.models || {}), ...Object.keys(config.fallbacks || {})])];
@@ -5090,11 +5123,32 @@ const FallbackModule = {
       .filter(m => !chain.some(e => configModelKey(e) === configModelKey(m)))
       .sort((a, b) => compareProviderDisplay(a.provider || 'opencode-go', b.provider || 'opencode-go')
         || a.model_id.localeCompare(b.model_id));
+
+    // Grouped by platform: the platform is the thing an operator reasons about
+    // ("fall back to a different provider"), and a flat list of model ids hides
+    // it. Platforms are shown by their display name, not their config key.
+    const byPlatform = new Map();
+    for (const m of available) {
+      const provider = m.provider || 'opencode-go';
+      if (!byPlatform.has(provider)) byPlatform.set(provider, []);
+      byPlatform.get(provider).push(m);
+    }
+    const groups = [...byPlatform.entries()].sort((a, b) => compareProviderDisplay(a[0], b[0]));
+
     addSel.innerHTML = '<option value="">' + t('fallback.selectModel') + '</option>' +
-      available.map(m =>
-        `<option value="${escapeHtml(configModelKey(m))}">${escapeHtml(m.model_id)} (${escapeHtml(m.provider || 'opencode-go')})</option>`
+      groups.map(([provider, models]) =>
+        `<optgroup label="${escapeHtml(platformLabel(provider))}">` +
+        models.map(m =>
+          `<option value="${escapeHtml(configModelKey(m))}">${escapeHtml(m.model_id)}</option>`
+        ).join('') + '</optgroup>'
       ).join('');
     addSel.disabled = available.length === 0;
+    const hint = document.getElementById('fallback-add-hint');
+    if (hint) {
+      hint.textContent = available.length === 0
+        ? t('fallback.noReachableModels')
+        : t('fallback.addHint').replace('{n}', String(groups.length));
+    }
   },
 
   onAddSelectChange() {
@@ -5128,10 +5182,15 @@ const FallbackModule = {
     }
 
     list.classList.add('has-items');
+    const activeSite = this.activeSite || '';
     list.innerHTML = chain.map((entry, index) => {
       const modelId = entry.model_id || entry;
       const displayName = modelId;
       const provider = entry.provider || 'opencode-go';
+      // A chain entry on another platform is not a fallback: the active site
+      // scopes routing, so it is dropped before the request is ever sent. Say
+      // so on the row rather than letting the picture imply protection.
+      const unreachable = activeSite && provider !== activeSite;
       const identity = `${displayName} (${PROVIDERS[provider.replace(/_/g, '-')]?.name || provider})`;
       const label = key => escapeHtml(t(key).replace('{model}', identity));
       return `
@@ -5140,6 +5199,7 @@ const FallbackModule = {
           <span class="chain-order" aria-hidden="true">${index + 1}</span>
           <span class="model-name">${escapeHtml(displayName)}</span>
           ${provider ? '<span class="model-meta">' + escapeHtml(provider) + '</span>' : ''}
+          ${unreachable ? '<span class="model-meta chain-unreachable" title="' + escapeHtml(t('fallback.unreachableHint')) + '">' + escapeHtml(t('fallback.unreachable')) + '</span>' : ''}
           <span class="chain-actions">
             <button type="button" class="chain-move" data-direction="up" onclick="FallbackModule.moveModel(${index}, ${index - 1}, 'up')" aria-label="${label('fallback.moveUp')}" title="${label('fallback.moveUp')}" ${index === 0 ? 'disabled' : ''}>↑</button>
             <button type="button" class="chain-move" data-direction="down" onclick="FallbackModule.moveModel(${index}, ${index + 1}, 'down')" aria-label="${label('fallback.moveDown')}" title="${label('fallback.moveDown')}" ${index === chain.length - 1 ? 'disabled' : ''}>↓</button>

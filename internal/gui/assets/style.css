@@ -1901,6 +1901,15 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
 /* The credential that carried the request, masked to its last four characters.
    Monospaced so equal-length labels line up column-wise, which is what makes a
    change of account visible at a glance. */
+.chain-unreachable {
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--ui-orange, #ff9f0a) 40%, transparent);
+  background: color-mix(in srgb, var(--ui-orange, #ff9f0a) 12%, transparent);
+  color: var(--ui-orange, #ff9f0a);
+  border-radius: 4px;
+  font-size: 10px;
+}
+
 .history-key-hint {
   font-family: var(--ui-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 11px;

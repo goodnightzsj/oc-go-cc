@@ -68,14 +68,11 @@ func (p *OpenRouterProvider) request(ctx context.Context, req *types.MessageRequ
 	if err != nil {
 		return nil, err
 	}
+	defer sel.Release()
 	key := sel.Key()
 	if key == "" {
 		return nil, fmt.Errorf("no API key configured for provider %q", p.Name())
 	}
-	// Every path out settles the reservation: a local transform failure
-	// releases it with no verdict, the send result reports the key's health.
-	var settleErr error
-	defer func() { sel.Settle(settleErr) }()
 	endpoint := strings.TrimRight(cfg.OpenRouter.BaseURL, "/")
 	if strings.HasSuffix(endpoint, "/v1") {
 		endpoint += "/chat/completions"
@@ -102,9 +99,8 @@ func (p *OpenRouterProvider) request(ctx context.Context, req *types.MessageRequ
 	if stream {
 		httpReq.Header.Set("Accept", "text/event-stream")
 	}
-	resp, err := p.httpClient.Do(httpReq)
+	resp, err := p.doSelected(httpReq, sel)
 	if err != nil {
-		settleErr = err
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
@@ -112,11 +108,9 @@ func (p *OpenRouterProvider) request(ctx context.Context, req *types.MessageRequ
 		body, readErr := io.ReadAll(resp.Body)
 		retryAfter := resp.Header.Get("Retry-After")
 		if readErr != nil {
-			settleErr = &client.APIError{StatusCode: resp.StatusCode, RetryAfter: retryAfter}
 			return nil, fmt.Errorf("read upstream error: %w: %w", readErr, &client.APIError{StatusCode: resp.StatusCode, Body: string(body)})
 		}
 		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(body), RetryAfter: retryAfter}
-		settleErr = apiErr
 		return nil, apiErr
 	}
 	if p.capture != nil {

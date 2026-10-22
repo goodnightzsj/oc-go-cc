@@ -89,7 +89,6 @@ func probeVerdict(t *testing.T, cfg *config.Config) string {
 	return strings.Join(captured, "\n")
 }
 
-
 // routingFrame builds the SSE tail the gateway sends: the routing block, in the
 // last frame before [DONE].
 func routingFrame(served string, candidates ...string) string {

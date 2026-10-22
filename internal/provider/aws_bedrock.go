@@ -85,6 +85,7 @@ func (p *AWSBedrockProvider) executeOpenAI(ctx context.Context, req *types.Messa
 	if rerr != nil {
 		return nil, rerr
 	}
+	defer sel.Release()
 
 	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
 	if err != nil {
@@ -130,6 +131,7 @@ func (p *AWSBedrockProvider) streamOpenAI(ctx context.Context, req *types.Messag
 	if rerr != nil {
 		return nil, rerr
 	}
+	defer sel.Release()
 
 	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
 	if err != nil {
@@ -155,6 +157,7 @@ func (p *AWSBedrockProvider) executeResponses(ctx context.Context, req *types.Me
 	if rerr != nil {
 		return nil, rerr
 	}
+	defer sel.Release()
 
 	responsesReq, err := transformer.AnthropicToResponses(req, model)
 	if err != nil {
@@ -199,6 +202,7 @@ func (p *AWSBedrockProvider) streamResponses(ctx context.Context, req *types.Mes
 	if rerr != nil {
 		return nil, rerr
 	}
+	defer sel.Release()
 
 	responsesReq, err := transformer.AnthropicToResponses(req, model)
 	if err != nil {
@@ -226,10 +230,10 @@ func (p *AWSBedrockProvider) executeAnthropic(ctx context.Context, req *types.Me
 	if rerr != nil {
 		return nil, rerr
 	}
+	defer sel.Release()
 
 	rawBody, err := anthropicPayload(ctx, req, model, false)
 	if err != nil {
-		sel.Settle(nil)
 		return nil, fmt.Errorf("failed to marshal anthropic request: %w", err)
 	}
 
@@ -245,9 +249,8 @@ func (p *AWSBedrockProvider) executeAnthropic(ctx context.Context, req *types.Me
 		httpReq.Header.Set("OpenAI-Project", cfg.AWSBedrock.ProjectID)
 	}
 
-	resp, err := p.httpClient.Do(httpReq)
+	resp, err := p.doSelected(httpReq, sel)
 	if err != nil {
-		sel.Settle(err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -255,10 +258,8 @@ func (p *AWSBedrockProvider) executeAnthropic(ctx context.Context, req *types.Me
 	if resp.StatusCode >= http.StatusBadRequest {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
-		sel.Settle(apiErr)
 		return nil, apiErr
 	}
-	sel.Settle(nil)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -278,10 +279,10 @@ func (p *AWSBedrockProvider) streamAnthropic(ctx context.Context, req *types.Mes
 	if rerr != nil {
 		return nil, rerr
 	}
+	defer sel.Release()
 
 	rawBody, err := anthropicPayload(ctx, req, model, true)
 	if err != nil {
-		sel.Settle(nil)
 		return nil, fmt.Errorf("failed to marshal anthropic request: %w", err)
 	}
 
@@ -298,9 +299,8 @@ func (p *AWSBedrockProvider) streamAnthropic(ctx context.Context, req *types.Mes
 	client.SetProviderHeaders(httpReq, p.Name())
 	client.SetAnthropicHeaders(httpReq)
 
-	resp, err := p.httpClient.Do(httpReq)
+	resp, err := p.doSelected(httpReq, sel)
 	if err != nil {
-		sel.Settle(err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
@@ -308,10 +308,8 @@ func (p *AWSBedrockProvider) streamAnthropic(ctx context.Context, req *types.Mes
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
-		sel.Settle(apiErr)
 		return nil, apiErr
 	}
-	sel.Settle(nil)
 
 	return resp.Body, nil
 }
@@ -366,7 +364,6 @@ func (p *AWSBedrockProvider) responsesEndpoint(cfg *config.Config) string {
 func (p *AWSBedrockProvider) doBedrockRequest(ctx context.Context, endpoint string, sel *selection, projectID string, req any, stream bool) (*http.Response, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
-		sel.Settle(nil) // never sent: no verdict for the key
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
@@ -384,9 +381,8 @@ func (p *AWSBedrockProvider) doBedrockRequest(ctx context.Context, endpoint stri
 		httpReq.Header.Set("Accept", "text/event-stream")
 	}
 
-	resp, err := p.httpClient.Do(httpReq)
+	resp, err := p.doSelected(httpReq, sel)
 	if err != nil {
-		sel.Settle(err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
@@ -394,10 +390,8 @@ func (p *AWSBedrockProvider) doBedrockRequest(ctx context.Context, endpoint stri
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
-		sel.Settle(apiErr)
 		return nil, apiErr
 	}
-	sel.Settle(nil)
 
 	return resp, nil
 }

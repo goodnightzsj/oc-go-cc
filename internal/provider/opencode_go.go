@@ -74,10 +74,10 @@ func (p *OpenCodeGoProvider) executeOpenAI(ctx context.Context, req *types.Messa
 	if err != nil {
 		return nil, err
 	}
+	defer sel.Release()
 
 	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
 	if err != nil {
-		sel.Settle(nil)
 		return nil, fmt.Errorf("request transform failed: %w", err)
 	}
 	streamFalse := false
@@ -120,10 +120,10 @@ func (p *OpenCodeGoProvider) streamOpenAI(ctx context.Context, req *types.Messag
 	if rerr != nil {
 		return nil, rerr
 	}
+	defer sel.Release()
 
 	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
 	if err != nil {
-		sel.Settle(nil)
 		return nil, fmt.Errorf("request transform failed: %w", err)
 	}
 	streamTrue := true
@@ -174,6 +174,7 @@ func (p *OpenCodeGoProvider) responsesRequest(ctx context.Context, req *types.Me
 	if rerr != nil {
 		return nil, rerr
 	}
+	defer sel.Release()
 	resp, err := p.doRequest(ctx, cfg.OpenCodeGo.ResponsesBaseURL, sel, payload, stream)
 	if err != nil {
 		return nil, err
@@ -190,10 +191,10 @@ func (p *OpenCodeGoProvider) executeAnthropic(ctx context.Context, req *types.Me
 	if rerr != nil {
 		return nil, rerr
 	}
+	defer sel.Release()
 
 	rawBody, err := anthropicPayload(ctx, req, model, false)
 	if err != nil {
-		sel.Settle(nil)
 		return nil, fmt.Errorf("failed to marshal anthropic request: %w", err)
 	}
 
@@ -207,9 +208,8 @@ func (p *OpenCodeGoProvider) executeAnthropic(ctx context.Context, req *types.Me
 	client.SetProviderHeaders(httpReq, p.Name())
 	client.SetAnthropicHeaders(httpReq)
 
-	resp, err := p.httpClient.Do(httpReq)
+	resp, err := p.doSelected(httpReq, sel)
 	if err != nil {
-		sel.Settle(err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -217,10 +217,8 @@ func (p *OpenCodeGoProvider) executeAnthropic(ctx context.Context, req *types.Me
 	if resp.StatusCode >= http.StatusBadRequest {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
-		sel.Settle(apiErr)
 		return nil, apiErr
 	}
-	sel.Settle(nil)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -237,10 +235,10 @@ func (p *OpenCodeGoProvider) streamAnthropic(ctx context.Context, req *types.Mes
 	if rerr != nil {
 		return nil, rerr
 	}
+	defer sel.Release()
 
 	rawBody, err := anthropicPayload(ctx, req, model, true)
 	if err != nil {
-		sel.Settle(nil)
 		return nil, fmt.Errorf("failed to marshal anthropic request: %w", err)
 	}
 
@@ -259,9 +257,8 @@ func (p *OpenCodeGoProvider) streamAnthropic(ctx context.Context, req *types.Mes
 		p.capture.CaptureUpstreamRequest(rid(ctx), p.Name(), rawBody)
 	}
 
-	resp, err := p.httpClient.Do(httpReq)
+	resp, err := p.doSelected(httpReq, sel)
 	if err != nil {
-		sel.Settle(err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
@@ -269,10 +266,8 @@ func (p *OpenCodeGoProvider) streamAnthropic(ctx context.Context, req *types.Mes
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
-		sel.Settle(apiErr)
 		return nil, apiErr
 	}
-	sel.Settle(nil)
 
 	if p.capture != nil {
 		return client.CaptureBody(resp.Body, func(data []byte) {
@@ -294,7 +289,6 @@ func rid(ctx context.Context) string {
 func (p *OpenCodeGoProvider) doRequest(ctx context.Context, endpoint string, sel *selection, req any, stream bool) (*http.Response, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
-		sel.Settle(nil) // never sent: no verdict for the key
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 	if p.capture != nil {
@@ -312,9 +306,8 @@ func (p *OpenCodeGoProvider) doRequest(ctx context.Context, endpoint string, sel
 		httpReq.Header.Set("Accept", "text/event-stream")
 	}
 
-	resp, err := p.httpClient.Do(httpReq)
+	resp, err := p.doSelected(httpReq, sel)
 	if err != nil {
-		sel.Settle(err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
@@ -322,10 +315,8 @@ func (p *OpenCodeGoProvider) doRequest(ctx context.Context, endpoint string, sel
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
-		sel.Settle(apiErr)
 		return nil, apiErr
 	}
-	sel.Settle(nil)
 
 	if p.capture != nil {
 		resp.Body = client.CaptureBody(resp.Body, func(data []byte) {

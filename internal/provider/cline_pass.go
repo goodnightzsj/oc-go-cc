@@ -130,7 +130,7 @@ func (p *ClinePassProvider) request(ctx context.Context, req *types.MessageReque
 	if err != nil {
 		return nil, err
 	}
-	key := sel.Key()
+	defer sel.Release()
 	converted, err := transformer.AnthropicToChatCompletion(req, model)
 	if err == nil {
 		// The field is always written, never left to the server default: the
@@ -160,30 +160,25 @@ func (p *ClinePassProvider) request(ctx context.Context, req *types.MessageReque
 		var payload []byte
 		payload, err = json.Marshal(out)
 		if err == nil {
-			body, sendErr := p.send(ctx, cfg, key, payload, stream)
+			body, sendErr := p.send(ctx, cfg, sel, payload, stream)
 			// A stream body that opens successfully is a success even though the
 			// caller reads it later: the upstream has accepted the key and
 			// started answering, which is what the health record is about. A
 			// failure that arrives mid-stream is reported by the stream reader,
 			// not here.
-			sel.Settle(sendErr)
 			return body, sendErr
 		}
 	}
-	// The key was reserved but never sent, so it must be released without a
-	// verdict: the request was never attempted, and counting that as a key
-	// failure would cool a healthy credential for a local encoding error.
-	sel.Settle(nil)
 	return nil, fmt.Errorf("encode cline-pass request: %w", err)
 }
 
-func (p *ClinePassProvider) send(ctx context.Context, cfg *config.Config, key string, payload []byte, stream bool) (io.ReadCloser, error) {
+func (p *ClinePassProvider) send(ctx context.Context, cfg *config.Config, sel *selection, payload []byte, stream bool) (io.ReadCloser, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.ClinePass.BaseURL, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("create cline-pass request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+key)
+	httpReq.Header.Set("Authorization", "Bearer "+sel.Key())
 	client.SetProviderHeaders(httpReq, p.Name())
 	if stream {
 		httpReq.Header.Set("Accept", "text/event-stream")
@@ -191,7 +186,7 @@ func (p *ClinePassProvider) send(ctx context.Context, cfg *config.Config, key st
 	if p.capture != nil {
 		p.capture.CaptureUpstreamRequest(rid(ctx), p.Name(), payload)
 	}
-	resp, err := p.httpClient.Do(httpReq)
+	resp, err := p.doSelected(httpReq, sel)
 	if err != nil {
 		return nil, fmt.Errorf("cline-pass request failed: %w", err)
 	}

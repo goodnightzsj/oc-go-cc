@@ -93,14 +93,6 @@ func LoadFromPath(path string) (*Config, error) {
 // LoadJSON validates a config using the same environment and defaults as a
 // disk load. The input remains unchanged so callers can persist placeholders.
 func LoadJSON(data []byte) (*Config, error) {
-	// Snapshot the file's own key pools from the raw bytes, before
-	// interpolation. A ${VAR} placeholder is a line the file holds and the
-	// settings round trip can keep, so it must count as file-backed - but once
-	// interpolation has run, the placeholder is indistinguishable from a
-	// literal that happens to have the same value, and a credential supplied
-	// only by the environment would be misreported as editable.
-	filePools := snapshotKeyPoolsFromRaw(data)
-
 	var cfg Config
 	if err := json.Unmarshal([]byte(interpolateEnvVars(string(data))), &cfg); err != nil {
 		return nil, fmt.Errorf("parsing JSON: %w", err)
@@ -110,7 +102,9 @@ func LoadJSON(data []byte) (*Config, error) {
 		return nil, err
 	}
 	// Note where each pool entry came from, now that both sources have merged.
-	recordKeyOrigins(&cfg, filePools)
+	if err := recordKeySources(&cfg, data); err != nil {
+		return nil, err
+	}
 	applyDefaults(&cfg)
 
 	if err := validate(&cfg); err != nil {
@@ -177,45 +171,14 @@ func InterpolateEnvVars(value string) string {
 
 // applyEnvOverrides applies environment variable overrides to the config.
 func applyEnvOverrides(cfg *Config) error {
-	// Global API keys (backward compatibility)
-	if v := envValue("ROUTATIC_PROXY_API_KEY"); v != "" {
-		cfg.APIKey = v
-	}
-	// Global API keys array (comma-separated)
-	if v := envValue("ROUTATIC_PROXY_API_KEYS"); v != "" {
-		cfg.APIKeys = parseCommaSeparatedKeys(v)
-	}
-
-	// Provider-specific API keys (new)
-	//
-	// Each platform's *_API_KEY and *_API_KEYS feed the same two config fields
-	// the file does, so they pool the same way: setting both appends rather
-	// than one clearing the other, matching EffectiveAPIKeys. A single-key
-	// environment override therefore no longer removes keys the file listed in
-	// api_keys - to drop those, clear api_keys in the file (or override it with
-	// *_API_KEYS).
-	//
-	// Single key
-	if v := envValue("ROUTATIC_PROXY_OPENCODE_GO_API_KEY"); v != "" {
-		cfg.OpenCodeGo.APIKey = v
-	}
-	// Comma-separated keys
-	if v := envValue("ROUTATIC_PROXY_OPENCODE_GO_API_KEYS"); v != "" {
-		cfg.OpenCodeGo.APIKeys = parseCommaSeparatedKeys(v)
-	}
-
-	if v := envValue("ROUTATIC_PROXY_OPENCODE_ZEN_API_KEY"); v != "" {
-		cfg.OpenCodeZen.APIKey = v
-	}
-	if v := envValue("ROUTATIC_PROXY_OPENCODE_ZEN_API_KEYS"); v != "" {
-		cfg.OpenCodeZen.APIKeys = parseCommaSeparatedKeys(v)
-	}
-
-	if v := envValue("ROUTATIC_PROXY_AWS_BEDROCK_API_KEY"); v != "" {
-		cfg.AWSBedrock.APIKey = v
-	}
-	if v := envValue("ROUTATIC_PROXY_AWS_BEDROCK_API_KEYS"); v != "" {
-		cfg.AWSBedrock.APIKeys = parseCommaSeparatedKeys(v)
+	// Overrides target each field independently; migration must preserve that layout.
+	for _, row := range keyPoolFields {
+		if v := envValue(row.envPrefix + "_API_KEY"); v != "" {
+			*row.single(cfg) = v
+		}
+		if v := envValue(row.envPrefix + "_API_KEYS"); v != "" {
+			*row.many(cfg) = parseCommaSeparatedKeys(v)
+		}
 	}
 	if v := envValue("ROUTATIC_PROXY_AWS_BILLING_ENABLED"); v != "" {
 		enabled, err := strconv.ParseBool(v)
@@ -231,20 +194,8 @@ func applyEnvOverrides(cfg *Config) error {
 		cfg.AWSBedrock.Billing.LinkedAccountID = v
 	}
 
-	if v := envValue("ROUTATIC_PROXY_OPENROUTER_API_KEY"); v != "" {
-		cfg.OpenRouter.APIKey = v
-	}
-	if v := envValue("ROUTATIC_PROXY_OPENROUTER_API_KEYS"); v != "" {
-		cfg.OpenRouter.APIKeys = parseCommaSeparatedKeys(v)
-	}
 	if v := envValue("ROUTATIC_PROXY_OPENROUTER_MANAGEMENT_API_KEY"); v != "" {
 		cfg.OpenRouter.ManagementAPIKey = v
-	}
-	if v := envValue("ROUTATIC_PROXY_COMMANDCODE_API_KEY"); v != "" {
-		cfg.CommandCode.APIKey = v
-	}
-	if v := envValue("ROUTATIC_PROXY_COMMANDCODE_API_KEYS"); v != "" {
-		cfg.CommandCode.APIKeys = parseCommaSeparatedKeys(v)
 	}
 	if v := envValue("ROUTATIC_PROXY_COMMANDCODE_URL"); v != "" {
 		cfg.CommandCode.BaseURL = v
@@ -253,12 +204,6 @@ func applyEnvOverrides(cfg *Config) error {
 		cfg.CommandCode.AnthropicBaseURL = v
 	}
 
-	if v := envValue("ROUTATIC_PROXY_CLINE_PASS_API_KEY"); v != "" {
-		cfg.ClinePass.APIKey = v
-	}
-	if v := envValue("ROUTATIC_PROXY_CLINE_PASS_API_KEYS"); v != "" {
-		cfg.ClinePass.APIKeys = parseCommaSeparatedKeys(v)
-	}
 	if v := envValue("ROUTATIC_PROXY_CLINE_PASS_URL"); v != "" {
 		cfg.ClinePass.BaseURL = v
 	}

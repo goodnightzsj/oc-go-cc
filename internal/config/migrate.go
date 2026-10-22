@@ -30,7 +30,7 @@ func MigrateKeyPools(data []byte) ([]byte, bool, error) {
 
 	changed := false
 	// The global pool is a top-level pair; each platform's sits in its block.
-	if moved, err := migrateKeyPoolFields(root); err != nil {
+	if moved, err := migrateKeyPoolFields(root, keyPoolFields[0]); err != nil {
 		return nil, false, err
 	} else if moved {
 		changed = true
@@ -50,7 +50,7 @@ func MigrateKeyPools(data []byte) ([]byte, bool, error) {
 			// for the loader to reject with its own message.
 			continue
 		}
-		moved, err := migrateKeyPoolFields(block)
+		moved, err := migrateKeyPoolFields(block, row)
 		if err != nil {
 			return nil, false, fmt.Errorf("%s: %w", row.jsonKey, err)
 		}
@@ -83,7 +83,12 @@ func MigrateKeyPools(data []byte) ([]byte, bool, error) {
 // The field is emptied rather than deleted so a reader that still looks for it
 // finds nothing rather than a missing key, and so a config with no array yet
 // keeps both names visible to an operator editing the file by hand.
-func migrateKeyPoolFields(obj map[string]json.RawMessage) (bool, error) {
+func migrateKeyPoolFields(obj map[string]json.RawMessage, row keyPoolField) (bool, error) {
+	// Overrides replace individual fields. Moving a key between them would
+	// change the effective pool, even when "," overrides the array to empty.
+	if envValue(row.envPrefix+"_API_KEY") != "" || envValue(row.envPrefix+"_API_KEYS") != "" {
+		return false, nil
+	}
 	singleRaw, hasSingle := obj["api_key"]
 	if !hasSingle {
 		return false, nil
@@ -127,7 +132,7 @@ func migrateKeyPoolFields(obj map[string]json.RawMessage) (bool, error) {
 // a stored file that still separates the two fields would address the wrong
 // credential - or refuse a correct edit as stale.
 func FoldKeyPoolBlocksInPlace(root map[string]json.RawMessage) error {
-	if _, err := migrateKeyPoolFields(root); err != nil {
+	if _, err := migrateKeyPoolFields(root, keyPoolFields[0]); err != nil {
 		return err
 	}
 	for _, row := range keyPoolFields {
@@ -142,7 +147,7 @@ func FoldKeyPoolBlocksInPlace(root map[string]json.RawMessage) error {
 		if err := json.Unmarshal(raw, &block); err != nil {
 			continue
 		}
-		moved, err := migrateKeyPoolFields(block)
+		moved, err := migrateKeyPoolFields(block, row)
 		if err != nil {
 			return fmt.Errorf("%s: %w", row.jsonKey, err)
 		}
@@ -180,6 +185,11 @@ func BackupConfigFile(path string, data []byte) (string, error) {
 // leaves the original file untouched, because the write is the atomic
 // rename-and-replace the settings path already uses.
 func MigrateConfigFileOnDisk(path string) (bool, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false, fmt.Errorf("failed to resolve config path: %w", err)
+	}
+	path = resolved
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false, err
@@ -195,29 +205,33 @@ func MigrateConfigFileOnDisk(path string) (bool, error) {
 	if _, err := BackupConfigFile(path, data); err != nil {
 		return false, err
 	}
-	if err := writeFileAtomic(path, migrated); err != nil {
+	if err := WriteFileAtomic(path, migrated); err != nil {
 		return false, fmt.Errorf("failed to write migrated config: %w", err)
 	}
 	return true, nil
 }
 
-// writeFileAtomic replaces path through a temporary file in the same directory,
-// so a crash mid-write cannot leave a truncated config behind.
-func writeFileAtomic(path string, data []byte) error {
+// WriteFileAtomic replaces a resolved config target through a private temporary
+// file in the same directory. Callers resolve symlinks before reading/backing up
+// the target, so the read and commit operate on the same file.
+func WriteFileAtomic(path string, data []byte) error {
 	file, err := os.CreateTemp(filepath.Dir(path), ".routatic-config-*.tmp")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create config file: %w", err)
 	}
 	defer func() { _ = os.Remove(file.Name()) }()
 	defer func() { _ = file.Close() }()
 	if _, err := file.Write(data); err != nil {
-		return err
+		return fmt.Errorf("failed to write config file: %w", err)
 	}
 	if err := file.Sync(); err != nil {
-		return err
+		return fmt.Errorf("failed to sync config file: %w", err)
 	}
 	if err := file.Close(); err != nil {
-		return err
+		return fmt.Errorf("failed to close config file: %w", err)
 	}
-	return os.Rename(file.Name(), path)
+	if err := os.Rename(file.Name(), path); err != nil {
+		return fmt.Errorf("failed to replace config file: %w", err)
+	}
+	return nil
 }

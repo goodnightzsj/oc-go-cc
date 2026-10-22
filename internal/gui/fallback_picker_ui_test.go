@@ -179,3 +179,44 @@ async function checks() {
 }
 `)
 }
+
+// The platform choice is view state, not configuration: it belongs in the URL
+// so a reload or a shared link lands on the same platform, and nothing is
+// written to the config file. It gets its own parameter because the global
+// `platform` key narrows history and analytics - sharing it would silently
+// filter every other tab.
+func TestFallbackPlatformSurvivesAReload(t *testing.T) {
+	runPlatformBehavior(t, platformBehaviorDOMScript+`
+async function checks() {
+  FallbackModule.availableModels = [
+    {provider:'cline-pass', model_id:'a', input_per_m:1, output_per_m:2},
+    {provider:'commandcode', model_id:'b', input_per_m:1, output_per_m:2},
+  ];
+  FallbackModule.chains = {default:[]};
+  FallbackModule.currentScenario = 'default';
+  activeTab = 'fallback';
+
+  // Choosing a platform writes it into the hash under its own key.
+  FallbackModule.platformFilter = 'cline-pass';
+  syncViewState({replace: true});
+  assert.ok(location.hash.includes('fplatform=cline-pass'), 'platform must be in the hash: ' + location.hash);
+  assert.ok(!/(^|[?&])platform=/.test(location.hash), 'the fallback filter must not use the global platform key');
+
+  // A reload restores it. Reset first: leaving the previous selection in place
+  // would make this pass whether or not the hash is read at all.
+  FallbackModule.platformFilter = '';
+  FallbackModule.pendingPlatform = '';
+  document.getElementById('fallback-platform-filter').value = '';
+  FallbackModule.populatePlatformFilter();   // rewrite the options from scratch
+  document.getElementById('fallback-platform-filter').value = '';
+  applyViewState(parseViewHash('./#fallback?fplatform=cline-pass').params);
+  assert.equal(FallbackModule.platformFilter, 'cline-pass', 'the restored value must drive the filter');
+  assert.equal(document.getElementById('fallback-platform-filter').value, 'cline-pass');
+
+  // A platform that is no longer reachable falls back to "all" rather than
+  // leaving a filter that can only ever show an empty list.
+  applyViewState(parseViewHash('./#fallback?fplatform=gone-platform').params);
+  assert.equal(FallbackModule.platformFilter, '', 'an unknown platform must fall back to all');
+}
+`)
+}

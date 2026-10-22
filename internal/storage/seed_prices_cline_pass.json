@@ -15,7 +15,7 @@
     "_comment": "cline-pass/muse-spark-1.3-contributor also appears in the live roster and has no rule here on purpose: neither source publishes a rate for it, so its cost reports as unknown. A missing rule is not a zero rate - inventing one would show a confident, wrong number."
   },
   {
-    "_comment": "Rows carry the platform's own model id (the page's Model ID table gives it as cline-pass/<name>), matched as a substring with longest-match winning. The full id is used rather than the bare name so a rule cannot match a same-named model on another platform and so the seed reads identically to what the live refresher parses off the page. glm-5.3 is a substring of glm-5.3-flash and mimo-v2.5 of mimo-v2.5-pro, which is why the longer id must stay in this table - longest match decides, not row order. Base rates are the Off-peak column; `tiers` replace them once the whole prompt exceeds `size` input tokens, matching the table's own '> 256K tokens' wording."
+    "_comment": "Rows carry the platform's own model id (the page's Model ID table gives it as cline-pass/<name>), matched as a substring with longest-match winning. The full id is used rather than the bare name so a rule cannot match a same-named model on another platform and so the seed reads identically to what the live refresher parses off the page. glm-5.3 is a substring of glm-5.3-flash and mimo-v2.5 of mimo-v2.5-pro, which is why the longer id must stay in this table - longest match decides, not row order. Base rates are the Off-peak column; `tiers` replace them once the whole prompt exceeds `size` input tokens, matching the table's own '> 256K tokens' wording. A peak-priced model the page prints only ONCE is listed at that single (peak) figure, and the refresher divides the declared peak ratio out of it so the base stays off-peak - see the note on the Flash row."
   },
   {
     "_comment": "DeepSeek V4 Pro/Flash publish a Peak column too (1.32/3.96/0.044 and 0.44/1.32/0.014). An earlier revision of this note said the peak WINDOW was unverified; it is verifiable, from the page this table's own footnote cites. DeepSeek's pricing page states: \"Peak hours are 01:00 - 04:00 and 06:00 - 10:00 UTC, Monday through Friday, excluding Chinese public holidays\". peakSchedules therefore carries a cline-pass entry with excludesHolidays set, and these rows bill at Peak inside that window on a working day."
@@ -72,7 +72,7 @@
     "output": 0.6,
     "cache_read": 0.003,
     "_source": "models.dev (absent from the docs Reference pricing table)",
-    "_note": "The docs page lists one Flash row at 0.30/1.20, which equals DeepSeek's Flash PEAK rate; this base is DeepSeek's off-peak and the cline-pass peakSchedules entry (x2) reproduces 0.30/1.20 inside the window. Adopting the page row as the base would double-count to 0.60/2.40 at peak, which no source states. Kept as the off-peak base deliberately."
+    "_note": "The docs page lists one Flash row at 0.30/1.20, which equals DeepSeek's Flash PEAK rate. This entry is the off-peak base, and the refresher now derives the same figure from that lone row by dividing the declared 2x out (parseClinePassPricePage), so a cold start and a live refresh agree. Adopting the page row as the base without that division double-counts to 0.60/2.40 at peak - which is what actually happened here for four days, worth 2x on every ClinePass Flash request from 2026-10-18 04:03 UTC until the parser was fixed."
   },
   {
     "match": "cline-pass/deepseek-v4-flash",

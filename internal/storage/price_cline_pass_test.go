@@ -2,9 +2,13 @@ package storage
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/routatic/proxy/internal/history"
+	"github.com/routatic/proxy/internal/site"
 )
 
 // clinePricePageFixture is the shape of the real page: a Model ID table
@@ -184,11 +188,66 @@ func TestClinePassPricesStripFootnoteWithItsElement(t *testing.T) {
 	if !ok {
 		t.Fatalf("the sup-footnoted row without parens lost its id; entries = %+v", entries)
 	}
-	if flash.Input != 0.30 || flash.Output != 1.20 {
-		t.Errorf("flash = %v/%v, want 0.30/1.20", flash.Input, flash.Output)
+	// The page prints one unqualified row for this model at 0.30/1.20, which is
+	// DeepSeek's PEAK rate; the table this parser feeds is the off-peak base,
+	// because the peak window has its own multiplier. Dividing the declared 2x
+	// out is what keeps the two from composing into 0.60/2.40.
+	if flash.Input != 0.15 || flash.Output != 0.60 || flash.CacheRead != 0.003 {
+		t.Errorf("flash = %v/%v/%v, want the off-peak base 0.15/0.60/0.003",
+			flash.Input, flash.Output, flash.CacheRead)
 	}
-	if _, ok := byMatch["cline-pass/deepseek-v4-pro"]; !ok {
-		t.Error("the parenthesised off-peak row must still resolve")
+	// A row the page explicitly marks Off-peak is already the base - dividing
+	// again would halve a figure that was published correctly.
+	pro, ok := byMatch["cline-pass/deepseek-v4-pro"]
+	if !ok {
+		t.Fatal("the parenthesised off-peak row must still resolve")
+	}
+	if pro.Input != 0.66 || pro.Output != 1.98 {
+		t.Errorf("pro = %v/%v, want 0.66/1.98 (its own Off-peak row, not divided twice)",
+			pro.Input, pro.Output)
+	}
+}
+
+// The base rate a refresh installs and the multiplier applied at request time
+// must compose back to the figure the platform publishes. This is the invariant
+// whose absence doubled ClinePass's Flash cost for four days: the refresher
+// installed the page's peak figure as the base, and the peak schedule then
+// multiplied it again.
+func TestRefreshedClinePassBaseComposesToThePublishedPeak(t *testing.T) {
+	resetPrices(t)
+	// The page as it actually reads today: a lone Flash row at the peak rate.
+	page := `
+| Model | Model ID |
+| - | - |
+| DeepSeek V4.1 Flash | ` + "`cline-pass/deepseek-v4.1-flash`" + ` |
+
+| Model | Input | Output | Cached Read | Cached Write |
+| - | - | - | - | - |
+| DeepSeek V4.1 Flash<sup>1</sup> | \$0.30 | \$1.20 | \$0.006 | - |
+`
+	fetched, err := parseClinePassPricePage([]byte(page))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	InstallPrices(map[string][]priceEntry{site.ClinePass: fetched})
+
+	baseIn, baseOut, baseCacheRead, _, ok := PriceForProviderModel(site.ClinePass, "cline-pass/deepseek-v4.1-flash", 0)
+	if !ok {
+		t.Fatal("the refreshed model must stay priced")
+	}
+	peak := history.PeakMultiplierFor(site.ClinePass, "cline-pass/deepseek-v4.1-flash")
+	if peak != 2 {
+		t.Fatalf("expected the published 2x peak ratio, got %v", peak)
+	}
+	// The arithmetic the cost column performs: base x peak multiplier.
+	if got := baseIn * peak; math.Abs(got-0.30) > 1e-9 {
+		t.Errorf("input at peak = %v x %v = %v, want the published 0.30", baseIn, peak, got)
+	}
+	if got := baseOut * peak; math.Abs(got-1.20) > 1e-9 {
+		t.Errorf("output at peak = %v x %v = %v, want the published 1.20", baseOut, peak, got)
+	}
+	if got := baseCacheRead * peak; math.Abs(got-0.006) > 1e-9 {
+		t.Errorf("cache read at peak = %v x %v = %v, want the published 0.006", baseCacheRead, peak, got)
 	}
 }
 

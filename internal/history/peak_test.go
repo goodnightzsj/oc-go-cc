@@ -64,9 +64,15 @@ func TestPeakCoversOnlyTheDocumentedFamilies(t *testing.T) {
 // and billed at the Flash price. So both spellings must be covered, or the
 // model actually being served would still be missed.
 func TestClinePassPeakCoversBothFlashSpellings(t *testing.T) {
+	// ClinePass's gateway began serving the -1017 snapshot of V4.1 Flash on
+	// 2026-10-22. It is the same model under a dated id, so it carries the same
+	// published peak rate - a row left out of the set bills flat at the
+	// off-peak rate and renders no peak badge, which is exactly the defect this
+	// test was written for.
 	for _, model := range []string{
-		"cline-pass/deepseek-v4.1-flash", // what the roster serves
-		"cline-pass/deepseek-v4-flash",   // what the pricing table calls it
+		"cline-pass/deepseek-v4.1-flash",      // what the roster served until 10-22
+		"cline-pass/deepseek-v4.1-flash-1017", // what it serves now
+		"cline-pass/deepseek-v4-flash",        // what the pricing table calls it
 		"cline-pass/deepseek-v4-pro",
 	} {
 		if got := ProviderPeakMultiplier("cline-pass", model, inside); got != 2 {
@@ -234,8 +240,8 @@ func TestEachScheduleOwnsItsCoveredModels(t *testing.T) {
 	want := map[string][]string{
 		"opencode-go": {"deepseek-v4-flash", "deepseek-v4.1-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"},
 		"commandcode": {"deepseek-v4-flash", "deepseek-v4.1-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"},
-		"cline-pass":  {"deepseek-v4-flash", "deepseek-v4.1-flash", "deepseek-v4-pro"},
-		"openrouter":  {"deepseek-v4.1-flash", "deepseek-v4-pro-0813", "hy3"},
+		"cline-pass":  {"deepseek-v4-flash", "deepseek-v4.1-flash", "deepseek-v4.1-flash-1017", "deepseek-v4-pro"},
+		"openrouter":  {"deepseek-v4.1-flash", "deepseek-v4.1-flash-1017", "deepseek-v4-pro-0813", "hy3"},
 	}
 	for provider, models := range want {
 		s, ok := peakSchedules[provider]
@@ -302,6 +308,11 @@ func TestOpenRouterPeakMatchesThePublishedOverrides(t *testing.T) {
 	}{
 		// DeepSeek: 2x across 01-04 and 06-10 UTC on weekdays, base otherwise.
 		{"deepseek weekday inside first window", "deepseek/deepseek-v4.1-flash", mk(time.Monday, 2, 0), 2},
+		// The -1017 snapshot publishes the same window under its own id, so the
+		// peak rate has to resolve for it too (OpenRouter's overrides for that id
+		// carry the identical weekday 01-04/06-10 entries).
+		{"deepseek -1017 inside first window", "deepseek/deepseek-v4.1-flash-1017", mk(time.Monday, 2, 0), 2},
+		{"deepseek -1017 between windows", "deepseek/deepseek-v4.1-flash-1017", mk(time.Monday, 5, 0), 1},
 		{"deepseek weekday inside second window", "deepseek/deepseek-v4-pro-0813", mk(time.Wednesday, 8, 0), 2},
 		{"deepseek weekday between windows", "deepseek/deepseek-v4.1-flash", mk(time.Monday, 5, 0), 1},
 		{"deepseek weekend is base", "deepseek/deepseek-v4.1-flash", mk(time.Saturday, 2, 0), 1},

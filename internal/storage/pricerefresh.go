@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/routatic/proxy/internal/history"
 	"github.com/routatic/proxy/internal/site"
 )
 
@@ -669,6 +670,13 @@ var clinePriceFootnoteRE = regexp.MustCompile(`\)\s*\d+\s*$`)
 // skipped, so what remains to strip is the Off-peak one.
 var clinePricePeakSuffixRE = regexp.MustCompile(`(?i)\s*\((?:off-)?peak\)\s*$`)
 
+// clinePriceOffPeakBaseRE reports whether a row label carries the explicit
+// "Off-peak" qualifier that tells the two rows of a peak-priced model apart.
+var clinePriceOffPeakRE = regexp.MustCompile(`(?i)\(\s*off-peak\s*\)`)
+
+// clinePricePeakOnlyRE matches the Peak qualifier without Off-peak.
+var clinePricePeakOnlyRE = regexp.MustCompile(`(?i)\(\s*peak\s*\)`)
+
 // parseClinePassPricePage reads the ClinePass Reference pricing table.
 //
 // The page carries two tables and the join between them is what makes this
@@ -685,9 +693,22 @@ var clinePricePeakSuffixRE = regexp.MustCompile(`(?i)\s*\((?:off-)?peak\)\s*$`)
 //     peak schedule is registered for this platform: a guessed window would
 //     price real traffic at the wrong multiplier while looking well-formed. The
 //     Peak rows are skipped, not merged into a band.
+//
 //   - A context band is a tier ("Qwen3.7 Plus (> 256K tokens)"), which the tier
 //     model already represents. The "≤" row is the base and the ">" row is the
 //     tier above it.
+//
+//   - A model that publishes Peak and Off-peak rows is printed here at its
+//     OFF-PEAK rate, because that is the rate outside the window and the window
+//     is what `history.ProviderPeakMultiplier` multiplies. A peak-priced model
+//     that publishes only ONE row is the trap: that single figure is the peak
+//     price, so taking it as the base and then multiplying at peak bills it
+//     twice. DeepSeek V4.1 Flash is exactly that shape (the page lists one row
+//     at 0.30/1.20, which is DeepSeek's Flash PEAK rate), and it silently
+//     doubled this instance's ClinePass cost for four days. The declared peak
+//     ratio from the peak schedule is therefore divided back out of a lone row.
+//     The two-row case is left alone: "Off-peak" is already explicit, so the
+//     ratio must not be applied a second time.
 //
 // A row that names a model the id table does not list is a parse failure rather
 // than a dropped model: this is the platform's only price source, so a page
@@ -697,6 +718,11 @@ func parseClinePassPricePage(body []byte) ([]priceEntry, error) {
 	idsDone := false
 	byMatch := map[string]*priceEntry{}
 	var order []string
+	// Models the page prices with both a Peak and an Off-peak row. Their
+	// off-peak row is already explicit, so the declared peak ratio must not be
+	// divided out of it again - see the doc comment.
+	offPeakRows := map[string]bool{}
+	peakRows := map[string]bool{}
 
 	for _, row := range clinePriceRowRE.FindAllStringSubmatch(string(body), -1) {
 		cells := strings.Split(row[1], "|")
@@ -720,6 +746,25 @@ func parseClinePassPricePage(body []byte) ([]priceEntry, error) {
 			continue
 		}
 		lowered := strings.ToLower(label)
+		qualified := clinePriceOffPeakRE.MatchString(label) || clinePricePeakOnlyRE.MatchString(label)
+		unqualified := strings.TrimSpace(clinePricePeakSuffixRE.ReplaceAllString(
+			strings.TrimSpace(clinePriceTagRE.ReplaceAllString(cells[0], "")), ""))
+		// The qualified rows are skipped past the price parsing below, but they
+		// still have to record which model publishes both rates - that is what
+		// keeps the lone-row division from touching it.
+		if qualified {
+			base := unqualified
+			if m := clinePriceBandRE.FindStringSubmatch(base); m != nil {
+				base = strings.TrimSpace(m[1])
+			}
+			if id, ok := ids[strings.ToLower(base)]; ok {
+				if clinePriceOffPeakRE.MatchString(label) {
+					offPeakRows[id] = true
+				} else {
+					peakRows[id] = true
+				}
+			}
+		}
 		if strings.Contains(lowered, "peak") && !strings.Contains(lowered, "off-peak") {
 			continue
 		}
@@ -776,14 +821,48 @@ func parseClinePassPricePage(body []byte) ([]priceEntry, error) {
 			entry.CacheWrite = rates[3]
 		}
 	}
+
 	if len(order) == 0 {
 		return nil, errors.New("no price rows found on the ClinePass page")
+	}
+	// A lone unqualified row for a peak-priced model prints the PEAK figure,
+	// while everything downstream treats the table as the off-peak base and
+	// multiplies it back up inside the window. Divide the declared ratio out
+	// once, so the base and the multiplier compose to the published number
+	// instead of doubling it.
+	for _, match := range order {
+		loweredMatch := strings.ToLower(match)
+		if offPeakRows[loweredMatch] || peakRows[loweredMatch] {
+			// The page stated both rates, so its figure is already the base.
+			continue
+		}
+		ratio := history.PeakMultiplierFor(site.ClinePass, match)
+		if ratio <= 1 {
+			continue
+		}
+		scaleEntryRates(byMatch[match], ratio)
 	}
 	out := make([]priceEntry, 0, len(order))
 	for _, match := range order {
 		out = append(out, *byMatch[match])
 	}
 	return out, nil
+}
+
+// scaleEntryRates divides every published rate on an entry by ratio. Tiers are
+// scaled with the base: they are alternate bands of the same published column,
+// so they carry the same peak/off-peak relationship.
+func scaleEntryRates(entry *priceEntry, ratio float64) {
+	entry.Input /= ratio
+	entry.Output /= ratio
+	entry.CacheRead /= ratio
+	entry.CacheWrite /= ratio
+	for i := range entry.Tiers {
+		entry.Tiers[i].Input /= ratio
+		entry.Tiers[i].Output /= ratio
+		entry.Tiers[i].CacheRead /= ratio
+		entry.Tiers[i].CacheWrite /= ratio
+	}
 }
 
 // FetchClinePassPrices reads the ClinePass Reference pricing table from the

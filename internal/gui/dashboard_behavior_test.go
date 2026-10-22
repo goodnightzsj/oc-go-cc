@@ -58,6 +58,10 @@ function node(id) {
     addEventListener(type, handler){(this.listeners[type] ||= []).push(handler)}, setAttribute(){}, querySelectorAll(){return []},
     querySelector(selector){return selector === '.modal-content' ? node('modal-content') : (selector === '.modal-subtitle' ? node('modal-subtitle') : null)}, focus(){},
     appendChild(child){this.children.push(child)}, insertAdjacentHTML(_, html){this.innerHTML += html},
+    // Standard DOM, and the model pickers build their option lists with it.
+    // A stub without it turns "the picker is empty" into a TypeError, which
+    // reads as a product failure rather than a harness gap.
+    replaceChildren(...kids){this.children = kids},
   });
   return nodes.get(id);
 }
@@ -574,11 +578,23 @@ vm.runInContext(` + "`" + `
   await saveProxyConfig();
   assert.equal(JSON.stringify(savedPatch), '{"commandcode":{"zero_data_retention":true}}', 'an isolated setting must not patch other platforms or persist masks');
 
-  fetch = async () => ({ok:true,json:async()=>({model_overrides:{cc_alias:cc,go_alias:go}})});
+  // The picker lists what the proxy can send to, per platform. It reads the
+  // served roster rather than the routing aliases, so the stub answers both
+  // endpoints and the assertion is about the served models.
+  fetch = async url => String(url).includes('/api/catalog/models')
+    ? {ok:true,json:async()=>({models:[
+        {id:'commandcode/shared',provider:'commandcode',context_window:128000,input_per_m:1,output_per_m:2},
+        {id:'opencode-go/shared',provider:'opencode-go',context_window:200000,input_per_m:1,output_per_m:3},
+      ],scope:'',total:2})}
+    : {ok:true,json:async()=>({model_overrides:{cc_alias:cc,go_alias:go}})};
   TestModule.testModelSelect = document.getElementById('test-model');
+  TestModule.testProviderSelect = document.getElementById('test-provider');
   await TestModule.populateModels();
-  assert.ok(TestModule.testModelSelect.children.some(option => option.value === 'cc_alias' && option.textContent.includes('commandcode/shared')));
-  assert.ok(TestModule.testModelSelect.children.some(option => option.value === 'go_alias' && option.textContent.includes('opencode-go/shared')));
+  assert.ok(TestModule.testModelSelect.children.some(option => option.value === 'commandcode/shared' && option.textContent.includes('CommandCode')),
+    'the picker must offer the CommandCode model the proxy serves');
+  assert.ok(TestModule.testModelSelect.children.some(option => option.value === 'opencode-go/shared' && option.textContent.includes('OpenCode Go')),
+    'the picker must offer the OpenCode Go model too, not just the active routing target');
+  assert.equal(TestModule.testProviderSelect.children.length, 3, 'both platforms plus "all platforms"');
 
   const quotaFetches = [];
   fetch = async url => {

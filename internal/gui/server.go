@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,6 +32,7 @@ import (
 	"github.com/routatic/proxy/internal/history"
 	"github.com/routatic/proxy/internal/metrics"
 	"github.com/routatic/proxy/internal/quota"
+	"github.com/routatic/proxy/internal/site"
 	"github.com/routatic/proxy/internal/storage"
 )
 
@@ -212,6 +214,7 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 	mux.HandleFunc("/api/proxy/stop", s.handleProxyStop)
 	mux.HandleFunc("/api/catalog/lock", s.handleCatalogLock)
 	mux.HandleFunc("/api/catalog/sync", s.handleCatalogSync)
+	mux.HandleFunc("/api/catalog/models", s.handleCatalogModels)
 	mux.HandleFunc("/api/prices", s.handlePrices)
 	mux.HandleFunc("/api/quota", s.handleQuota)
 	mux.HandleFunc("/api/sites", s.handleSites)
@@ -1112,6 +1115,153 @@ func (s *Server) handleTestSend(w http.ResponseWriter, r *http.Request) {
 		}
 		logger.Error("failed to stream proxy response", "err", err, "bytes_written", written)
 	}
+}
+
+// catalogModelEntry is one row of the model browser: enough for a picker to
+// sort, group and describe a model without a second request per row.
+type catalogModelEntry struct {
+	ID            string  `json:"id"`
+	Name          string  `json:"name,omitempty"`
+	Provider      string  `json:"provider"`
+	ContextWindow int64   `json:"context_window,omitempty"`
+	MaxOutput     int64   `json:"max_output,omitempty"`
+	InputPerM     float64 `json:"input_per_m,omitempty"`
+	OutputPerM    float64 `json:"output_per_m,omitempty"`
+	ToolCall      bool    `json:"tool_call,omitempty"`
+	Vision        bool    `json:"vision,omitempty"`
+	Reasoning     bool    `json:"reasoning,omitempty"`
+	// RoutesTo names the model an alias resolves to. An alias is a requestable
+	// id - a client sends it and the router maps it - but it is not a model the
+	// catalog knows, so it has no context window or rates of its own. Saying
+	// what it points at is the difference between "this row is missing data"
+	// and "this row is an alias".
+	RoutesTo string `json:"routes_to,omitempty"`
+}
+
+// handleCatalogModels reports the models this instance can actually send to,
+// grouped by platform.
+//
+// The source is the proxy's own /v1/models rather than the catalog file. That
+// listing is the only answer that already applies the routing rules: it hides
+// platforms outside the active site, drops catalog entries a platform's live
+// roster has retired, and adds rosters the catalog has never carried
+// (CommandCode is absent from models.dev entirely). Reading the catalog file
+// directly would offer models that fail on send, which is the bug this endpoint
+// exists to prevent.
+func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	wanted := strings.TrimSpace(r.URL.Query().Get("provider"))
+
+	resp, err := s.fetchProxyModels(r.Context())
+	if err != nil {
+		// A failed listing is not an empty one. Reporting 200 with no models
+		// would read as "this instance serves nothing", which is a different
+		// and alarming claim; the dashboard needs to say the lookup failed.
+		http.Error(w, "proxy model listing unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	entries := make([]catalogModelEntry, 0, len(resp.Data))
+	// /v1/models answers "what may a client request", which is not the same as
+	// "what is this model" - it carries no context window and no rates. Those
+	// come from the catalog and the platform price tables, joined by the id the
+	// listing returned. Both are best-effort: a model the catalog has never
+	// heard of still lists, just without the detail.
+	cat, _ := catalog.Load(filepath.Join(s.catalogDir, "catalog.json"))
+	for _, m := range resp.Data {
+		if wanted != "" && site.Normalize(m.OwnedBy) != site.Normalize(wanted) {
+			continue
+		}
+		e := catalogModelEntry{ID: m.ID, Name: m.Name, Provider: m.OwnedBy}
+		if e.Name == "" {
+			e.Name = m.ID
+		}
+		if cat != nil {
+			if model, ok := cat.Models[m.ID]; ok {
+				e.Name = model.DisplayName()
+				e.ToolCall = model.ToolCall
+				e.Vision = model.SupportsVision()
+				e.Reasoning = model.Reasoning
+				if model.Limit != nil {
+					e.ContextWindow = model.Limit.Context
+					e.MaxOutput = model.Limit.Output
+				}
+			}
+		}
+		// cfg.Models is keyed by scenario, so its entries name routing slots, not
+		// models a client may request. Only model_overrides produces a requestable
+		// alias; a scenario key that leaked into this list would look like a
+		// model and fail when sent.
+		if s.atomicCfg != nil {
+			if cfg := s.atomicCfg.Get(); cfg != nil {
+				if mc, ok := cfg.ModelOverrides[m.ID]; ok {
+					e.RoutesTo = mc.ModelID
+				} else if slices.Contains(config.CostScenarioNames, m.ID) {
+					continue
+				}
+			}
+		}
+		if in, out, _, _, ok := storage.PriceForProviderModel(m.OwnedBy, m.ID, 0); ok {
+			e.InputPerM = in
+			e.OutputPerM = out
+		}
+		entries = append(entries, e)
+	}
+
+	writeJSON(w, map[string]any{
+		"models": entries,
+		"scope":  s.activeSiteID(),
+		"total":  len(entries),
+	})
+}
+
+// proxyModel is the shape /v1/models returns for one model.
+type proxyModel struct {
+	ID      string `json:"id"`
+	Name    string `json:"name,omitempty"`
+	OwnedBy string `json:"owned_by,omitempty"`
+}
+
+type proxyModelListing struct {
+	Data []proxyModel `json:"data"`
+}
+
+// fetchProxyModels asks the running proxy for its model list.
+func (s *Server) fetchProxyModels(ctx context.Context) (*proxyModelListing, error) {
+	url := fmt.Sprintf("http://127.0.0.1:%d/v1/models", s.getProxyPort())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("model listing returned HTTP %d", resp.StatusCode)
+	}
+	var out proxyModelListing
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&out); err != nil {
+		return nil, fmt.Errorf("parse model listing: %w", err)
+	}
+	return &out, nil
+}
+
+// activeSiteID reports the platform routing is scoped to, or "" when unscoped.
+func (s *Server) activeSiteID() string {
+	if s.atomicCfg == nil {
+		return ""
+	}
+	cfg := s.atomicCfg.Get()
+	if cfg == nil {
+		return ""
+	}
+	return site.Normalize(cfg.ActiveSite)
 }
 
 func (s *Server) handleCatalogLock(w http.ResponseWriter, r *http.Request) {

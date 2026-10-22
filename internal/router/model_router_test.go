@@ -1271,3 +1271,175 @@ func TestListModels_KeepsCatalogModelsWhenTheRosterIsUnreachable(t *testing.T) {
 		t.Error("an unreachable roster must leave the catalog's models alone, not empty the picker")
 	}
 }
+
+// A model whose capabilities live under another namespace must still resolve.
+//
+// Cline publishes "cline-pass/deepseek-v4.1-flash-1017"; models.dev files the
+// same model as "deepseek/deepseek-v4.1-flash-1017". Neither catalog lookup
+// strips anything, so the id the listing just handed us matched nothing, the
+// hardcoded metadata table (which does not know this model) answered instead,
+// and every request carrying a new image died on "no eligible model for
+// request capacity" - a 500 for a vision-capable model.
+func TestPublishedByActiveSite_ResolvesCapabilitiesAcrossNamespaces(t *testing.T) {
+	const listingID = "cline-pass/deepseek-v4.1-flash-1017"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/ai/cline/recommended-models" {
+			t.Errorf("roster requested from %q", r.URL.Path)
+			return
+		}
+		_, _ = io.WriteString(w, `{"clinePass":[{"id":"`+listingID+`","name":"`+listingID+`"}]}`)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "catalog.json")
+	body := `{
+	  "providers": {
+	    "cline-pass": {"name": "cline-pass", "enabled": true},
+	    "deepseek":   {"name": "deepseek",   "enabled": true}
+	  },
+	  "models": {
+	    "deepseek/deepseek-v4.1-flash-1017": {
+	      "id": "deepseek/deepseek-v4.1-flash-1017",
+	      "name": "DeepSeek V4.1 Flash 1017",
+	      "limit": {"context": 1000000, "output": 384000},
+	      "tool_call": true,
+	      "modalities": {"input": ["text", "image"], "output": ["text"]}
+	    }
+	  }
+	}`
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		ActiveSite: "cline-pass",
+		ClinePass:  config.ClinePassConfig{APIKey: "synthetic-key", BaseURL: srv.URL + "/api/v1/chat/completions"},
+	}
+	router := NewModelRouterWithCatalog(newTestAtomicConfig(cfg), path)
+
+	target, ok := router.PublishedByActiveSite(context.Background(), listingID)
+	if !ok {
+		t.Fatalf("%s is in the platform's own roster and must resolve", listingID)
+	}
+	if !target.Vision {
+		t.Error("the catalog records this model as accepting images; a false here makes every image request unfilterable")
+	}
+	if target.ContextWindow != 1000000 {
+		t.Errorf("ContextWindow = %d, want the catalog's 1000000", target.ContextWindow)
+	}
+
+	// The platform and the id are the listing's, not the catalog's: adopting the
+	// catalog's would move the request to another platform's credential, which on
+	// ClinePass is a different billing pool rather than another spelling.
+	if target.Provider != "cline-pass" {
+		t.Errorf("Provider = %q, want the active site", target.Provider)
+	}
+	if target.ModelID != listingID {
+		t.Errorf("ModelID = %q, want the id the platform published", target.ModelID)
+	}
+	if target.ModelRef == "" {
+		t.Error("ModelRef must be set, or ResolveModelConfig overwrites the catalog's capabilities " +
+			"with the built-in family table, which does not know this model")
+	}
+}
+
+// A vendor-qualified id on a platform that does not prefix its own must not be
+// stripped: that would resolve the model on some other platform entirely.
+func TestCatalogResolved_LeavesVendorNamespacesAlone(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "catalog.json")
+	body := `{
+	  "providers": {"opencode-go": {"name": "opencode-go", "enabled": true}},
+	  "models": {"opencode-go/deepseek-v4-flash": {"name": "DeepSeek V4 Flash", "modalities": {"input": ["text"], "output": ["text"]}}}
+	}`
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	router := NewModelRouterWithCatalog(newTestAtomicConfig(&config.Config{}), path)
+
+	// "deepseek" is not this platform, so nothing is stripped and the vendor
+	// namespace resolves through the catalog's own rules instead.
+	resolved, err := router.catalogResolved(context.Background(), "opencode-go", "opencode-go/deepseek-v4-flash")
+	if err != nil {
+		t.Fatalf("expected the platform's own prefix to resolve: %v", err)
+	}
+	if resolved.Provider != "opencode-go" {
+		t.Errorf("Provider = %q, want opencode-go", resolved.Provider)
+	}
+}
+
+// The same namespace mismatch reaches the client path too. A client that names
+// the model the way the platform lists it must get the catalog's capabilities
+// rather than the bare legacy fallback, or a vision request is refused here
+// before the platform is ever asked.
+func TestResolveRequestedModel_ResolvesPlatformPrefixedId(t *testing.T) {
+	const requested = "cline-pass/deepseek-v4.1-flash-1017"
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "catalog.json")
+	body := `{
+	  "providers": {
+	    "cline-pass": {"name": "cline-pass", "enabled": true},
+	    "deepseek":   {"name": "deepseek",   "enabled": true}
+	  },
+	  "models": {
+	    "deepseek/deepseek-v4.1-flash-1017": {
+	      "id": "deepseek/deepseek-v4.1-flash-1017",
+	      "name": "DeepSeek V4.1 Flash 1017",
+	      "limit": {"context": 1000000, "output": 384000},
+	      "tool_call": true,
+	      "modalities": {"input": ["text", "image"], "output": ["text"]}
+	    }
+	  }
+	}`
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{RespectRequestedModel: boolPtr(true)}
+	router := NewModelRouterWithCatalog(newTestAtomicConfig(cfg), path)
+
+	// needsVision=true is the case that used to fail: without catalog
+	// capabilities the model looks text-only and is rejected outright.
+	result, ok, err := router.resolveRequestedModel(cfg, requested, true)
+	if err != nil {
+		t.Fatalf("a vision request against a vision-capable model must not be refused: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected the requested model to be honoured")
+	}
+	if !result.Primary.Vision {
+		t.Error("Vision = false; the catalog says this model accepts images")
+	}
+	if result.Primary.ContextWindow != 1000000 {
+		t.Errorf("ContextWindow = %d, want 1000000", result.Primary.ContextWindow)
+	}
+	// The client named this platform, so the catalog's vendor namespace must not
+	// become the target - on ClinePass the prefix is the billing pool selector.
+	if result.Primary.Provider != "cline-pass" {
+		t.Errorf("Provider = %q, want cline-pass", result.Primary.Provider)
+	}
+	if result.Primary.ModelID != requested {
+		t.Errorf("ModelID = %q, want the id the client sent (%q)", result.Primary.ModelID, requested)
+	}
+}
+
+// A vendor namespace is not a platform prefix. Stripping one would look for a
+// model named after its vendor and resolve to nothing, or worse, to whatever
+// that name happens to match.
+func TestSplitPlatformPrefix_IgnoresVendorNamespaces(t *testing.T) {
+	for _, tc := range []struct{ in, wantPlatform, wantShort string }{
+		{"cline-pass/deepseek-v4.1-flash-1017", "cline-pass", "deepseek-v4.1-flash-1017"},
+		{"deepseek/deepseek-v4.1-flash-1017", "", ""},
+		{"opencode-go/kimi-k3", "opencode-go", "kimi-k3"},
+		{"kimi-k3", "", ""},
+		{"cline-pass/", "", ""},
+		{"/kimi-k3", "", ""},
+	} {
+		platform, short := splitPlatformPrefix(tc.in)
+		if platform != tc.wantPlatform || short != tc.wantShort {
+			t.Errorf("splitPlatformPrefix(%q) = (%q, %q), want (%q, %q)", tc.in, platform, short, tc.wantPlatform, tc.wantShort)
+		}
+	}
+}

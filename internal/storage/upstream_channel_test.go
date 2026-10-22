@@ -120,3 +120,37 @@ func TestUpstreamModelSurvivesTheRoundTrip(t *testing.T) {
 		t.Errorf("upstream model = %q, want it preserved", got)
 	}
 }
+
+// The effort column records what the client asked for, so it has to survive the
+// same round trip and keep "asked for nothing" distinct from "asked for the
+// lowest level" - a blank cell and a "low" badge mean different things.
+func TestReasoningEffortSurvivesTheRoundTrip(t *testing.T) {
+	db := newCostTestDB(t)
+	repo := NewRequests(db)
+	base := time.Date(2026, 10, 23, 3, 0, 0, 0, time.UTC)
+
+	for id, effort := range map[string]string{"with": "max", "without": ""} {
+		if err := repo.Insert(history.RequestRecord{
+			ID: id, Model: "cline-pass/deepseek-v4.1-flash-1017", Provider: "cline-pass",
+			StartTime: base, Duration: time.Second, Success: true, DetailsKnown: true,
+			ReasoningEffort: effort,
+		}); err != nil {
+			t.Fatalf("insert %s: %v", id, err)
+		}
+	}
+
+	records, _, err := repo.Query(RequestQuery{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	byID := map[string]string{}
+	for _, rec := range records {
+		byID[rec.ID] = rec.ReasoningEffort
+	}
+	if got := byID["with"]; got != "max" {
+		t.Errorf("effort = %q, want max", got)
+	}
+	if got, ok := byID["without"]; !ok || got != "" {
+		t.Errorf("a row that asked for no level must read back blank, got %q (present=%v)", got, ok)
+	}
+}

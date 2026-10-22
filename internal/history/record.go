@@ -2,11 +2,14 @@
 package history
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 
+	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/internal/models"
 	"github.com/routatic/proxy/internal/site"
+	"github.com/routatic/proxy/pkg/types"
 )
 
 // RequestRecord holds metadata for a single completed proxy request.
@@ -27,7 +30,11 @@ type RequestRecord struct {
 	// questions: the total includes the model's thinking time, while this is
 	// the part the gateway controls. On a proxied provider the gap between them
 	// is where queueing and fallback attempts show up.
-	FirstByte           time.Duration
+	FirstByte time.Duration
+	// ReasoningEffort is the level the client asked for, normalized. Empty when
+	// it asked for none. It records intent, not effect: an upstream that ignores
+	// the field leaves this populated and the response unchanged.
+	ReasoningEffort     string
 	InputTokens         int     // raw (non-cache) input tokens from SSE usage event
 	OutputTokens        int     // output tokens from SSE usage event
 	CacheReadTokens     int     // prompt-cache read tokens
@@ -450,4 +457,41 @@ func ProviderPeakMultiplier(provider, model string, t time.Time) float64 {
 // for UI display. Billing uses the split fields separately.
 func (r RequestRecord) DisplayInputTokens() int {
 	return r.InputTokens + r.CacheReadTokens + r.CacheCreationTokens
+}
+
+// RequestedEffort reports the reasoning level the client asked for, from
+// whichever field it used, normalized to the levels this proxy sends.
+//
+// Two surfaces carry the same intent. The newer one states a level directly in
+// output_config.effort; the older one gives a token budget in
+// thinking.budget_tokens, and the level is this proxy's reading of that number.
+// The stated level wins - it is the caller's own words, where the other is an
+// inference - and an unrecognised value yields "" rather than being guessed at.
+//
+// The result records intent, not effect. An upstream that ignores the field
+// leaves every row populated the same way and answers identically.
+func RequestedEffort(req *types.MessageRequest) string {
+	if req == nil {
+		return ""
+	}
+	if len(req.OutputConfig) > 0 {
+		var oc struct {
+			Effort string `json:"effort"`
+		}
+		if err := json.Unmarshal(req.OutputConfig, &oc); err == nil {
+			if effort, ok := core.NormalizeEffort(oc.Effort); ok && effort != "" {
+				return effort
+			}
+		}
+	}
+	if len(req.Thinking) > 0 {
+		var tc struct {
+			Type         string `json:"type"`
+			BudgetTokens int    `json:"budget_tokens"`
+		}
+		if err := json.Unmarshal(req.Thinking, &tc); err == nil && tc.Type == "enabled" && tc.BudgetTokens > 0 {
+			return core.EffortFromBudget(tc.BudgetTokens)
+		}
+	}
+	return ""
 }

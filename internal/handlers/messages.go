@@ -679,6 +679,9 @@ func (h *MessagesHandler) handleStreaming(
 	defer stopHeartbeat()
 
 	streamStart := time.Now()
+	// What the client asked for, before any provider decides whether it can
+	// honour it. Read once here so both record paths use one value.
+	clientEffort := history.RequestedEffort(anthropicReq)
 	blockedProviders := make(map[string]bool)
 	// lastStreamErr keeps the last refusal so the terminal response can name the
 	// cause. Without it every exhausted chain reads as "all streaming models
@@ -756,6 +759,7 @@ func (h *MessagesHandler) handleStreaming(
 				UpstreamChannel:     upstreamChannel,
 				UpstreamModel:       upstreamModel,
 				FirstByte:           firstByteDuration(firstByte, streamStart),
+				ReasoningEffort:     clientEffort,
 			}
 			if h.storage != nil {
 				if err := h.storage.InsertRequest(rec); err != nil {
@@ -1030,6 +1034,7 @@ func (h *MessagesHandler) handleNonStreaming(
 	// Set by the attempt that succeeds, then stored. Empty for every platform
 	// whose upstream does not name a channel.
 	var upstreamChannel, upstreamModel string
+	clientEffort := history.RequestedEffort(anthropicReq)
 
 	result, responseBody, err := h.fallbackHandler.ExecuteWithFallback(
 		ctx,
@@ -1124,6 +1129,7 @@ func (h *MessagesHandler) handleNonStreaming(
 		PeakMultiplier:      history.ProviderPeakMultiplier(result.Provider, result.ModelID, startTime),
 		UpstreamChannel:     upstreamChannel,
 		UpstreamModel:       upstreamModel,
+		ReasoningEffort:     clientEffort,
 	}
 	if h.storage != nil {
 		if err := h.storage.InsertRequest(rec); err != nil {

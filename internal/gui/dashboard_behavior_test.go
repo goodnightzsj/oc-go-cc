@@ -437,42 +437,44 @@ vm.runInContext(` + "`" + `
   renderHistory();
   const historyHTML = document.getElementById('history-tbody').innerHTML;
   const historyCells = historyHTML.slice(0, historyHTML.indexOf('</tr>')).split('<td').slice(1);
-  // Eight: Scenario was removed and TTFT was added, so the count lands back
-  // where it started without the constant column. Asserted as a number rather
-  // than derived so that adding a column is a deliberate edit here.
-  assert.equal(historyCells.length, 8, 'a History row must carry eight cells');
+  // Nine: Scenario was removed, TTFT and Effort were added. Asserted as a
+  // number rather than derived so that adding a column is a deliberate edit
+  // here.
+  assert.equal(historyCells.length, 9, 'a History row must carry nine cells');
   // Asserted on each cell's own markup rather than on a digit: the Duration cell
   // carries the same tok/s figure in its grading tooltip, so a numeric search
   // matches whichever of the two cells it lands in and cannot see them swap.
   // The timing class is emitted only by gradeDuration, and the throughput hint
   // only by the Tok/s cell, so each identifies exactly one column.
   const timingClass = 'class=' + String.fromCharCode(34) + 'timing';
-  assert.ok(historyCells[6].includes(timingClass),
-    'cell 7 must be the graded Duration figure; got ' + historyCells[6]);
-  assert.ok(historyCells[7].includes('Output tokens divided by'),
-    'cell 8 must carry the Tok/s cell, whose tooltip is the throughput hint; got ' + historyCells[7]);
-  assert.ok(!historyCells[7].includes(timingClass),
-    'cell 8 must not be the Duration cell - the two are adjacent and swapping them still counts eight');
+  assert.ok(historyCells[7].includes(timingClass),
+    'cell 8 must be the graded Duration figure; got ' + historyCells[7]);
+  assert.ok(historyCells[8].includes('Output tokens divided by'),
+    'cell 9 must carry the Tok/s cell, whose tooltip is the throughput hint; got ' + historyCells[8]);
+  assert.ok(!historyCells[8].includes(timingClass),
+    'cell 9 must not be the Duration cell - the two are adjacent and swapping them still counts nine');
   // 400 output tokens over 2000 ms is 200 tok/s.
   assert.equal(Math.round(requestThroughput(measured)), 200, 'the row helper and the cell must use one definition');
 
   allHistory = [unknownRecord];
   renderHistory();
   const unknownCells = document.getElementById('history-tbody').innerHTML.slice(0, document.getElementById('history-tbody').innerHTML.indexOf('</tr>')).split('<td').slice(1);
-  assert.equal(unknownCells.length, 8, 'an unknown row still carries eight cells');
+  assert.equal(unknownCells.length, 9, 'an unknown row still carries nine cells');
   // Compared against the cell's text, not the raw markup: splitting on "<td"
   // leaves that cell's own opening-tag attributes in the segment, so the tooltip
   // text is present even for a correctly blank cell. Take the content after the
   // opening tag's ">" and strip any nested tags.
   const cellText = cell => cell.slice(cell.indexOf('>') + 1).replace(/<[^>]*>/g, '').trim();
-  assert.equal(cellText(unknownCells[7]), '—',
-    'an unmeasured row must show a dash, not a fabricated rate; got ' + unknownCells[7]);
-  assert.equal(cellText(historyCells[7]), '200',
-    'the measured row must show its own rate under the Tok/s heading; got ' + historyCells[7]);
-  // The TTFT cell sits left of Duration and shows a dash when the row has no
-  // measurement - a fixture without first_byte_ms must not read as instant.
-  assert.equal(cellText(historyCells[5]), '—',
-    'a row with no first-byte measurement must show a dash, not 0ms; got ' + historyCells[5]);
+  assert.equal(cellText(unknownCells[8]), '—',
+    'an unmeasured row must show a dash, not a fabricated rate; got ' + unknownCells[8]);
+  assert.equal(cellText(historyCells[8]), '200',
+    'the measured row must show its own rate under the Tok/s heading; got ' + historyCells[8]);
+  // TTFT and Effort sit left of Duration. Both show a dash when the row has no
+  // value - a fixture without them must not read as instant or as effort-free.
+  assert.equal(cellText(historyCells[6]), '—',
+    'a row with no first-byte measurement must show a dash, not 0ms; got ' + historyCells[6]);
+  assert.equal(cellText(unknownCells[5]), '—',
+    'a row with no effort must show a dash; got ' + unknownCells[5]);
 
   showHistoryDetail(unknownRecord);
   assert.ok(document.getElementById('modal-body').innerHTML.includes('detail-status unknown'));

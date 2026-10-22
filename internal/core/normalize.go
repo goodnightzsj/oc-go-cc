@@ -63,6 +63,19 @@ func NormalizeRequest(anthropicReq *types.MessageRequest) *NormalizedRequest {
 			}
 		}
 	}
+	// A client on the newer Anthropic surface states a level directly instead
+	// of a budget, and it wins: it is the caller's own words, where the level
+	// above is this proxy's inference from a token count. Without this the
+	// capture showed no effort at all for those requests, which read as "the
+	// client asked for nothing".
+	if len(anthropicReq.OutputConfig) > 0 {
+		var oc struct {
+			Effort string `json:"effort"`
+		}
+		if err := json.Unmarshal(anthropicReq.OutputConfig, &oc); err == nil && oc.Effort != "" {
+			nr.ReasoningEffort = oc.Effort
+		}
+	}
 
 	// Convert messages.
 	for _, msg := range anthropicReq.Messages {

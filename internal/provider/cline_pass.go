@@ -128,7 +128,15 @@ func (p *ClinePassProvider) Stream(ctx context.Context, req *types.MessageReques
 	// and correcting it later - is impossible: message_start goes out first.
 	// This costs the wait for the upstream's first byte, which the caller was
 	// going to wait for anyway before writing anything.
-	peeked, _, firstByteArrived := peekServedModel(peekCtx, cancelPeek, body, maxServedModelPeekBytes, idleTimeout)
+	peeked, _, firstByteArrived, peekErr := peekServedModel(peekCtx, cancelPeek, body, maxServedModelPeekBytes, idleTimeout)
+	if peekErr != nil {
+		// The read-ahead gave up on a stalled stream. Surfacing it lets the
+		// handler fall through to the next model; a nil error would have made a
+		// truncated stream look like a complete short one.
+		cancelPeek()
+		_ = body.Close()
+		return nil, peekErr
+	}
 	// The peek stamps the first byte as it reads, so this only covers the case
 	// where it never read one. MarkFirstByte ignores a second call, so the two
 	// cannot disagree about when the byte arrived.

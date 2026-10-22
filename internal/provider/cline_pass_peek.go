@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/routatic/proxy/internal/transformer"
 )
 
 // peekedBody replays the bytes a peek consumed before reading further.
@@ -95,18 +97,18 @@ func (p *peekedBody) UpstreamModel() string {
 //
 // body must be the observer wrapper: the peek reads through it, so the observer
 // sees the frames it consumes and answers without a second parser here.
-func peekServedModel(ctx context.Context, cancel context.CancelFunc, body io.ReadCloser, maxPeekBytes int, idleTimeout time.Duration) (io.ReadCloser, string, bool) {
+func peekServedModel(ctx context.Context, cancel context.CancelFunc, body io.ReadCloser, maxPeekBytes int, idleTimeout time.Duration) (io.ReadCloser, string, bool, error) {
 	reporter, ok := body.(interface{ ServedModel() string })
 	if !ok || body == nil {
-		return body, "", false
+		return body, "", false, nil
 	}
 	if model := reporter.ServedModel(); model != "" {
 		// Already drained by an earlier peek: the first byte is behind us, and
 		// reporting it again would claim a second one arrived.
-		return body, model, false
+		return body, model, false, nil
 	}
 	if maxPeekBytes <= 0 {
-		return body, "", false
+		return body, "", false, nil
 	}
 
 	// The idle bound is a watchdog, not a total deadline: every byte that
@@ -163,8 +165,12 @@ func peekServedModel(ctx context.Context, cancel context.CancelFunc, body io.Rea
 	buf := make([]byte, 4096)
 	for consumed.Len() < maxPeekBytes {
 		if idleFired.Load() {
-			// Give the caller what arrived; the stream stops here.
-			return &peekedBody{ReadCloser: body, pending: consumed.Bytes()}, "", consumed.Len() > 0
+			// The upstream stopped mid-frame. Reporting this as a clean end
+			// would look like a short but valid stream, and the caller would
+			// forward it as one. ErrStreamIdle is what the handler already
+			// recognises as "try the next model", so a stalled gateway becomes
+			// a fallback instead of a truncated answer.
+			return nil, "", consumed.Len() > 0, transformer.ErrStreamIdle
 		}
 		if err := ctx.Err(); err != nil {
 			// The caller's deadline is the honest end of a stalled peek: the
@@ -188,16 +194,22 @@ func peekServedModel(ctx context.Context, cancel context.CancelFunc, body io.Rea
 			ping()
 			consumed.Write(buf[:n])
 			if model := reporter.ServedModel(); model != "" {
-				return &peekedBody{ReadCloser: body, pending: consumed.Bytes()}, model, true
+				return &peekedBody{ReadCloser: body, pending: consumed.Bytes()}, model, true, nil
 			}
 		}
 		if err != nil {
+			// The read failed. If it failed because the watchdog fired, that is
+			// a stalled upstream and has to be reported as such - breaking out
+			// here would hand the caller a body that reads like a clean end.
+			if idleFired.Load() {
+				return nil, "", consumed.Len() > 0, transformer.ErrStreamIdle
+			}
 			break
 		}
 	}
 	// The peek read at least one chunk before giving up, so a first byte did
 	// arrive even though it never named a model.
-	return &peekedBody{ReadCloser: body, pending: consumed.Bytes()}, "", consumed.Len() > 0
+	return &peekedBody{ReadCloser: body, pending: consumed.Bytes()}, "", consumed.Len() > 0, nil
 }
 
 // maxServedModelPeekBytes bounds the read-ahead. The gateway names the model in

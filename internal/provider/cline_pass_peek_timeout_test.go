@@ -2,11 +2,14 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/routatic/proxy/internal/transformer"
 )
 
 // gatedBody answers reads from a script and blocks afterwards until released.
@@ -72,7 +75,7 @@ func TestPeekStopsWhenContextExpires(t *testing.T) {
 	done := make(chan time.Duration, 1)
 	go func() {
 		start := time.Now()
-		_, _, _ = peekServedModel(peekCtx, cancelPeek, observerFor(body, ""), maxServedModelPeekBytes, stall)
+		_, _, _, _ = peekServedModel(peekCtx, cancelPeek, observerFor(body, ""), maxServedModelPeekBytes, stall)
 		done <- time.Since(start)
 	}()
 
@@ -84,6 +87,33 @@ func TestPeekStopsWhenContextExpires(t *testing.T) {
 		t.Logf("peek bounded in %v", took)
 	case <-time.After(2 * time.Second):
 		t.Fatal("peek never returned: it is not bound by the context")
+	}
+}
+
+// A stalled peek must produce the sentinel the handler already treats as "try
+// the next model". Returning a replayed body with no error looked like a clean
+// short stream, so a stalled gateway produced a truncated answer instead of a
+// fallback.
+func TestPeekIdleExpiryReportsStreamIdle(t *testing.T) {
+	stall := 10 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	peekCtx, cancelPeek := context.WithCancel(ctx)
+	defer cancelPeek()
+
+	body := &gatedBody{
+		script:  []string{"data: {\"choices\":[{\"delta\":{}}]}\n\n"},
+		release: make(chan struct{}),
+		ctx:     peekCtx,
+	}
+	defer close(body.release)
+
+	peeked, _, _, err := peekServedModel(peekCtx, cancelPeek, observerFor(body, ""), maxServedModelPeekBytes, stall)
+	if !errors.Is(err, transformer.ErrStreamIdle) {
+		t.Fatalf("peek error = %v, want ErrStreamIdle so the handler falls through to the next model", err)
+	}
+	if peeked != nil {
+		t.Error("a failed peek must not hand back a body that reads as a complete stream")
 	}
 }
 
@@ -102,7 +132,10 @@ func TestPeekReplaysWhatItReadWhenItGivesUp(t *testing.T) {
 	// The idle bound must outlast the script, or the watchdog would cancel the
 	// context before the replay is read - which is the correct behaviour for a
 	// stalled stream, but not what this test is about.
-	peeked, model, arrived := peekServedModel(peekCtx, cancelPeek, observerFor(body, ""), maxServedModelPeekBytes, 5*time.Second)
+	peeked, model, arrived, peekErr := peekServedModel(peekCtx, cancelPeek, observerFor(body, ""), maxServedModelPeekBytes, 5*time.Second)
+	if peekErr != nil {
+		t.Fatalf("peek returned an error: %v", peekErr)
+	}
 	if model != "" {
 		t.Fatalf("model = %q, want empty: no frame named one", model)
 	}
@@ -138,7 +171,10 @@ func TestFirstByteStampedAtFirstChunkNotAtPeekEnd(t *testing.T) {
 	defer close(body.release)
 
 	start := time.Now()
-	peeked, model, arrived := peekServedModel(peekCtx, cancelPeek, observerFor(&slowSecondRead{gatedBody: body, delay: 80 * time.Millisecond}, ""), maxServedModelPeekBytes, 5*time.Second)
+	peeked, model, arrived, peekErr := peekServedModel(peekCtx, cancelPeek, observerFor(&slowSecondRead{gatedBody: body, delay: 80 * time.Millisecond}, ""), maxServedModelPeekBytes, 5*time.Second)
+	if peekErr != nil {
+		t.Fatalf("peek returned an error: %v", peekErr)
+	}
 	if !arrived {
 		t.Fatal("no first byte reported")
 	}

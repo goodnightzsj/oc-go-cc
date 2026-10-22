@@ -513,7 +513,8 @@ const TRANSLATIONS = {
     'fallback.selectModel': 'Select a model',
     'fallback.crossPlatform': 'Allow fallbacks on other platforms',
     'fallback.crossPlatformHint': 'Off by default. Entries on another platform are skipped and counted in the log, so you can see how often it would fire before spending another account\'s quota.',
-    'fallback.addHint': 'Grouped by platform; only platforms holding a credential are listed ({n}).',
+    'fallback.addHint': '{m} models from {n} platforms, grouped by platform.',
+    'fallback.listingUnavailable': 'Could not read the reachable-model list, so only models already in the config are offered. Reload to retry.',
     'fallback.unreachable': 'Inactive',
     'fallback.unreachableHint': 'This platform is outside the active site, so this entry is skipped and never serves a request.',
     'fallback.noReachableModels': 'No platform currently has a usable credential, so there is nothing to fall back to.',
@@ -1123,7 +1124,8 @@ const TRANSLATIONS = {
     'fallback.selectModel': '选择模型',
     'fallback.crossPlatform': '允许跨平台降级',
     'fallback.crossPlatformHint': '默认关闭。其他平台的条目会被跳过并在日志中计数，这样可以在消耗另一个账号额度之前先看清它有多频繁。',
-    'fallback.addHint': '按平台分组，只列出持有可用凭据的平台（{n} 个）。',
+    'fallback.addHint': '共 {m} 个模型，来自 {n} 个平台，按平台分组。',
+    'fallback.listingUnavailable': '无法读取可用模型列表，目前只能选择配置里已有的模型。刷新可重试。',
     'fallback.unreachable': '不生效',
     'fallback.unreachableHint': '该平台不在当前 active site 内，此条目会被跳过，永远不会承接请求。',
     'fallback.noReachableModels': '当前没有平台持有可用凭据，无法配置降级模型。',
@@ -5067,7 +5069,13 @@ const FallbackModule = {
           reachable = payload.models || [];
           this.activeSite = payload.scope || config.active_site || '';
         }
-      } catch (_) { /* fall back to configured models below */ }
+      } catch (err) {
+        // Silent here meant an empty picker with no explanation anywhere. If
+        // the listing is unreachable the operator needs to know why they can
+        // only see models already in the file.
+        console.warn('fallback: reachable model listing unavailable', err);
+        this.listingError = true;
+      }
       for (const m of reachable) {
         if (!m.id || !m.provider) continue;
         const entry = { provider: m.provider, model_id: m.id };
@@ -5155,9 +5163,15 @@ const FallbackModule = {
     addSel.disabled = available.length === 0;
     const hint = document.getElementById('fallback-add-hint');
     if (hint) {
-      hint.textContent = available.length === 0
-        ? t('fallback.noReachableModels')
-        : t('fallback.addHint').replace('{n}', String(groups.length));
+      if (this.listingError) {
+        hint.textContent = t('fallback.listingUnavailable');
+      } else if (available.length === 0) {
+        hint.textContent = t('fallback.noReachableModels');
+      } else {
+        hint.textContent = t('fallback.addHint')
+          .replace('{n}', String(groups.length))
+          .replace('{m}', String(available.length));
+      }
     }
   },
 

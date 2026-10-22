@@ -45,8 +45,8 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 			id, model, requested_model, provider, scenario, start_time, duration_ms,
 			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
 			cost_usd, cost_source, details_known, usage_trusted, streaming, success, error_msg, attempt,
-			peak_multiplier, upstream_channel
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?)
+			peak_multiplier, upstream_channel, upstream_model
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		rec.ID,
 		rec.Model,
@@ -67,6 +67,7 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 		attempt,
 		peakMultiplierForRecord(rec),
 		nullIfEmpty(rec.UpstreamChannel),
+		nullIfEmpty(rec.UpstreamModel),
 	)
 
 	return err
@@ -456,7 +457,7 @@ func (r *Requests) Query(q RequestQuery) ([]history.RequestRecord, int64, error)
 		SELECT id, model, requested_model, provider, scenario, start_time, duration_ms,
 		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
 		       cost_usd, cost_source, details_known, streaming, success, error_msg, attempt,
-		       peak_multiplier, upstream_channel
+		       peak_multiplier, upstream_channel, upstream_model
 		FROM requests`+where+`
 		ORDER BY `+orderBy+`
 		LIMIT ? OFFSET ?
@@ -697,7 +698,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		var costSource sql.NullString
 		var errorMsg sql.NullString
 		var provider, scenario, requestedModel sql.NullString
-		var upstreamChannel sql.NullString
+		var upstreamChannel, upstreamModel sql.NullString
 		var peakMul float64
 		err := rows.Scan(
 			&rec.ID,
@@ -720,6 +721,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 			&attempt,
 			&peakMul,
 			&upstreamChannel,
+			&upstreamModel,
 		)
 		if err != nil {
 			return nil, err
@@ -728,6 +730,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		rec.Scenario = scenario.String
 		rec.RequestedModel = requestedModel.String
 		rec.UpstreamChannel = upstreamChannel.String
+		rec.UpstreamModel = upstreamModel.String
 		rec.PeakMultiplier = peakMul
 		if attempt.Valid {
 			rec.Attempt = int(attempt.Int64)

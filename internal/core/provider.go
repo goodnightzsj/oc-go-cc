@@ -47,6 +47,12 @@ type ExecuteResult struct {
 	// request, when that platform publishes one. Empty for every platform that
 	// does not, and empty when the gateway did not say.
 	UpstreamChannel string
+	// UpstreamModel is the model the gateway said it actually ran, when that
+	// differs from the id we sent. A gateway may answer a request for one id by
+	// running a virtual model behind its own fallback chain; the request id then
+	// no longer describes what produced the response. Empty when the platform
+	// does not publish it or reported the id we asked for.
+	UpstreamModel string
 }
 
 // ResponsesStatusError retains a failed execution's reported usage across

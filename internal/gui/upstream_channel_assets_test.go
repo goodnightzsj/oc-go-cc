@@ -72,3 +72,41 @@ func TestUpstreamChannelBadgeAppearsOnlyWhenAChannelWasObserved(t *testing.T) {
 		t.Errorf("the model cell must be wide enough for a channel badge; got %q", cell)
 	}
 }
+
+// The upstream-model badge must appear only when the gateway named a model
+// that is not the one we sent. Repeating the request id on every ordinary row
+// would be noise, and the badge's presence is itself the signal that the
+// gateway rewrote the id onto something else.
+func TestUpstreamModelBadgeOnlyForARealRewrite(t *testing.T) {
+	app, err := assets.ReadFile("assets/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(app)
+	// The condition, stated once. A badge rendered unconditionally would pass
+	// any assertion that only looks for the class name.
+	if !strings.Contains(source, "const upstreamModelMark = h.upstream_model && h.upstream_model !== h.model") {
+		t.Error("the upstream-model badge must be conditional on the model actually differing")
+	}
+	if !strings.Contains(source, "badge-upstream-model") {
+		t.Error("the upstream-model badge class must be rendered")
+	}
+	// Both locales, or the tooltip shows a raw key.
+	for _, key := range []string{"'history.upstreamModelHint'"} {
+		if strings.Count(source, key+":") < 2 {
+			t.Errorf("translation key %s must exist in both en and zh", key)
+		}
+	}
+	css, err := assets.ReadFile("assets/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A distinct colour: two chips in the same cyan read as one datum.
+	rule := cssSection(string(css), ".badge-upstream-model {")
+	if rule == "" {
+		t.Fatal("missing .badge-upstream-model rule")
+	}
+	if strings.Contains(rule, "--ui-cyan") {
+		t.Error("the upstream-model badge must not reuse the channel badge's colour")
+	}
+}

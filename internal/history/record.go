@@ -50,6 +50,19 @@ type RequestRecord struct {
 	// pinned to one channel and served by another. Storing the observed value is
 	// what makes that visible after the fact.
 	UpstreamChannel string `json:"upstream_channel,omitempty"`
+
+	// UpstreamModel is the model the gateway says it actually ran, when that is
+	// not the id we sent. It is empty for every platform that does not report
+	// one, and for a gateway that ran exactly what was asked for.
+	//
+	// The distinction matters because a gateway may answer a request for one id
+	// by running a virtual model behind its own fallback chain: ClinePass
+	// answers `cline-pass/deepseek-v4.1-flash-1017` with
+	// `vmc/deepseek-v4p1-flash-1017-contributor-fallbacks`, and that virtual
+	// model is what decides which upstream channel is tried first. The Model
+	// column keeps the id the client asked for - it is what the dashboard and
+	// the billing rules key on - so this is the only place the real one lives.
+	UpstreamModel string `json:"upstream_model,omitempty"`
 }
 
 // RequestedModelDiffers reports whether the client asked for a model other than

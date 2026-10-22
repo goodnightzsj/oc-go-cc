@@ -77,12 +77,13 @@ func (p *ClinePassProvider) Execute(ctx context.Context, req *types.MessageReque
 	// Read the channel after the body is drained: the gateway names it in the
 	// last metadata frame, so it does not exist before the stream ends.
 	channel := client.UpstreamChannelOf(body)
+	upstreamModel := client.UpstreamModelOf(body)
 	converted, err := transformer.NewResponseTransformer().TransformResponse(response, model.ModelID)
 	if err != nil {
 		return nil, fmt.Errorf("convert cline-pass response: %w", err)
 	}
 	raw, err := json.Marshal(converted)
-	return &core.ExecuteResult{Body: raw, UpstreamChannel: channel}, err
+	return &core.ExecuteResult{Body: raw, UpstreamChannel: channel, UpstreamModel: upstreamModel}, err
 }
 
 func (p *ClinePassProvider) Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {

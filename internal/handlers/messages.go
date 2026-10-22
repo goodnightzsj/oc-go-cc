@@ -722,7 +722,7 @@ func (h *MessagesHandler) handleStreaming(
 		// variable: the gateway names it in the last frame, so the only correct
 		// moment to ask is after the stream has ended. Reading it earlier would
 		// record an empty channel for every request.
-		recordStreamSuccess := func(model config.ModelConfig, upstreamChannel string) {
+		recordStreamSuccess := func(model config.ModelConfig, upstreamChannel, upstreamModel string) {
 			cancelAttempt()
 			complete(clientCtx, nil)
 			latency := time.Since(streamStart)
@@ -730,6 +730,7 @@ func (h *MessagesHandler) handleStreaming(
 			h.logger.Info("streaming completed",
 				"request_id", requestID, "record_id", recordID,
 				"model", model.ModelID,
+				"upstream_model", upstreamModel,
 				"latency", latency,
 				"input_tokens", rw.usage.inputTokens,
 				"output_tokens", rw.usage.outputTokens,
@@ -753,6 +754,7 @@ func (h *MessagesHandler) handleStreaming(
 				Attempt:             attempt + 1,
 				PeakMultiplier:      history.ProviderPeakMultiplier(providerName, model.ModelID, streamStart),
 				UpstreamChannel:     upstreamChannel,
+				UpstreamModel:       upstreamModel,
 			}
 			if h.storage != nil {
 				if err := h.storage.InsertRequest(rec); err != nil {
@@ -858,7 +860,7 @@ func (h *MessagesHandler) handleStreaming(
 			if err := rw.finish(); err != nil {
 				return handleStreamError(err, model, action)
 			}
-			recordStreamSuccess(model, client.UpstreamChannelOf(currentStream))
+			recordStreamSuccess(model, client.UpstreamChannelOf(currentStream), client.UpstreamModelOf(currentStream))
 			return false
 		}
 
@@ -1017,7 +1019,7 @@ func (h *MessagesHandler) handleNonStreaming(
 
 	// Set by the attempt that succeeds, then stored. Empty for every platform
 	// whose upstream does not name a channel.
-	var upstreamChannel string
+	var upstreamChannel, upstreamModel string
 
 	result, responseBody, err := h.fallbackHandler.ExecuteWithFallback(
 		ctx,
@@ -1056,6 +1058,7 @@ func (h *MessagesHandler) handleNonStreaming(
 			// The upstream body has been drained by Execute, so the channel the
 			// gateway named in its last frame is available now.
 			upstreamChannel = execResult.UpstreamChannel
+			upstreamModel = execResult.UpstreamModel
 			return execResult.Body, nil
 		},
 	)
@@ -1110,6 +1113,7 @@ func (h *MessagesHandler) handleNonStreaming(
 		Attempt:             result.Attempted,
 		PeakMultiplier:      history.ProviderPeakMultiplier(result.Provider, result.ModelID, startTime),
 		UpstreamChannel:     upstreamChannel,
+		UpstreamModel:       upstreamModel,
 	}
 	if h.storage != nil {
 		if err := h.storage.InsertRequest(rec); err != nil {

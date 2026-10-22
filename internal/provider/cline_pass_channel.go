@@ -20,6 +20,13 @@ type clineChannelBody struct {
 	line                                 []byte
 	dropping, done, reported, incomplete bool
 	target, actual, requestID            string
+	// upstreamModel is the model the gateway says it actually ran, which is not
+	// always the id we sent. The gateway rewrites some request ids onto a
+	// virtual model (`vmc/...-contributor-fallbacks`) and routes those through
+	// its own fallback chain, so the id in the request stops describing what
+	// produced the answer. Observing it is the only way to report that without
+	// changing the response the client already received.
+	upstreamModel string
 }
 
 func newClineChannelBody(body io.ReadCloser, target, requestID string) *clineChannelBody {
@@ -72,6 +79,14 @@ func (b *clineChannelBody) UpstreamChannel() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.actual
+}
+
+// UpstreamModel reports the model the gateway says it actually ran, or "" while
+// the metadata frame has not arrived. See UpstreamModelReader.
+func (b *clineChannelBody) UpstreamModel() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.upstreamModel
 }
 
 // clineRoutingMetadata is the routing block the gateway attaches to a response.
@@ -138,6 +153,11 @@ func (b *clineChannelBody) observe(line []byte) {
 	remember := func(m clineRoutingMetadata) {
 		if actual := m.channel(); actual != "" {
 			b.actual = actual
+		}
+		// canonicalSlug names the upstream model. It is set on the same routing
+		// block as the channel, so it costs one more assignment here.
+		if slug := m.ProviderMetadata.Gateway.Routing.CanonicalSlug; slug != "" {
+			b.upstreamModel = slug
 		}
 	}
 	remember(chunk.clineRoutingMetadata)

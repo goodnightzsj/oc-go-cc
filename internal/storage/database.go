@@ -196,6 +196,10 @@ func Open(cfg Config) (*Database, error) {
 		_ = database.Close()
 		return nil, fmt.Errorf("migrate request columns: %w", err)
 	}
+	if err := database.initHistoryRevision(ctx); err != nil {
+		_ = database.Close()
+		return nil, fmt.Errorf("init history revision: %w", err)
+	}
 	if err := database.clearCatalogAPIKeys(ctx); err != nil {
 		_ = database.Close()
 		return nil, fmt.Errorf("clear persisted catalog API keys: %w", err)
@@ -225,6 +229,33 @@ func Open(cfg Config) (*Database, error) {
 	}
 
 	return database, nil
+}
+
+// Persistent triggers cover every writer, including another process or older
+// CLI. The revision commits (or rolls back) with its request rows. Install the
+// counter and triggers atomically so no writer can slip between them.
+func (d *Database) initHistoryRevision(ctx context.Context) error {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS history_revision (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			revision INTEGER NOT NULL
+		);
+		INSERT OR IGNORE INTO history_revision (id, revision) VALUES (1, 0);
+		CREATE TRIGGER IF NOT EXISTS requests_revision_insert AFTER INSERT ON requests
+		BEGIN UPDATE history_revision SET revision = revision + 1 WHERE id = 1; END;
+		CREATE TRIGGER IF NOT EXISTS requests_revision_update AFTER UPDATE ON requests
+		BEGIN UPDATE history_revision SET revision = revision + 1 WHERE id = 1; END;
+		CREATE TRIGGER IF NOT EXISTS requests_revision_delete AFTER DELETE ON requests
+		BEGIN UPDATE history_revision SET revision = revision + 1 WHERE id = 1; END;
+	`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func prepareDatabaseFile(path string) error {

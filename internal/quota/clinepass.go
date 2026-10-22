@@ -115,8 +115,8 @@ var clinePassWindowType = map[string]string{
 // are read rather than betting on one.
 func clinePassErrorText(body []byte) string {
 	var envelope struct {
-		Error json.RawMessage `json:"error"`
-		Message string        `json:"message"`
+		Error   json.RawMessage `json:"error"`
+		Message string          `json:"message"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		return ""

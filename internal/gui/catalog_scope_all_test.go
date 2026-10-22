@@ -21,10 +21,11 @@ func writeTestCatalogDir(t *testing.T) string {
 	    "cline-pass": {"name": "cline-pass", "enabled": true,
 	      "models": {"deepseek-v4.1-flash": {"name": "DeepSeek V4.1 Flash", "limit": {"context": 1000000, "output": 384000}, "tool_call": true}}},
 	    "commandcode": {"name": "commandcode", "enabled": true,
-	      "models": {"deepseek/deepseek-v4-pro": {"name": "DeepSeek V4 Pro", "limit": {"context": 1000000, "output": 8192}, "tool_call": true}}}
+	      "models": {"deepseek/deepseek-v4-pro": {"name": "DeepSeek V4 Pro", "limit": {"context": 1000000, "output": 8192}, "tool_call": true}}},
+	    "openrouter": {"name": "openrouter", "enabled": true}
 	  },
 	  "models": {
-	    "cline-pass/cline-pass": {"name": "placeholder", "limit": {"context": 1, "output": 1}}
+	    "openrouter/placeholder": {"name": "placeholder", "limit": {"context": 8, "output": 8}}
 	  }
 	}`
 	if err := os.WriteFile(filepath.Join(dir, "catalog.json"), []byte(body), 0600); err != nil {
@@ -63,8 +64,23 @@ func TestCatalogModelsScopeAllIgnoresTheActiveSite(t *testing.T) {
 		seen := map[string]bool{}
 		for _, m := range payload.Models {
 			seen[m.Provider] = true
-			if !strings.Contains(m.ID, "/") {
-				t.Errorf("id %q is not a sendable wire id", m.ID)
+			// The id must be what a fallback entry stores: the model's name
+			// within its platform. The wire form is a different string for most
+			// platforms, and using it here wrote the wrong model back.
+			if strings.HasPrefix(m.ID, m.Provider+"/") {
+				t.Errorf("id %q carries its provider prefix; a chain entry stores provider and model_id separately", m.ID)
+			}
+			if m.ID == "" {
+				t.Error("empty model id")
+			}
+		}
+		wantIDs := map[string]string{
+			"cline-pass":  "deepseek-v4.1-flash",
+			"commandcode": "deepseek/deepseek-v4-pro",
+		}
+		for _, m := range payload.Models {
+			if want, ok := wantIDs[m.Provider]; ok && m.ID != want {
+				t.Errorf("%s id = %q, want %q", m.Provider, m.ID, want)
 			}
 		}
 		hasCommandCode := strings.Contains(cfg, `"commandcode":{"api_keys":["synthetic-b"]}`)

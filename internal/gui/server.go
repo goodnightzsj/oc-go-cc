@@ -1393,13 +1393,19 @@ func (s *Server) serveAllReachableModels(w http.ResponseWriter, wanted string) {
 			continue
 		}
 		for _, resolved := range cat.ListProviderModels(descriptor.ID) {
-			// The id a client sends is the key's wire form, not its canonical
-			// name: ClinePass requires the pool prefix, everything else drops it.
-			// CanonicalName is the key; ModelID may be blank for an entry that
-			// came from a provider's nested map.
-			id := catalog.WireModelID(resolved.CanonicalName)
-			if resolved.CanonicalName == "" {
-				id = resolved.ModelID
+			// The model_id a fallback entry stores is the name within its
+			// platform, which is not the wire id: WireModelID strips the provider
+			// for most platforms but keeps it for ClinePass, while a chain entry
+			// carries provider and model_id separately. Taking the wire form here
+			// produced ids that did not match what the chain expects, so a
+			// selected model was written back as a different model.
+			id := resolved.ModelID
+			if key := resolved.CanonicalName; key != "" {
+				if idx := strings.IndexByte(key, '/'); idx >= 0 {
+					id = key[idx+1:]
+				} else {
+					id = key
+				}
 			}
 			if id == "" {
 				continue

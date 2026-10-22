@@ -3,6 +3,7 @@ package provider
 import (
 	"bytes"
 	"io"
+	"time"
 )
 
 // peekedBody replays the bytes a peek consumed before reading further.
@@ -43,6 +44,19 @@ func (p *peekedBody) UpstreamChannel() string {
 	return ""
 }
 
+func (p *peekedBody) MarkFirstByte() {
+	if recorder, ok := p.ReadCloser.(interface{ MarkFirstByte() }); ok {
+		recorder.MarkFirstByte()
+	}
+}
+
+func (p *peekedBody) FirstByteAt() time.Time {
+	if reporter, ok := p.ReadCloser.(interface{ FirstByteAt() time.Time }); ok {
+		return reporter.FirstByteAt()
+	}
+	return time.Time{}
+}
+
 func (p *peekedBody) UpstreamModel() string {
 	if reporter, ok := p.ReadCloser.(interface{ UpstreamModel() string }); ok {
 		return reporter.UpstreamModel()
@@ -61,16 +75,18 @@ func (p *peekedBody) UpstreamModel() string {
 //
 // body must be the observer wrapper: the peek reads through it, so the observer
 // sees the frames it consumes and answers without a second parser here.
-func peekServedModel(body io.ReadCloser, maxPeekBytes int) (io.ReadCloser, string) {
+func peekServedModel(body io.ReadCloser, maxPeekBytes int) (io.ReadCloser, string, bool) {
 	reporter, ok := body.(interface{ ServedModel() string })
 	if !ok || body == nil {
-		return body, ""
+		return body, "", false
 	}
 	if model := reporter.ServedModel(); model != "" {
-		return body, model
+		// Already drained by an earlier peek: the first byte is behind us, and
+		// reporting it again would claim a second one arrived.
+		return body, model, false
 	}
 	if maxPeekBytes <= 0 {
-		return body, ""
+		return body, "", false
 	}
 
 	// Read in small chunks rather than by line: the observer already splits
@@ -83,14 +99,16 @@ func peekServedModel(body io.ReadCloser, maxPeekBytes int) (io.ReadCloser, strin
 		if n > 0 {
 			consumed.Write(buf[:n])
 			if model := reporter.ServedModel(); model != "" {
-				return &peekedBody{ReadCloser: body, pending: consumed.Bytes()}, model
+				return &peekedBody{ReadCloser: body, pending: consumed.Bytes()}, model, true
 			}
 		}
 		if err != nil {
 			break
 		}
 	}
-	return &peekedBody{ReadCloser: body, pending: consumed.Bytes()}, ""
+	// The peek read at least one chunk before giving up, so a first byte did
+	// arrive even though it never named a model.
+	return &peekedBody{ReadCloser: body, pending: consumed.Bytes()}, "", consumed.Len() > 0
 }
 
 // maxServedModelPeekBytes bounds the read-ahead. The gateway names the model in

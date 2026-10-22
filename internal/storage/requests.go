@@ -45,8 +45,8 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 			id, model, requested_model, provider, scenario, start_time, duration_ms,
 			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
 			cost_usd, cost_source, details_known, usage_trusted, streaming, success, error_msg, attempt,
-			peak_multiplier, upstream_channel, upstream_model
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?)
+			peak_multiplier, upstream_channel, upstream_model, first_byte_ms
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		rec.ID,
 		rec.Model,
@@ -68,6 +68,7 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 		peakMultiplierForRecord(rec),
 		nullIfEmpty(rec.UpstreamChannel),
 		nullIfEmpty(rec.UpstreamModel),
+		nullIfZero(int64(rec.FirstByte.Milliseconds())),
 	)
 
 	return err
@@ -92,6 +93,15 @@ func requestedModelForRecord(rec history.RequestRecord) any {
 // an empty one". Only the former is a real state, so it is the only one stored.
 func nullIfEmpty(value string) any {
 	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
+}
+
+// nullIfZero keeps "not measured" distinct from "measured as zero". A latency
+// of 0ms is not a real observation, so it is the absence that gets stored.
+func nullIfZero(value int64) any {
+	if value == 0 {
 		return nil
 	}
 	return value
@@ -457,7 +467,7 @@ func (r *Requests) Query(q RequestQuery) ([]history.RequestRecord, int64, error)
 		SELECT id, model, requested_model, provider, scenario, start_time, duration_ms,
 		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
 		       cost_usd, cost_source, details_known, streaming, success, error_msg, attempt,
-		       peak_multiplier, upstream_channel, upstream_model
+		       peak_multiplier, upstream_channel, upstream_model, first_byte_ms
 		FROM requests`+where+`
 		ORDER BY `+orderBy+`
 		LIMIT ? OFFSET ?
@@ -602,6 +612,13 @@ func requestSortColumn(field string) string {
 		return "COALESCE(output_tokens, 0)"
 	case "cost_usd":
 		return "COALESCE(cost_usd, 0)"
+	case "first_byte_ms":
+		// A row without a measurement sorts as the slowest thing there is, in
+		// both directions: the cell shows a dash, and "no data" is not the
+		// fastest response. The sentinel has to live in the expression rather
+		// than in a second ORDER BY term, because orderBy appends the direction
+		// once and a comma here would leave the sentinel unsorted.
+		return "COALESCE(first_byte_ms, 9223372036854775807)"
 	case "duration_ms":
 		return "COALESCE(duration_ms, 0)"
 	case "tokens_per_second":
@@ -699,6 +716,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		var errorMsg sql.NullString
 		var provider, scenario, requestedModel sql.NullString
 		var upstreamChannel, upstreamModel sql.NullString
+		var firstByteMS sql.NullInt64
 		var peakMul float64
 		err := rows.Scan(
 			&rec.ID,
@@ -722,6 +740,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 			&peakMul,
 			&upstreamChannel,
 			&upstreamModel,
+			&firstByteMS,
 		)
 		if err != nil {
 			return nil, err
@@ -731,6 +750,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		rec.RequestedModel = requestedModel.String
 		rec.UpstreamChannel = upstreamChannel.String
 		rec.UpstreamModel = upstreamModel.String
+		rec.FirstByte = time.Duration(firstByteMS.Int64) * time.Millisecond
 		rec.PeakMultiplier = peakMul
 		if attempt.Valid {
 			rec.Attempt = int(attempt.Int64)

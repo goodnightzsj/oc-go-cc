@@ -226,6 +226,16 @@ func UpstreamModelOf(body any) string {
 	return reader.UpstreamModel()
 }
 
+// FirstByteAtOf returns when the upstream's first byte arrived, or the zero
+// time when the body does not report one.
+func FirstByteAtOf(body any) time.Time {
+	reporter, ok := body.(interface{ FirstByteAt() time.Time })
+	if !ok {
+		return time.Time{}
+	}
+	return reporter.FirstByteAt()
+}
+
 // ServedModelOf returns the model the upstream named in its first chunk, which
 // is available before any content is forwarded. Empty when the body does not
 // report one.

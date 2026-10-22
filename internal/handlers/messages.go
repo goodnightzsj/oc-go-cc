@@ -722,7 +722,7 @@ func (h *MessagesHandler) handleStreaming(
 		// variable: the gateway names it in the last frame, so the only correct
 		// moment to ask is after the stream has ended. Reading it earlier would
 		// record an empty channel for every request.
-		recordStreamSuccess := func(model config.ModelConfig, upstreamChannel, upstreamModel string) {
+		recordStreamSuccess := func(model config.ModelConfig, upstreamChannel, upstreamModel string, firstByte time.Time) {
 			cancelAttempt()
 			complete(clientCtx, nil)
 			latency := time.Since(streamStart)
@@ -755,6 +755,7 @@ func (h *MessagesHandler) handleStreaming(
 				PeakMultiplier:      history.ProviderPeakMultiplier(providerName, model.ModelID, streamStart),
 				UpstreamChannel:     upstreamChannel,
 				UpstreamModel:       upstreamModel,
+				FirstByte:           firstByteDuration(firstByte, streamStart),
 			}
 			if h.storage != nil {
 				if err := h.storage.InsertRequest(rec); err != nil {
@@ -860,7 +861,7 @@ func (h *MessagesHandler) handleStreaming(
 			if err := rw.finish(); err != nil {
 				return handleStreamError(err, model, action)
 			}
-			recordStreamSuccess(model, client.UpstreamChannelOf(currentStream), client.UpstreamModelOf(currentStream))
+			recordStreamSuccess(model, client.UpstreamChannelOf(currentStream), client.UpstreamModelOf(currentStream), client.FirstByteAtOf(currentStream))
 			return false
 		}
 
@@ -1129,6 +1130,17 @@ func (h *MessagesHandler) handleNonStreaming(
 			h.logger.Warn("failed to insert request into storage", "error", err)
 		}
 	}
+}
+
+// firstByteDuration is the gap from the request's start to the upstream's first
+// byte, or zero when that moment was never observed. A zero is stored as "not
+// measured" rather than as a duration, so a provider that does not report it
+// cannot look like an instant one.
+func firstByteDuration(at, start time.Time) time.Duration {
+	if at.IsZero() || start.IsZero() || at.Before(start) {
+		return 0
+	}
+	return at.Sub(start)
 }
 
 // extractTextFromBlocks extracts plain text from Anthropic content blocks.

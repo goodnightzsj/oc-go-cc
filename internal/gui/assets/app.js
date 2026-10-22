@@ -434,6 +434,8 @@ const TRANSLATIONS = {
     'th.promptTokens': 'Prompt Tokens',
     'th.outputTokens': 'Output Tokens',
     'th.cost': 'Cost',
+    'th.firstByte': 'TTFT',
+    'th.firstByteHint': 'Time from the request starting to the upstream sending its first byte. What the upstream controls, as opposed to the model thinking time included in Duration.',
     'th.duration': 'Duration',
     'th.tokensPerSecond': 'Tok/s',
     'th.status': 'Status',
@@ -1003,6 +1005,8 @@ const TRANSLATIONS = {
     'th.promptTokens': 'Prompt Token',
     'th.outputTokens': '输出 Token',
     'th.cost': '费用',
+    'th.firstByte': '首字节',
+    'th.firstByteHint': '从请求开始到上游返回第一个字节的时间。这是上游可控的部分；Duration 里还包含模型思考时间。',
     'th.duration': '耗时',
     'th.tokensPerSecond': 'Tok/s',
     'th.status': '状态',
@@ -2692,20 +2696,19 @@ function renderHistory() {
     // Shown only when the gateway names a model that is not the one we sent:
     // repeating the request id on every ordinary row would be noise, and the
     // presence of the badge is itself the signal that a rewrite happened.
-    // The model column names what actually ran. When the gateway rewrote the
-    // id, the requested one is kept beneath it: routing and billing key on
-    // that one, and an operator comparing a row against config needs both.
+    // The model column names what actually ran, and nothing else. The id we
+    // sent is a routing detail the gateway already resolved; repeating it under
+    // the real one doubles the height of every row to show a string the reader
+    // never acts on.
     const servedModel = h.upstream_model || h.model;
-    const requestedMark = h.upstream_model && h.upstream_model !== h.model
-      ? '<small class="history-requested-model" title="' + escapeHtml(h.model + ' — ' + t('history.requestedModelHint')) + '">' + escapeHtml(h.model) + '</small>'
-      : '';
     return `
     <tr data-id="${escapeHtml(rowId)}" tabindex="0" aria-haspopup="dialog" data-provider="${escapeHtml(h.provider || '')}" style="cursor: pointer;">
       <td><time class="history-timestamp" datetime="${escapeHtml(h.start_time || '')}" title="${escapeHtml(h.start_time || '')}">${fmtRelativeTime(h.start_time)}<small>${fmtDate(h.start_time)}</small></time>${peakMark}</td>
       <td><div class="history-status-stack">${detailsKnown ? `<span class="badge ${h.success ? 'badge-success' : 'badge-error'}" title="${h.success ? t('badge.success') : t('badge.fail')}">${h.success ? t('badge.success') : t('badge.fail')}</span>` : `<span class="badge badge-unknown" title="${t('detail.unknown')}">${t('detail.unknown')}</span>`}<small class="history-stream-state">${streamLabel}</small></div></td>
-      <td><div class="history-model-cell"><strong title="${escapeHtml(servedModel)}">${escapeHtml(servedModel) || '—'}</strong>${requestedMark}<small>${escapeHtml(providerLabel(h.provider))}${channelMark}</small></div></td>
+      <td><div class="history-model-cell"><strong title="${escapeHtml(servedModel)}">${escapeHtml(servedModel) || '—'}</strong><small>${escapeHtml(providerLabel(h.provider))}${channelMark}</small></div></td>
       <td><button type="button" class="history-token-trigger" data-token-id="${escapeHtml(rowId)}" aria-label="${t('detail.title')}">${totalTokens.toLocaleString()}</button><br><small>${tokenSplit}</small></td>
       <td>${cost}<br><small>${costSourceLabel(h.cost_source)}</small></td>
+      <td>${h.first_byte_ms ? fmtDuration(h.first_byte_ms) : '—'}</td>
       <td>${detailsKnown ? gradeDuration(h, fmtDuration(h.duration_ms)) : '—'}</td>
       <td title="${escapeHtml(t('analytics.throughputHint'))}">${detailsKnown && h.success ? fmtThroughput(requestThroughput(h)) : '—'}</td>
     </tr>
@@ -3044,6 +3047,7 @@ const HISTORY_CSV_COLUMNS = [
   ['cost_usd', r => r.cost_usd],
   ['cost_source', r => r.cost_source],
   ['details_known', r => historyHasDetails(r)],
+  ['first_byte_ms', r => r.first_byte_ms || null],
   ['duration_ms', r => historyHasDetails(r) ? r.duration_ms : null],
   ['streaming', r => historyHasDetails(r) ? r.streaming : null],
   ['attempt', r => historyHasDetails(r) ? r.attempt : null],

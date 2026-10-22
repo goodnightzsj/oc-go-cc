@@ -3,10 +3,12 @@ package router
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -362,6 +364,21 @@ func (h *FallbackHandler) ExecuteWithFallback(
 			return nil, nil, errCtx
 		}
 
+		// The request itself is unacceptable. Every model in the chain would
+		// reject it the same way, so trying them spends quota on an answer that
+		// is already known - and hides the real cause behind several attempts.
+		if IsNonRetryableRequestError(err) {
+			h.logger.Warn("request rejected as invalid, not falling back",
+				"model", model.ModelID,
+				"error", err,
+			)
+			return &FallbackResult{
+				ModelID:   model.ModelID,
+				Provider:  provider,
+				Attempted: i + 1,
+			}, nil, err
+		}
+
 		// A provider-wide usage limit makes its remaining models pointless.
 		// Skip them, but continue if the chain includes another provider.
 		lastErr = err
@@ -502,6 +519,44 @@ func IsRetryableError(err error) bool {
 		if strings.Contains(errStr, sub) {
 			return true
 		}
+	}
+	return false
+}
+
+// IsNonRetryableRequestError reports whether an error says the request itself is
+// wrong, rather than the model failing to serve it.
+//
+// The distinction is the point of a fallback chain. A 5xx, a timeout or a 429
+// describes this attempt - another platform may well do better. A 400, a 413 or
+// a context-length rejection describes the request, and every model in the chain
+// will refuse it the same way. Trying them in turn spends the operator's quota
+// on an answer that is already known, and buries the real cause under several
+// attempts.
+//
+// The sentence this enforces: a malformed request is the client's answer, and
+// returning it immediately is both cheaper and more truthful.
+func IsNonRetryableRequestError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *client.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.StatusCode {
+		case http.StatusBadRequest, // 400 malformed body, bad schema
+			http.StatusRequestEntityTooLarge, // 413 body too large
+			http.StatusUnprocessableEntity,   // 422 semantically invalid
+			http.StatusUnsupportedMediaType:  // 415
+			return true
+		}
+		// Anthropic and OpenAI both report a context overrun as 400, and so do
+		// most OpenAI-compatible gateways. Anything else in the 4xx family is
+		// about the credential or the model's availability and stays retryable.
+		return false
+	}
+	// A body that cannot be parsed at all never reached a model's judgement.
+	var syntaxErr *json.SyntaxError
+	if errors.As(err, &syntaxErr) {
+		return true
 	}
 	return false
 }

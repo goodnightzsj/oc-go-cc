@@ -22,6 +22,12 @@ func ImportFromJSON(ctx context.Context, db *storage.Database, jsonPath string) 
 		return 0, 0, fmt.Errorf("load catalog from JSON: %w", err)
 	}
 
+	// Applied here rather than in Load so a test fixture is exactly the file it
+	// wrote. This is the entry point every sync goes through, and it replaces
+	// the whole table, so an entry added here survives the mirror's next
+	// download - which is the only requirement.
+	applyProviderOverrides(&idx.Catalog)
+
 	providers := make([]storage.ProviderRecord, 0, len(idx.Providers))
 	for name, p := range idx.Providers {
 		providers = append(providers, providerToStorageRecord(name, p))

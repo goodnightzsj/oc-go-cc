@@ -40,8 +40,13 @@ func TestHistoryHeaderColumnsMatchTheRow(t *testing.T) {
 
 	// Insertion order is the contract: each key is the column heading the row
 	// must fill at the same index.
+	// th.scenario is absent on purpose. This instance routes 100% of its
+	// traffic through `override` (the client names the model, so scenario
+	// detection never runs), which made the column a constant string. The
+	// value is still recorded and still filterable; it is just not a column
+	// worth a slot when it cannot vary.
 	want := []string{
-		"th.time", "th.status", "th.modelPlatform", "th.scenario",
+		"th.time", "th.status", "th.modelPlatform",
 		"th.tokens", "th.cost", "th.duration", "th.tokensPerSecond",
 	}
 	prev := -1

@@ -37,9 +37,13 @@ func TestRequestedEffortPrefersTheStatedLevel(t *testing.T) {
 			// minimal is OpenAI's and has no Anthropic rung; it is raised the
 			// same way the inbound paths raise it, so one row cannot disagree
 			// with what was actually sent.
-			name: "lowest levels are raised",
+			// The column records what the client asked for. Raising the value
+			// here would make the record say "low" for a request that said
+			// "minimal" - the mapping belongs to the wire boundary, not to the
+			// ledger.
+			name: "lowest levels are recorded as stated",
 			req:  &types.MessageRequest{OutputConfig: json.RawMessage(`{"effort":"minimal"}`)},
-			want: "low",
+			want: "minimal",
 		},
 		{
 			name: "thinking disabled is not a level",

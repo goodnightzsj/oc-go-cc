@@ -60,14 +60,15 @@ func TestEffortFromBudgetReportsNothingForAZeroBudget(t *testing.T) {
 }
 
 // Every level either vendor documents is accepted, so a client cannot be told
-// its normal settings are invalid. The two rungs Anthropic lacks are raised to
-// "low": the request asked for as little reasoning as possible, and that is the
-// least this ladder can express.
-func TestNormalizeEffortAcceptsEveryDocumentedLevelAndRaisesTheTwoLowest(t *testing.T) {
+// its normal settings are invalid. The value comes back unchanged: this
+// function decides whether something is a level, not what a protocol can
+// express. Mapping "none"/"minimal" onto Anthropic's ladder is AnthropicEffort's
+// job, applied only at that boundary.
+func TestNormalizeEffortAcceptsEveryDocumentedLevelUnchanged(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{"", ""},
-		{"none", "low"},
-		{"minimal", "low"},
+		{"none", "none"},
+		{"minimal", "minimal"},
 		{"low", "low"},
 		{"medium", "medium"},
 		{"high", "high"},
@@ -91,6 +92,34 @@ func TestNormalizeEffortRejectsModesAndUnknownValues(t *testing.T) {
 	for _, value := range []string{"enabled", "disabled", "adaptive", "between_tools", "ultra", "HIGH", " high"} {
 		if got, ok := NormalizeEffort(value); ok {
 			t.Errorf("%q was accepted as a level (-> %q)", value, got)
+		}
+	}
+}
+
+// The raise belongs to the Anthropic boundary alone. Moving it back into
+// NormalizeEffort would silently rewrite requests on the same-protocol path
+// where nothing needed translating.
+func TestAnthropicEffortRaisesOnlyAtThatBoundary(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"none", "low"},
+		{"minimal", "low"},
+		{"low", "low"},
+		{"medium", "medium"},
+		{"high", "high"},
+		{"xhigh", "xhigh"},
+		{"max", "max"},
+		{"", ""},
+	} {
+		if got := AnthropicEffort(tc.in); got != tc.want {
+			t.Errorf("AnthropicEffort(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+
+	// And validation no longer changes the value it reports.
+	for _, level := range []string{"none", "minimal"} {
+		got, ok := NormalizeEffort(level)
+		if !ok || got != level {
+			t.Errorf("NormalizeEffort(%q) = (%q, %v); validation must not translate", level, got, ok)
 		}
 	}
 }

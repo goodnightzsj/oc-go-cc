@@ -165,16 +165,15 @@ func ResponsesToMessageRequest(raw []byte) (*types.MessageRequest, error) {
 		if in.Reasoning.Summary != "" {
 			return nil, fmt.Errorf("reasoning.summary is not supported by this adapter")
 		}
-		// Every level OpenAI documents is accepted. The two lowest - "none" and
-		// "minimal", which ask for little or no reasoning - are raised to "low"
-		// because Anthropic has no equivalent rung: its ladder is
-		// low/medium/high/xhigh/max. Rejecting them made a Codex request fail
-		// outright, and a client that cannot send its normal settings cannot use
-		// the proxy at all. Raising a level spends more tokens than the caller
-		// asked for; failing spends none and delivers nothing.
+		// The level is validated and carried through unchanged.
 		//
-		// The loss is real and one-directional: a request that asked for the
-		// least possible reasoning gets the least Anthropic offers, not none.
+		// It used to be raised here ("none"/"minimal" -> "low") because the
+		// Anthropic ladder has no rung for them. But this adapter's output is a
+		// MessageRequest, which is not always sent over Anthropic: a Responses
+		// request can leave as Responses, where those levels are legal. Rewriting
+		// at this point changed the client's stated intent for a translation that
+		// might never happen, and left the record unable to say what was asked
+		// for. The raise now happens where the wire actually needs it.
 		effort, ok := core.NormalizeEffort(in.Reasoning.Effort)
 		if !ok {
 			return nil, fmt.Errorf("reasoning.effort %q has no supported upstream mapping", in.Reasoning.Effort)

@@ -328,11 +328,12 @@ func TestResponsesInboundAcceptsTheLevelsThePipelineSupports(t *testing.T) {
 		}
 	}
 
-	// "none" and "minimal" are OpenAI's lowest rungs and have no Anthropic
-	// equivalent. They are accepted and raised to "low" rather than rejected:
-	// a Codex client that cannot send its normal settings cannot use the proxy
-	// at all, and spending a few more tokens beats delivering nothing. The loss
-	// is one-directional and is the reason this is asserted explicitly.
+	// "none" and "minimal" are OpenAI's lowest rungs. They are accepted here
+	// and carried through unchanged: this adapter produces a MessageRequest,
+	// and a Responses request may leave as Responses, where those levels are
+	// legal. Raising them at this point changed the client's stated intent for
+	// a translation that might never happen. The raise belongs to the Anthropic
+	// boundary - see core.AnthropicEffort and request.go.
 	for _, level := range []string{"none", "minimal"} {
 		body := `{"model":"m","input":"hi","reasoning":{"effort":"` + level + `"}}`
 		req, err := ResponsesToMessageRequest([]byte(body))
@@ -340,8 +341,8 @@ func TestResponsesInboundAcceptsTheLevelsThePipelineSupports(t *testing.T) {
 			t.Errorf("effort %q must not fail the request: %v", level, err)
 			continue
 		}
-		if !strings.Contains(string(req.OutputConfig), `"low"`) {
-			t.Errorf("effort %q should arrive as low, got %q", level, req.OutputConfig)
+		if !strings.Contains(string(req.OutputConfig), `"`+level+`"`) {
+			t.Errorf("effort %q was rewritten; it should reach output_config unchanged, got %q", level, req.OutputConfig)
 		}
 	}
 }

@@ -1634,6 +1634,18 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
 .settings-save-bar .save-status { flex-basis: 100%; margin: 0; text-align: left; }
 .settings-save-bar .save-status:empty { display: none; }
 .fallback-toolbar > div:first-child { display: grid; gap: 6px; }
+/* Two labelled controls side by side: the scenario (only when there is more
+   than one) and the platform, which is what narrows the model list. */
+.fallback-toolbar-fields { display: flex; gap: 14px; align-items: flex-end; }
+.fallback-toolbar-fields > div { display: grid; gap: 6px; }
+.fallback-toolbar-fields > div[hidden] { display: none; }
+.fallback-toolbar-fields label {
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--ui-muted);
+}
+.fallback-toolbar-fields .theme-select { min-width: 180px; }
 .fallback-actions { display: flex; gap: 8px; }
 .routing-layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; align-items: start; gap: 24px; }
 .routing-workspace { min-width: 0; padding: 20px; border: 1px solid var(--ui-line); border-radius: 10px; background: var(--ui-surface); }
@@ -1910,10 +1922,19 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
 .model-picker-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 200px;
+  height: 34px;
   justify-content: space-between;
+  padding: 0 10px;
+  border: 1px solid var(--ui-line);
+  border-radius: 5px;
+  background: var(--ui-input);
+  color: var(--ui-text);
+  font-size: 12px;
 }
+
+.model-picker-trigger:hover { border-color: var(--ui-line-strong); }
 
 .picker-caret { opacity: 0.6; font-size: 10px; }
 
@@ -1926,8 +1947,8 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
   max-height: 420px;
   display: flex;
   flex-direction: column;
-  background: var(--ui-bg-elevated, #2c2c2e);
-  border: 1px solid var(--ui-border, #48484a);
+  background: var(--ui-surface-raised, #1e2a3a);
+  border: 1px solid var(--ui-line);
   border-radius: 10px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
   overflow: hidden;
@@ -1937,21 +1958,21 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
 
 .model-picker-search {
   padding: 8px;
-  border-bottom: 1px solid var(--ui-border, #48484a);
+  border-bottom: 1px solid var(--ui-line);
 }
 
 .model-picker-search input {
   width: 100%;
   padding: 7px 10px;
   border-radius: 6px;
-  border: 1px solid var(--ui-border, #48484a);
-  background: var(--ui-bg-input, #1c1c1e);
+  border: 1px solid var(--ui-line);
+  background: var(--ui-input);
   color: inherit;
   font-size: 13px;
 }
 
 .model-picker-search input:focus {
-  outline: 2px solid var(--ui-accent, #0a84ff);
+  outline: 2px solid var(--ui-action);
   outline-offset: -1px;
 }
 
@@ -1971,14 +1992,14 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--ui-text-secondary, #98989d);
+  color: var(--ui-muted);
 }
 
 .picker-group-site {
   padding: 0 5px;
   border-radius: 4px;
-  background: color-mix(in srgb, var(--ui-accent, #0a84ff) 18%, transparent);
-  color: var(--ui-accent, #0a84ff);
+  background: color-mix(in srgb, var(--ui-action) 22%, transparent);
+  color: var(--ui-indigo);
   font-size: 9px;
   letter-spacing: 0;
   text-transform: none;
@@ -1999,7 +2020,7 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
 
 .picker-row:hover,
 .picker-row.active {
-  background: color-mix(in srgb, var(--ui-accent, #0a84ff) 20%, transparent);
+  background: color-mix(in srgb, var(--ui-action) 22%, transparent);
 }
 
 .picker-model {
@@ -2010,7 +2031,7 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
 }
 
 .picker-ctx {
-  color: var(--ui-text-secondary, #98989d);
+  color: var(--ui-muted);
   font-size: 11px;
   white-space: nowrap;
 }
@@ -2023,32 +2044,33 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
   font-size: 11px;
   white-space: nowrap;
 }
-.picker-price-low { color: var(--ui-green, #30d158); }
-.picker-price-mid { color: var(--ui-text-secondary, #98989d); }
-.picker-price-high { color: var(--ui-orange, #ff9f0a); }
+.picker-price-low { color: var(--ui-green); }
+.picker-price-mid { color: var(--ui-muted); }
+.picker-price-high { color: var(--ui-amber, #fbbf24); }
+.picker-price-none { color: var(--ui-muted, #afbdd0); opacity: 0.5; }
 
 .picker-badges { display: flex; gap: 3px; }
 .picker-badge {
   padding: 0 4px;
   border-radius: 3px;
-  background: color-mix(in srgb, var(--ui-text-secondary, #98989d) 18%, transparent);
-  color: var(--ui-text-secondary, #98989d);
+  background: color-mix(in srgb, var(--ui-muted) 16%, transparent);
+  color: var(--ui-muted);
   font-size: 9px;
 }
 
 .picker-empty {
   padding: 20px 10px;
   text-align: center;
-  color: var(--ui-text-secondary, #98989d);
+  color: var(--ui-muted);
   font-size: 12px;
 }
 
 .fallback-cross-platform {
   margin-bottom: 14px;
   padding: 10px 12px;
-  border: 1px solid var(--ui-border, #3a3a3c);
+  border: 1px solid var(--ui-line);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--ui-text-secondary, #98989d) 6%, transparent);
+  background: color-mix(in srgb, var(--ui-muted) 6%, transparent);
 }
 
 .fallback-cross-platform .toggle-row {
@@ -2074,6 +2096,6 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
 .history-key-hint {
   font-family: var(--ui-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 11px;
-  color: var(--ui-text-secondary, #98989d);
+  color: var(--ui-muted);
   white-space: nowrap;
 }

@@ -462,9 +462,15 @@
         <p class="page-meta" data-i18n="fallback.crossPlatformHint">Off by default. Entries on another platform are skipped and counted in the log, so you can see how often it would fire before spending another account's quota.</p>
       </div>
       <div class="fallback-toolbar">
-        <div>
-          <label for="fallback-scenario" data-i18n="fallback.scenario">Scenario</label>
-          <select id="fallback-scenario" onchange="FallbackModule.onScenarioChange()" class="filter-select"></select>
+        <div class="fallback-toolbar-fields">
+          <div id="fallback-scenario-field">
+            <label for="fallback-scenario" data-i18n="fallback.scenario">Scenario</label>
+            <select id="fallback-scenario" onchange="FallbackModule.onScenarioChange()" class="filter-select"></select>
+          </div>
+          <div>
+            <label for="fallback-platform-filter" data-i18n="fallback.platformFilter">Platform</label>
+            <select id="fallback-platform-filter" onchange="FallbackModule.onPlatformFilterChange()" class="filter-select"></select>
+          </div>
         </div>
         <div class="fallback-actions">
           <button type="button" class="btn btn-small" onclick="FallbackModule.preview()" data-i18n="fallback.preview">Preview</button>

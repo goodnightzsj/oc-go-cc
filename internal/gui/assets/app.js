@@ -521,6 +521,8 @@ const TRANSLATIONS = {
     'fallback.noMatches': 'No model matches that search',
     'fallback.currentSite': 'current',
     'fallback.priceHint': 'Input / output per million tokens. Green is near the cheapest visible model, amber is far above it.',
+    'fallback.priceUnknown': 'No published rate for this model on this platform.',
+    'fallback.platformFilter': 'Platform',
     'fallback.unreachable': 'Inactive',
     'fallback.unreachableHint': 'This platform is outside the active site, so this entry is skipped and never serves a request.',
     'fallback.noReachableModels': 'No platform currently has a usable credential, so there is nothing to fall back to.',
@@ -1138,6 +1140,8 @@ const TRANSLATIONS = {
     'fallback.noMatches': '没有匹配的模型',
     'fallback.currentSite': '当前',
     'fallback.priceHint': '每百万 token 的输入 / 输出价格。绿色表示接近可见模型中最便宜的，橙色表示远高于它。',
+    'fallback.priceUnknown': '该平台上此模型没有公开价格。',
+    'fallback.platformFilter': '平台',
     'fallback.unreachable': '不生效',
     'fallback.unreachableHint': '该平台不在当前 active site 内，此条目会被跳过，永远不会承接请求。',
     'fallback.noReachableModels': '当前没有平台持有可用凭据，无法配置降级模型。',
@@ -5123,7 +5127,13 @@ const FallbackModule = {
         this.chains[key] = this.parseFallbackChain(config, key);
       }
 
-      // Populate scenario dropdown
+      // The scenario dropdown is a leftover from when fallbacks were keyed per
+      // routing scenario. This instance routes everything through override -
+      // the client names the model, so DetectScenario never runs - which leaves
+      // exactly one key and a control with nothing to choose. Showing a
+      // single-option dropdown invites the question "what is this for"; the
+      // branch stays for a config that really does have several.
+      const scenarioField = document.getElementById('fallback-scenario-field');
       const sel = document.getElementById('fallback-scenario');
       if (sel) {
         sel.innerHTML = scenarioKeys.map(k =>
@@ -5132,6 +5142,8 @@ const FallbackModule = {
         this.currentScenario = scenarioKeys[0] || 'default';
         sel.value = this.currentScenario;
       }
+      if (scenarioField) scenarioField.hidden = scenarioKeys.length <= 1;
+      this.populatePlatformFilter(scenarioKeys);
 
       this.populateAddSelect();
       const crossBox = document.getElementById('fallback-cross-platform');
@@ -5150,6 +5162,42 @@ const FallbackModule = {
     return [];
   },
 
+  // populatePlatformFilter builds the platform dropdown from the platforms that
+  // actually have reachable models. Choosing one narrows the picker to it,
+  // which is how an operator thinks: "fall back to a different provider" is a
+  // platform decision before it is a model decision.
+  populatePlatformFilter() {
+    const sel = document.getElementById('fallback-platform-filter');
+    if (!sel) return;
+    const providers = [...new Set((this.availableModels || [])
+      .map(m => m.provider || 'opencode-go')
+      .concat((this.addCandidates || []).map(m => m.provider || 'opencode-go')))]
+      .sort(compareProviderDisplay);
+    const previous = sel.value || this.platformFilter || '';
+    const mkOption = (label, value) => {
+      const item = document.createElement('option');
+      item.value = value;
+      item.textContent = label;
+      return item;
+    };
+    sel.replaceChildren(
+      mkOption(t('filter.allProviders'), ''),
+      ...providers.map(p => mkOption(platformLabel(p), p)),
+    );
+    sel.value = providers.includes(previous) ? previous : '';
+    this.platformFilter = sel.value;
+    window.CustomSelect?.sync(sel);
+  },
+
+  onPlatformFilterChange() {
+    const sel = document.getElementById('fallback-platform-filter');
+    this.platformFilter = sel ? sel.value : '';
+    this.populateAddSelect();
+    if (document.getElementById('fallback-add-popover')?.hidden === false) {
+      this.renderPickerList(document.getElementById('fallback-add-search')?.value || '');
+    }
+  },
+
   // The add-model picker: a searchable popover rather than a native select.
   //
   // A native <select> cannot be searched and cannot show the facts that decide
@@ -5161,8 +5209,13 @@ const FallbackModule = {
     const trigger = document.getElementById('fallback-add-trigger');
     const hint = document.getElementById('fallback-add-hint');
     const chain = this.chains[this.currentScenario] || [];
+    // The platform filter narrows the list before anything else runs, so a
+    // chosen platform never has to compete with 500 models from the others -
+    // that is the whole reason the control exists.
+    const platform = this.platformFilter || '';
     const available = this.availableModels
       .filter(m => !chain.some(e => configModelKey(e) === configModelKey(m)))
+      .filter(m => !platform || (m.provider || 'opencode-go') === platform)
       .sort((a, b) => compareProviderDisplay(a.provider || 'opencode-go', b.provider || 'opencode-go')
         || a.model_id.localeCompare(b.model_id));
 
@@ -5240,7 +5293,11 @@ const FallbackModule = {
   pickerRow(model) {
     const key = configModelKey(model);
     const ctx = model.context_window ? fmtCompactTokens(model.context_window) + ' ctx' : '';
-    const price = (model.input_per_m || model.output_per_m)
+    const hasRate = model.input_per_m > 0 || model.output_per_m > 0;
+    // An unpriced model shows a dash, never $0: zero is a real rate for a free
+    // model, and conflating the two would make a platform with no price table
+    // look like the cheapest option on the page.
+    const price = hasRate
       ? `$${trimNumber(model.input_per_m)} / $${trimNumber(model.output_per_m)}`
       : '';
     const tier = this.priceTier(model);
@@ -5253,7 +5310,9 @@ const FallbackModule = {
           onclick="FallbackModule.chooseModel('${escapeHtml(key).replace(/'/g, "&#39;")}')">
         <span class="picker-model">${escapeHtml(model.model_id)}</span>
         ${ctx ? `<span class="picker-ctx">${escapeHtml(ctx)}</span>` : ''}
-        ${price ? `<span class="picker-price picker-price-${tier}" title="${escapeHtml(t('fallback.priceHint'))}">${escapeHtml(price)}</span>` : '<span class="picker-price"></span>'}
+        ${price
+          ? `<span class="picker-price picker-price-${tier}" title="${escapeHtml(t('fallback.priceHint'))}">${escapeHtml(price)}</span>`
+          : `<span class="picker-price picker-price-none" title="${escapeHtml(t('fallback.priceUnknown'))}">—</span>`}
         <span class="picker-badges">${badges.map(b => `<span class="picker-badge">${escapeHtml(b)}</span>`).join('')}</span>
       </li>`;
   },

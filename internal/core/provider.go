@@ -84,6 +84,17 @@ type Provider interface {
 
 // ModelWireFormat keeps the sender and stream decoder on the same protocol.
 // Explicit model configuration takes precedence over provider inference.
+//
+// anthropic_tools_disabled downgrades an inferred Anthropic endpoint to Chat
+// Completions. It exists because the raw Messages endpoint passes tool
+// definitions through untouched, and some models only accept the Anthropic
+// server-tool shorthands (`type: "custom"`) on the transformed path. The flag
+// was read from config and copied through the catalog into every target, but
+// nothing consulted it, so setting it changed nothing.
+//
+// It does not override an explicit wire_format: an operator who named the
+// protocol meant it, and silently ignoring their choice is worse than a request
+// that fails visibly.
 func ModelWireFormat(p Provider, model config.ModelConfig) WireFormat {
 	switch model.WireFormat {
 	case "openai":
@@ -95,6 +106,10 @@ func ModelWireFormat(p Provider, model config.ModelConfig) WireFormat {
 	case "gemini":
 		return WireFormatGemini
 	default:
-		return p.WireFormat(model.ModelID)
+		format := p.WireFormat(model.ModelID)
+		if model.AnthropicToolsDisabled && format == WireFormatAnthropic {
+			return WireFormatOpenAIChat
+		}
+		return format
 	}
 }

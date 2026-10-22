@@ -314,12 +314,54 @@ func (r *ModelRouter) resolveFromCatalog(cat *catalog.IndexedCatalog, requestedM
 		resolved, err = cat.ResolveShort(requestedModel)
 	}
 	if err != nil {
-		return config.ModelConfig{}, false
+		// The client may have used the platform's own spelling, which carries
+		// the platform's prefix where the catalog carries the vendor's. Falling
+		// through to legacyUnknownModelConfig here is what left such a request
+		// with no capabilities at all - and a vision-capable model was then
+		// refused for not supporting vision.
+		platform, short := splitPlatformPrefix(requestedModel)
+		if platform == "" {
+			return config.ModelConfig{}, false
+		}
+		resolved, err = cat.ResolveShort(short)
+		if err != nil {
+			return config.ModelConfig{}, false
+		}
+		// Capabilities only. The client named this platform, so the catalog's
+		// vendor namespace must not become the target: on ClinePass the prefix
+		// selects a billing pool, and changing it changes which balance pays.
+		// The wire id goes through WireModelID for the same reason every other
+		// path does - that prefix is part of the id on ClinePass and a
+		// namespace everywhere else.
+		target := config.ModelConfig{
+			Provider: platform,
+			ModelID:  catalog.WireModelID(platform + "/" + short),
+			ModelRef: resolved.CanonicalName,
+		}
+		return applyCatalogCapabilities(target, resolved), true
 	}
 
 	cfg := resolvedModelToConfig(resolved)
 	cfg.ModelRef = requestedModel
 	return cfg, true
+}
+
+// splitPlatformPrefix returns the platform and the remainder when a model id
+// carries a known platform's own prefix, or two empty strings when it does not.
+//
+// Only a registered platform counts. A vendor namespace looks identical
+// ("deepseek/deepseek-v4.1-flash-1017") and must be left alone: stripping it
+// would search for a model named after the vendor, not after the model.
+func splitPlatformPrefix(modelID string) (string, string) {
+	idx := strings.IndexByte(modelID, '/')
+	if idx <= 0 || idx == len(modelID)-1 {
+		return "", ""
+	}
+	prefix := modelID[:idx]
+	if !site.IsKnown(prefix) {
+		return "", ""
+	}
+	return site.Normalize(prefix), modelID[idx+1:]
 }
 
 // legacyUnknownModelConfig builds a bare target for a model no source knows,
@@ -714,10 +756,19 @@ func (r *ModelRouter) PublishedByActiveSite(ctx context.Context, modelID string)
 				}
 			}
 			if resolved, err := r.catalogResolved(ctx, active, m.ID); err == nil {
-				target = resolvedModelToConfig(resolved)
-				// The listing's display name is the platform's own wording for
-				// the model; the catalog's is a mirror's. Keep ours.
-				target.ModelRef = config.ModelKey(target)
+				// Capabilities only. The catalog may file this model under a
+				// vendor's namespace, and adopting its provider and id would
+				// send a request the operator scoped to this platform somewhere
+				// else - on ClinePass that is a different billing pool, not a
+				// different spelling of the same target.
+				target = applyCatalogCapabilities(target, resolved)
+				// ModelRef records that these capabilities have an authority
+				// behind them, which stops ResolveModelConfig from overriding
+				// them with the built-in family table. The catalog's canonical
+				// name is that authority, and it is single-prefixed - composing
+				// one from this target would double a platform prefix the id
+				// already carries.
+				target.ModelRef = resolved.CanonicalName
 			}
 			return config.ResolveModelConfig(target), true
 		}
@@ -732,6 +783,19 @@ func (r *ModelRouter) PublishedByActiveSite(ctx context.Context, modelID string)
 // namespace while the catalog may file the same upstream model under the
 // vendor's. ResolveShort is what handles that - it searches every provider for
 // a short name and is the same path a client's model string takes.
+//
+// The third attempt strips the platform's own prefix. Neither lookup above
+// removes anything, so an id the listing just published - Cline answers
+// "cline-pass/deepseek-v4.1-flash-1017" while models.dev files the same model
+// as "deepseek/deepseek-v4.1-flash-1017" - matches nothing at all. The failure
+// is silent and expensive: the caller falls back to the hardcoded metadata
+// table, which does not know the model, so it reports Vision=false and a zero
+// context window, and every image request against a vision-capable model is
+// then discarded as "vision_not_supported".
+//
+// Only a prefix that names the provider is stripped. A vendor namespace such
+// as "deepseek/deepseek-v4-pro" on a platform that does not prefix its ids
+// must be left alone, or it would resolve to another platform's entry.
 func (r *ModelRouter) catalogResolved(ctx context.Context, provider, modelID string) (catalog.ResolvedModel, error) {
 	cat, err := r.catalog(ctx)
 	if err != nil || cat == nil {
@@ -740,7 +804,34 @@ func (r *ModelRouter) catalogResolved(ctx context.Context, provider, modelID str
 	if resolved, err := cat.Resolve(catalog.Selector{Provider: provider, Model: modelID}); err == nil {
 		return resolved, nil
 	}
-	return cat.ResolveShort(modelID)
+	if resolved, err := cat.ResolveShort(modelID); err == nil {
+		return resolved, nil
+	}
+	// Stripping is keyed on a registered platform, not on "whatever precedes the
+	// slash": a vendor namespace is also slash-separated and removing it would
+	// search for a model named after its vendor.
+	if platform, short := splitPlatformPrefix(modelID); platform != "" && platform == site.Normalize(provider) {
+		return cat.ResolveShort(short)
+	}
+	return catalog.ResolvedModel{}, fmt.Errorf("catalog has no entry for %q", modelID)
+}
+
+// applyCatalogCapabilities takes the capability facts from a catalog resolution
+// onto a target without letting the resolution change which platform is called
+// or which model id is sent.
+//
+// PublishedByActiveSite must not adopt the resolution wholesale: the catalog may
+// file the model under the vendor's namespace, and adopting it would send a
+// request the operator scoped to one platform to a different one - for ClinePass
+// that is not even the same billing pool. The listing decides where the request
+// goes; the catalog only fills in what the model can do.
+func applyCatalogCapabilities(target config.ModelConfig, resolved catalog.ResolvedModel) config.ModelConfig {
+	target.Vision = resolved.Vision
+	target.ContextWindow = int(resolved.ContextWindow)
+	target.MaxOutputTokens = int(resolved.MaxOutputTokens)
+	supportsTools := resolved.Tools
+	target.SupportsTools = &supportsTools
+	return target
 }
 
 // RestrictToActiveSite keeps only the targets belonging to the active site. The

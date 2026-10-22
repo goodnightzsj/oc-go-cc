@@ -6,74 +6,81 @@ func TestViewStateRoundTripsThroughTheHash(t *testing.T) {
 	runPlatformBehavior(t, viewStateScript)
 }
 
-// Only the tab name used to be routable, so a link could not carry a filter and
-// pressing back after paging into history left the tab instead of stepping back
-// one page. This pins the round trip in both directions and the rule that one
-// URL key drives every control for the same concept.
+// The view choices are the reader's own preferences and live in localStorage;
+// the hash carries only the tab name, because that one is navigation and a
+// deep link into a page is worth keeping. These used to share the URL, which
+// dragged one person's filters into another person's link and grew the address
+// bar with state nobody reads.
 const viewStateScript = platformBehaviorDOMScript + `
 async function checks() {
   const get = id => document.getElementById(id);
   for (const id of VIEW_CONTROLS.platform) {
     get(id).options = ['', ...visiblePlatforms].map(value => ({value, disabled:false}));
   }
+  localStorage.removeItem(VIEW_STATE_KEY);
 
-  // Serialise: the tab, the filters, and the two pieces of state that are
-  // variables rather than controls.
+  // Serialise the reader's choices.
   get('provider-filter').value = 'commandcode';
   get('history-search').value = 'cache';
   historyPage = 3;
   currentSort = {field:'duration_ms', dir:'asc'};
-  activeTab = 'history';
-  let link = parseViewHash(buildViewHash());
-  assert.equal(link.name, 'history', 'the link must name the tab');
-  assert.equal(link.params.get('platform'), 'commandcode', 'a filtered platform belongs in the link');
-  assert.equal(link.params.get('q'), 'cache', 'the search belongs in the link');
-  assert.equal(link.params.get('page'), '3', 'the page belongs in the link');
-  assert.equal(link.params.get('sort'), 'duration_ms', 'the sort field belongs in the link');
-  assert.equal(link.params.get('dir'), 'asc', 'the sort direction belongs in the link');
+  const state = buildViewState();
+  assert.equal(state.platform, 'commandcode', 'a filtered platform is remembered');
+  assert.equal(state.q, 'cache', 'the search is remembered');
+  assert.equal(state.page, '3', 'the page is remembered');
+  assert.equal(state.sort, 'duration_ms', 'the sort field is remembered');
+  assert.equal(state.dir, 'asc', 'the sort direction is remembered');
 
-  // Defaults stay out rather than being spelled out: a link should not carry
-  // state the reader did not choose. (The date range is not a default - the
-  // history view fills it in on first load - so it is expected here.)
+  // Defaults stay out: the store holds choices, not the panel's opening state.
   historyPage = 1;
   currentSort = {field:'start_time', dir:'desc'};
-  link = parseViewHash(buildViewHash());
-  assert.equal(link.params.has('page'), false, 'page 1 is the default and must be omitted');
-  assert.equal(link.params.has('sort'), false, 'the default sort must be omitted');
-  assert.equal(link.params.has('dir'), false, 'the default direction must be omitted');
+  get('provider-filter').value = defaultControlValue('provider-filter', get('provider-filter'));
+  get('history-search').value = '';
+  const plain = buildViewState();
+  assert.equal(plain.page, undefined, 'page 1 is the default and must not be stored');
+  assert.equal(plain.sort, undefined, 'the default sort must not be stored');
+  assert.equal(plain.dir, undefined, 'the default direction must not be stored');
 
-  // Apply: a link restores the whole view, not just the tab. The controls go
-  // back to their opening state and that state is captured the way boot does,
-  // so an omitted parameter can be resolved back to it.
-  for (const id of ['provider-filter','overview-provider','perf-provider','analytics-provider','quota-provider']) {
-    get(id).value = '';
-  }
+  // Write, then read back through the storage layer - not through a variable,
+  // so a broken serialise/parse pair fails here.
+  get('provider-filter').value = 'commandcode';
+  get('history-search').value = 'cache';
+  historyPage = 3;
+  currentSort = {field:'duration_ms', dir:'asc'};
+  syncViewState();
+  const saved = readSavedView();
+  assert.equal(saved.platform, 'commandcode', 'the store must round-trip the platform');
+  assert.equal(saved.q, 'cache', 'the store must round-trip the search');
+
+  // Apply: a stored view restores the whole view, not just the tab.
+  for (const id of VIEW_CONTROLS.platform) get(id).value = '';
   get('history-search').value = '';
   historyPage = 1;
   currentSort = {field:'start_time', dir:'desc'};
-  activeTab = 'overview';
   captureViewDefaults();
 
-  const moved = applyViewState(new URLSearchParams('platform=commandcode&q=cache&page=3&sort=duration_ms&dir=asc'));
+  const moved = applyViewState(readSavedView());
   assert.ok(moved, 'restoring a page must report that history pagination moved');
-  assert.equal(get('provider-filter').value, 'commandcode', 'the filter the link named must be restored');
-  assert.equal(get('history-search').value, 'cache', 'the search the link named must be restored');
-  assert.equal(historyPage, 3, 'the page the link named must be restored');
-  assert.equal(currentSort.field, 'duration_ms', 'the sort the link named must be restored');
+  assert.equal(get('provider-filter').value, 'commandcode', 'the stored filter must be restored');
+  assert.equal(get('history-search').value, 'cache', 'the stored search must be restored');
+  assert.equal(historyPage, 3, 'the stored page must be restored');
+  assert.equal(currentSort.field, 'duration_ms', 'the stored sort must be restored');
   assert.equal(currentSort.dir, 'asc');
 
-  // One key, every control that drives it - otherwise a link would restore the
-  // history filter and leave the same platform unselected on four other tabs.
+  // One key, every control that drives it - otherwise the history filter is
+  // restored and the same platform stays unselected on four other tabs.
   for (const id of ['overview-provider','perf-provider','analytics-provider','quota-provider']) {
-    assert.equal(get(id).value, 'commandcode', 'every control for one concept must follow the link: ' + id);
+    assert.equal(get(id).value, 'commandcode', 'every control for one concept must follow the store: ' + id);
   }
 
-  // An omitted parameter means the default, so stepping back from a link that
-  // named a filter to one that does not has to undo it - otherwise the panel
-  // and its own URL disagree about what is being shown.
-  applyViewState(new URLSearchParams('platform=opencode-go'));
-  assert.equal(get('history-search').value, '', 'an omitted filter must return to its default');
-  assert.equal(historyPage, 1, 'an omitted page must return to the first');
-  assert.equal(get('provider-filter').value, 'opencode-go');
+  // The hash is navigation only.
+  activeTab = 'history';
+  assert.equal(buildViewHash(), '#history', 'the hash must name the tab and nothing else');
+  assert.equal(syncViewHash, syncViewHash, 'syncViewHash exists');
+
+  // A corrupt store must not stop the panel from loading.
+  localStorage.setItem(VIEW_STATE_KEY, '{not json');
+  assert.equal(JSON.stringify(readSavedView()), '{}', 'a corrupt store reads as empty');
+  localStorage.removeItem(VIEW_STATE_KEY);
 }
 ` + platformBehaviorRunScript

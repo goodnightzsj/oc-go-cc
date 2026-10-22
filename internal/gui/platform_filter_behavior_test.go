@@ -344,6 +344,9 @@ async function checks() {
 const platformBehaviorRunScript = `
 (async()=>{
   vm.runInContext(input.app,context,{timeout:3000});
+  // Defined inside the vm so it closes over the panel's own readSavedView: the
+  // Node side and the page run in separate scopes.
+  vm.runInContext('globalThis.savedView = () => readSavedView();',context);
   await new Promise(setImmediate);
   await vm.runInContext('(' + checks.toString() + ')()',context,{timeout:3000});
 })().catch(error=>{console.error(error);process.exitCode=1});

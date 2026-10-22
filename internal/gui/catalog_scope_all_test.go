@@ -92,3 +92,47 @@ func TestCatalogModelsScopeAllIgnoresTheActiveSite(t *testing.T) {
 		}
 	}
 }
+
+// The price tables match by substring against the id the platform uses, and
+// ClinePass's rules are written with the pool prefix. Looking the rate up with
+// the bare model_id finds nothing, so every ClinePass row showed no price even
+// though the platform publishes one for all of them.
+func TestScopeAllCarriesPricesForPrefixedPlatforms(t *testing.T) {
+	srv, _ := configTestServer(t, `{"active_site":"cline-pass","cline_pass":{"api_keys":["synthetic"]}}`)
+	srv.catalogDir = writeTestCatalogDir(t)
+
+	rec := httptest.NewRecorder()
+	srv.handleCatalogModels(rec, httptest.NewRequest(http.MethodGet, "/api/catalog/models?scope=all", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	var payload struct {
+		Models []struct {
+			ID         string  `json:"id"`
+			Provider   string  `json:"provider"`
+			InputPerM  float64 `json:"input_per_m"`
+			OutputPerM float64 `json:"output_per_m"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, m := range payload.Models {
+		if m.Provider != "cline-pass" {
+			continue
+		}
+		found = true
+		// The id stays the bare name a chain entry stores; only the lookup key
+		// carries the prefix.
+		if strings.HasPrefix(m.ID, "cline-pass/") {
+			t.Errorf("id %q must stay platform-local", m.ID)
+		}
+		if m.InputPerM == 0 && m.OutputPerM == 0 {
+			t.Errorf("%s lists no rate; the platform publishes one", m.ID)
+		}
+	}
+	if !found {
+		t.Fatal("no cline-pass model in the listing")
+	}
+}

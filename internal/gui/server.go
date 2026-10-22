@@ -1423,7 +1423,16 @@ func (s *Server) serveAllReachableModels(w http.ResponseWriter, wanted string) {
 			if e.Name == "" {
 				e.Name = id
 			}
-			if in, out, _, _, ok := storage.PriceForProviderModel(descriptor.ID, id, 0); ok {
+			// The price tables match by substring against the id the platform
+			// uses, and ClinePass's rules are written with the pool prefix
+			// ("cline-pass/deepseek-v4.1-flash"). Look the price up with the
+			// canonical key while still handing the client the bare model_id,
+			// or the row would show no rate even though one is published.
+			priceKey := resolved.CanonicalName
+			if priceKey == "" {
+				priceKey = id
+			}
+			if in, out, _, _, ok := storage.PriceForProviderModel(descriptor.ID, priceKey, 0); ok {
 				e.InputPerM = in
 				e.OutputPerM = out
 			}

@@ -322,6 +322,7 @@ const TRANSLATIONS = {
     'history.nonStreaming': 'Non-streaming',
     'history.peakWindow': 'Billed at this platform\'s peak rate for the hour of the request; the badge shows the multiplier',
     'history.upstreamChannelHint': 'The upstream channel the gateway actually served this request on, as the gateway reported it. It is chosen by the gateway, not by us.',
+    'history.upstreamModelHint': 'The model the gateway says it actually ran. A gateway can answer one id by running a virtual model behind its own fallback chain, which is what this names.',
     'filter.dateRange': 'Date range',
     'filter.today': 'Today',
     'filter.throughToday': 'Always end today',
@@ -889,6 +890,7 @@ const TRANSLATIONS = {
     'history.nonStreaming': '非流式',
     'history.peakWindow': '按请求时刻所在平台的峰时费率计费，倍率见徽标',
     'history.upstreamChannelHint': '网关实际服务本次请求的上游渠道，取自网关自己的回报；渠道由网关选择，不由我们决定。',
+    'history.upstreamModelHint': '网关自报实际执行的模型。网关可能用一个虚拟模型（带自己的降级链）来应答某个 id，这个字段就是那个真实模型。',
     'filter.dateRange': '日期范围',
     'filter.today': '今天',
     'filter.throughToday': '结束日期始终为今天',
@@ -2685,11 +2687,17 @@ function renderHistory() {
     const channelMark = h.upstream_channel
       ? ' <span class="badge badge-channel" title="' + escapeHtml(h.upstream_channel + ' — ' + t('history.upstreamChannelHint')) + '">' + escapeHtml(h.upstream_channel) + '</span>'
       : '';
+    // Shown only when the gateway names a model that is not the one we sent:
+    // repeating the request id on every ordinary row would be noise, and the
+    // presence of the badge is itself the signal that a rewrite happened.
+    const upstreamModelMark = h.upstream_model && h.upstream_model !== h.model
+      ? ' <span class="badge badge-upstream-model" title="' + escapeHtml(h.upstream_model + ' — ' + t('history.upstreamModelHint')) + '">' + escapeHtml(h.upstream_model) + '</span>'
+      : '';
     return `
     <tr data-id="${escapeHtml(rowId)}" tabindex="0" aria-haspopup="dialog" data-provider="${escapeHtml(h.provider || '')}" style="cursor: pointer;">
       <td><time class="history-timestamp" datetime="${escapeHtml(h.start_time || '')}" title="${escapeHtml(h.start_time || '')}">${fmtRelativeTime(h.start_time)}<small>${fmtDate(h.start_time)}</small></time>${peakMark}</td>
       <td><div class="history-status-stack">${detailsKnown ? `<span class="badge ${h.success ? 'badge-success' : 'badge-error'}" title="${h.success ? t('badge.success') : t('badge.fail')}">${h.success ? t('badge.success') : t('badge.fail')}</span>` : `<span class="badge badge-unknown" title="${t('detail.unknown')}">${t('detail.unknown')}</span>`}<small class="history-stream-state">${streamLabel}</small></div></td>
-      <td><div class="history-model-cell"><strong title="${escapeHtml(h.model)}">${escapeHtml(h.model) || '—'}</strong><small>${escapeHtml(providerLabel(h.provider))}${channelMark}</small></div></td>
+      <td><div class="history-model-cell"><strong title="${escapeHtml(h.model)}">${escapeHtml(h.model) || '—'}</strong><small>${escapeHtml(providerLabel(h.provider))}${channelMark}${upstreamModelMark}</small></div></td>
       <td><span class="badge badge-scene" title="${t('detail.scenario')}: ${escapeHtml(h.scenario) || '—'}">${escapeHtml(h.scenario) || '—'}</span></td>
       <td><button type="button" class="history-token-trigger" data-token-id="${escapeHtml(rowId)}" aria-label="${t('detail.title')}">${totalTokens.toLocaleString()}</button><br><small>${tokenSplit}</small></td>
       <td>${cost}<br><small>${costSourceLabel(h.cost_source)}</small></td>

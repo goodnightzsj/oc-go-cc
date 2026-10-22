@@ -69,6 +69,19 @@ func (c *ctxReadCloser) UpstreamChannel() string {
 	return reporter.UpstreamChannel()
 }
 
+// UpstreamModel forwards the wrapped body's model report, when it has one.
+//
+// It needs the same forwarding as UpstreamChannel and for the same reason:
+// embedding promotes Read alone, so a wrapper that forwards one observation
+// silently erases the other. The streaming path reads both from this value.
+func (c *ctxReadCloser) UpstreamModel() string {
+	reporter, ok := c.closer.(interface{ UpstreamModel() string })
+	if !ok {
+		return ""
+	}
+	return reporter.UpstreamModel()
+}
+
 func (c *ctxReader) Read(p []byte) (int, error) {
 	select {
 	case <-c.ctx.Done():

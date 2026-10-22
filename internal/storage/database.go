@@ -365,6 +365,11 @@ func (d *Database) migrateColumns(ctx context.Context) error {
 		// NULL means "this platform does not publish one, or the row predates
 		// the column" - not "the channel was empty". Only ClinePass fills it.
 		`ALTER TABLE requests ADD COLUMN upstream_channel TEXT`,
+		// The model the gateway says it actually ran, when that is not the id we
+		// sent. NULL means the platform publishes none, the gateway ran what was
+		// asked for, or the row predates the column - all three read as "the
+		// recorded model is what ran".
+		`ALTER TABLE requests ADD COLUMN upstream_model TEXT`,
 		// Existing rows keep NULL, which reads back as "unknown ceiling" - the
 		// same answer they gave before the column existed. The next catalog sync
 		// fills them in.

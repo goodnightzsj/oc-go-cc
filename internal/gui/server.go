@@ -485,7 +485,12 @@ type historyEntry struct {
 	// request on. Only ClinePass publishes one, so it is empty everywhere else -
 	// which is why the UI shows the badge for that platform only rather than
 	// rendering an empty marker on every row.
-	UpstreamChannel     string   `json:"upstream_channel,omitempty"`
+	UpstreamChannel string `json:"upstream_channel,omitempty"`
+	// UpstreamModel is the model the gateway said it ran, when that is not the
+	// id that was requested. A gateway can answer one id by running a virtual
+	// model behind its own fallback chain, so the model column stops describing
+	// what produced the response; this is the field that does.
+	UpstreamModel       string   `json:"upstream_model,omitempty"`
 	Scenario            string   `json:"scenario"`
 	StartTime           string   `json:"start_time"` // RFC3339
 	DurationMs          int64    `json:"duration_ms"`
@@ -670,6 +675,7 @@ func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 			RequestedModel:      rec.RequestedModel,
 			Provider:            rec.Provider,
 			UpstreamChannel:     rec.UpstreamChannel,
+			UpstreamModel:       rec.UpstreamModel,
 			Scenario:            scenario,
 			StartTime:           rec.StartTime.Format("2006-01-02T15:04:05Z07:00"),
 			DurationMs:          rec.Duration.Milliseconds(),

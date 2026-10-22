@@ -40,6 +40,12 @@ func (t *captureReadCloser) UpstreamChannel() string {
 	return UpstreamChannelOf(t.ReadCloser)
 }
 
+// UpstreamModel forwards the wrapped body's model report, for the same reason
+// and through the same chain as the channel above.
+func (t *captureReadCloser) UpstreamModel() string {
+	return UpstreamModelOf(t.ReadCloser)
+}
+
 // CaptureBody wraps body so that all bytes read from it are delivered (async)
 // to capture. Returns body unchanged when capture is nil.
 func CaptureBody(body io.ReadCloser, capture func(data []byte)) io.ReadCloser {
@@ -189,4 +195,25 @@ func UpstreamChannelOf(body any) string {
 		return ""
 	}
 	return reader.UpstreamChannel()
+}
+
+// UpstreamModelReader is implemented by a stream body that observed which model
+// the upstream actually ran, when that differs from the id we sent.
+//
+// It is separate from UpstreamChannelReader because the two answer different
+// questions and not every platform that reports one reports the other: a
+// gateway may name its channel without rewriting the model id at all, and a
+// plain upstream names neither.
+type UpstreamModelReader interface {
+	UpstreamModel() string
+}
+
+// UpstreamModelOf returns the model a stream body reported, or "" when the body
+// does not report one or has not seen the metadata yet.
+func UpstreamModelOf(body any) string {
+	reader, ok := body.(UpstreamModelReader)
+	if !ok {
+		return ""
+	}
+	return reader.UpstreamModel()
 }

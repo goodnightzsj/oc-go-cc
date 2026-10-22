@@ -86,3 +86,37 @@ func TestUpstreamChannelColumnIsMigratedOnAnOldDatabase(t *testing.T) {
 		t.Errorf("after migration channel = %+v, want it readable", records)
 	}
 }
+
+// The upstream model is a second observed fact on the same routing block, and
+// it has to survive the same round trip: a row that records the channel but
+// drops the model loses exactly the datum that explains the channel.
+func TestUpstreamModelSurvivesTheRoundTrip(t *testing.T) {
+	db := newCostTestDB(t)
+	repo := NewRequests(db)
+	base := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
+
+	if err := repo.Insert(history.RequestRecord{
+		ID: "rewritten", Model: "cline-pass/deepseek-v4.1-flash-1017", Provider: "cline-pass",
+		StartTime: base, Duration: time.Second, Success: true, DetailsKnown: true,
+		UpstreamChannel: "openai-compatible-private",
+		UpstreamModel:   "vmc/deepseek-v4p1-flash-1017-contributor-fallbacks",
+	}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	records, _, err := repo.Query(RequestQuery{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("got %d records", len(records))
+	}
+	// The served id stays what the client asked for; the observed model is the
+	// separate fact. Swapping them would break every rule keyed on the model.
+	if got := records[0].Model; got != "cline-pass/deepseek-v4.1-flash-1017" {
+		t.Errorf("model = %q, must stay the requested id", got)
+	}
+	if got := records[0].UpstreamModel; got != "vmc/deepseek-v4p1-flash-1017-contributor-fallbacks" {
+		t.Errorf("upstream model = %q, want it preserved", got)
+	}
+}

@@ -224,6 +224,24 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
   vertical-align: middle;
 }
 
+/* The virtual model the gateway actually ran. Deliberately a different colour
+   from the channel badge next to it: they answer different questions, and two
+   cyan chips side by side would read as one datum split in half. Truncation
+   matches because these ids are longer than the channel names. */
+.badge-upstream-model {
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--ui-indigo) 38%, transparent);
+  background: color-mix(in srgb, var(--ui-indigo) 12%, transparent);
+  color: var(--ui-indigo);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
 /* Duration grading. Colour carries the judgement, so the three levels are also
    named in a title attribute and never rely on hue alone. */
 .timing { font-variant-numeric: tabular-nums; }

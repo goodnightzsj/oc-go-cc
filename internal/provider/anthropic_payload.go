@@ -24,7 +24,11 @@ func anthropicPayload(ctx context.Context, req *types.MessageRequest, model conf
 	}
 	raw := core.RequestMetadataFromContext(ctx).Body
 	if len(raw) == 0 {
-		return json.Marshal(transformer.AnthropicForModel(req, model, stream))
+		out := transformer.AnthropicForModel(req, model, stream)
+		if adjusted, ok := anthropicEffortField(out.OutputConfig); ok {
+			out.OutputConfig = adjusted
+		}
+		return json.Marshal(out)
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {

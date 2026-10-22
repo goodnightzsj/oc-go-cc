@@ -333,7 +333,7 @@ func TestResponsesInboundAcceptsTheLevelsThePipelineSupports(t *testing.T) {
 	// and a Responses request may leave as Responses, where those levels are
 	// legal. Raising them at this point changed the client's stated intent for
 	// a translation that might never happen. The raise belongs to the Anthropic
-	// boundary - see core.AnthropicEffort and request.go.
+	// boundary - see core.AnthropicEffort and provider/anthropic_payload.go.
 	for _, level := range []string{"none", "minimal"} {
 		body := `{"model":"m","input":"hi","reasoning":{"effort":"` + level + `"}}`
 		req, err := ResponsesToMessageRequest([]byte(body))

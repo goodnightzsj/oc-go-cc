@@ -113,9 +113,7 @@ func (p *ClinePassProvider) Stream(ctx context.Context, req *types.MessageReques
 	// about to install on the body it gets back - otherwise a stalled upstream
 	// is held for the platform-wide total timeout instead of the idle one.
 	idleTimeout := p.streamIdleTimeout(model)
-	// Deliberately not deferred: the returned body stays bound to this context,
-	// and cancelling it on the way out would break every later read. Only the
-	// idle watchdog cancels it, which is the one case where stopping is right.
+	// The returned body retains this context until Close; cancel only on failure.
 	peekCtx, cancelPeek := context.WithCancel(ctx)
 
 	body, err := p.request(peekCtx, req, model, true)
@@ -128,26 +126,12 @@ func (p *ClinePassProvider) Stream(ctx context.Context, req *types.MessageReques
 	// and correcting it later - is impossible: message_start goes out first.
 	// This costs the wait for the upstream's first byte, which the caller was
 	// going to wait for anyway before writing anything.
-	peeked, _, firstByteArrived, peekErr := peekServedModel(peekCtx, cancelPeek, body, maxServedModelPeekBytes, idleTimeout)
+	peeked, _, _, peekErr := peekServedModel(peekCtx, cancelPeek, body, maxServedModelPeekBytes, idleTimeout)
 	if peekErr != nil {
-		// The read-ahead gave up on a stalled stream. Surfacing it lets the
-		// handler fall through to the next model; a nil error would have made a
-		// truncated stream look like a complete short one.
+		// Fail before message_start so the handler can still try the next model.
 		cancelPeek()
 		_ = body.Close()
 		return nil, peekErr
-	}
-	// The peek stamps the first byte as it reads, so this only covers the case
-	// where it never read one. MarkFirstByte ignores a second call, so the two
-	// cannot disagree about when the byte arrived.
-	//
-	// The peek's own context is cancelled on return: the body must not inherit
-	// a deadline that was only there to bound the read-ahead. The caller wraps
-	// it in attemptCtx immediately, which is the real bound from here on.
-	if firstByteArrived {
-		if recorder, ok := peeked.(interface{ MarkFirstByte() }); ok {
-			recorder.MarkFirstByte()
-		}
 	}
 	// The context outlives this call because the body depends on it; closing the
 	// body is what releases it, so the watchdog's cancel does not leak a

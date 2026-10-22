@@ -187,21 +187,26 @@ type CatalogConfig struct {
 
 // ModelConfig defines routing rules for a specific model.
 type ModelConfig struct {
-	Provider               string          `json:"provider"`
-	ModelID                string          `json:"model_id"`
-	ModelRef               string          `json:"model_ref,omitempty"`
-	WireFormat             string          `json:"wire_format,omitempty"` // "auto" (default), "openai", "anthropic", "responses", "gemini"
-	Temperature            float64         `json:"temperature"`
-	MaxTokens              int             `json:"max_tokens"`
-	MaxOutputTokens        int             `json:"max_output_tokens,omitempty"`
-	ContextWindow          int             `json:"context_window,omitempty"`
-	ContextMargin          int             `json:"context_margin,omitempty"`
-	ContextThreshold       int             `json:"context_threshold"`
-	SupportsTools          *bool           `json:"supports_tools,omitempty"`
-	ReasoningEffort        string          `json:"reasoning_effort"`
-	Thinking               json.RawMessage `json:"thinking,omitempty"`
-	Vision                 bool            `json:"vision"`
-	AnthropicToolsDisabled bool            `json:"anthropic_tools_disabled"`
+	Provider         string          `json:"provider"`
+	ModelID          string          `json:"model_id"`
+	ModelRef         string          `json:"model_ref,omitempty"`
+	WireFormat       string          `json:"wire_format,omitempty"` // "auto" (default), "openai", "anthropic", "responses", "gemini"
+	Temperature      float64         `json:"temperature"`
+	MaxTokens        int             `json:"max_tokens"`
+	MaxOutputTokens  int             `json:"max_output_tokens,omitempty"`
+	ContextWindow    int             `json:"context_window,omitempty"`
+	ContextMargin    int             `json:"context_margin,omitempty"`
+	ContextThreshold int             `json:"context_threshold"`
+	SupportsTools    *bool           `json:"supports_tools,omitempty"`
+	ReasoningEffort  string          `json:"reasoning_effort"`
+	Thinking         json.RawMessage `json:"thinking,omitempty"`
+	// Vision is tri-state, like SupportsTools: nil means no source stated a
+	// capability, which is not the same as "cannot accept images". A plain bool
+	// could not express the difference, so a model the catalog had not indexed
+	// reported Vision=false and every image request against it was discarded as
+	// "vision_not_supported" before the platform was ever asked.
+	Vision                 *bool `json:"vision,omitempty"`
+	AnthropicToolsDisabled bool  `json:"anthropic_tools_disabled"`
 }
 
 // Key scheduling strategies. Only fill-first is implemented: the earliest

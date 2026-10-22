@@ -36,7 +36,12 @@ func FilterByCapacity(chain []config.ModelConfig, inputTokens int, requestedMaxT
 
 	for _, raw := range chain {
 		model := config.ResolveModelConfig(raw)
-		if needsVision && !model.Vision {
+		// Only a model known to lack vision is skipped. An unstated capability
+		// is not a refusal: dropping the model here made every image request
+		// against a model the catalog had not indexed fail with "no eligible
+		// model for request capacity", before the platform was ever asked.
+		// Keeping it lets the platform answer for itself.
+		if vision, known := config.ModelHasVision(model); needsVision && known && !vision {
 			decision.Skipped = append(decision.Skipped, SkippedModel{ModelID: model.ModelID, Reason: "vision_not_supported"})
 			continue
 		}

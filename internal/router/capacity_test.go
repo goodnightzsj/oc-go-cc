@@ -81,3 +81,41 @@ func TestFilterByCapacityHonorsSmallMaxTokens(t *testing.T) {
 		t.Fatalf("skipped = %+v, want none for small max_tokens with room to spare", decision.Skipped)
 	}
 }
+
+// A model no source describes must not be refused an image request.
+//
+// This is the defect that made a vision-capable model answer 500: the catalog
+// had not indexed it, Vision read false, and the chain's only model was dropped
+// as "vision_not_supported" before the platform was ever asked. An unstated
+// capability is not a refusal.
+func TestFilterByCapacityKeepsModelWhoseVisionIsUnknown(t *testing.T) {
+	chain := []config.ModelConfig{
+		{Provider: "cline-pass", ModelID: "some-model-nobody-catalogued"},
+	}
+	decision, err := FilterByCapacity(chain, 1000, 4096, true, false)
+	if err != nil {
+		t.Fatalf("an unknown capability must not fail the request: %v", err)
+	}
+	if len(decision.Models) != 1 {
+		t.Fatalf("kept %d models, want the one unknown model", len(decision.Models))
+	}
+	if len(decision.Skipped) != 0 {
+		t.Errorf("skipped = %+v, want none", decision.Skipped)
+	}
+}
+
+// A model known to lack vision is still skipped - that is what the filter is
+// for, and it lets the chain fall through to a model that can serve the image.
+func TestFilterByCapacityStillSkipsAKnownTextOnlyModel(t *testing.T) {
+	textOnly := false
+	chain := []config.ModelConfig{
+		{Provider: "cline-pass", ModelID: "known-text-only", Vision: &textOnly},
+	}
+	decision, err := FilterByCapacity(chain, 1000, 4096, true, false)
+	if err == nil {
+		t.Fatal("a known text-only model must still be skipped")
+	}
+	if len(decision.Skipped) != 1 || decision.Skipped[0].Reason != "vision_not_supported" {
+		t.Errorf("skipped = %+v, want vision_not_supported", decision.Skipped)
+	}
+}

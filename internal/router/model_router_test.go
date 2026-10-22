@@ -1341,7 +1341,7 @@ func TestPublishedByActiveSite_ResolvesCapabilitiesAcrossNamespaces(t *testing.T
 	if !ok {
 		t.Fatalf("%s is in the platform's own roster and must resolve", listingID)
 	}
-	if !target.Vision {
+	if vision, known := config.ModelHasVision(target); !known || !vision {
 		t.Error("the catalog records this model as accepting images; a false here makes every image request unfilterable")
 	}
 	if target.ContextWindow != 1000000 {
@@ -1436,7 +1436,7 @@ func TestResolveRequestedModel_ResolvesPlatformPrefixedId(t *testing.T) {
 	if !ok {
 		t.Fatal("expected the requested model to be honoured")
 	}
-	if !result.Primary.Vision {
+	if vision, known := config.ModelHasVision(result.Primary); !known || !vision {
 		t.Error("Vision = false; the catalog says this model accepts images")
 	}
 	if result.Primary.ContextWindow != 1000000 {

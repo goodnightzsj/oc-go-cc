@@ -359,7 +359,8 @@ func TestCommandCodePresetIsIndependent(t *testing.T) {
 		cfg.CommandCode.AnthropicBaseURL != "https://api.commandcode.ai/provider/v1/messages" {
 		t.Fatal("preset must call the official complete endpoints")
 	}
-	if cfg.Models["default"].ModelID != "claude-sonnet-4-6" || !cfg.Models["default"].Vision {
+	defaultVision, defaultVisionKnown := config.ModelHasVision(cfg.Models["default"])
+	if cfg.Models["default"].ModelID != "claude-sonnet-4-6" || !defaultVisionKnown || !defaultVision {
 		t.Fatal("default must use native Messages with image support")
 	}
 }

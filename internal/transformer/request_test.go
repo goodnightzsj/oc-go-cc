@@ -1276,7 +1276,7 @@ func TestTransformRequestVisionModelPassesImageContent(t *testing.T) {
 	// Vision-capable model: images should be passed as image_url content parts
 	openaiReq, err := transformer.TransformRequest(req, config.ModelConfig{
 		ModelID: "kimi-k2.6",
-		Vision:  true,
+		Vision:  config.BoolPtr(true),
 	})
 	if err != nil {
 		t.Fatalf("TransformRequest() error = %v", err)

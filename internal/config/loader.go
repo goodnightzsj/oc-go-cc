@@ -548,11 +548,15 @@ func validateCostScenarios(cr *CostRoutingConfig) error {
 // only validate them when they appear in the models map.
 func validateVisionModels(cfg *Config) error {
 	for _, scenario := range []string{"vision", "vision_complex", "vision_long_context"} {
-		if model, ok := cfg.Models[scenario]; ok && !model.Vision {
-			resolved := ResolveModelConfig(model)
-			if !resolved.Vision {
-				return invalid(fmt.Sprintf("models[%q]", scenario), "vision_required", "models[%q] does not support vision but is configured for vision scenario", scenario)
-			}
+		model, ok := cfg.Models[scenario]
+		if !ok {
+			continue
+		}
+		// Only a model known to lack vision is a configuration error here. A
+		// model whose capability is unstated may well accept images; refusing to
+		// start would punish the operator for the catalog's silence.
+		if vision, known := ModelHasVision(ResolveModelConfig(model)); known && !vision {
+			return invalid(fmt.Sprintf("models[%q]", scenario), "vision_required", "models[%q] does not support vision but is configured for vision scenario", scenario)
 		}
 	}
 	return nil

@@ -23,7 +23,7 @@ func TestResolveModelConfig(t *testing.T) {
 				ModelID:         "kimi-k2.6",
 				ContextWindow:   256000,
 				MaxOutputTokens: 8192,
-				Vision:          true,
+				Vision:          BoolPtr(true),
 				ContextMargin:   DefaultContextMargin,
 				SupportsTools:   boolPtr(true),
 			},
@@ -46,7 +46,7 @@ func TestResolveModelConfig(t *testing.T) {
 				ModelID:         "moonshotai/Kimi-K2.7-Code",
 				ContextWindow:   256000,
 				MaxOutputTokens: 32768,
-				Vision:          true,
+				Vision:          BoolPtr(true),
 				ContextMargin:   DefaultContextMargin,
 				SupportsTools:   boolPtr(true),
 			},
@@ -69,7 +69,7 @@ func TestResolveModelConfig(t *testing.T) {
 				ModelID:         "kimi-k3",
 				ContextWindow:   1000000,
 				MaxOutputTokens: 131072,
-				Vision:          true,
+				Vision:          BoolPtr(true),
 				ContextMargin:   DefaultContextMargin,
 				SupportsTools:   boolPtr(true),
 			},
@@ -80,14 +80,14 @@ func TestResolveModelConfig(t *testing.T) {
 				ModelID:       "deepseek-v4-flash",
 				ModelRef:      "deepseek/deepseek-v4-flash@opencode-go",
 				ContextWindow: 12345,
-				Vision:        true,
+				Vision:        BoolPtr(true),
 				SupportsTools: boolPtr(true),
 			},
 			expected: ModelConfig{
 				ModelID:       "deepseek-v4-flash",
 				ModelRef:      "deepseek/deepseek-v4-flash@opencode-go",
 				ContextWindow: 12345,
-				Vision:        true,
+				Vision:        BoolPtr(true),
 				ContextMargin: DefaultContextMargin,
 				SupportsTools: boolPtr(true),
 			},
@@ -123,8 +123,12 @@ func TestResolveModelConfig(t *testing.T) {
 			if got.MaxOutputTokens != tt.expected.MaxOutputTokens {
 				t.Errorf("MaxOutputTokens = %d, want %d", got.MaxOutputTokens, tt.expected.MaxOutputTokens)
 			}
-			if got.Vision != tt.expected.Vision {
-				t.Errorf("Vision = %v, want %v", got.Vision, tt.expected.Vision)
+			// Vision is tri-state: nil is "no source said", which is a different
+			// answer from false. Compare the two that way, not by pointer.
+			gotVision, gotKnown := ModelHasVision(got)
+			wantVision, wantKnown := ModelHasVision(tt.expected)
+			if gotKnown != wantKnown || (gotKnown && gotVision != wantVision) {
+				t.Errorf("Vision = (%v, known=%v), want (%v, known=%v)", gotVision, gotKnown, wantVision, wantKnown)
 			}
 			if got.ContextMargin != tt.expected.ContextMargin {
 				t.Errorf("ContextMargin = %d, want %d", got.ContextMargin, tt.expected.ContextMargin)

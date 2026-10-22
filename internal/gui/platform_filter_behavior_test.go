@@ -180,6 +180,10 @@ async function checks() {
     else if (url.pathname === '/api/analytics/tokens/trend') data = {provider,trend:empty ? null : [{...s,requests:s.total_requests,date:(url.searchParams.get('from') || new Date().toISOString()).slice(0,10)}]};
     else if (url.pathname === '/api/history') data = {items:empty ? [] : [{id:provider || 'all',provider,model:'shared',details_known:true,success:true}],total:empty ? 0 : 1};
     else if (url.pathname === '/api/history/summary') data = {...s,total_tokens:17,success_rows:1};
+    // The channel filter is scoped to a platform and reports what that platform
+    // actually recorded. Answered here so the history poll's channel refresh is
+    // not an "unexpected URL".
+    else if (url.pathname === '/api/history/channels') data = {channels: provider ? ['deepseek'] : []};
     // Price-table provenance is instance state, not window state, so it is
     // unscoped by provider like the endpoint itself.
     else if (url.pathname === '/api/prices') data = {tables:{'opencode-go':{rules:53,seed_rules:53,live:true,refreshed_at:new Date().toISOString()}}};

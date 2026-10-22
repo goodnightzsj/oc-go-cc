@@ -2692,17 +2692,18 @@ function renderHistory() {
     // Shown only when the gateway names a model that is not the one we sent:
     // repeating the request id on every ordinary row would be noise, and the
     // presence of the badge is itself the signal that a rewrite happened.
-    // The model column names exactly what the client asked for. The gateway
-    // may have run something else, and that is what the channel badge beside it
-    // reports - one column, one question. Showing the observed id here instead
-    // would make the row disagree with the routing and billing rules, which key
-    // on this id.
-    const servedModel = h.model;
+    // The model column names what actually ran. When the gateway rewrote the
+    // id, the requested one is kept beneath it: routing and billing key on
+    // that one, and an operator comparing a row against config needs both.
+    const servedModel = h.upstream_model || h.model;
+    const requestedMark = h.upstream_model && h.upstream_model !== h.model
+      ? '<small class="history-requested-model" title="' + escapeHtml(h.model + ' — ' + t('history.requestedModelHint')) + '">' + escapeHtml(h.model) + '</small>'
+      : '';
     return `
     <tr data-id="${escapeHtml(rowId)}" tabindex="0" aria-haspopup="dialog" data-provider="${escapeHtml(h.provider || '')}" style="cursor: pointer;">
       <td><time class="history-timestamp" datetime="${escapeHtml(h.start_time || '')}" title="${escapeHtml(h.start_time || '')}">${fmtRelativeTime(h.start_time)}<small>${fmtDate(h.start_time)}</small></time>${peakMark}</td>
       <td><div class="history-status-stack">${detailsKnown ? `<span class="badge ${h.success ? 'badge-success' : 'badge-error'}" title="${h.success ? t('badge.success') : t('badge.fail')}">${h.success ? t('badge.success') : t('badge.fail')}</span>` : `<span class="badge badge-unknown" title="${t('detail.unknown')}">${t('detail.unknown')}</span>`}<small class="history-stream-state">${streamLabel}</small></div></td>
-      <td><div class="history-model-cell"><strong title="${escapeHtml(servedModel)}">${escapeHtml(servedModel) || '—'}</strong><small>${escapeHtml(providerLabel(h.provider))}${channelMark}</small></div></td>
+      <td><div class="history-model-cell"><strong title="${escapeHtml(servedModel)}">${escapeHtml(servedModel) || '—'}</strong>${requestedMark}<small>${escapeHtml(providerLabel(h.provider))}${channelMark}</small></div></td>
       <td><button type="button" class="history-token-trigger" data-token-id="${escapeHtml(rowId)}" aria-label="${t('detail.title')}">${totalTokens.toLocaleString()}</button><br><small>${tokenSplit}</small></td>
       <td>${cost}<br><small>${costSourceLabel(h.cost_source)}</small></td>
       <td>${detailsKnown ? gradeDuration(h, fmtDuration(h.duration_ms)) : '—'}</td>

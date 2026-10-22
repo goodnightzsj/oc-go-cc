@@ -1884,3 +1884,15 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
 #test-modal .modal-content { max-width: 800px; }
 #catalog-modal .modal-content { max-width: 900px; }
 
+/* The requested id, kept under the served one when the gateway named a
+   different model. Smaller and dimmer than the model line above it: it is
+   context, not the answer. */
+.history-requested-model {
+  display: block;
+  font-size: 10px;
+  color: var(--ui-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

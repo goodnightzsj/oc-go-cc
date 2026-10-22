@@ -203,6 +203,10 @@ vm.runInContext(` + "`" + `
   assert.equal(mixed[0].index, undefined, 'an env row holds no stored index');
   assert.equal(mixed[1].index, 0, 'the first file row is stored index 0, not 1');
   assert.equal(mixed[2].index, 1);
+  const sparse = describeKeys(['••••aaaa', '••••bbbb'], ['file', 'file'], [0, 2]);
+  assert.equal(JSON.stringify(collectKeys(sparse)), '[{"keep":0,"hint":"••••aaaa"},{"keep":2,"hint":"••••bbbb"}]');
+  const singleSlot = describeKeys(['••••single', '••••env1'], ['file', 'env'], [-1, null]);
+  assert.equal(JSON.stringify(collectKeys(singleSlot)), '[{"keep":-1,"hint":"••••single"}]');
   // The env row is left out of the patch entirely: the credential is not in the
   // file, so there is nothing for the server to keep, and the environment
   // re-merges it on the next load.

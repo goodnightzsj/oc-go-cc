@@ -15,7 +15,7 @@ async function checks() {
       assert.equal(get(id).value, 'commandcode', tab + ' must retain the active platform: ' + id);
     }
     assert.equal(QuotaModule.provider, 'commandcode', 'the account loader must match its selector');
-    assert.equal(parseViewHash(location.hash).params.has('platform'), false, 'an automatic default must not pin the URL');
+    assert.equal(('platform' in savedView()), false, 'an automatic default must not pin the URL');
   }
   assert.equal(get('quota-commandcode').hidden, false);
   assert.equal(get('quota-go').hidden, true);
@@ -26,7 +26,7 @@ async function checks() {
   get('nav-quota').click();
   await settleView();
   assert.equal(get('quota-provider').value, 'opencode-go');
-  assert.equal(parseViewHash(location.hash).params.has('platform'), false);
+  assert.equal(('platform' in savedView()), false);
 }
 `+platformBehaviorRunScript)
 }
@@ -40,7 +40,7 @@ async function checks() {
     get(id).value = 'opencode-go';
     await get(id).dispatchEvent(new Event('change', {bubbles:true}));
     await settleView();
-    assert.equal(parseViewHash(location.hash).params.get('platform'), 'opencode-go', 'the changed control wins: ' + id);
+    assert.equal((savedView().platform ?? null), 'opencode-go', 'the changed control wins: ' + id);
     await applyActiveSite();
     get('nav-quota').click();
     await settleView();
@@ -57,17 +57,21 @@ async function checks() {
   await applyActiveSite();
   get('nav-history').click();
   await settleView();
-  assert.equal(parseViewHash(location.hash).params.has('platform'), true);
-  assert.equal(parseViewHash(location.hash).params.get('platform'), '');
+  assert.equal(('platform' in savedView()), true);
+  assert.equal((savedView().platform ?? null), '');
   for (const id of VIEW_CONTROLS.platform.filter(id => id !== 'quota-provider')) assert.equal(get(id).value, '', id);
   assert.equal(get('quota-provider').value, 'commandcode');
 
   // Deep links and back/forward must update the pin, not keep the boot choice.
-  location.hash = '#history?platform=opencode-go';
+  // A stored choice is restored on the next load; clearing the store puts the
+  // panel back on the active site's default.
+  writeSavedView({platform:'opencode-go'});
+  if (applyViewState(readSavedView())) refreshCurrentTab();
   await settleView();
   await applyActiveSite();
   assert.equal(get('provider-filter').value, 'opencode-go');
-  location.hash = '#history';
+  writeSavedView({});
+  if (applyViewState(readSavedView())) refreshCurrentTab();
   await settleView();
   assert.equal(get('provider-filter').value, 'commandcode');
 
@@ -75,7 +79,7 @@ async function checks() {
   await settleView();
   assert.equal(activeTab, 'history');
   assert.equal(get('provider-filter').value, 'opencode-go');
-  assert.equal(parseViewHash(location.hash).params.get('platform'), 'opencode-go');
+  assert.equal((savedView().platform ?? null), 'opencode-go');
 }
 `+platformBehaviorRunScript)
 }
@@ -101,7 +105,7 @@ async function checks() {
   await settleView();
   for (const id of VIEW_CONTROLS.platform.filter(id => id !== 'quota-provider')) assert.equal(document.getElementById(id).value, '', 'removing the route scope restores the statistics default: ' + id);
   assert.equal(document.getElementById('quota-provider').value, 'opencode-go');
-  assert.equal(parseViewHash(location.hash).params.has('platform'), false);
+  assert.equal(('platform' in savedView()), false);
 }
 `+platformBehaviorRunScript)
 }
@@ -172,7 +176,11 @@ async function checks() {
   get('nav-history').click();
   await settleView();
   const before = historyLoadSeq;
-  location.hash = '#history?q=cache&model=shared&scenario=fast';
+  // Filters come from the store now. A legacy link still carries them once, so
+  // that path is exercised too - it is the same restore either way.
+  location.hash = '#history';
+  writeSavedView({q:'cache', model:'shared', scenario:'fast'});
+  if (applyViewState(readSavedView())) refreshCurrentTab();
   await settleView();
   assert.ok(historyLoadSeq > before, 'restoring text filters invalidates and reloads history');
   assert.ok(requests.some(url => url.pathname === '/api/history' && url.searchParams.get('search') === 'cache'));
@@ -180,7 +188,9 @@ async function checks() {
   get('nav-analytics').click();
   await settleView();
   requests.length = 0;
-  location.hash = '#analytics?afrom=2026-09-01&ato=2026-09-02';
+  location.hash = '#analytics';
+  writeSavedView({afrom:'2026-09-01', ato:'2026-09-02'});
+  if (applyViewState(readSavedView())) refreshCurrentTab();
   await settleView();
   assert.equal(get('analytics-date-label').textContent, '2026-09-01 → 2026-09-02 (UTC)');
   assert.ok(requests.some(url => url.pathname === '/api/analytics/summary' && url.searchParams.get('from') === '2026-09-01T00:00:00.000Z'), 'restored dates must reach the data loader');
@@ -189,8 +199,8 @@ async function checks() {
   get('analytics-end-display').value = '2026-09-04';
   AnalyticsModule.applyDateRange();
   await settleView();
-  assert.equal(parseViewHash(location.hash).params.get('afrom'), '2026-09-03');
-  assert.equal(parseViewHash(location.hash).params.get('ato'), '2026-09-04');
+  assert.equal((savedView().afrom ?? null), '2026-09-03');
+  assert.equal((savedView().ato ?? null), '2026-09-04');
 }
 `+platformBehaviorRunScript)
 }

@@ -1928,53 +1928,98 @@ function setViewPlatform(value) {
   window.CustomSelect?.syncAll();
 }
 
-// buildViewHash serialises the current view. A parameter is written only when
-// its control differs from its default, so a link carries the reader's choices
-// rather than the panel's own opening state. History pagination and sort order
-// are plain variables rather than controls, so they are appended separately
-// under the same rule.
-function buildViewHash() {
+// VIEW_STATE_KEY names the localStorage entry holding the reader's view choices.
+//
+// These are preferences, not navigation: the panel is a tool the same person
+// reopens, and a filter that resets on every reload is one they have to re-apply
+// every time. They used to live in the URL hash, which made a shared link drag
+// someone else's filters along with it and grew the address bar with state
+// nobody reads. The tab name stays in the hash - that one is navigation, and
+// deep links into a page are worth keeping.
+const VIEW_STATE_KEY = 'routatic-proxy-view-state';
+
+// readSavedView returns the stored view, or an empty object. A corrupt or
+// unavailable store must not stop the panel from loading: the defaults are a
+// perfectly good view.
+function readSavedView() {
+  try {
+    const raw = localStorage.getItem(VIEW_STATE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function writeSavedView(view) {
+  try {
+    localStorage.setItem(VIEW_STATE_KEY, JSON.stringify(view));
+  } catch (_) {
+    // Private mode, a full quota, or a blocked origin. Losing the preference is
+    // recoverable; throwing here would break the interaction that triggered it.
+  }
+}
+
+// viewStateParams adapts the stored object to the same read interface the URL
+// used to provide, so the restore code did not have to be rewritten twice.
+function viewStateParams(saved) {
   const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(saved || {})) {
+    if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+  }
+  return params;
+}
+
+// buildViewState serialises the current view. A value is written only when its
+// control differs from its default, so the store holds the reader's choices
+// rather than the panel's own opening state.
+function buildViewState() {
+  const state = {};
   for (const [key, ids] of Object.entries(VIEW_CONTROLS)) {
     if (key === 'platform' && viewPlatformPinned !== null) {
-      params.set(key, viewPlatformPinned);
+      state[key] = viewPlatformPinned;
       continue;
     }
     for (const id of ids) {
       const el = document.getElementById(id);
       if (el && el.value && !controlIsDefault(id, el)) {
-        params.set(key, el.value);
+        state[key] = el.value;
         break;
       }
     }
   }
   // A dynamic end must not turn a chosen start into a moving boot default.
   for (const [from, to] of [['from', 'to'], ['afrom', 'ato']]) {
-    if (params.get(to) === 'today') {
-      params.set(from, document.getElementById(VIEW_CONTROLS[from][0]).value);
+    if (state[to] === 'today') {
+      state[from] = document.getElementById(VIEW_CONTROLS[from][0]).value;
     }
   }
-  if (activeTab === 'history') {
-    if (historyPage > 1) params.set('page', String(historyPage));
-    if (currentSort.field !== 'start_time') params.set('sort', currentSort.field);
-    if (currentSort.dir !== 'desc') params.set('dir', currentSort.dir);
-  }
-  // The Fallback tab's platform filter is its own parameter. It is not the
-  // global `platform` key - that one narrows history and analytics - so sharing
-  // it would make choosing a platform to browse fallback models silently filter
-  // every other tab.
-  if (activeTab === 'fallback' && FallbackModule.platformFilter) {
-    params.set('fplatform', FallbackModule.platformFilter);
-  }
-  const query = params.toString();
-  return '#' + (activeTab || 'overview') + (query ? '?' + query : '');
+  if (historyPage > 1) state.page = String(historyPage);
+  if (currentSort.field !== 'start_time') state.sort = currentSort.field;
+  if (currentSort.dir !== 'desc') state.dir = currentSort.dir;
+  // The Fallback tab's platform filter is its own key: it narrows a model list,
+  // not the history or analytics views, and sharing the global `platform` key
+  // would apply one choice to both.
+  if (FallbackModule.platformFilter) state.fplatform = FallbackModule.platformFilter;
+  if (FallbackModule.pickerSearch) state.fsearch = FallbackModule.pickerSearch;
+  return state;
 }
 
-// syncViewState writes the current view into the URL. `replace` is for changes
-// that are not navigation - typing in the search box, or a reload settling the
-// page number - so the back button does not collect one entry per keystroke.
-function syncViewState({replace = false} = {}) {
+// syncViewState persists the current view. Called on every change; the store is
+// small and a read-modify-write of one key is cheaper than tracking dirty flags.
+function syncViewState() {
   if (suppressViewStateSync) return;
+  writeSavedView(buildViewState());
+}
+
+// The tab name is the only thing in the URL. Keeping it there costs nothing and
+// preserves deep links and the back button for page-level navigation.
+function buildViewHash() {
+  return '#' + (activeTab || 'overview');
+}
+
+function syncViewHash({replace = false} = {}) {
   const next = buildViewHash();
   if (next === (location.hash || '')) return;
   if (replace) history.replaceState(null, '', next);
@@ -1988,7 +2033,8 @@ function parseViewHash(hash) {
 
 // applyViewState restores the whole view and reports whether history needs
 // reloading, including pagination/sort state that has no control of its own.
-function applyViewState(params) {
+function applyViewState(saved) {
+  const params = saved instanceof URLSearchParams ? saved : viewStateParams(saved);
   const before = historyQueryParams().toString();
   suppressViewStateSync = true;
   try {
@@ -1997,6 +2043,7 @@ function applyViewState(params) {
     // once at boot, and the listing may not have arrived yet, so the module
     // decides when it can act on the value.
     FallbackModule.applyPendingPlatform(params.get('fplatform') || '');
+    FallbackModule.pendingSearch = params.get('fsearch') || '';
     const changed = [];
     for (const [key, ids] of Object.entries(VIEW_CONTROLS)) {
       if (key === 'platform') continue;
@@ -2030,15 +2077,12 @@ function applyViewState(params) {
   return historyQueryParams().toString() !== before;
 }
 
-// Respond to back/forward and manual hash edits.
+// Respond to back/forward and manual hash edits. The hash now carries only the
+// tab name, so this moves between pages; the filters it used to restore live in
+// localStorage and are applied once at boot.
 window.addEventListener('hashchange', () => {
-  const {name, params} = parseViewHash(location.hash);
-  const historyMoved = applyViewState(params);
-  if (name !== activeTab) {
-    activateTab(name);
-    return;
-  }
-  if (historyMoved) refreshCurrentTab();
+  const {name} = parseViewHash(location.hash);
+  if (name !== activeTab) activateTab(name);
 });
 
 /* ── Polling ───────────────────────────────────────────────────── */
@@ -5241,6 +5285,10 @@ const FallbackModule = {
   // the view-state applier, which may run before or after the config loads.
   applyPendingPlatform(value) {
     this.pendingPlatform = value || '';
+    if (this.pendingSearch !== undefined && this.pendingSearch !== null) {
+      this.pickerSearch = this.pendingSearch;
+      this.pendingSearch = '';
+    }
     const sel = document.getElementById('fallback-platform-filter');
     if (!sel || sel.options.length === 0) return; // the listing has not arrived yet
     this.populatePlatformFilter();
@@ -5256,6 +5304,7 @@ const FallbackModule = {
     // applies". populateAddSelect re-renders with the cleared box.
     const search = document.getElementById('fallback-add-search');
     if (search) search.value = '';
+    this.pickerSearch = '';
     this.populateAddSelect();
     // The choice is view state, not configuration: it belongs in the URL so a
     // reload or a shared link lands on the same platform, and nothing is
@@ -5407,15 +5456,22 @@ const FallbackModule = {
     trigger.setAttribute('aria-expanded', String(open));
     if (!open) return;
     const search = document.getElementById('fallback-add-search');
-    this.renderPickerList('');
+    // Restore the remembered query rather than clearing it: the box is how the
+    // reader narrowed 500 models, and reopening to a blank box means re-typing.
+    this.renderPickerList(this.pickerSearch || '');
     if (search) {
-      search.value = '';
+      search.value = this.pickerSearch || '';
       search.focus();
     }
   },
 
   filterPicker(query) {
+    // Remembered so reopening the picker - or reloading the page - does not
+    // throw away a search the reader is in the middle of. It is view state, so
+    // it lives beside the platform choice rather than in the config.
+    this.pickerSearch = query || '';
     this.renderPickerList(query);
+    syncViewState();
   },
 
   chooseModel(key) {
@@ -5689,8 +5745,12 @@ queueMicrotask(() => {
   // The defaults are read before the URL is applied, so a link cannot become
   // the baseline its own parameters are measured against.
   captureViewDefaults();
+  // The tab comes from the hash (navigation); the filters come from localStorage
+  // (the reader's own choices). A legacy link may still carry query parameters,
+  // so those are honoured once - that keeps an old bookmark working without
+  // making the URL the source of truth again.
   const {name, params} = parseViewHash(location.hash);
-  applyViewState(params);
+  applyViewState(params.toString() ? params : readSavedView());
   activateTab(name);
 });
 

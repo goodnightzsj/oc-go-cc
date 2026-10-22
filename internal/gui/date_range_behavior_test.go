@@ -29,10 +29,11 @@ async function checks() {
   AnalyticsModule.applyDateRange();
   await settleView();
   assert.equal(get('analytics-end').value, 'today');
-  assert.equal(parseViewHash(location.hash).params.get('ato'), 'today');
-  assert.equal(parseViewHash(location.hash).params.get('afrom'), start);
+  assert.equal((savedView().ato ?? null), 'today');
+  assert.equal((savedView().afrom ?? null), start);
   assert.equal(AnalyticsModule.queryParams().get('to'), '2026-11-02T00:00:00.000Z');
-  const saved = location.hash;
+  // The store is the source now; the hash carries only the tab name.
+  const saved = JSON.stringify(readSavedView());
 
   // UTC crosses midnight before Los Angeles; each picker retains its contract.
   window.HistoryDateRange.open();
@@ -58,7 +59,7 @@ async function checks() {
   assert.equal(historyQueryParams().get('end'), '2026-11-03T08:00:00.000Z');
 
   // Back/forward and reload resolve today again, without rolling the start.
-  applyViewState(parseViewHash(saved).params);
+  applyViewState(JSON.parse(saved));
   await settleView();
   assert.equal(get('analytics-start').value, start);
   assert.equal(get('analytics-end').value, 'today');
@@ -90,7 +91,7 @@ async function checks() {
   // Simulate boot on another day with new default dates, then restore the URL.
   AnalyticsModule.initDateRange();
   captureViewDefaults();
-  applyViewState(parseViewHash(saved).params);
+  applyViewState(JSON.parse(saved));
   await settleView();
   assert.equal(get('analytics-start').value, start, 'reload must not move the chosen start');
   AnalyticsModule.presetDateRange(7);

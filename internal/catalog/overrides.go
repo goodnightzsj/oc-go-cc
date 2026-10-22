@@ -17,6 +17,13 @@ package catalog
 // An entry already published by the mirror is never replaced: the mirror is the
 // authority for models it knows, and silently preferring a hand-written copy
 // would let this table go stale without anything noticing.
+//
+// Prices are deliberately absent from this table. The platform's rates live in
+// the embedded table and its hourly refresher, which is what the cost column
+// and the dashboard both read; a rate written here would be a second copy that
+// nobody updates when the platform changes its prices. Only the capability
+// facts this table exists to supply - context window, output ceiling, vision,
+// tool support - are stated.
 var providerModelOverrides = map[string]map[string]Model{
 	"cline-pass": {
 		// Verified against the platform: a 256x256 red PNG answers "Red", and
@@ -33,7 +40,6 @@ var providerModelOverrides = map[string]map[string]Model{
 				Output: []string{"text"},
 			},
 			Limit: &Limit{Context: 1000000, Output: 384000},
-			Cost:  &Cost{Input: 0.15, Output: 0.6},
 		},
 	},
 }

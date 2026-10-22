@@ -10,6 +10,7 @@ import (
 	"github.com/routatic/proxy/internal/catalog"
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/site"
+	"github.com/routatic/proxy/internal/storage"
 )
 
 // ScenarioConstraints filters candidate models by required capabilities.
@@ -87,6 +88,16 @@ func (s *Selector) scenarioPolicy(scenario string) config.CostScenario {
 	return s.cfg.CostRouting.Scenarios[scenario]
 }
 
+// catalogRate reports a catalog model's published rates, and whether it has any.
+// A model with no cost object is unpriced; a model with a cost object is priced
+// even when both rates are zero, because zero is a real rate for a free model.
+func catalogRate(model catalog.Model) (input, output float64, priced bool) {
+	if model.Rates() == nil {
+		return 0, 0, false
+	}
+	return model.CostInputPerM(), model.CostOutputPerM(), true
+}
+
 // resolveCandidates enumerates all enabled provider/model pairs for a scenario
 // and returns the resolved models that match the scenario requirements and
 // constraints.
@@ -109,9 +120,20 @@ func (s *Selector) resolveCandidates(scen config.CostScenario, constraints Scena
 			if !modelSupportsProvider(modelKey, providerName) {
 				continue
 			}
+			// Rates come from the catalog when it has them, and from the
+			// platform's own price table otherwise. The table is what the cost
+			// column is computed from, so a model priced only there - a model the
+			// mirror has not priced yet - must still be eligible. Reading the
+			// catalog alone silently excluded exactly those models.
+			inputRate, outputRate, priced := catalogRate(model)
+			if !priced {
+				if tableIn, tableOut, _, _, ok := storage.PriceForProviderModel(providerName, modelKey, 0); ok {
+					inputRate, outputRate, priced = tableIn, tableOut, true
+				}
+			}
 			// Missing prices cannot participate in cheapest-model selection.
 			// Explicit zero rates remain valid (free) candidates.
-			if model.Rates() == nil {
+			if !priced {
 				continue
 			}
 			if maxContext > 0 && model.ContextWindow() > maxContext {
@@ -129,8 +151,8 @@ func (s *Selector) resolveCandidates(scen config.CostScenario, constraints Scena
 				APIKey:                 provider.APIKey,
 				AnthropicToolsDisabled: provider.AnthropicToolsDisabled,
 				ContextWindow:          model.ContextWindow(),
-				CostInputPerM:          model.CostInputPerM(),
-				CostOutputPerM:         model.CostOutputPerM(),
+				CostInputPerM:          inputRate,
+				CostOutputPerM:         outputRate,
 				Tools:                  model.SupportsTools(),
 				Vision:                 model.SupportsVision(),
 				Reasoning:              model.Reasoning,

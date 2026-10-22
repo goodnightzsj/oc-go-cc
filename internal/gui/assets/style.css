@@ -1901,6 +1901,148 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
 /* The credential that carried the request, masked to its last four characters.
    Monospaced so equal-length labels line up column-wise, which is what makes a
    change of account visible at a glance. */
+/* Searchable model picker.
+   A native <select> cannot be searched and cannot show the facts that decide
+   the choice; with 500+ reachable models the popover is the difference between
+   a usable page and a list nobody scrolls. */
+.model-picker { position: relative; }
+
+.model-picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 200px;
+  justify-content: space-between;
+}
+
+.picker-caret { opacity: 0.6; font-size: 10px; }
+
+.model-picker-popover {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(680px, 88vw);
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
+  background: var(--ui-bg-elevated, #2c2c2e);
+  border: 1px solid var(--ui-border, #48484a);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.model-picker-popover[hidden] { display: none; }
+
+.model-picker-search {
+  padding: 8px;
+  border-bottom: 1px solid var(--ui-border, #48484a);
+}
+
+.model-picker-search input {
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--ui-border, #48484a);
+  background: var(--ui-bg-input, #1c1c1e);
+  color: inherit;
+  font-size: 13px;
+}
+
+.model-picker-search input:focus {
+  outline: 2px solid var(--ui-accent, #0a84ff);
+  outline-offset: -1px;
+}
+
+.model-picker-list {
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.picker-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 8px 4px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ui-text-secondary, #98989d);
+}
+
+.picker-group-site {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ui-accent, #0a84ff) 18%, transparent);
+  color: var(--ui-accent, #0a84ff);
+  font-size: 9px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.picker-group-count { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+.picker-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.picker-row:hover,
+.picker-row.active {
+  background: color-mix(in srgb, var(--ui-accent, #0a84ff) 20%, transparent);
+}
+
+.picker-model {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ui-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.picker-ctx {
+  color: var(--ui-text-secondary, #98989d);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* Price is bucketed against the cheapest visible model rather than a fixed
+   threshold: absolute numbers are meaningless across platforms whose rates
+   differ by two orders of magnitude. */
+.picker-price {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.picker-price-low { color: var(--ui-green, #30d158); }
+.picker-price-mid { color: var(--ui-text-secondary, #98989d); }
+.picker-price-high { color: var(--ui-orange, #ff9f0a); }
+
+.picker-badges { display: flex; gap: 3px; }
+.picker-badge {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--ui-text-secondary, #98989d) 18%, transparent);
+  color: var(--ui-text-secondary, #98989d);
+  font-size: 9px;
+}
+
+.picker-empty {
+  padding: 20px 10px;
+  text-align: center;
+  color: var(--ui-text-secondary, #98989d);
+  font-size: 12px;
+}
+
 .fallback-cross-platform {
   margin-bottom: 14px;
   padding: 10px 12px;

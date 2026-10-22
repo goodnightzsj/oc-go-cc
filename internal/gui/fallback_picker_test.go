@@ -17,9 +17,10 @@ func TestFallbackPickerUsesTheReachableListing(t *testing.T) {
 		t.Error("the picker must read the proxy's own listing; that is the only source that applies routing rules and credential presence")
 	}
 	// Grouped by platform: the platform is what an operator reasons about when
-	// choosing a fallback, and a flat list of model ids hides it.
-	if !strings.Contains(js, "optgroup") {
-		t.Error("the picker must group options by platform")
+	// choosing a fallback, and a flat list of model ids hides it. The grouping
+	// is drawn by the popover now, not an <optgroup>.
+	if !strings.Contains(js, "picker-group") {
+		t.Error("the picker must group models by platform")
 	}
 	if !strings.Contains(js, "platformLabel(provider)") {
 		t.Error("groups must use the platform's display name, not its config key")

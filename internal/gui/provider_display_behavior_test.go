@@ -52,8 +52,13 @@ async function checks() {
   const chainBefore = JSON.stringify(FallbackModule.chains);
   const modelsBefore = JSON.stringify(FallbackModule.availableModels);
   FallbackModule.populateAddSelect();
-  equal([...document.getElementById('fallback-add-model').innerHTML.matchAll(/value="([^"]+)"/g)].map(match=>match[1].split('/')[0]),
-    [...all,'a-custom','z-custom'],'add-model picker');
+  // The picker is a popover now, so the drawn list is the source of truth: it
+  // groups by platform and every row carries its platform-qualified key.
+  FallbackModule.togglePicker(true);
+  FallbackModule.renderPickerList('');
+  const pickerPlatforms = [...document.getElementById('fallback-add-list').innerHTML.matchAll(/data-key="([^"]+)"/g)]
+    .map(match=>match[1].split('/')[0]);
+  equal([...new Set(pickerPlatforms)], [...all,'a-custom','z-custom'], 'add-model picker');
   assert.equal(JSON.stringify(FallbackModule.chains),chainBefore,'configured fallback order must not change');
   assert.equal(JSON.stringify(FallbackModule.availableModels),modelsBefore,'picker sorting must not mutate model source');
 

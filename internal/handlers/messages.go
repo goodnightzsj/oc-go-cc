@@ -795,6 +795,14 @@ func (h *MessagesHandler) handleStreaming(
 			if h.storage == nil {
 				return
 			}
+			// The same observations the success path records, read from the same
+			// source. A stream that failed after producing usage was being stored
+			// with these three empty, so a failed row could not say which model
+			// actually ran, how long the first byte took, or what level the
+			// client asked for - exactly the fields someone investigating the
+			// failure needs. currentStream is the attempt's body, so it answers
+			// for the attempt that failed.
+			firstByte := client.FirstByteAtOf(currentStream)
 			rec := history.RequestRecord{
 				ID:                  recordID,
 				Model:               model.ModelID,
@@ -812,6 +820,9 @@ func (h *MessagesHandler) handleStreaming(
 				Attempt:             attempt + 1,
 				PeakMultiplier:      history.ProviderPeakMultiplier(providerName, model.ModelID, streamStart),
 				UpstreamChannel:     client.UpstreamChannelOf(currentStream),
+				UpstreamModel:       client.UpstreamModelOf(currentStream),
+				FirstByte:           firstByteDuration(firstByte, streamStart),
+				ReasoningEffort:     clientEffort,
 			}
 			if err := h.storage.InsertRequest(rec); err != nil {
 				h.logger.Warn("failed to insert failed request into storage", "error", err)

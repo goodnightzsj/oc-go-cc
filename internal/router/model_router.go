@@ -319,26 +319,35 @@ func (r *ModelRouter) resolveFromCatalog(cat *catalog.IndexedCatalog, requestedM
 		// through to legacyUnknownModelConfig here is what left such a request
 		// with no capabilities at all - and a vision-capable model was then
 		// refused for not supporting vision.
+		//
+		// The name is resolved, not the target: the catalog lists this id under
+		// many providers, so asking it which one to use has no right answer and
+		// ResolveShort refuses. The client already said which platform it meant.
 		platform, short := splitPlatformPrefix(requestedModel)
 		if platform == "" {
 			return config.ModelConfig{}, false
 		}
-		resolved, err = cat.ResolveShort(short)
-		if err != nil {
+		model, ok := cat.ModelByName(short)
+		if !ok {
 			return config.ModelConfig{}, false
 		}
-		// Capabilities only. The client named this platform, so the catalog's
-		// vendor namespace must not become the target: on ClinePass the prefix
-		// selects a billing pool, and changing it changes which balance pays.
 		// The wire id goes through WireModelID for the same reason every other
 		// path does - that prefix is part of the id on ClinePass and a
 		// namespace everywhere else.
 		target := config.ModelConfig{
 			Provider: platform,
 			ModelID:  catalog.WireModelID(platform + "/" + short),
-			ModelRef: resolved.CanonicalName,
+			// ModelRef marks these capabilities as having an authority behind
+			// them, so ResolveModelConfig does not overwrite them with the
+			// built-in family table.
+			ModelRef: platform + "/" + short,
 		}
-		return applyCatalogCapabilities(target, resolved), true
+		target.Vision = model.SupportsVision()
+		target.ContextWindow = int(model.ContextWindow())
+		target.MaxOutputTokens = int(model.MaxOutputTokens())
+		supportsTools := model.SupportsTools()
+		target.SupportsTools = &supportsTools
+		return target, true
 	}
 
 	cfg := resolvedModelToConfig(resolved)
@@ -810,8 +819,22 @@ func (r *ModelRouter) catalogResolved(ctx context.Context, provider, modelID str
 	// Stripping is keyed on a registered platform, not on "whatever precedes the
 	// slash": a vendor namespace is also slash-separated and removing it would
 	// search for a model named after its vendor.
+	//
+	// This resolves the name only, never the target: a real catalog lists this
+	// id under 38 providers, so asking it which provider to use is a question
+	// with no right answer and ResolveShort rightly refuses it. The caller wants
+	// the model's capabilities, so the name is all that is taken from it.
 	if platform, short := splitPlatformPrefix(modelID); platform != "" && platform == site.Normalize(provider) {
-		return cat.ResolveShort(short)
+		if model, ok := cat.ModelByName(short); ok {
+			return catalog.ResolvedModel{
+				Provider:        site.Normalize(provider),
+				CanonicalName:   short,
+				Vision:          model.SupportsVision(),
+				ContextWindow:   model.ContextWindow(),
+				MaxOutputTokens: model.MaxOutputTokens(),
+				Tools:           model.SupportsTools(),
+			}, nil
+		}
 	}
 	return catalog.ResolvedModel{}, fmt.Errorf("catalog has no entry for %q", modelID)
 }

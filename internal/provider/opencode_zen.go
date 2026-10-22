@@ -85,10 +85,10 @@ func (p *OpenCodeZenProvider) executeOpenAI(ctx context.Context, req *types.Mess
 	if err != nil {
 		return nil, err
 	}
+	defer sel.Release()
 
 	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
 	if err != nil {
-		sel.Settle(nil)
 		return nil, fmt.Errorf("request transform failed: %w", err)
 	}
 	streamFalse := false
@@ -131,10 +131,10 @@ func (p *OpenCodeZenProvider) streamOpenAI(ctx context.Context, req *types.Messa
 	if rerr != nil {
 		return nil, rerr
 	}
+	defer sel.Release()
 
 	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
 	if err != nil {
-		sel.Settle(nil)
 		return nil, fmt.Errorf("request transform failed: %w", err)
 	}
 	streamTrue := true
@@ -157,10 +157,10 @@ func (p *OpenCodeZenProvider) executeAnthropic(ctx context.Context, req *types.M
 	if rerr != nil {
 		return nil, rerr
 	}
+	defer sel.Release()
 
 	rawBody, err := anthropicPayload(ctx, req, model, false)
 	if err != nil {
-		sel.Settle(nil)
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
@@ -174,7 +174,7 @@ func (p *OpenCodeZenProvider) executeAnthropic(ctx context.Context, req *types.M
 	client.SetProviderHeaders(httpReq, p.Name())
 	client.SetAnthropicHeaders(httpReq)
 
-	resp, err := p.httpClient.Do(httpReq)
+	resp, err := p.doSelected(httpReq, sel)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
@@ -182,7 +182,7 @@ func (p *OpenCodeZenProvider) executeAnthropic(ctx context.Context, req *types.M
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
+		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -200,10 +200,10 @@ func (p *OpenCodeZenProvider) streamAnthropic(ctx context.Context, req *types.Me
 	if rerr != nil {
 		return nil, rerr
 	}
+	defer sel.Release()
 
 	rawBody, err := anthropicPayload(ctx, req, model, true)
 	if err != nil {
-		sel.Settle(nil)
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
@@ -218,7 +218,7 @@ func (p *OpenCodeZenProvider) streamAnthropic(ctx context.Context, req *types.Me
 	client.SetProviderHeaders(httpReq, p.Name())
 	client.SetAnthropicHeaders(httpReq)
 
-	resp, err := p.httpClient.Do(httpReq)
+	resp, err := p.doSelected(httpReq, sel)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
@@ -226,7 +226,7 @@ func (p *OpenCodeZenProvider) streamAnthropic(ctx context.Context, req *types.Me
 	if resp.StatusCode >= http.StatusBadRequest {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
+		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
 	}
 
 	return resp.Body, nil
@@ -241,10 +241,10 @@ func (p *OpenCodeZenProvider) executeResponses(ctx context.Context, req *types.M
 	if rerr != nil {
 		return nil, rerr
 	}
+	defer sel.Release()
 
 	responsesReq, err := transformer.AnthropicToResponses(req, model)
 	if err != nil {
-		sel.Settle(nil)
 		return nil, err
 	}
 	responsesReq.Stream = false
@@ -287,10 +287,10 @@ func (p *OpenCodeZenProvider) streamResponses(ctx context.Context, req *types.Me
 	if rerr != nil {
 		return nil, rerr
 	}
+	defer sel.Release()
 
 	responsesReq, err := transformer.AnthropicToResponses(req, model)
 	if err != nil {
-		sel.Settle(nil)
 		return nil, err
 	}
 	responsesReq.Stream = true
@@ -312,6 +312,7 @@ func (p *OpenCodeZenProvider) executeGemini(ctx context.Context, req *types.Mess
 	if rerr != nil {
 		return nil, rerr
 	}
+	defer sel.Release()
 
 	geminiReq := transformer.AnthropicToGemini(req, model)
 	geminiReq.Stream = false
@@ -351,6 +352,7 @@ func (p *OpenCodeZenProvider) streamGemini(ctx context.Context, req *types.Messa
 	if rerr != nil {
 		return nil, rerr
 	}
+	defer sel.Release()
 
 	geminiReq := transformer.AnthropicToGemini(req, model)
 	geminiReq.Stream = true
@@ -370,7 +372,6 @@ func (p *OpenCodeZenProvider) streamGemini(ctx context.Context, req *types.Messa
 func (p *OpenCodeZenProvider) doRequest(ctx context.Context, endpoint string, sel *selection, req any, stream bool) (*http.Response, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
-		sel.Settle(nil) // never sent: no verdict for the key
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
@@ -385,9 +386,8 @@ func (p *OpenCodeZenProvider) doRequest(ctx context.Context, endpoint string, se
 	}
 	client.SetProviderHeaders(httpReq, p.Name())
 
-	resp, err := p.httpClient.Do(httpReq)
+	resp, err := p.doSelected(httpReq, sel)
 	if err != nil {
-		sel.Settle(err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
@@ -395,10 +395,8 @@ func (p *OpenCodeZenProvider) doRequest(ctx context.Context, endpoint string, se
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
-		sel.Settle(apiErr)
 		return nil, apiErr
 	}
-	sel.Settle(nil)
 
 	return resp, nil
 }

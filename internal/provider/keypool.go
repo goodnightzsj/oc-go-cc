@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -59,9 +60,8 @@ type keyState struct {
 // resting takes the request - and a key only steps aside once the upstream has
 // actually said something is wrong with it.
 //
-// A resting key is skipped, not disabled. When every key is resting the pool
-// hands out the one that unblocks soonest, because refusing to send at all would
-// turn a temporary upstream problem into an outage.
+// A resting key is skipped, not disabled. A multi-key pool with every key
+// resting rejects the reservation until a key recovers.
 type keyPool struct {
 	mu     sync.Mutex
 	states map[string]*keyState
@@ -78,8 +78,8 @@ func newKeyPool() *keyPool {
 // empty pool, which means no key was configured at all.
 var ErrAllKeysCooling = errors.New("every API key is resting after an upstream rejection")
 
-// selection is one reserved key. The caller must call Settle exactly once with
-// the outcome, or the key's in-flight count never drops.
+// selection is one reserved key. Defer Release at its owner; doSelected settles
+// HTTP outcomes. Either path releases in-flight exactly once.
 type selection struct {
 	pool *keyPool
 	key  string
@@ -176,23 +176,35 @@ func (p *keyPool) Reserve(keys []string) *selection {
 // any cooldown it was serving is over. An error is classified by status - see
 // classify - and only a verdict about the key changes its state. A 400 from a
 // malformed request or a client cancellation says nothing about the key and is
-// deliberately ignored, because cooling a key for the caller's mistake would
-// move traffic off a working credential.
+// not cooled. Cancellation is neutral and preserves concurrent health verdicts;
+// a non-key-related HTTP rejection retains the existing healthy verdict.
 func (s *selection) Settle(err error) {
-	if s == nil || s.pool == nil || s.done {
+	s.settle(classify(err), err)
+}
+
+// Release is deferred immediately after reserving. Local failures are neutral;
+// a completed HTTP verdict wins, so releasing again cannot erase its health.
+func (s *selection) Release() {
+	s.settle(verdictNeutral, nil)
+}
+
+func (s *selection) settle(verdict verdict, err error) {
+	if s == nil || s.pool == nil || s.key == "" {
 		return
 	}
-	s.done = true
 	p := s.pool
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if s.done {
+		return
+	}
+	s.done = true
 	st := p.stateFor(s.key)
 	if st.inFlight > 0 {
 		st.inFlight--
 	}
 	now := p.now()
 
-	verdict := classify(err)
 	switch verdict {
 	case verdictHealthy:
 		st.consecutive = 0
@@ -248,16 +260,20 @@ const (
 	verdictRateLimited
 	// verdictTransient is a 5xx, a dial error, or a stream that broke midway.
 	verdictTransient
+	// verdictNeutral releases a reservation without changing another request's verdict.
+	verdictNeutral
 )
 
 // classify maps an error to what it says about the key.
 //
 // Anything that is not a status the key is responsible for returns
-// verdictHealthy, so the caller's own mistakes (a bad request body, a model that
-// does not exist, a client that hung up) never cost a key its place.
+// verdictHealthy. Cancellation returns verdictNeutral; neither cools the key.
 func classify(err error) verdict {
 	if err == nil {
 		return verdictHealthy
+	}
+	if errors.Is(err, context.Canceled) {
+		return verdictNeutral
 	}
 	status, ok := statusOf(err)
 	if !ok {

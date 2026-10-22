@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/metrics"
 )
@@ -40,6 +41,19 @@ func newBaseProvider(atomic *config.AtomicConfig) baseProvider {
 	}
 }
 
+// doSelected records health at the shared HTTP boundary. Encoding and request
+// construction failures never reach here; the caller's deferred Release leaves
+// those neutral. Bodies remain owned by the protocol-specific caller.
+func (b *baseProvider) doSelected(req *http.Request, sel *selection) (*http.Response, error) {
+	resp, err := b.httpClient.Do(req)
+	outcome := err
+	if err == nil && resp.StatusCode >= http.StatusBadRequest {
+		outcome = &client.APIError{StatusCode: resp.StatusCode, RetryAfter: resp.Header.Get("Retry-After")}
+	}
+	sel.Settle(outcome)
+	return resp, err
+}
+
 // Count at the shared transport boundary, including retries and redirects, but
 // not candidates rejected before sending. Embedded transport keeps idle cleanup.
 type countingTransport struct{ *http.Transport }
@@ -59,9 +73,8 @@ func (t *countingTransport) RoundTrip(req *http.Request) (*http.Response, error)
 // handle carries both the credential and the health record, so the caller only
 // has to pass the send result back - see selection.Settle.
 //
-// Callers must settle exactly once per reservation. A reservation that is never
-// settled leaves the key counted as in-flight, which makes the scheduler treat
-// it as busy forever.
+// Callers defer Release immediately after reservation and send through
+// doSelected, so local failures and HTTP results have one lifecycle owner.
 func (b *baseProvider) reserveKey(keys []string) *selection {
 	if b.keys == nil {
 		// A zero-value baseProvider would otherwise panic; treat it as a pool

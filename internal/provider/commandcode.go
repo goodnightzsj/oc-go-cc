@@ -81,12 +81,8 @@ func (p *CommandCodeProvider) request(ctx context.Context, req *types.MessageReq
 	if err != nil {
 		return nil, err
 	}
+	defer sel.Release()
 	key := sel.Key()
-	// Settled on every path out of this function: an encode failure releases the
-	// reservation with no verdict, and the send result below reports the key's
-	// health. Leaking a reservation would keep the key counted as in-flight.
-	var settleErr error
-	defer func() { sel.Settle(settleErr) }()
 	format := core.ModelWireFormat(p, model)
 	endpoint := cfg.CommandCode.BaseURL
 	var payload []byte
@@ -105,8 +101,6 @@ func (p *CommandCodeProvider) request(ctx context.Context, req *types.MessageReq
 		return nil, fmt.Errorf("commandcode does not provide %s upstream format", format)
 	}
 	if err != nil {
-		// A local encode failure never reached the upstream, so the key carries
-		// no verdict - settleErr stays nil and the reservation is released.
 		return nil, fmt.Errorf("encode commandcode request: %w", err)
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
@@ -128,20 +122,17 @@ func (p *CommandCodeProvider) request(ctx context.Context, req *types.MessageReq
 	if p.capture != nil {
 		p.capture.CaptureUpstreamRequest(rid(ctx), p.Name(), payload)
 	}
-	resp, err := p.httpClient.Do(httpReq)
+	resp, err := p.doSelected(httpReq, sel)
 	if err != nil {
-		settleErr = err
 		return nil, fmt.Errorf("commandcode request failed: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer func() { _ = resp.Body.Close() }()
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		if err != nil {
-			settleErr = &client.APIError{StatusCode: resp.StatusCode, RetryAfter: resp.Header.Get("Retry-After")}
 			return nil, fmt.Errorf("read commandcode error (HTTP %d): %w", resp.StatusCode, err)
 		}
 		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(body), RetryAfter: resp.Header.Get("Retry-After")}
-		settleErr = apiErr
 		return nil, apiErr
 	}
 	if p.capture != nil {

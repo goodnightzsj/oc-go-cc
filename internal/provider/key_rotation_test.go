@@ -240,6 +240,9 @@ func TestKeyPool_SpreadsAConcurrentBurst(t *testing.T) {
 	p := newKeyPool()
 
 	const burst = 30
+	var reserved sync.WaitGroup
+	reserved.Add(burst)
+	release := make(chan struct{})
 	var mu sync.Mutex
 	seen := map[string]int{}
 	var wg sync.WaitGroup
@@ -251,19 +254,20 @@ func TestKeyPool_SpreadsAConcurrentBurst(t *testing.T) {
 			mu.Lock()
 			seen[sel.Key()]++
 			mu.Unlock()
+			reserved.Done()
+			<-release // All reservations overlap, regardless of scheduler timing.
 			// Settle as a success so the in-flight counts drain.
 			sel.Settle(nil)
 		}()
 	}
+	reserved.Wait()
+	close(release)
 	wg.Wait()
 
-	if len(seen) == 0 {
-		t.Fatal("no reservations were recorded")
-	}
-	// With three keys and no health information yet, a burst should touch more
-	// than one key rather than stacking on the first.
-	if len(seen) < 2 {
-		t.Fatalf("a burst of %d used only %d key(s): %v", burst, len(seen), seen)
+	for _, key := range keys {
+		if seen[key] != burst/len(keys) || p.states[key].inFlight != 0 {
+			t.Fatalf("unbalanced or unreleased concurrent burst: %v", seen)
+		}
 	}
 }
 
@@ -281,6 +285,19 @@ func TestSelection_DoubleSettleIsIgnored(t *testing.T) {
 	// would be resting. It must not be.
 	if got := p.Reserve(keys).Key(); got != "a" {
 		t.Fatal("a second Settle changed the key's health")
+	}
+}
+
+func TestSelectionConcurrentReleaseAndSettle(t *testing.T) {
+	p := newKeyPool()
+	sel := p.Reserve([]string{"a"})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); sel.Release() }()
+	go func() { defer wg.Done(); sel.Settle(nil) }()
+	wg.Wait()
+	if p.states["a"].inFlight != 0 {
+		t.Fatal("reservation not released exactly once")
 	}
 }
 

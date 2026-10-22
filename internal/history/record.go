@@ -268,7 +268,14 @@ var peakSchedules = map[string]peakSchedule{
 			models: map[string]bool{
 				"deepseek-v4-flash":   true,
 				"deepseek-v4.1-flash": true,
-				"deepseek-v4-pro":     true,
+				// The October 17 snapshot of V4.1 Flash. ClinePass's gateway
+				// started serving it on 2026-10-22; it is a dated copy of the
+				// same model, and OpenRouter's own per-model overrides carry the
+				// identical weekday 01-04/06-10 UTC window at 2x for this exact
+				// id. Left out, every request on it billed flat at the off-peak
+				// rate and showed no peak badge.
+				"deepseek-v4.1-flash-1017": true,
+				"deepseek-v4-pro":          true,
 			},
 			windows:    []PeakWindow{{1, 4}, {6, 10}},
 			multiplier: 2,
@@ -311,8 +318,9 @@ var peakSchedules = map[string]peakSchedule{
 		rules: []peakRule{
 			{
 				models: map[string]bool{
-					"deepseek-v4.1-flash":  true,
-					"deepseek-v4-pro-0813": true,
+					"deepseek-v4.1-flash":      true,
+					"deepseek-v4.1-flash-1017": true,
+					"deepseek-v4-pro-0813":     true,
 				},
 				windows:    []PeakWindow{{1, 4}, {6, 10}},
 				multiplier: 2,
@@ -377,6 +385,27 @@ func PeakScheduledProviders() map[string]bool {
 		out[id] = true
 	}
 	return out
+}
+
+// PeakMultiplierFor reports the multiplier a platform applies to a model inside
+// its peak window, or 1 when the platform publishes no peak rate for it.
+//
+// This is the platform's *stated* peak ratio, independent of any timestamp. It
+// exists because a price table that publishes one row for a peak-priced model
+// prints the peak figure, and reconstructing the off-peak base from it needs the
+// ratio the platform itself declares.
+func PeakMultiplierFor(provider, model string) float64 {
+	schedule, ok := peakSchedules[site.Normalize(provider)]
+	if !ok {
+		return 1
+	}
+	family := models.ModelFamily(model)
+	for _, r := range schedule.rules {
+		if r.models[family] {
+			return r.multiplier
+		}
+	}
+	return 1
 }
 
 // ProviderPeakMultiplier answers, for one provider's request, whether the

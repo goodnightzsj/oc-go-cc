@@ -258,11 +258,22 @@ func resetPrices(t *testing.T) {
 	prev := priceOverrides.Load()
 	empty := map[string][]priceEntry{}
 	priceOverrides.Store(&empty)
+	// The refresh timestamps are separate state, and a test that installs a
+	// table stamps them. Left in place, the next test reads a platform it never
+	// fetched as "live", which is exactly the leak PriceTables reports.
+	prevWhen := priceRefreshedAt.Load()
+	noWhen := map[string]time.Time{}
+	priceRefreshedAt.Store(&noWhen)
 	t.Cleanup(func() {
 		if prev != nil {
 			priceOverrides.Store(prev)
 		} else {
 			priceOverrides.Store(nil)
+		}
+		if prevWhen != nil {
+			priceRefreshedAt.Store(prevWhen)
+		} else {
+			priceRefreshedAt.Store(nil)
 		}
 	})
 }

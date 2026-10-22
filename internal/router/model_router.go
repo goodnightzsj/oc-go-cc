@@ -263,6 +263,10 @@ func resolvedModelToConfig(resolved catalog.ResolvedModel) config.ModelConfig {
 		// instead of clamping a client's request down to the built-in default.
 		MaxOutputTokens: int(resolved.MaxOutputTokens),
 		SupportsTools:   &supportsTools,
+		// The catalog records this per platform. Dropping it here was the second
+		// half of a broken chain: core.ModelWireFormat already learned to honour
+		// the flag, and it never saw a target that carried it.
+		AnthropicToolsDisabled: resolved.AnthropicToolsDisabled,
 	}
 }
 

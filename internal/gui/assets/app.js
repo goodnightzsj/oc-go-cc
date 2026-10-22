@@ -434,6 +434,8 @@ const TRANSLATIONS = {
     'th.promptTokens': 'Prompt Tokens',
     'th.outputTokens': 'Output Tokens',
     'th.cost': 'Cost',
+    'th.effort': 'Effort',
+    'th.effortHint': 'The reasoning level the client asked for. It records intent, not effect: an upstream that ignores the field answers the same way at every level.',
     'th.firstByte': 'TTFT',
     'th.firstByteHint': 'Time from the request starting to the upstream sending its first byte. What the upstream controls, as opposed to the model thinking time included in Duration.',
     'th.duration': 'Duration',
@@ -1005,6 +1007,8 @@ const TRANSLATIONS = {
     'th.promptTokens': 'Prompt Token',
     'th.outputTokens': '输出 Token',
     'th.cost': '费用',
+    'th.effort': '思考强度',
+    'th.effortHint': '客户端请求的思考强度。记录的是意图而非效果：上游若忽略该字段，各档位回答完全一样。',
     'th.firstByte': '首字节',
     'th.firstByteHint': '从请求开始到上游返回第一个字节的时间。这是上游可控的部分；Duration 里还包含模型思考时间。',
     'th.duration': '耗时',
@@ -2708,6 +2712,7 @@ function renderHistory() {
       <td><div class="history-model-cell"><strong title="${escapeHtml(servedModel)}">${escapeHtml(servedModel) || '—'}</strong><small>${escapeHtml(providerLabel(h.provider))}${channelMark}</small></div></td>
       <td><button type="button" class="history-token-trigger" data-token-id="${escapeHtml(rowId)}" aria-label="${t('detail.title')}">${totalTokens.toLocaleString()}</button><br><small>${tokenSplit}</small></td>
       <td>${cost}<br><small>${costSourceLabel(h.cost_source)}</small></td>
+      <td>${h.reasoning_effort ? `<span class="badge badge-effort" title="${escapeHtml(t('th.effortHint'))}">${escapeHtml(h.reasoning_effort)}</span>` : '—'}</td>
       <td>${h.first_byte_ms ? fmtDuration(h.first_byte_ms) : '—'}</td>
       <td>${detailsKnown ? gradeDuration(h, fmtDuration(h.duration_ms)) : '—'}</td>
       <td title="${escapeHtml(t('analytics.throughputHint'))}">${detailsKnown && h.success ? fmtThroughput(requestThroughput(h)) : '—'}</td>
@@ -3047,6 +3052,7 @@ const HISTORY_CSV_COLUMNS = [
   ['cost_usd', r => r.cost_usd],
   ['cost_source', r => r.cost_source],
   ['details_known', r => historyHasDetails(r)],
+  ['reasoning_effort', r => r.reasoning_effort || ''],
   ['first_byte_ms', r => r.first_byte_ms || null],
   ['duration_ms', r => historyHasDetails(r) ? r.duration_ms : null],
   ['streaming', r => historyHasDetails(r) ? r.streaming : null],

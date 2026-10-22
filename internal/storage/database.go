@@ -375,6 +375,14 @@ func (d *Database) migrateColumns(ctx context.Context) error {
 		// and an attempt that failed before the body opened never had one. Zero
 		// is not used for that: it would read as an instant response.
 		`ALTER TABLE requests ADD COLUMN first_byte_ms INTEGER`,
+		// The reasoning level the client asked for, after normalization. NULL
+		// means the client expressed no level - which is not the same as asking
+		// for the weakest one, so an empty string is stored as NULL.
+		//
+		// This records intent, not effect: a provider that ignores the field
+		// leaves the column populated and the response unchanged. Reading it as
+		// "how much this request reasoned" would be wrong for those upstreams.
+		`ALTER TABLE requests ADD COLUMN reasoning_effort TEXT`,
 		// Existing rows keep NULL, which reads back as "unknown ceiling" - the
 		// same answer they gave before the column existed. The next catalog sync
 		// fills them in.

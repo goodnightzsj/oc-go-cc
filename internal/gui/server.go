@@ -493,7 +493,10 @@ type historyEntry struct {
 	UpstreamModel string `json:"upstream_model,omitempty"`
 	// FirstByteMs is how long the upstream took to send its first byte. Omitted
 	// when it was not measured, which is a different answer from zero.
-	FirstByteMs         int64    `json:"first_byte_ms,omitempty"`
+	FirstByteMs int64 `json:"first_byte_ms,omitempty"`
+	// ReasoningEffort is the level the client asked for. Omitted when it asked
+	// for none - a blank is a different answer from "the lowest level".
+	ReasoningEffort     string   `json:"reasoning_effort,omitempty"`
 	Scenario            string   `json:"scenario"`
 	StartTime           string   `json:"start_time"` // RFC3339
 	DurationMs          int64    `json:"duration_ms"`
@@ -680,6 +683,7 @@ func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 			UpstreamChannel:     rec.UpstreamChannel,
 			UpstreamModel:       rec.UpstreamModel,
 			FirstByteMs:         rec.FirstByte.Milliseconds(),
+			ReasoningEffort:     rec.ReasoningEffort,
 			Scenario:            scenario,
 			StartTime:           rec.StartTime.Format("2006-01-02T15:04:05Z07:00"),
 			DurationMs:          rec.Duration.Milliseconds(),

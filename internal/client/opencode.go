@@ -46,6 +46,14 @@ func (t *captureReadCloser) UpstreamModel() string {
 	return UpstreamModelOf(t.ReadCloser)
 }
 
+// ServedModel forwards the first-chunk model the same way, for the same reason.
+func (t *captureReadCloser) ServedModel() string {
+	if reporter, ok := t.ReadCloser.(interface{ ServedModel() string }); ok {
+		return reporter.ServedModel()
+	}
+	return ""
+}
+
 // CaptureBody wraps body so that all bytes read from it are delivered (async)
 // to capture. Returns body unchanged when capture is nil.
 func CaptureBody(body io.ReadCloser, capture func(data []byte)) io.ReadCloser {
@@ -216,4 +224,15 @@ func UpstreamModelOf(body any) string {
 		return ""
 	}
 	return reader.UpstreamModel()
+}
+
+// ServedModelOf returns the model the upstream named in its first chunk, which
+// is available before any content is forwarded. Empty when the body does not
+// report one.
+func ServedModelOf(body any) string {
+	reader, ok := body.(interface{ ServedModel() string })
+	if !ok {
+		return ""
+	}
+	return reader.ServedModel()
 }

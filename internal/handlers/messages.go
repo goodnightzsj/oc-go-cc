@@ -898,7 +898,16 @@ func (h *MessagesHandler) handleStreaming(
 		if wireFormat == core.WireFormatAnthropic {
 			atomic.StoreInt32(&heartbeatPaused, 1)
 		}
-		errProxy := h.streamProxy.ProxyStream(rw, streamReader, wireFormat, model.ModelID, attemptCtx, idleTimeout, cancelAttempt)
+		// The model to name in message_start. The provider peeked the first
+		// upstream chunk, so this is what the gateway says it is running - not
+		// the id we asked for. They differ whenever the gateway answers one id
+		// by running a virtual model behind its own fallback chain, and naming
+		// the request id there would describe a model that never ran.
+		servedModel := client.ServedModelOf(streamReader)
+		if servedModel == "" {
+			servedModel = model.ModelID
+		}
+		errProxy := h.streamProxy.ProxyStream(rw, streamReader, wireFormat, servedModel, attemptCtx, idleTimeout, cancelAttempt)
 		if wireFormat == core.WireFormatAnthropic {
 			atomic.StoreInt32(&heartbeatPaused, 0)
 		}

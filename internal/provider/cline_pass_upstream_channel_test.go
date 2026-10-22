@@ -59,8 +59,10 @@ func TestClinePassReportsTheServingChannel(t *testing.T) {
 				}
 				// Before draining: the metadata frame has not been read, so the
 				// honest answer is "not known yet".
-				if got := client.UpstreamChannelOf(body); got != "" {
-					t.Errorf("channel before draining = %q, want empty", got)
+				// Stream reads ahead to the model frame, so the routing metadata
+				// on it is observed before the body is returned.
+				if got := client.UpstreamChannelOf(body); got != "openai-compatible-private" {
+					t.Errorf("channel after the peek = %q, want the gateway's reported channel", got)
 				}
 				if _, err := io.Copy(io.Discard, body); err != nil {
 					t.Fatal(err)

@@ -78,7 +78,20 @@ func (p *ClinePassProvider) Execute(ctx context.Context, req *types.MessageReque
 	// last metadata frame, so it does not exist before the stream ends.
 	channel := client.UpstreamChannelOf(body)
 	upstreamModel := client.UpstreamModelOf(body)
-	converted, err := transformer.NewResponseTransformer().TransformResponse(response, model.ModelID)
+	// Name the model the gateway ran, not the one asked for. A gateway may
+	// answer one id by running another behind its own fallback chain, and the
+	// caller reading `model` from the response would otherwise be told a model
+	// that never executed.
+	//
+	// The drift aggregates the whole drained stream, so the first-chunk model
+	// (ServedModel) is no longer reachable here - the routing block's
+	// canonicalSlug is. Either answer beats the request id; only the streaming
+	// path has to settle for the first chunk, because there it has no choice.
+	responseModel := model.ModelID
+	if upstreamModel != "" {
+		responseModel = upstreamModel
+	}
+	converted, err := transformer.NewResponseTransformer().TransformResponse(response, responseModel)
 	if err != nil {
 		return nil, fmt.Errorf("convert cline-pass response: %w", err)
 	}
@@ -87,7 +100,17 @@ func (p *ClinePassProvider) Execute(ctx context.Context, req *types.MessageReque
 }
 
 func (p *ClinePassProvider) Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
-	return p.request(ctx, req, model, true)
+	body, err := p.request(ctx, req, model, true)
+	if err != nil {
+		return nil, err
+	}
+	// Read ahead to the frame that names the model, then hand back a body that
+	// replays it. The alternative - naming the request's model in message_start
+	// and correcting it later - is impossible: message_start goes out first.
+	// This costs the wait for the upstream's first byte, which the caller was
+	// going to wait for anyway before writing anything.
+	peeked, _ := peekServedModel(body, maxServedModelPeekBytes)
+	return peeked, nil
 }
 
 // request sends one attempt upstream. stream is the upstream's flag; the

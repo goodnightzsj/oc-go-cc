@@ -61,11 +61,17 @@ type Server struct {
 	setAutostart      func(bool, int) error
 	catalogDir        string
 	catalogSourceURL  string
-	srv               *http.Server
-	logger            *slog.Logger
-	limitsCancel      context.CancelFunc
-	limitsDone        chan struct{}
-	channels          channelCatalog
+	// The catalog file is ~6.5MB and parsing it costs about 200ms, while this
+	// endpoint is hit every time a picker opens. The model detail changes only
+	// when the catalog is re-synced, so it is parsed once and reused until the
+	// sync handler clears it.
+	catalogModelsMu    sync.Mutex
+	catalogModelsIndex *catalog.IndexedCatalog
+	srv                *http.Server
+	logger             *slog.Logger
+	limitsCancel       context.CancelFunc
+	limitsDone         chan struct{}
+	channels           channelCatalog
 
 	// One cached quota response per platform; each response carries its TTL.
 	quotaMu    sync.Mutex
@@ -1170,7 +1176,7 @@ func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
 	// come from the catalog and the platform price tables, joined by the id the
 	// listing returned. Both are best-effort: a model the catalog has never
 	// heard of still lists, just without the detail.
-	cat, _ := catalog.Load(filepath.Join(s.catalogDir, "catalog.json"))
+	cat := s.catalogIndex()
 	for _, m := range resp.Data {
 		if wanted != "" && site.Normalize(m.OwnedBy) != site.Normalize(wanted) {
 			continue
@@ -1180,7 +1186,7 @@ func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
 			e.Name = m.ID
 		}
 		if cat != nil {
-			if model, ok := cat.Models[m.ID]; ok {
+			if model, ok := catalogModelFor(cat, m.ID, m.OwnedBy); ok {
 				e.Name = model.DisplayName()
 				e.ToolCall = model.ToolCall
 				e.Vision = model.SupportsVision()
@@ -1216,6 +1222,75 @@ func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
 		"scope":  s.activeSiteID(),
 		"total":  len(entries),
 	})
+}
+
+// catalogIndex returns the parsed catalog, loading it on first use.
+//
+// Nil is a valid answer: a missing or unreadable catalog leaves the listing
+// without detail rather than failing it, because the ids alone are still what
+// the picker needs. A load failure is not cached, so the next call retries.
+func (s *Server) catalogIndex() *catalog.IndexedCatalog {
+	s.catalogModelsMu.Lock()
+	defer s.catalogModelsMu.Unlock()
+	if s.catalogModelsIndex != nil {
+		return s.catalogModelsIndex
+	}
+	if s.catalogDir == "" {
+		return nil
+	}
+	cat, err := catalog.Load(filepath.Join(s.catalogDir, "catalog.json"))
+	if err != nil {
+		return nil
+	}
+	s.catalogModelsIndex = cat
+	return cat
+}
+
+// invalidateCatalogIndex drops the cached catalog after a re-sync.
+func (s *Server) invalidateCatalogIndex() {
+	s.catalogModelsMu.Lock()
+	s.catalogModelsIndex = nil
+	s.catalogModelsMu.Unlock()
+}
+
+// catalogModelFor resolves a served model id to its catalog entry.
+//
+// The catalog is keyed by models.dev's provider-qualified id, and a platform's
+// own roster does not always use that provider name. ClinePass's gateway serves
+// `cline-pass/deepseek-v4.1-flash-1017`, which the catalog carries only as
+// `deepseek/deepseek-v4.1-flash-1017` - the platform is a reseller, so nothing
+// under `cline-pass/` describes it. Without a fallback that row lists with an
+// id and a price but no context window, no capability flags and no display
+// name, which reads as missing data rather than as a model the catalog does not
+// file under that provider.
+//
+// The fallback matches the bare model name across every provider. That is only
+// safe because the catalog does not disagree with itself: across all 602 bare
+// names, no two providers describe the same name differently. A bare name that
+// did carry two specs would still resolve to one of them, so this degrades to
+// the old behaviour rather than to a wrong one. A candidate from the model's
+// own provider is preferred when one exists, so the fallback cannot override a
+// provider-specific entry.
+func catalogModelFor(cat *catalog.IndexedCatalog, id, provider string) (catalog.Model, bool) {
+	if model, ok := cat.Models[id]; ok {
+		return model, true
+	}
+	bare := id
+	if slash := strings.LastIndex(id, "/"); slash >= 0 {
+		bare = id[slash+1:]
+	}
+	qualified := provider + "/" + bare
+	if provider != "" {
+		if model, ok := cat.Models[qualified]; ok {
+			return model, true
+		}
+	}
+	for key, model := range cat.Models {
+		if key == bare || strings.HasSuffix(key, "/"+bare) {
+			return model, true
+		}
+	}
+	return catalog.Model{}, false
 }
 
 // proxyModel is the shape /v1/models returns for one model.
@@ -1321,6 +1396,9 @@ func (s *Server) handleCatalogSync(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("catalog sync failed: %v", err), http.StatusInternalServerError)
 		return
 	}
+	// The old file's parse is still cached; a reader who re-synced expects the
+	// model list to reflect what the sync just fetched.
+	s.invalidateCatalogIndex()
 
 	age := time.Since(lock.SyncedAt)
 	writeJSON(w, catalogLockResponse{

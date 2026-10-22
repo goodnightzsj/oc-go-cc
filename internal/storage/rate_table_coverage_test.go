@@ -70,6 +70,7 @@ func TestRefreshPricesReachesEveryRateTable(t *testing.T) {
 		},
 		CommandCodeURL: "http://127.0.0.1:1/pro",
 		ClinePassURL:   "http://127.0.0.1:1/clinepass",
+		OpenRouterURL:  "http://127.0.0.1:1/models",
 	}, nil)
 
 	for _, d := range site.All() {

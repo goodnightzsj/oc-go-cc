@@ -535,6 +535,9 @@ const TRANSLATIONS = {
     'fallback.moveDown': 'Move {model} down',
     'fallback.remove': 'Remove {model}',
     'fallback.primary': 'Primary model',
+    'fallback.readOnly': 'read-only',
+    'fallback.primaryReadOnly': 'Set by the scenario configuration, not by this page. Requests on this instance are routed by the model the client names, so this entry does not run.',
+    'fallback.primaryNote': 'Configured default: {model}. It applies only when a request names no model.',
     'perf.lastHour': 'Last Hour',
     'perf.last24h': 'Last 24 Hours',
     'perf.last7d': 'Last 7 Days',
@@ -1154,6 +1157,9 @@ const TRANSLATIONS = {
     'fallback.moveDown': '下移 {model}',
     'fallback.remove': '移除 {model}',
     'fallback.primary': '主模型',
+    'fallback.readOnly': '只读',
+    'fallback.primaryReadOnly': '由场景配置决定，不是在本页选择的。本实例的请求按客户端指定的模型路由，因此这个条目不会被执行。',
+    'fallback.primaryNote': '配置的默认值：{model}。仅当请求没有指定模型时才会用到。',
     'perf.lastHour': '最近 1 小时',
     'perf.last24h': '最近 24 小时',
     'perf.last7d': '最近 7 天',
@@ -5099,8 +5105,11 @@ const FallbackModule = {
       }
       for (const m of reachable) {
         if (!m.id || !m.provider) continue;
-        const entry = { provider: m.provider, model_id: m.id };
-        modelMap.set(configModelKey(entry), entry);
+        // Keep the whole record. Rebuilding it as {provider, model_id} threw
+        // away the rates, context window and capability flags, so every row in
+        // the picker rendered with no price - the data was there and the merge
+        // discarded it.
+        modelMap.set(configModelKey({ provider: m.provider, model_id: m.id }), { ...m });
       }
       // Anything already configured stays selectable even if the listing is
       // momentarily unavailable, so an existing chain is never silently
@@ -5396,7 +5405,20 @@ const FallbackModule = {
     const chain = this.chains[this.currentScenario];
     const primary = currentProxyConfig?.models?.[this.currentScenario];
     const primaryEl = document.getElementById('fallback-primary');
-    if (primaryEl) primaryEl.textContent = primary ? configModelKey(primary) : '—';
+    // The primary is not editable here: it comes from the scenario's own model
+    // config, and on this instance requests are routed by override anyway - the
+    // client names the model, so this entry never runs. Showing it as a value
+    // invited the reading that the page had selected it.
+    if (primaryEl) {
+      primaryEl.textContent = primary ? configModelKey(primary) : '—';
+      primaryEl.title = t('fallback.primaryReadOnly');
+    }
+    const primaryNote = document.getElementById('fallback-primary-note');
+    if (primaryNote) {
+      primaryNote.textContent = primary
+        ? t('fallback.primaryNote').replace('{model}', configModelKey(primary))
+        : '';
+    }
     this.setStatus(t(this.originalChains && JSON.stringify(this.chains) !== JSON.stringify(this.originalChains)
       ? 'fallback.unsaved' : 'fallback.noChanges'));
 

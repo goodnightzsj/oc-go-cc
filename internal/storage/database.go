@@ -874,6 +874,9 @@ var commandCodePrices []byte
 //go:embed seed_prices_cline_pass.json
 var clinePassPrices []byte
 
+//go:embed seed_prices_openrouter.json
+var openRouterPrices []byte
+
 // rateTableFiles maps a site's RateTable name to its embedded table. A platform
 // absent from this map has no published prices, which is different from having
 // prices of zero.
@@ -881,6 +884,7 @@ var rateTableFiles = map[string][]byte{
 	site.OpenCodeGo:  openCodeGoPrices,
 	site.CommandCode: commandCodePrices,
 	site.ClinePass:   clinePassPrices,
+	site.OpenRouter:  openRouterPrices,
 }
 
 // rateTables parses every embedded table once. Pricing runs per model per

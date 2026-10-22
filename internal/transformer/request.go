@@ -272,39 +272,6 @@ func HasThinkingBlocks(messages []types.Message) bool {
 	return false
 }
 
-// resolveThinkingAndEffort applies thinking/reasoning_effort to the OpenAI
-// request. Decision priority:
-//
-//  1. Client request — anthropicReq.Thinking set and not disabled
-//     → forward thinking config; map budget_tokens to reasoning_effort.
-//  2. History continuity — a prior turn used thinking → keep it enabled.
-//  3. Explicit config — model.Thinking set → use it verbatim.
-//  4. Config intent — model.ReasoningEffort set without model.Thinking
-//     → enable on first turn (no assistant messages), disable only when
-//     safety guard fires (DeepSeek + history assistant msgs lack thinking).
-//  5. No config, no history → leave both unset (safety guard for DeepSeek).
-//
-// budgetTokensToEffort maps Anthropic budget_tokens to OpenAI reasoning_effort.
-//
-// The bands are unchanged from when this was introduced: they are a judgement,
-// not a published conversion, and widening the ladder changes what upstreams
-// receive for every existing request. Anyone revisiting them should change both
-// this and core.EffortFromBudget - the normalized request and this path have to
-// agree, or a capture reader and the upstream would be told different levels
-// for the same request.
-func budgetTokensToEffort(budget int) string {
-	switch {
-	case budget <= 2048:
-		return "low"
-	case budget <= 8192:
-		return "medium"
-	case budget <= 32768:
-		return "high"
-	default:
-		return "max"
-	}
-}
-
 // parseBudgetTokens extracts budget_tokens from a thinking JSON field.
 func parseBudgetTokens(thinking json.RawMessage) int {
 	var m struct {
@@ -316,6 +283,17 @@ func parseBudgetTokens(thinking json.RawMessage) int {
 	return m.BudgetTokens
 }
 
+// resolveThinkingAndEffort applies thinking/reasoning_effort to the OpenAI
+// request. Decision priority:
+//
+//  1. Client request — anthropicReq.Thinking set and not disabled
+//     → forward thinking config; map budget_tokens to reasoning_effort.
+//  2. History continuity — a prior turn used thinking → keep it enabled.
+//  3. Explicit config — model.Thinking set → use it verbatim.
+//  4. Config intent — model.ReasoningEffort set without model.Thinking
+//     → enable on first turn (no assistant messages), disable only when
+//     safety guard fires (DeepSeek + history assistant msgs lack thinking).
+//  5. No config, no history → leave both unset (safety guard for DeepSeek).
 func resolveThinkingAndEffort(
 	anthropicReq *types.MessageRequest,
 	model config.ModelConfig,
@@ -363,7 +341,7 @@ func resolveThinkingAndEffort(
 		}
 		if allowEffortParam && !allowThinkingParam {
 			if budget := parseBudgetTokens(anthropicReq.Thinking); budget > 0 {
-				effort := budgetTokensToEffort(budget)
+				effort := core.EffortFromBudget(budget)
 				openaiReq.ReasoningEffort = &effort
 			}
 		}

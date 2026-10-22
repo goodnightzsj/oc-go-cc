@@ -265,9 +265,37 @@
     </div>
   </div>
 
+  <!-- Model Catalog Modal -->
+  <div class="modal-overlay" id="catalog-modal" role="dialog" aria-labelledby="catalog-modal-title" aria-modal="true">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h3 class="modal-title" id="catalog-modal-title" data-i18n="catalog.title">Available models</h3>
+          <div class="text-xs text-[#98989d] mt-1" id="catalog-modal-subtitle"></div>
+        </div>
+        <button class="modal-close" id="catalog-modal-close" aria-label="Close modal">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="flex gap-2 mb-3 items-center">
+          <select id="catalog-platform-filter" class="filter-select" aria-label="Filter by platform" data-i18n-aria-label="catalog.filterPlatform">
+            <option value="" data-i18n-option="filter.allProviders">All platforms</option>
+          </select>
+          <input id="catalog-search" type="search" class="filter-select flex-1" placeholder="Filter models..." data-i18n-placeholder="catalog.searchPlaceholder" aria-label="Filter models">
+          <button class="btn btn-primary btn-small" id="btn-catalog-resync" data-i18n="btn.refreshCatalog">Refresh catalog</button>
+        </div>
+        <div id="catalog-model-list" class="catalog-model-list"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Quick Model Test Modal -->
   <div class="modal-overlay" id="test-modal" role="dialog" aria-labelledby="test-modal-title" aria-modal="true">
-    <div class="modal-content max-w-[800px]">
+    <div class="modal-content">
       <div class="modal-header">
         <h3 class="modal-title" id="test-modal-title" data-i18n="test.title">Quick Model Test</h3>
         <button class="modal-close" id="test-modal-close" aria-label="Close modal">
@@ -279,6 +307,9 @@
       </div>
       <div class="modal-body">
         <div class="flex gap-2 mb-3">
+          <select id="test-provider" class="filter-select" aria-label="Select platform" data-i18n-aria-label="test.platform">
+            <option value="" data-i18n-option="filter.allProviders">All platforms</option>
+          </select>
           <select id="test-model" class="filter-select flex-1" aria-label="Select model">
             <option value="" data-i18n="test.selectModel">Select a model...</option>
           </select>
@@ -729,7 +760,10 @@
             <div class="text-sm font-medium mb-0.5" data-i18n="setting.catalog">Catalog</div>
             <div class="text-xs text-[#98989d]" id="catalog-age" data-i18n="setting.catalogNotSynced">Catalog not synced</div>
           </div>
-          <button class="btn btn-small" id="btn-refresh-catalog" onclick="refreshCatalog()" data-i18n="btn.refreshCatalog">Refresh catalog</button>
+          <div class="flex gap-2">
+            <button class="btn btn-small" id="btn-view-catalog" data-i18n="btn.viewCatalog">View models</button>
+            <button class="btn btn-small" id="btn-refresh-catalog" data-i18n="btn.refreshCatalog">Refresh catalog</button>
+          </div>
         </div>
 
         <div class="flex items-center justify-between px-4 py-3.5 border-b border-[#48484a]">

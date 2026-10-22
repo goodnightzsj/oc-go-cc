@@ -89,14 +89,52 @@ async function checks() {
   resetHistoryFilters(false);
   assert.equal(channels.value, '', 'reset must clear the channel');
 
-  // A failing request leaves the control withdrawn rather than offering a
-  // filter that cannot be applied.
+  // A failing first lookup for a platform leaves the control withdrawn rather
+  // than offering a filter that cannot be applied.
   fetch = async raw => new URL(raw, 'http://synthetic.invalid').pathname === '/api/history/channels'
     ? {ok:false, status:503, text:async()=>'unavailable'}
     : {ok:true, json:async()=>({})};
+  get('provider-filter').value = 'opencode-go';
+  await syncChannelFilter();
+  assert.equal(channels.hidden, true, 'a first failed lookup must not offer a channel filter');
+
+  // A later failure for the same platform does not withdraw options that a
+  // real answer already produced: the tab polls the channel list every three
+  // seconds, and one flaky poll must not blink the control out from under a
+  // reader who is using it.
+  fetch = async raw => {
+    const path = new URL(raw, 'http://synthetic.invalid').pathname;
+    if (path === '/api/history/channels') return {ok:true, json:async()=>({channels:['fireworks','deepseek']})};
+    return {ok:true, json:async()=>({})};
+  };
   get('provider-filter').value = 'cline-pass';
   await syncChannelFilter();
-  assert.equal(channels.hidden, true, 'a failed lookup must not offer a channel filter');
+  assert.equal(channels.hidden, false);
+  fetch = async raw => new URL(raw, 'http://synthetic.invalid').pathname === '/api/history/channels'
+    ? {ok:false, status:503, text:async()=>'unavailable'}
+    : {ok:true, json:async()=>({})};
+  await syncChannelFilter();
+  assert.equal(channels.hidden, false, 'a transient failure must keep the options already offered');
+  assert.equal(JSON.stringify(channels.options.map(o => o.value)),
+    JSON.stringify(['', 'fireworks', 'deepseek']),
+    'the offered options must survive a transient failure');
+
+  // A channel this instance starts recording shows up on the next poll, not
+  // only on the next page load: the list is derived from the same rows the
+  // table shows, so a plain refresh has to re-read it.
+  fetch = async raw => {
+    const path = new URL(raw, 'http://synthetic.invalid').pathname;
+    if (path === '/api/history/channels') return {ok:true, json:async()=>({channels:['deepseek','fireworks','newly-observed']})};
+    if (path === '/api/history') return {ok:true, json:async()=>({items:[], total:0})};
+    if (path === '/api/history/summary') return {ok:true, json:async()=>({total_requests:0, success_rows:0})};
+    return {ok:true, json:async()=>({})};
+  };
+  channels.value = 'fireworks';
+  await refreshHistory();
+  assert.equal(JSON.stringify(channels.options.map(o => o.value)),
+    JSON.stringify(['', 'deepseek', 'fireworks', 'newly-observed']),
+    'a channel observed since the last sync must appear on the next history refresh');
+  assert.equal(channels.value, 'fireworks', 'and the selection must survive the rebuild');
 }
 `+platformBehaviorRunScript)
 }

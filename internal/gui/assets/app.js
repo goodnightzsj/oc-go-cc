@@ -447,6 +447,15 @@ const TRANSLATIONS = {
     'setting.catalog': 'Catalog',
     'setting.catalogNotSynced': 'Catalog not synced',
     'setting.catalogAge': 'Last synced: {age}',
+    'catalog.title': 'Available models',
+    'catalog.count': '{n} models',
+    'catalog.ofTotal': 'of {n} total',
+    'catalog.scoped': 'active site: {site}',
+    'catalog.syncing': 'Syncing…',
+    'catalog.filterPlatform': 'Filter by platform',
+    'catalog.searchPlaceholder': 'Filter models...',
+    'catalog.empty': 'No models match this filter',
+    'catalog.loadFailed': 'Could not load the model list',
     'section.proxyConfig': 'Proxy Configuration',
     'setting.platformJump': 'Jump to platform',
     'setting.runtime': 'Runtime & tools',
@@ -460,6 +469,7 @@ const TRANSLATIONS = {
     'label.port': 'Listen Port (Port)',
     'btn.save': 'Save & Apply Config',
     'btn.refreshCatalog': 'Refresh catalog',
+    'btn.viewCatalog': 'View models',
     'status.saving': 'Saving…',
     'status.saveOk': 'Config saved successfully!',
     'status.saveFail': 'Save failed: ',
@@ -537,6 +547,8 @@ const TRANSLATIONS = {
     'btn.testModel': 'Test Model',
     'test.title': 'Quick Model Test',
     'test.selectModel': 'Select a model...',
+    'test.platform': 'Platform',
+    'test.noModels': 'No models available for this platform',
     'test.send': 'Send',
     'test.promptPlaceholder': 'Enter your prompt...',
     'test.latency': 'Latency:',
@@ -1002,6 +1014,15 @@ const TRANSLATIONS = {
     'setting.catalog': '模型目录',
     'setting.catalogNotSynced': '模型目录未同步',
     'setting.catalogAge': '上次同步：{age}',
+    'catalog.title': '可用模型',
+    'catalog.count': '{n} 个模型',
+    'catalog.ofTotal': '共 {n} 个',
+    'catalog.scoped': '当前站点：{site}',
+    'catalog.syncing': '同步中…',
+    'catalog.filterPlatform': '按平台筛选',
+    'catalog.searchPlaceholder': '筛选模型...',
+    'catalog.empty': '没有匹配的模型',
+    'catalog.loadFailed': '无法加载模型列表',
     'section.proxyConfig': '服务代理配置',
     'setting.platformJump': '定位平台',
     'setting.runtime': '运行状态与其他操作',
@@ -1015,6 +1036,7 @@ const TRANSLATIONS = {
     'label.port': '监听端口 (Port)',
     'btn.save': '保存并应用配置',
     'btn.refreshCatalog': '刷新模型目录',
+    'btn.viewCatalog': '查看模型',
     'status.saving': '保存中…',
     'status.saveOk': '配置保存并应用成功！',
     'status.saveFail': '保存失败: ',
@@ -1038,6 +1060,8 @@ const TRANSLATIONS = {
     'btn.testModel': '测试模型',
     'test.title': '快速模型测试',
     'test.selectModel': '选择模型...',
+    'test.platform': '平台',
+    'test.noModels': '该平台没有可用模型',
     'test.send': '发送',
     'test.promptPlaceholder': '输入测试提示词...',
     'test.latency': '延迟：',
@@ -1966,9 +1990,9 @@ const MODEL_DISTRIBUTION_LIMIT = 5;
 function startPolling() {
   refreshAll();
   // The observed-channel list is derived from the same rows the history table
-  // shows, so it is fetched alongside the first load rather than on the 3s
-  // loop: a new channel appears when the gateway first serves one, which is
-  // not a change worth re-querying every three seconds.
+  // shows, so it is read here as well as on every history refresh: the table's
+  // poll is what notices the gateway first routing to a new channel. This first
+  // call covers the case where the history tab is not the one being viewed.
   syncChannelFilter();
   PerfModule.init();
   PerfModule.refresh();
@@ -2324,15 +2348,31 @@ function setChannelFilterVisible(visible) {
   if (wrapper) wrapper.hidden = !visible;
 }
 
+// The options last rendered, and the platform they belong to. The history tab
+// polls every three seconds while a channel only appears when the gateway first
+// routes to it, so the poll has to re-read this list - but rebuilding the same
+// options every time would reset the CustomSelect label and churn the DOM for an
+// answer that did not change.
+let channelFilterProvider = '';
+let renderedChannelOptions = '';
+// The platform can change while a lookup is in flight, and its answer then
+// describes the platform that was just left. Only the newest lookup may render.
+let channelSyncSeq = 0;
+
 async function syncChannelFilter() {
   const select = document.getElementById('channel-filter');
   if (!select) return;
+  const seq = ++channelSyncSeq;
   const provider = document.getElementById('provider-filter')?.value.trim() || '';
+  if (provider !== channelFilterProvider) {
+    // Withdrawn before the request: the platform has already changed, so a
+    // channel left in place would be sent with the query that follows.
+    channelFilterProvider = provider;
+    renderedChannelOptions = '';
+    select.value = '';
+    setChannelFilterVisible(false);
+  }
   const chosen = select.value;
-  // Withdrawn before the request: the platform has already changed, so a
-  // channel left in place would be sent with the query that follows.
-  setChannelFilterVisible(false);
-  select.value = '';
   // A concrete platform is required. The question the filter answers is "which
   // upstream channel served this platform's traffic", and with no platform
   // chosen there is no such platform - the rows behind "all platforms" mostly
@@ -2341,13 +2381,28 @@ async function syncChannelFilter() {
   if (!provider) return;
   try {
     const r = await fetch(`/api/history/channels?provider=${encodeURIComponent(provider)}`);
+    if (seq !== channelSyncSeq) return;
     if (!r.ok) return;
     const data = await r.json();
+    if (seq !== channelSyncSeq) return;
     const channels = Array.isArray(data.channels) ? data.channels : [];
-    if (!channels.length) return;
+    // A platform whose rows were deleted offers nothing. Withdrawn rather than
+    // left showing options that would each return an empty page.
+    if (!channels.length) {
+      renderedChannelOptions = '';
+      select.value = '';
+      setChannelFilterVisible(false);
+      return;
+    }
+    // The translated "all channels" label is part of the key so a language
+    // switch still rebuilds, as it must: the labels are translated text.
+    const key = [provider, t('filter.allChannels'), ...channels].join('\x1f');
+    if (key === renderedChannelOptions) return;
+    renderedChannelOptions = key;
     // Built from createElement rather than the Option constructor, matching how
-    // CustomSelect renders its own list, and rebuilt on every sync so a
-    // language switch or a platform change cannot accumulate stale options.
+    // CustomSelect renders its own list, and rebuilt whenever the set changes
+    // so neither a newly observed channel nor a language switch leaves stale
+    // options behind.
     const option = (label, value) => {
       const item = document.createElement('option');
       item.value = value;
@@ -2399,6 +2454,11 @@ function syncAdvancedFilters(reveal = true) {
 async function refreshHistory() {
   window.HistoryDateRange?.syncLabel();
   syncAdvancedFilters(false);
+  // The filter's options are the channels this history recorded, so they gain a
+  // value the moment the gateway routes to a new one - which the table's own
+  // poll is the first place to notice. Left out of the poll, a newly observed
+  // channel stayed invisible until the page was reloaded.
+  syncChannelFilter();
   const seq = ++historyLoadSeq;
   const errorEl = document.getElementById('history-error');
   try {
@@ -2734,15 +2794,20 @@ async function refreshCatalogAge() {
 }
 
 async function refreshCatalog() {
-  const btn = document.getElementById('btn-refresh-catalog');
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = currentLang === 'zh' ? '同步中…' : 'Syncing…';
-  }
+  const buttons = ['btn-refresh-catalog', 'btn-catalog-resync']
+    .map(id => document.getElementById(id))
+    .filter(Boolean);
+  const labels = buttons.map(b => b.textContent);
+  buttons.forEach(b => { b.disabled = true; });
+  buttons.forEach(b => { b.textContent = t('catalog.syncing'); });
   try {
     const r = await fetch('/api/catalog/sync', { method: 'POST' });
     if (r.ok) {
       await refreshCatalogAge();
+      // The model browser is showing the previous catalog, so a successful
+      // sync has to refresh what is on screen - otherwise the one place an
+      // operator looks to confirm the sync still shows the old set.
+      CatalogModule.load(true);
       toast(t('toast.catalogSynced'), 'success');
     } else {
       const txt = await r.text();
@@ -2753,12 +2818,141 @@ async function refreshCatalog() {
     console.error('Catalog refresh network error:', e);
     toast(t('toast.catalogNetworkError'), 'error');
   } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = t('btn.refreshCatalog');
-    }
+    buttons.forEach((b, i) => { b.disabled = false; b.textContent = labels[i]; });
   }
 }
+
+/* ── Model catalog browser ───────────────────────────────────── */
+// Shows what this instance can actually send to, grouped by platform. It reads
+// /api/catalog/models, which answers from the proxy's own /v1/models listing:
+// that applies the active-site scope and each platform's live roster, so the
+// browser never advertises a model that would fail on use.
+const CatalogModule = {
+  models: [],
+  scope: '',
+
+  init() {
+    document.getElementById('btn-view-catalog')?.addEventListener('click', () => this.open());
+    document.getElementById('catalog-modal-close')?.addEventListener('click', () => this.close());
+    document.getElementById('catalog-modal')?.addEventListener('click', e => {
+      if (e.target === document.getElementById('catalog-modal')) this.close();
+    });
+    document.getElementById('catalog-platform-filter')?.addEventListener('change', () => this.render());
+    document.getElementById('catalog-search')?.addEventListener('input', () => this.render());
+    document.getElementById('btn-catalog-resync')?.addEventListener('click', () => refreshCatalog());
+  },
+
+  async open() {
+    document.getElementById('catalog-modal')?.classList.add('visible');
+    await refreshCatalogAge();
+    await this.load();
+  },
+
+  close() {
+    document.getElementById('catalog-modal')?.classList.remove('visible');
+  },
+
+  async load(force = false) {
+    if (this.models.length && !force) this.render();
+    try {
+      const r = await fetch('/api/catalog/models');
+      // A failed lookup is not an empty one. Without this check the error body
+      // has no `models`, the list renders as "no models match", and the reader
+      // is told this instance serves nothing rather than that the lookup broke.
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      this.models = Array.isArray(data.models) ? data.models : [];
+      this.scope = data.scope || '';
+      this.renderPlatforms();
+      this.render();
+    } catch (e) {
+      const list = document.getElementById('catalog-model-list');
+      if (list) list.innerHTML = `<div class="catalog-empty">${escapeHtml(t('catalog.loadFailed'))}</div>`;
+    }
+  },
+
+  renderPlatforms() {
+    const select = document.getElementById('catalog-platform-filter');
+    if (!select) return;
+    const providers = [...new Set(this.models.map(m => m.provider).filter(Boolean))]
+      .sort(compareProviderDisplay);
+    const previous = select.value;
+    const option = (label, value) => {
+      const item = document.createElement('option');
+      item.value = value;
+      item.textContent = label;
+      return item;
+    };
+    select.replaceChildren(option(t('filter.allProviders'), ''),
+      ...providers.map(p => option(`${platformLabel(p)} (${this.models.filter(m => m.provider === p).length})`, p)));
+    select.value = providers.includes(previous) ? previous : '';
+    window.CustomSelect?.sync(select);
+  },
+
+  render() {
+    const list = document.getElementById('catalog-model-list');
+    if (!list) return;
+    const platform = document.getElementById('catalog-platform-filter')?.value || '';
+    const term = (document.getElementById('catalog-search')?.value || '').trim().toLowerCase();
+    const shown = this.models.filter(m =>
+      (!platform || m.provider === platform) &&
+      (!term || m.id.toLowerCase().includes(term) || (m.name || '').toLowerCase().includes(term)));
+
+    const subtitle = document.getElementById('catalog-modal-subtitle');
+    if (subtitle) {
+      const parts = [t('catalog.count').replace('{n}', shown.length)];
+      if (this.scope) parts.push(t('catalog.scoped').replace('{site}', platformLabel(this.scope)));
+      if (shown.length !== this.models.length) parts.push(t('catalog.ofTotal').replace('{n}', this.models.length));
+      subtitle.textContent = parts.join(' · ');
+    }
+
+    if (!shown.length) {
+      list.innerHTML = `<div class="catalog-empty">${escapeHtml(t('catalog.empty'))}</div>`;
+      return;
+    }
+
+    // Grouped by platform so the answer to "what can this platform serve" is
+    // one block rather than a filtered flat list the reader has to reassemble.
+    const groups = new Map();
+    shown.forEach(m => {
+      if (!groups.has(m.provider)) groups.set(m.provider, []);
+      groups.get(m.provider).push(m);
+    });
+    const ordered = [...groups.keys()].sort(compareProviderDisplay);
+
+    list.innerHTML = ordered.map(provider => {
+      const rows = groups.get(provider)
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map(m => {
+          const badges = [];
+          if (m.context_window) badges.push(`${Math.round(m.context_window / 1000)}K ctx`);
+          if (m.max_output) badges.push(`${Math.round(m.max_output / 1000)}K out`);
+          if (m.input_per_m || m.output_per_m) badges.push(`$${m.input_per_m} / $${m.output_per_m}`);
+          if (m.tool_call) badges.push('tools');
+          if (m.vision) badges.push('vision');
+          if (m.reasoning) badges.push('reasoning');
+          if (m.routes_to) badges.push(`\u2192 ${m.routes_to}`);
+          const name = m.name && m.name !== m.id ? `<div class="catalog-model-name">${escapeHtml(m.name)}</div>` : '';
+          return `<div class="catalog-model-row">
+            <div class="catalog-model-main">
+              <code class="catalog-model-id" title="${escapeHtml(m.id)}">${escapeHtml(m.id)}</code>
+              ${name}
+            </div>
+            <div class="catalog-model-badges">${badges.map(b => `<span class="catalog-badge">${escapeHtml(b)}</span>`).join('')}</div>
+          </div>`;
+        }).join('');
+      const info = providerInfo(provider);
+      return `<section class="catalog-group">
+        <header class="catalog-group-head">
+          <span class="catalog-dot" style="background:${info?.color || 'var(--ui-cyan)'}"></span>
+          <span class="catalog-group-name">${escapeHtml(platformLabel(provider))}</span>
+          <span class="catalog-group-count">${groups.get(provider).length}</span>
+        </header>
+        ${rows}
+      </section>`;
+    }).join('');
+  },
+};
 
 /* ── Toggle actions ────────────────────────────────────────────── */
 async function toggleProxy(el) {
@@ -5092,17 +5286,29 @@ const btnHistNext = document.getElementById('btn-history-next');
 if (btnHistPrev) btnHistPrev.addEventListener('click', () => historyGoToPage(historyPage - 1));
 if (btnHistNext) btnHistNext.addEventListener('click', () => historyGoToPage(historyPage + 1));
 
+/* ── Quick model test ────────────────────────────────────────── */
+// The platform's display name, falling back to the raw id for a platform the
+// dashboard carries no label for.
+function platformLabel(provider) {
+  return providerInfo(provider)?.name || provider || '';
+}
+
 const TestModule = {
   testModal: null,
   testPrompt: null,
   testResponse: null,
   testModelSelect: null,
+  testProviderSelect: null,
   testLatency: null,
   testTokens: null,
   testSendBtn: null,
   testCopyBtn: null,
   testModalClose: null,
   testHistoryHint: null,
+  // Every model the proxy can actually send to, as /api/catalog/models reports
+  // it. Held here so switching platform re-filters locally instead of
+  // refetching a listing that has not changed.
+  catalogModels: [],
 
   STORAGE_KEY: 'routatic-test-prompt-history',
   MAX_HISTORY: 5,
@@ -5112,6 +5318,7 @@ const TestModule = {
     this.testPrompt = document.getElementById('test-prompt');
     this.testResponse = document.getElementById('test-response');
     this.testModelSelect = document.getElementById('test-model');
+    this.testProviderSelect = document.getElementById('test-provider');
     this.testLatency = document.getElementById('test-latency');
     this.testTokens = document.getElementById('test-tokens');
     this.testSendBtn = document.getElementById('btn-test-send');
@@ -5126,6 +5333,9 @@ const TestModule = {
     });
     this.testSendBtn?.addEventListener('click', () => this.sendTest());
     this.testCopyBtn?.addEventListener('click', () => this.copyResponse());
+    // The platform narrows the model list; both are plain selects so a change
+    // is all the wiring needed.
+    this.testProviderSelect?.addEventListener('change', () => this.renderModels());
     this.testPrompt?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
@@ -5151,24 +5361,77 @@ const TestModule = {
 
   async populateModels() {
     if (!this.testModelSelect) return;
-    this.testModelSelect.innerHTML = '<option value="">Select a model...</option>';
 
+    // The candidate list is what the proxy can actually send to, not the config
+    // file's routing aliases. Those aliases name scenarios or a client-side
+    // model string, and on an instance whose routing points every scenario at
+    // one platform the old list offered nothing but that platform's models -
+    // with no way to test anything else. /api/catalog/models answers from the
+    // same listing /v1/models publishes, which already applies the active-site
+    // scope and the platforms' own rosters.
     try {
-      const r = await fetch('/api/proxy/config');
-      if (!r.ok) return;
+      const r = await fetch('/api/catalog/models');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
-      // Only collect model_overrides and model_family_overrides — the
-      // top-level "models" keys are routing scenarios (fast, default,
-      // long_context, etc.), not real model IDs.
-      const targets = {...data.model_family_overrides, ...data.model_overrides};
-      Object.keys(targets).sort((a, b) => compareProviderDisplay(targets[a].provider || 'opencode-go', targets[b].provider || 'opencode-go')
-        || a.localeCompare(b)).forEach(id => {
-        const opt = document.createElement('option');
-        opt.value = id;
-        opt.textContent = `${id} · ${configModelKey(targets[id])}`;
-        this.testModelSelect.appendChild(opt);
-      });
-    } catch (e) {}
+      this.catalogModels = Array.isArray(data.models) ? data.models : [];
+    } catch (_) {
+      this.catalogModels = [];
+    }
+    this.renderPlatforms();
+    this.renderModels();
+  },
+
+  // The platform list is derived from the models actually present, so it never
+  // offers a platform with nothing to test.
+  renderPlatforms() {
+    const select = this.testProviderSelect;
+    if (!select) return;
+    const providers = [...new Set(this.catalogModels.map(m => m.provider).filter(Boolean))]
+      .sort(compareProviderDisplay);
+    const previous = select.value;
+    const option = (label, value) => {
+      const item = document.createElement('option');
+      item.value = value;
+      item.textContent = label;
+      return item;
+    };
+    select.replaceChildren(option(t('filter.allProviders'), ''), ...providers.map(p => option(platformLabel(p), p)));    select.value = providers.includes(previous) ? previous : '';
+    window.CustomSelect?.sync(select);
+  },
+
+  renderModels() {
+    const select = this.testModelSelect;
+    if (!select) return;
+    const provider = this.testProviderSelect?.value || '';
+    const previous = select.value;
+    const models = this.catalogModels
+      .filter(m => !provider || m.provider === provider)
+      .sort((a, b) => compareProviderDisplay(a.provider, b.provider) || a.id.localeCompare(b.id));
+
+    const option = (label, value) => {
+      const item = document.createElement('option');
+      item.value = value;
+      item.textContent = label;
+      return item;
+    };
+    if (!models.length) {
+      select.replaceChildren(option(t('test.noModels'), ''));
+      window.CustomSelect?.sync(select);
+      return;
+    }
+    // The id is what gets sent, so it leads; the platform and the two facts an
+    // operator checks before spending a request follow it.
+    select.replaceChildren(option(t('test.selectModel'), ''), ...models.map(m => {
+      const facts = [platformLabel(m.provider)];
+      if (m.context_window) facts.push(`${Math.round(m.context_window / 1000)}K ctx`);
+      if (m.input_per_m || m.output_per_m) facts.push(`$${m.input_per_m}/$${m.output_per_m}`);
+      // An alias resolves to a model, so name the target instead of leaving the
+      // row looking like a model whose details failed to load.
+      if (m.routes_to) facts.push(`→ ${m.routes_to}`);
+      return option(`${m.id} · ${facts.join(' · ')}`, m.id);
+    }));
+    select.value = models.some(m => m.id === previous) ? previous : '';
+    window.CustomSelect?.sync(select);
   },
 
   resetResponse() {
@@ -5308,7 +5571,10 @@ const TestModule = {
   }
 };
 
-document.addEventListener('DOMContentLoaded', () => TestModule.init());
+document.addEventListener('DOMContentLoaded', () => {
+  TestModule.init();
+  CatalogModule.init();
+});
 
 /* ── Analytics Tab (minimal, vanilla JS + SVG/CSS) ─────────────── */
 const AnalyticsModule = {

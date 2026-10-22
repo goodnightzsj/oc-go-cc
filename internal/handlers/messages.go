@@ -558,7 +558,16 @@ func (h *MessagesHandler) buildModelChain(
 		// site: falling back to another platform is what the scope exists to
 		// prevent.
 		fallbacks, _ := h.routeOnce(routerMessages, tokenCount, "", isStreaming)
-		net := router.RestrictToActiveSite(h.modelRouter.ActiveSite(), fallbacks.GetModelChain())
+		configured := fallbacks.GetModelChain()
+		net := router.RestrictToActiveSite(h.modelRouter.ActiveSite(), configured)
+		if len(configured) > 0 && len(net) == 0 {
+			// Configured but unreachable. Without this the operator sees a chain
+			// in the dashboard and no fallback in practice, with nothing saying
+			// why: the active site scopes routing, and every configured fallback
+			// belonged to another platform.
+			h.logger.Warn("configured fallbacks are outside the active site and cannot be used",
+				"active_site", h.modelRouter.ActiveSite(), "configured", len(configured))
+		}
 		result = router.RouteResult{Primary: primary, Scenario: router.ScenarioOverride}
 		chain = appendUniqueModels([]config.ModelConfig{primary}, net)
 	} else if requestedModel != "" {

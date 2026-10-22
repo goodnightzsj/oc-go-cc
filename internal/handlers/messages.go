@@ -535,6 +535,30 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 //     as the primary and append the scenario chain as a deduplicated safety net.
 //     Exact overrides win over family matches.
 //  2. Otherwise, fall through to scenario-based routing via routeOnce.
+//
+// keepUsableFallbacks drops a fallback whose platform holds no credential.
+//
+// A cross-platform fallback is only a plan if this instance can actually reach
+// that platform. Keeping a keyless entry would produce a chain that reads as
+// protected and fails on the attempt that needed it, which is the same silent
+// gap the fallback feature is supposed to close.
+func (h *MessagesHandler) keepUsableFallbacks(fallbacks []config.ModelConfig) []config.ModelConfig {
+	if len(fallbacks) == 0 {
+		return fallbacks
+	}
+	cfg := h.modelRouter.Config()
+	out := make([]config.ModelConfig, 0, len(fallbacks))
+	for _, target := range fallbacks {
+		if len(cfg.ProviderAPIKeys(client.Provider(target))) == 0 {
+			h.logger.Info("fallback skipped: platform has no credential",
+				"model", target.ModelID, "provider", client.Provider(target))
+			continue
+		}
+		out = append(out, target)
+	}
+	return out
+}
+
 func (h *MessagesHandler) buildModelChain(
 	ctx context.Context,
 	requestedModel string,
@@ -603,15 +627,23 @@ func (h *MessagesHandler) buildModelChain(
 		h.logger.Info("model skipped by capacity filter", "model", s.ModelID, "reason", s.Reason)
 	}
 
-	// The active site scopes the chain rather than reordering it. An empty
-	// result is the operator's configuration not covering the selected site,
-	// and it is reported as such instead of routing to a platform they did not
-	// choose.
+	// The primary is scoped to the active site: sending the request to another
+	// platform by default would not be a fallback, it would be a different
+	// decision than the one the operator made. Fallbacks are not scoped - a
+	// plan for "this platform cannot answer" that is limited to this platform
+	// cannot do its job. Same-platform entries stay ahead of cross-platform
+	// ones, so quota already paid for is spent first.
 	if active := h.modelRouter.ActiveSite(); active != "" {
-		decision.Models = router.RestrictToActiveSite(active, decision.Models)
 		if len(decision.Models) == 0 {
 			return nil, result, fmt.Errorf("%w: active site %q has no routing target for this request; configure a model for it or switch the site", router.ErrWithinSiteNoTarget, active)
 		}
+		primary := decision.Models[0]
+		if client.Provider(primary) != active {
+			return nil, result, fmt.Errorf("%w: active site %q has no routing target for this request; the resolved primary belongs to %q", router.ErrWithinSiteNoTarget, active, client.Provider(primary))
+		}
+		fallbacks := h.keepUsableFallbacks(decision.Models[1:])
+		_, ordered := router.SplitPrimaryAndFallbacks(active, primary, fallbacks)
+		decision.Models = append([]config.ModelConfig{primary}, ordered...)
 	}
 
 	return decision.Models, result, nil
@@ -874,6 +906,20 @@ func (h *MessagesHandler) handleStreaming(
 					return false // abort
 				}
 				return true // continue to next model
+			}
+			// A rejected request is not a failing model. Every model in the chain
+			// would refuse it identically, so the answer goes back to the client
+			// now instead of costing quota on each remaining platform.
+			if router.IsNonRetryableRequestError(err) {
+				h.logger.Warn("request rejected as invalid, not falling back",
+					"model", model.ModelID, "error", err)
+				lastStreamErr = err
+				if rw.ssePayloadWritten {
+					h.sendStreamError(rw, streamFailureMessage(err))
+					recordStreamFailure(model, err, action, true)
+					return false
+				}
+				return false
 			}
 			h.logger.Warn(action+" streaming failed", "model", model.ModelID, "error", err)
 			if rw.ssePayloadWritten {

@@ -737,6 +737,13 @@ func isVisionScenario(s Scenario) bool {
 // ActiveSite is the platform routing is restricted to, or "" when the config
 // does not restrict it. An unrestricted config behaves exactly as it did before
 // this field existed: every configured target stays a candidate.
+// Config returns the live configuration. Callers that need to reason about a
+// platform's credentials - whether a cross-platform fallback is reachable at
+// all - ask here rather than keeping a second copy of the config.
+func (r *ModelRouter) Config() *config.Config {
+	return r.atomic.Get()
+}
+
 func (r *ModelRouter) ActiveSite() string {
 	return r.atomic.Get().ActiveSite
 }
@@ -889,4 +896,38 @@ func RestrictToActiveSite(active string, chain []config.ModelConfig) []config.Mo
 		}
 	}
 	return out
+}
+
+// SplitPrimaryAndFallbacks applies the active site to the roles differently,
+// because they mean different things.
+//
+// The primary is where the request goes by default: the operator chose this
+// platform, and silently sending their traffic elsewhere is not a fallback, it
+// is a different decision. It stays scoped.
+//
+// A fallback is a plan for the case where the primary cannot answer. Restricting
+// it to the same platform defeats the purpose: when the subscription itself is
+// rate-limited or down, a second model on that subscription fails the same way.
+// An operator who configured a fallback on another platform, and holds a
+// credential for it, has already made that decision - so it is kept.
+//
+// Same-platform fallbacks stay first: quota already paid for should be spent
+// before reaching into another account, and only then the cross-platform ones.
+func SplitPrimaryAndFallbacks(active string, primary config.ModelConfig, fallbacks []config.ModelConfig) (config.ModelConfig, []config.ModelConfig) {
+	if active == "" {
+		return primary, fallbacks
+	}
+	samePlatform := make([]config.ModelConfig, 0, len(fallbacks))
+	crossPlatform := make([]config.ModelConfig, 0, len(fallbacks))
+	for _, target := range fallbacks {
+		if config.ModelKey(target) == config.ModelKey(primary) {
+			continue
+		}
+		if client.Provider(target) == active {
+			samePlatform = append(samePlatform, target)
+			continue
+		}
+		crossPlatform = append(crossPlatform, target)
+	}
+	return primary, append(samePlatform, crossPlatform...)
 }

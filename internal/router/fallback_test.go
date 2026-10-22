@@ -74,24 +74,26 @@ func TestExecuteWithFallback_NonRetryableDoesNotOpenCircuit(t *testing.T) {
 		models,
 		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
 			attempts++
-			// Non-retryable 400 error — should NOT open circuit breaker
+			// A 400 says the request is wrong. Every model would refuse it the
+			// same way, so the chain stops here instead of spending the second
+			// platform's quota on a known outcome.
 			return nil, &client.APIError{StatusCode: 400, Body: "bad request"}
 		},
 	)
 
 	if err == nil {
-		t.Fatal("expected all models to fail")
+		t.Fatal("expected the error to reach the client")
 	}
 
-	// Circuit breaker should still be closed since errors were non-retryable
+	// Circuit breaker should still be closed: a caller's bad request says
+	// nothing about the model.
 	cb := h.getCircuitBreaker("opencode-go/model-a")
 	if cb.State() != CircuitClosed {
-		t.Errorf("model-a circuit should be closed after non-retryable errors, got %v", cb.State())
+		t.Errorf("model-a circuit should be closed after a rejection, got %v", cb.State())
 	}
 
-	// All models were tried
-	if attempts != 2 {
-		t.Errorf("expected 2 attempts, got %d", attempts)
+	if attempts != 1 {
+		t.Errorf("attempted %d models; a rejected request must not fall back", attempts)
 	}
 }
 
@@ -138,28 +140,28 @@ func TestExecuteWithFallback_NonRetryableThenRetryable(t *testing.T) {
 		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
 			callCount++
 			if callCount == 1 {
-				// Non-retryable: model-a should NOT get circuit opened
-				return nil, &client.APIError{StatusCode: 400, Body: "bad request"}
+				// A 5xx is about this attempt, so the chain moves on.
+				return nil, &client.APIError{StatusCode: 500, Body: "internal error"}
 			}
-			// Retryable: model-b should get circuit opened
-			return nil, &client.APIError{StatusCode: 500, Body: "internal error"}
+			// A 400 is about the request, so the chain stops on model-b.
+			return nil, &client.APIError{StatusCode: 400, Body: "bad request"}
 		},
 	)
 
 	if err == nil {
-		t.Fatal("expected all models to fail")
+		t.Fatal("expected the error to reach the client")
 	}
 
-	// model-a circuit should be closed (non-retryable)
+	// model-a earned a failure: the upstream itself broke.
 	cbA := h.getCircuitBreaker("opencode-go/model-a")
-	if cbA.State() != CircuitClosed {
-		t.Errorf("model-a circuit should be closed after non-retryable error, got %v", cbA.State())
+	if cbA.State() != CircuitOpen {
+		t.Errorf("model-a circuit should be open after a 5xx, got %v", cbA.State())
 	}
 
-	// model-b circuit should be open (retryable)
+	// model-b must not be blamed for a request it was told to reject.
 	cbB := h.getCircuitBreaker("opencode-go/model-b")
-	if cbB.State() != CircuitOpen {
-		t.Errorf("model-b circuit should be open after retryable error, got %v", cbB.State())
+	if cbB.State() != CircuitClosed {
+		t.Errorf("model-b circuit should stay closed after a rejection, got %v", cbB.State())
 	}
 }
 

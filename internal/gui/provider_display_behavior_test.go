@@ -57,11 +57,41 @@ async function checks() {
   assert.equal(JSON.stringify(FallbackModule.chains),chainBefore,'configured fallback order must not change');
   assert.equal(JSON.stringify(FallbackModule.availableModels),modelsBefore,'picker sorting must not mutate model source');
 
-  const targets = Object.fromEntries(shuffled.map(provider=>['alias-'+provider,{provider,model_id:'model'}]));
-  fetch = async()=>({ok:true,json:async()=>({model_overrides:targets})});
+  // The quick-test picker lists what the proxy can actually send to, not the
+  // routing aliases: on an instance whose scenarios all point at one platform,
+  // the alias list offered nothing else to test. It groups by platform, so the
+  // platform selector and the model list must agree with the served roster.
+  const served = [
+    ...shuffled.filter(p=>all.includes(p)).map((provider,index)=>({id:'m'+index, provider, context_window:128000, input_per_m:1, output_per_m:2})),
+    {id:'a-custom/m', provider:'a-custom'},
+    {id:'z-custom/m', provider:'z-custom'},
+  ];
+  fetch = async raw => String(raw).includes('/api/catalog/models')
+    ? {ok:true,json:async()=>({models:served, scope:'', total:served.length})}
+    : {ok:true,json:async()=>({model_overrides:targets})};
   TestModule.testModelSelect = document.getElementById('test-model');
+  TestModule.testProviderSelect = document.getElementById('test-provider');
   await TestModule.populateModels();
-  equal(TestModule.testModelSelect.children.map(option=>option.value),[...all,'a-custom','z-custom'].map(provider=>'alias-'+provider),'test model picker');
+  equal(TestModule.testProviderSelect.children.map(option=>option.value),['',...all,'a-custom','z-custom'],'test platform picker');
+  // Ordered by platform display order, then by id - the same rule the picker
+  // states, recomputed here rather than hard-coded so a fixture change does not
+  // silently weaken the assertion.
+  const expectedModelOrder = [...served]
+    .sort((a,b)=>compareProviderDisplay(a.provider,b.provider)||a.id.localeCompare(b.id))
+    .map(m=>m.id);
+  equal(TestModule.testModelSelect.children.map(option=>option.value),['',...expectedModelOrder],'test model picker offers every served model');
+  assert.ok(TestModule.testModelSelect.children.length > 2,
+    'the picker must not collapse to a single platform: this fixture serves several');
+
+  // Narrowing to one platform re-filters the model list to that platform alone.
+  TestModule.testProviderSelect.value = 'cline-pass';
+  TestModule.renderModels();
+  const clineOnly = TestModule.testModelSelect.children.map(option=>option.value).filter(Boolean);
+  assert.ok(clineOnly.length > 0, 'the selected platform must keep its own models');
+  for (const id of clineOnly) {
+    const model = served.find(m=>m.id===id);
+    assert.equal(model.provider,'cline-pass','a platform filter must not leak another platform\'s model: '+id);
+  }
   assert.equal(JSON.stringify(FallbackModule.chains),chainBefore);
 }
 ` + platformBehaviorRunScript

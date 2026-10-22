@@ -79,6 +79,7 @@ func (p *ClinePassProvider) Execute(ctx context.Context, req *types.MessageReque
 	// last metadata frame, so it does not exist before the stream ends.
 	channel := client.UpstreamChannelOf(body)
 	upstreamModel := client.UpstreamModelOf(body)
+	usedKey := client.KeyHintOf(body)
 	// Name the model the gateway ran, not the one asked for. A gateway may
 	// answer one id by running another behind its own fallback chain, and the
 	// caller reading `model` from the response would otherwise be told a model
@@ -104,7 +105,7 @@ func (p *ClinePassProvider) Execute(ctx context.Context, req *types.MessageReque
 		return nil, fmt.Errorf("convert cline-pass response: %w", err)
 	}
 	raw, err := json.Marshal(converted)
-	return &core.ExecuteResult{Body: raw, UpstreamChannel: channel, UpstreamModel: upstreamModel}, err
+	return &core.ExecuteResult{Body: raw, UpstreamChannel: channel, UpstreamModel: upstreamModel, KeyHint: usedKey}, err
 }
 
 func (p *ClinePassProvider) Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
@@ -163,6 +164,16 @@ func (c *cancelOnClose) Close() error {
 func (c *cancelOnClose) ServedModel() string {
 	if r, ok := c.ReadCloser.(interface{ ServedModel() string }); ok {
 		return r.ServedModel()
+	}
+	return ""
+}
+
+// KeyHint forwards the credential label for the same reason as the observations
+// above: embedding promotes Read and Close only, so a wrapper that omits this
+// erases it for everything downstream.
+func (c *cancelOnClose) KeyHint() string {
+	if r, ok := c.ReadCloser.(interface{ KeyHint() string }); ok {
+		return r.KeyHint()
 	}
 	return ""
 }
@@ -293,7 +304,9 @@ func (p *ClinePassProvider) send(ctx context.Context, cfg *config.Config, sel *s
 	if cfg.ClinePass.ChannelPinEnabled {
 		target = cfg.ClinePass.ChannelPin
 	}
-	resp.Body = newClineChannelBody(resp.Body, target, rid(ctx))
+	observed := newClineChannelBody(resp.Body, target, rid(ctx))
+	observed.keyHint = sel.KeyHint()
+	resp.Body = observed
 	if p.capture != nil {
 		return client.CaptureBody(resp.Body, func(data []byte) {
 			p.capture.CaptureUpstreamResponse(rid(ctx), p.Name(), data)

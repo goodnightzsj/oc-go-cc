@@ -45,8 +45,9 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 			id, model, requested_model, provider, scenario, start_time, duration_ms,
 			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
 			cost_usd, cost_source, details_known, usage_trusted, streaming, success, error_msg, attempt,
-			peak_multiplier, upstream_channel, upstream_model, first_byte_ms, reasoning_effort
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			peak_multiplier, upstream_channel, upstream_model, first_byte_ms, reasoning_effort,
+			key_hint
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		rec.ID,
 		rec.Model,
@@ -70,6 +71,7 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 		nullIfEmpty(rec.UpstreamModel),
 		nullIfZero(int64(rec.FirstByte.Milliseconds())),
 		nullIfEmpty(rec.ReasoningEffort),
+		nullIfEmpty(rec.KeyHint),
 	)
 
 	return err
@@ -454,7 +456,8 @@ func (r *Requests) Query(q RequestQuery) ([]history.RequestRecord, int64, error)
 		SELECT id, model, requested_model, provider, scenario, start_time, duration_ms,
 		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
 		       cost_usd, cost_source, details_known, streaming, success, error_msg, attempt,
-		       peak_multiplier, upstream_channel, upstream_model, first_byte_ms, reasoning_effort
+		       peak_multiplier, upstream_channel, upstream_model, first_byte_ms, reasoning_effort,
+		       key_hint
 		FROM requests`+where+`
 		ORDER BY `+orderBy+`
 		LIMIT ? OFFSET ?
@@ -702,7 +705,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		var provider, scenario, requestedModel sql.NullString
 		var upstreamChannel, upstreamModel sql.NullString
 		var firstByteMS sql.NullInt64
-		var reasoningEffort sql.NullString
+		var reasoningEffort, keyHint sql.NullString
 		var peakMul float64
 		err := rows.Scan(
 			&rec.ID,
@@ -728,6 +731,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 			&upstreamModel,
 			&firstByteMS,
 			&reasoningEffort,
+			&keyHint,
 		)
 		if err != nil {
 			return nil, err
@@ -739,6 +743,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		rec.UpstreamModel = upstreamModel.String
 		rec.FirstByte = time.Duration(firstByteMS.Int64) * time.Millisecond
 		rec.ReasoningEffort = reasoningEffort.String
+		rec.KeyHint = keyHint.String
 		rec.PeakMultiplier = peakMul
 		if attempt.Valid {
 			rec.Attempt = int(attempt.Int64)

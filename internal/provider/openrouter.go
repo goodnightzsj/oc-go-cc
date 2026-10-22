@@ -52,7 +52,7 @@ func (p *OpenRouterProvider) Execute(ctx context.Context, req *types.MessageRequ
 		return nil, fmt.Errorf("response transform failed: %w", err)
 	}
 	raw, err = json.Marshal(converted)
-	return &core.ExecuteResult{Body: raw}, err
+	return &core.ExecuteResult{Body: raw, KeyHint: client.KeyHintOf(body)}, err
 }
 
 func (p *OpenRouterProvider) Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
@@ -118,5 +118,5 @@ func (p *OpenRouterProvider) request(ctx context.Context, req *types.MessageRequ
 			p.capture.CaptureUpstreamResponse(rid(ctx), p.Name(), data)
 		}), nil
 	}
-	return resp.Body, nil
+	return p.withKeyHint(resp.Body, sel), nil
 }

@@ -4,6 +4,7 @@ package provider
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -39,6 +40,29 @@ func newBaseProvider(atomic *config.AtomicConfig) baseProvider {
 		},
 		keys: newKeyPool(),
 	}
+}
+
+// keyHintBody labels a response body with the credential that carried it.
+//
+// The history record needs to say which account served a request. The handler
+// never sees the selection, so the label rides the body through the same
+// observation chain the channel and model already use. Wrapping here rather
+// than in each provider keeps one implementation: the alternative is six
+// copies that each have to remember to forward it.
+type keyHintBody struct {
+	io.ReadCloser
+	hint string
+}
+
+func (b *keyHintBody) KeyHint() string { return b.hint }
+
+// withKeyHint attaches sel's label to body. A nil body passes through so a
+// caller can wrap without checking.
+func (b *baseProvider) withKeyHint(body io.ReadCloser, sel *selection) io.ReadCloser {
+	if body == nil {
+		return nil
+	}
+	return &keyHintBody{ReadCloser: body, hint: sel.KeyHint()}
 }
 
 // doSelected records health at the shared HTTP boundary. Encoding and request

@@ -53,6 +53,9 @@ type ExecuteResult struct {
 	// no longer describes what produced the response. Empty when the platform
 	// does not publish it or reported the id we asked for.
 	UpstreamModel string
+	// KeyHint labels the credential that carried the request, masked to its last
+	// four characters. Empty when the platform does not use a key pool.
+	KeyHint string
 }
 
 // ResponsesStatusError retains a failed execution's reported usage across

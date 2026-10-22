@@ -54,6 +54,16 @@ func (t *captureReadCloser) ServedModel() string {
 	return ""
 }
 
+// KeyHint forwards the credential label for the same reason as the observations
+// above: embedding promotes Read and Close only, so a wrapper that omits this
+// erases it for everything downstream.
+func (t *captureReadCloser) KeyHint() string {
+	if r, ok := t.ReadCloser.(interface{ KeyHint() string }); ok {
+		return r.KeyHint()
+	}
+	return ""
+}
+
 // MarkFirstByte and FirstByteAt forward the first-byte observation. They are
 // here for the reason the methods above are: embedding promotes Read and Close
 // only, so a wrapper that forwards one observation and not the others erases
@@ -253,6 +263,19 @@ func FirstByteAtOf(body any) time.Time {
 		return time.Time{}
 	}
 	return reporter.FirstByteAt()
+}
+
+// KeyHintOf returns the masked label of the credential a stream body used, or
+// "" when the body does not report one.
+//
+// The history record needs to say which account carried a request, and this is
+// the only channel that reaches it: the handler never touches the selection.
+func KeyHintOf(body any) string {
+	reader, ok := body.(interface{ KeyHint() string })
+	if !ok {
+		return ""
+	}
+	return reader.KeyHint()
 }
 
 // ServedModelOf returns the model the upstream named in its first chunk, which

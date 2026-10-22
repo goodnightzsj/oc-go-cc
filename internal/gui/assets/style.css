@@ -1897,3 +1897,13 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
   letter-spacing: 0.01em;
   white-space: nowrap;
 }
+
+/* The credential that carried the request, masked to its last four characters.
+   Monospaced so equal-length labels line up column-wise, which is what makes a
+   change of account visible at a glance. */
+.history-key-hint {
+  font-family: var(--ui-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  color: var(--ui-text-secondary, #98989d);
+  white-space: nowrap;
+}

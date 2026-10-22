@@ -439,6 +439,9 @@ const TRANSLATIONS = {
     'th.cost': 'Cost',
     'th.effort': 'Effort',
     'th.effortHint': 'The reasoning level the client asked for. It records intent, not effect: an upstream that ignores the field answers the same way at every level.',
+    'th.keyHint': 'Key',
+    'th.keyHintTooltip': 'Which credential in the pool carried this request, masked to its last four characters. Two keys sharing those four characters show the same label.',
+    'detail.keyHint': 'API key',
     'th.firstByte': 'TTFT',
     'th.firstByteHint': 'Time from the request starting to the upstream sending its first byte. What the upstream controls, as opposed to the model thinking time included in Duration.',
     'th.duration': 'Duration',
@@ -1015,6 +1018,9 @@ const TRANSLATIONS = {
     'th.cost': '费用',
     'th.effort': '思考强度',
     'th.effortHint': '客户端请求的思考强度。记录的是意图而非效果：上游若忽略该字段，各档位回答完全一样。',
+    'th.keyHint': '密钥',
+    'th.keyHintTooltip': '本次请求实际使用的密钥（脱敏，仅保留末四位）。末四位相同的两把密钥会显示相同标签。',
+    'detail.keyHint': 'API 密钥',
     'th.firstByte': '首字节',
     'th.firstByteHint': '从请求开始到上游返回第一个字节的时间。这是上游可控的部分；Duration 里还包含模型思考时间。',
     'th.duration': '耗时',
@@ -2717,6 +2723,7 @@ function renderHistory() {
       <td><div class="history-status-stack">${detailsKnown ? `<span class="badge ${h.success ? 'badge-success' : 'badge-error'}" title="${h.success ? t('badge.success') : t('badge.fail')}">${h.success ? t('badge.success') : t('badge.fail')}</span>` : `<span class="badge badge-unknown" title="${t('detail.unknown')}">${t('detail.unknown')}</span>`}<small class="history-stream-state">${streamLabel}</small></div></td>
       <td><div class="history-model-cell"><strong title="${escapeHtml(servedModel)}">${escapeHtml(servedModel) || '—'}</strong><small>${escapeHtml(providerLabel(h.provider))}${channelMark}</small></div></td>
       <td>${h.reasoning_effort ? `<span class="badge badge-effort" title="${escapeHtml(t('th.effortHint'))}">${escapeHtml(h.reasoning_effort)}</span>` : '—'}</td>
+      <td>${h.key_hint ? `<code class="history-key-hint" title="${escapeHtml(t('th.keyHintTooltip'))}">${escapeHtml(h.key_hint)}</code>` : '—'}</td>
       <td><button type="button" class="history-token-trigger" data-token-id="${escapeHtml(rowId)}" aria-label="${t('detail.title')}">${totalTokens.toLocaleString()}</button><br><small>${tokenSplit}</small></td>
       <td>${cost}<br><small>${costSourceLabel(h.cost_source)}</small></td>
       <td>${h.first_byte_ms ? fmtDuration(h.first_byte_ms) : '—'}</td>
@@ -3059,6 +3066,7 @@ const HISTORY_CSV_COLUMNS = [
   ['cost_source', r => r.cost_source],
   ['details_known', r => historyHasDetails(r)],
   ['reasoning_effort', r => r.reasoning_effort || ''],
+  ['key_hint', r => r.key_hint || ''],
   ['first_byte_ms', r => r.first_byte_ms || null],
   ['duration_ms', r => historyHasDetails(r) ? r.duration_ms : null],
   ['streaming', r => historyHasDetails(r) ? r.streaming : null],
@@ -4651,6 +4659,7 @@ function showHistoryDetail(record) {
       ${record.upstream_channel ? `<div class="detail-row"><span class="detail-label">${t('detail.upstreamChannel')}</span><span class="detail-value">${escapeHtml(record.upstream_channel)}</span></div>` : ''}
       ${record.upstream_model ? `<div class="detail-row"><span class="detail-label">${t('detail.upstreamModel')}</span><span class="detail-value">${escapeHtml(record.upstream_model)}</span></div>` : ''}
       ${record.reasoning_effort ? `<div class="detail-row"><span class="detail-label">${t('detail.effort')}</span><span class="detail-value" title="${escapeHtml(t('th.effortHint'))}">${escapeHtml(record.reasoning_effort)}</span></div>` : ''}
+      ${record.key_hint ? `<div class="detail-row"><span class="detail-label">${t('detail.keyHint')}</span><span class="detail-value" title="${escapeHtml(t('th.keyHintTooltip'))}"><code>${escapeHtml(record.key_hint)}</code></span></div>` : ''}
       ${record.first_byte_ms ? `<div class="detail-row"><span class="detail-label">${t('detail.firstByte')}</span><span class="detail-value">${fmtDuration(record.first_byte_ms)}</span></div>` : ''}
       <div class="detail-row"><span class="detail-label">${t('detail.attempt')}</span><span class="detail-value">${detailsKnown ? (record.attempt || 1) : t('detail.unavailable')}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.duration')}</span><span class="detail-value">${detailsKnown ? gradeDuration(record, fmtDuration(record.duration_ms)) : t('detail.unavailable')}</span></div>

@@ -40,6 +40,16 @@ func (p *peekedBody) ServedModel() string {
 	return ""
 }
 
+// KeyHint forwards the credential label for the same reason as the observations
+// above: embedding promotes Read and Close only, so a wrapper that omits this
+// erases it for everything downstream.
+func (p *peekedBody) KeyHint() string {
+	if r, ok := p.ReadCloser.(interface{ KeyHint() string }); ok {
+		return r.KeyHint()
+	}
+	return ""
+}
+
 func (p *peekedBody) UpstreamChannel() string {
 	if reporter, ok := p.ReadCloser.(interface{ UpstreamChannel() string }); ok {
 		return reporter.UpstreamChannel()

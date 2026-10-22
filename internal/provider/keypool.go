@@ -91,6 +91,20 @@ type selection struct {
 	done bool
 }
 
+// KeyHint labels the reserved credential for the history record: the last four
+// characters behind a mask, so the column can say which account served a
+// request without the database ever holding a credential. Empty when nothing
+// was reserved.
+func (s *selection) KeyHint() string {
+	if s == nil || s.key == "" {
+		return ""
+	}
+	if len(s.key) <= 4 {
+		return "****"
+	}
+	return "****" + s.key[len(s.key)-4:]
+}
+
 // Key is the credential to send. Empty when no key could be reserved.
 func (s *selection) Key() string {
 	if s == nil {

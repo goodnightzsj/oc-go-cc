@@ -109,7 +109,8 @@ func (p *OpenCodeGoProvider) executeOpenAI(ctx context.Context, req *types.Messa
 	}
 
 	return &core.ExecuteResult{
-		Body: resultBody,
+		Body:    resultBody,
+		KeyHint: sel.KeyHint(),
 	}, nil
 }
 
@@ -134,7 +135,7 @@ func (p *OpenCodeGoProvider) streamOpenAI(ctx context.Context, req *types.Messag
 		return nil, err
 	}
 
-	return resp.Body, nil
+	return p.withKeyHint(resp.Body, sel), nil
 }
 
 func (p *OpenCodeGoProvider) executeResponses(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
@@ -179,7 +180,7 @@ func (p *OpenCodeGoProvider) responsesRequest(ctx context.Context, req *types.Me
 	if err != nil {
 		return nil, err
 	}
-	return resp.Body, nil
+	return p.withKeyHint(resp.Body, sel), nil
 }
 
 // ── Anthropic Messages ────────────────────────────────────────────────
@@ -274,7 +275,7 @@ func (p *OpenCodeGoProvider) streamAnthropic(ctx context.Context, req *types.Mes
 			p.capture.CaptureUpstreamResponse(rid(ctx), p.Name(), data)
 		}), nil
 	}
-	return resp.Body, nil
+	return p.withKeyHint(resp.Body, sel), nil
 }
 
 // ── HTTP helpers ──────────────────────────────────────────────────────

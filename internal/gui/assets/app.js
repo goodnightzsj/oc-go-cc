@@ -467,6 +467,8 @@ const TRANSLATIONS = {
     'catalog.filterPlatform': 'Filter by platform',
     'catalog.searchPlaceholder': 'Filter models...',
     'catalog.empty': 'No models match this filter',
+    'catalog.vision': 'vision',
+    'catalog.reasoning': 'reasoning',
     'catalog.loadFailed': 'Could not load the model list',
     'section.proxyConfig': 'Proxy Configuration',
     'setting.platformJump': 'Jump to platform',
@@ -515,6 +517,10 @@ const TRANSLATIONS = {
     'fallback.crossPlatformHint': 'Off by default. Entries on another platform are skipped and counted in the log, so you can see how often it would fire before spending another account\'s quota.',
     'fallback.addHint': '{m} models from {n} platforms, grouped by platform.',
     'fallback.listingUnavailable': 'Could not read the reachable-model list, so only models already in the config are offered. Reload to retry.',
+    'fallback.noOptions': 'No models available',
+    'fallback.noMatches': 'No model matches that search',
+    'fallback.currentSite': 'current',
+    'fallback.priceHint': 'Input / output per million tokens. Green is near the cheapest visible model, amber is far above it.',
     'fallback.unreachable': 'Inactive',
     'fallback.unreachableHint': 'This platform is outside the active site, so this entry is skipped and never serves a request.',
     'fallback.noReachableModels': 'No platform currently has a usable credential, so there is nothing to fall back to.',
@@ -1053,6 +1059,8 @@ const TRANSLATIONS = {
     'catalog.filterPlatform': '按平台筛选',
     'catalog.searchPlaceholder': '筛选模型...',
     'catalog.empty': '没有匹配的模型',
+    'catalog.vision': '视觉',
+    'catalog.reasoning': '推理',
     'catalog.loadFailed': '无法加载模型列表',
     'section.proxyConfig': '服务代理配置',
     'setting.platformJump': '定位平台',
@@ -1126,6 +1134,10 @@ const TRANSLATIONS = {
     'fallback.crossPlatformHint': '默认关闭。其他平台的条目会被跳过并在日志中计数，这样可以在消耗另一个账号额度之前先看清它有多频繁。',
     'fallback.addHint': '共 {m} 个模型，来自 {n} 个平台，按平台分组。',
     'fallback.listingUnavailable': '无法读取可用模型列表，目前只能选择配置里已有的模型。刷新可重试。',
+    'fallback.noOptions': '没有可用模型',
+    'fallback.noMatches': '没有匹配的模型',
+    'fallback.currentSite': '当前',
+    'fallback.priceHint': '每百万 token 的输入 / 输出价格。绿色表示接近可见模型中最便宜的，橙色表示远高于它。',
     'fallback.unreachable': '不生效',
     'fallback.unreachableHint': '该平台不在当前 active site 内，此条目会被跳过，永远不会承接请求。',
     'fallback.noReachableModels': '当前没有平台持有可用凭据，无法配置降级模型。',
@@ -5073,7 +5085,12 @@ const FallbackModule = {
         // Silent here meant an empty picker with no explanation anywhere. If
         // the listing is unreachable the operator needs to know why they can
         // only see models already in the file.
-        console.warn('fallback: reachable model listing unavailable', err);
+        // console.error, not warn: a stripped-down DOM shim (and some embedded
+        // webviews) expose only error, and an absent method would throw here and
+        // take the whole module load with it.
+        if (console && typeof console.error === 'function') {
+          console.error('fallback: reachable model listing unavailable', err);
+        }
         this.listingError = true;
       }
       for (const m of reachable) {
@@ -5133,70 +5150,186 @@ const FallbackModule = {
     return [];
   },
 
+  // The add-model picker: a searchable popover rather than a native select.
+  //
+  // A native <select> cannot be searched and cannot show the facts that decide
+  // the choice. With 500+ reachable models across four platforms, scrolling a
+  // dropdown is the difference between a usable page and a list nobody reads.
+  // The popover shows the platform, the context window and the rates next to
+  // every model, and filters as you type.
   populateAddSelect() {
-    const addSel = document.getElementById('fallback-add-model');
-    if (!addSel) return;
+    const trigger = document.getElementById('fallback-add-trigger');
+    const hint = document.getElementById('fallback-add-hint');
     const chain = this.chains[this.currentScenario] || [];
     const available = this.availableModels
       .filter(m => !chain.some(e => configModelKey(e) === configModelKey(m)))
       .sort((a, b) => compareProviderDisplay(a.provider || 'opencode-go', b.provider || 'opencode-go')
         || a.model_id.localeCompare(b.model_id));
 
-    // Grouped by platform: the platform is the thing an operator reasons about
-    // ("fall back to a different provider"), and a flat list of model ids hides
-    // it. Platforms are shown by their display name, not their config key.
-    const byPlatform = new Map();
-    for (const m of available) {
-      const provider = m.provider || 'opencode-go';
-      if (!byPlatform.has(provider)) byPlatform.set(provider, []);
-      byPlatform.get(provider).push(m);
+    this.addCandidates = available;
+    if (trigger) {
+      trigger.disabled = available.length === 0;
+      trigger.setAttribute('aria-expanded', 'false');
+      const label = trigger.querySelector('.picker-value');
+      if (label) {
+        label.textContent = available.length === 0 ? t('fallback.noOptions') : t('fallback.addModel');
+      }
     }
-    const groups = [...byPlatform.entries()].sort((a, b) => compareProviderDisplay(a[0], b[0]));
+    const pop = document.getElementById('fallback-add-popover');
+    if (pop && !pop.hidden) this.renderPickerList('');
 
-    addSel.innerHTML = '<option value="">' + t('fallback.selectModel') + '</option>' +
-      groups.map(([provider, models]) =>
-        `<optgroup label="${escapeHtml(platformLabel(provider))}">` +
-        models.map(m =>
-          `<option value="${escapeHtml(configModelKey(m))}">${escapeHtml(m.model_id)}</option>`
-        ).join('') + '</optgroup>'
-      ).join('');
-    addSel.disabled = available.length === 0;
-    const hint = document.getElementById('fallback-add-hint');
     if (hint) {
       if (this.listingError) {
         hint.textContent = t('fallback.listingUnavailable');
       } else if (available.length === 0) {
         hint.textContent = t('fallback.noReachableModels');
       } else {
+        const platforms = new Set(available.map(m => m.provider || 'opencode-go'));
         hint.textContent = t('fallback.addHint')
-          .replace('{n}', String(groups.length))
+          .replace('{n}', String(platforms.size))
           .replace('{m}', String(available.length));
       }
     }
   },
 
-  onCrossPlatformChange() {
-    const box = document.getElementById('fallback-cross-platform');
-    if (!box) return;
-    // Saved with the chain: the switch and the entries it governs belong to one
-    // decision, and splitting them across two save actions invites a state
-    // where the chain says one thing and the switch another.
-    this.crossPlatformDirty = true;
-    updateConfigChangeCount();
+  // renderPickerList draws the filtered, grouped rows. query is matched against
+  // the model id and the platform's display name, case-insensitively.
+  renderPickerList(query) {
+    const list = document.getElementById('fallback-add-list');
+    if (!list) return;
+    const q = (query || '').trim().toLowerCase();
+    const matches = (this.addCandidates || []).filter(m => {
+      if (!q) return true;
+      const provider = platformLabel(m.provider || 'opencode-go').toLowerCase();
+      return m.model_id.toLowerCase().includes(q) || provider.includes(q);
+    });
+
+    if (matches.length === 0) {
+      list.innerHTML = `<li class="picker-empty">${escapeHtml(t('fallback.noMatches'))}</li>`;
+      return;
+    }
+
+    const byPlatform = new Map();
+    for (const m of matches) {
+      const provider = m.provider || 'opencode-go';
+      if (!byPlatform.has(provider)) byPlatform.set(provider, []);
+      byPlatform.get(provider).push(m);
+    }
+    const groups = [...byPlatform.entries()].sort((a, b) => compareProviderDisplay(a[0], b[0]));
+    const activeSite = this.activeSite || '';
+
+    list.innerHTML = groups.map(([provider, models]) => {
+      const isActive = provider === activeSite;
+      return `
+        <li class="picker-group" role="presentation">
+          <div class="picker-group-head">
+            <span class="picker-group-name">${escapeHtml(platformLabel(provider))}</span>
+            ${isActive ? `<span class="picker-group-site">${escapeHtml(t('fallback.currentSite'))}</span>` : ''}
+            <span class="picker-group-count">${models.length}</span>
+          </div>
+          <ul role="none">
+            ${models.map(m => this.pickerRow(m)).join('')}
+          </ul>
+        </li>`;
+    }).join('');
   },
 
-  onAddSelectChange() {
-    const addSel = document.getElementById('fallback-add-model');
-    const modelKey = addSel.value;
-    if (!modelKey) return;
-    const model = this.availableModels.find(m => configModelKey(m) === modelKey);
-    if (model) {
-      if (!this.chains[this.currentScenario]) this.chains[this.currentScenario] = [];
-      this.chains[this.currentScenario].push({ ...model });
-      this.renderChain();
+  // pickerRow is one selectable model. Price is highlighted relative to the
+  // cheapest model in the visible set, so "expensive" is a judgement the reader
+  // can see rather than a number they have to compare by hand.
+  pickerRow(model) {
+    const key = configModelKey(model);
+    const ctx = model.context_window ? fmtCompactTokens(model.context_window) + ' ctx' : '';
+    const price = (model.input_per_m || model.output_per_m)
+      ? `$${trimNumber(model.input_per_m)} / $${trimNumber(model.output_per_m)}`
+      : '';
+    const tier = this.priceTier(model);
+    const badges = [];
+    if (model.vision) badges.push(t('catalog.vision'));
+    if (model.reasoning) badges.push(t('catalog.reasoning'));
+    return `
+      <li class="picker-row" role="option" tabindex="-1"
+          data-key="${escapeHtml(key)}"
+          onclick="FallbackModule.chooseModel('${escapeHtml(key).replace(/'/g, "&#39;")}')">
+        <span class="picker-model">${escapeHtml(model.model_id)}</span>
+        ${ctx ? `<span class="picker-ctx">${escapeHtml(ctx)}</span>` : ''}
+        ${price ? `<span class="picker-price picker-price-${tier}" title="${escapeHtml(t('fallback.priceHint'))}">${escapeHtml(price)}</span>` : '<span class="picker-price"></span>'}
+        <span class="picker-badges">${badges.map(b => `<span class="picker-badge">${escapeHtml(b)}</span>`).join('')}</span>
+      </li>`;
+  },
+
+  // priceTier buckets a model's blended rate against the cheapest visible one.
+  // Absolute thresholds would be meaningless across platforms whose rates differ
+  // by two orders of magnitude; the ratio is what a reader is actually judging.
+  priceTier(model) {
+    const rate = (model.input_per_m || 0) + (model.output_per_m || 0);
+    if (!rate) return 'unknown';
+    const rates = (this.addCandidates || [])
+      .map(m => (m.input_per_m || 0) + (m.output_per_m || 0))
+      .filter(r => r > 0);
+    if (rates.length === 0) return 'unknown';
+    const cheapest = Math.min(...rates);
+    if (rate <= cheapest * 1.5) return 'low';
+    if (rate <= cheapest * 6) return 'mid';
+    return 'high';
+  },
+
+  togglePicker(force) {
+    const pop = document.getElementById('fallback-add-popover');
+    const trigger = document.getElementById('fallback-add-trigger');
+    if (!pop || !trigger) return;
+    const open = force === undefined ? pop.hidden : force;
+    pop.hidden = !open;
+    trigger.setAttribute('aria-expanded', String(open));
+    if (!open) return;
+    const search = document.getElementById('fallback-add-search');
+    this.renderPickerList('');
+    if (search) {
+      search.value = '';
+      search.focus();
     }
-    addSel.value = '';
+  },
+
+  filterPicker(query) {
+    this.renderPickerList(query);
+  },
+
+  chooseModel(key) {
+    const model = (this.availableModels || []).find(m => configModelKey(m) === key)
+      || (this.addCandidates || []).find(m => configModelKey(m) === key);
+    if (!model) return;
+    if (!this.chains[this.currentScenario]) this.chains[this.currentScenario] = [];
+    // Carry the whole config, not just the identity: wire_format, max_tokens
+    // and the rest are what make the entry usable. A chain entry holding only
+    // provider and model_id reaches the API without its protocol.
+    this.chains[this.currentScenario].push({ ...model });
+    this.togglePicker(false);
+    this.renderChain();
     this.populateAddSelect();
+  },
+
+  // Keyboard: arrows move, Enter picks, Escape closes. Handled on the list so
+  // the search box keeps receiving typing.
+  onPickerKeydown(event) {
+    const list = document.getElementById('fallback-add-list');
+    if (!list) return;
+    if (event.key === 'Escape') { this.togglePicker(false); return; }
+    const rows = [...list.querySelectorAll('.picker-row')];
+    if (rows.length === 0) return;
+    const current = rows.findIndex(r => r.classList.contains('active'));
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const next = event.key === 'ArrowDown'
+        ? Math.min(rows.length - 1, current + 1)
+        : Math.max(0, current - 1);
+      rows.forEach(r => r.classList.remove('active'));
+      rows[next].classList.add('active');
+      rows[next].scrollIntoView({block: 'nearest'});
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      const target = rows[current >= 0 ? current : 0];
+      if (target) this.chooseModel(target.dataset.key);
+    }
   },
 
   renderChain() {
@@ -5324,8 +5457,8 @@ const FallbackModule = {
       chain.splice(index, 1);
       this.renderChain();
       const next = document.querySelector(`.fallback-item[data-index="${Math.min(index, chain.length - 1)}"] .chain-remove`);
-      const picker = document.getElementById('fallback-add-model');
-      (next || window.CustomSelect?.instances.get(picker)?.button || picker)?.focus();
+      const trigger = document.getElementById('fallback-add-trigger');
+      (next || trigger)?.focus();
     }
   },
 
@@ -5408,6 +5541,16 @@ const FallbackModule = {
 
 document.addEventListener('DOMContentLoaded', () => {
   FallbackModule.init();
+  // A popover that stays open when the operator clicks elsewhere reads as
+  // stuck. Closing on an outside pointer press is the whole dismissal rule.
+  document.addEventListener('pointerdown', event => {
+    const pop = document.getElementById('fallback-add-popover');
+    if (!pop || pop.hidden) return;
+    if (pop.contains(event.target)) return;
+    const trigger = document.getElementById('fallback-add-trigger');
+    if (trigger && trigger.contains(event.target)) return;
+    FallbackModule.togglePicker(false);
+  });
 });
 
 /* ── Boot ──────────────────────────────────────────────────────── */
@@ -5437,6 +5580,20 @@ if (btnHistNext) btnHistNext.addEventListener('click', () => historyGoToPage(his
 // dashboard carries no label for.
 function platformLabel(provider) {
   return providerInfo(provider)?.name || provider || '';
+}
+
+// fmtCompactTokens renders a context window the way people say it: 1M, 256K.
+function fmtCompactTokens(n) {
+  if (!Number.isFinite(n) || n <= 0) return '';
+  if (n >= 1e6) return (n / 1e6).toFixed(n % 1e6 === 0 ? 0 : 1) + 'M';
+  if (n >= 1e3) return Math.round(n / 1e3) + 'K';
+  return String(n);
+}
+
+// trimNumber drops trailing zeros so a rate reads $0.15, not $0.1500.
+function trimNumber(v) {
+  if (!Number.isFinite(v)) return '0';
+  return String(Number(v.toFixed(4)));
 }
 
 const TestModule = {

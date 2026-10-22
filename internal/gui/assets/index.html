@@ -476,8 +476,23 @@
       <div class="fallback-primary-card"><span class="metric-label" data-i18n="fallback.primary">Primary model</span><strong id="fallback-primary"></strong></div>
       <div class="fallback-chain-heading">
         <h2 class="section-heading" data-i18n="fallback.chainOrder">Fallback Chain Order</h2>
-        <label class="sr-only" for="fallback-add-model" data-i18n="fallback.addModel">Add model</label>
-        <select id="fallback-add-model" onchange="FallbackModule.onAddSelectChange()" class="filter-select"><option value="" data-i18n-option="fallback.addModel">+ Add Model</option></select>
+        <div class="model-picker">
+          <button type="button" class="btn btn-small model-picker-trigger" id="fallback-add-trigger"
+                  aria-haspopup="listbox" aria-expanded="false" aria-controls="fallback-add-popover"
+                  onclick="FallbackModule.togglePicker()">
+            <span class="picker-value" data-i18n="fallback.addModel">+ Add Model</span>
+            <span class="picker-caret" aria-hidden="true">▾</span>
+          </button>
+          <div class="model-picker-popover" id="fallback-add-popover" hidden>
+            <div class="model-picker-search">
+              <input type="search" id="fallback-add-search" autocomplete="off" spellcheck="false"
+                     placeholder="Search models or platforms…" aria-label="Search models"
+                     oninput="FallbackModule.filterPicker(this.value)"
+                     onkeydown="FallbackModule.onPickerKeydown(event)">
+            </div>
+            <ul class="model-picker-list" id="fallback-add-list" role="listbox" aria-label="Available models"></ul>
+          </div>
+        </div>
         <p class="page-meta" id="fallback-add-hint" role="note"></p>
       </div>
       <ul class="fallback-chain" id="fallback-chain" aria-label="Fallback chain models">

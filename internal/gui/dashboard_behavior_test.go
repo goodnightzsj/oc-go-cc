@@ -278,11 +278,16 @@ vm.runInContext(` + "`" + `
   FallbackModule.chains = {default:[go]};
   FallbackModule.currentScenario = 'default';
   FallbackModule.populateAddSelect();
-  assert.ok(document.getElementById('fallback-add-model').innerHTML.includes('commandcode/shared'));
-  assert.ok(!document.getElementById('fallback-add-model').innerHTML.includes('value="opencode-go/shared"'));
+  FallbackModule.togglePicker(true);
+  FallbackModule.renderPickerList('');
+  // The same model id exists on two platforms; each row must be addressable by
+  // its platform-qualified key, and the one already in the chain must not be
+  // offered again.
+  const pickerHTML = document.getElementById('fallback-add-list').innerHTML;
+  assert.ok(pickerHTML.includes('data-key="commandcode/shared"'), 'the other platform stays selectable');
+  assert.ok(!pickerHTML.includes('data-key="opencode-go/shared"'), 'a model already in the chain is not offered twice');
   FallbackModule.renderChain = () => {};
-  document.getElementById('fallback-add-model').value = 'commandcode/shared';
-  FallbackModule.onAddSelectChange();
+  FallbackModule.chooseModel('commandcode/shared');
   assert.equal(FallbackModule.chains.default[1].wire_format, 'anthropic');
   assert.equal(FallbackModule.chains.default[1].max_tokens, 4096);
   assert.equal(configModelKey({provider:'opencode_go',model_id:'shared'}), configModelKey(go));

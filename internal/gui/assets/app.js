@@ -3726,24 +3726,22 @@ function keyRowsOf(value) {
 // still holds a bare string (an older config, or a value the form just wrote)
 // is one row.
 //
-// index is the row's position in the *stored* pool and is what the server
-// resolves a kept row against. It counts only file-backed rows, because the
-// stored pool does not contain the environment's: an environment row occupies a
-// display position but no stored one, and numbering by display position would
-// shift every file row after it onto the wrong credential.
+// indices carries the actual file slots supplied by the server. Display
+// deduplication can leave gaps; -1 is a retained single-key field. Older
+// responses without this metadata keep the legacy compact file numbering.
 //
 // origins is the server's per-row provenance. An "env" row is shown but cannot
 // be edited: the credential is not in the config file, so there is nothing to
 // keep, reorder or remove - and offering those controls would promise an edit
 // that cannot be written.
-function describeKeys(value, origins) {
+function describeKeys(value, origins, indices) {
   let storedIndex = 0;
   return keyRowsOf(value).map((label, index) => {
     const origin = Array.isArray(origins) ? origins[index] : undefined;
     const env = origin === 'env';
     const row = {
       label,
-      index: env ? undefined : storedIndex,
+      index: env ? undefined : (Array.isArray(indices) ? indices[index] : storedIndex),
       kept: label === '' || label.startsWith(keyHintPrefix),
       env,
       value: '',
@@ -3952,10 +3950,10 @@ function addKeyRow(id) {
   updateConfigChangeCount();
 }
 
-function loadKeysIntoEditor(id, value, origins) {
+function loadKeysIntoEditor(id, value, origins, indices) {
   const editor = keyEditors.get(id);
   if (!editor) return;
-  editor.rows = describeKeys(value, origins);
+  editor.rows = describeKeys(value, origins, indices);
   renderKeyEditor(id);
 }
 
@@ -4002,8 +4000,8 @@ function readFieldValue(field) {
     if (!rows) return undefined;
     const next = collectKeys(rows);
     const current = deepGet(currentProxyConfig, field[0]) || [];
-    const untouched = next.length === current.length &&
-      next.every((slot, i) => slot.keep === i && slot.hint === String(current[i]));
+    const initial = collectKeys(describeKeys(current, keyOriginsFor(field[0]), keyIndicesFor(field[0])));
+    const untouched = JSON.stringify(next) === JSON.stringify(initial);
     return untouched ? undefined : next;
   }
   // string
@@ -4019,6 +4017,11 @@ function keyOriginsFor(path) {
   const block = path.replace(/\.?api_keys$/, '');
   const origins = currentProxyConfig && currentProxyConfig.key_origins;
   return origins ? origins[block] : undefined;
+}
+
+function keyIndicesFor(path) {
+  const block = path.replace(/\.?api_keys$/, '');
+  return currentProxyConfig?.key_indices?.[block];
 }
 
 function configInputSnapshot() {  return new Map(CONFIG_FIELDS.map(([, id, type]) => {
@@ -4053,7 +4056,7 @@ async function loadProxyConfig({preserveInputs = configInputSnapshot(), quiet = 
       // A key pool has no single input to compare, so it is compared by the
       // rows it currently holds.
       if (type === 'keys') {
-        if (!keysTouchedSince(preserveInputs).has(id)) loadKeysIntoEditor(id, deepGet(currentProxyConfig, path), keyOriginsFor(path));
+        if (!keysTouchedSince(preserveInputs).has(id)) loadKeysIntoEditor(id, deepGet(currentProxyConfig, path), keyOriginsFor(path), keyIndicesFor(path));
         continue;
       }
       if ((type === 'bool' ? el.checked : el.value) !== preserveInputs.get(id)) continue;
@@ -4379,6 +4382,7 @@ async function saveProxyConfig() {
     const v = readFieldValue(field);
     if (v !== undefined) {
       deepSet(patch, field[0], v);
+      if (field[2] === 'keys') deepSet(patch, field[0].replace(/api_keys$/, 'key_pool_edit'), true);
     }
   }
 

@@ -642,7 +642,21 @@ func (h *MessagesHandler) buildModelChain(
 			return nil, result, fmt.Errorf("%w: active site %q has no routing target for this request; the resolved primary belongs to %q", router.ErrWithinSiteNoTarget, active, client.Provider(primary))
 		}
 		fallbacks := h.keepUsableFallbacks(decision.Models[1:])
-		_, ordered := router.SplitPrimaryAndFallbacks(active, primary, fallbacks)
+		crossCount, ordered := router.ClassifyChain(active, primary, fallbacks)
+		if crossCount > 0 {
+			// Recorded either way. With the switch off this is the only way to
+			// learn whether the feature would ever fire - the count is measured,
+			// nothing is spent, and the decision is made on data.
+			enabled := h.modelRouter.Config().EnableCrossPlatformFallback
+			h.logger.Info("cross-platform fallback candidates",
+				"active_site", active, "candidates", crossCount, "enabled", enabled)
+			if !enabled {
+				// Keep only what stays inside the active site. The chain is
+				// truncated rather than flagged so no execution path has to know
+				// about the switch.
+				ordered = router.RestrictToActiveSite(active, ordered)
+			}
+		}
 		decision.Models = append([]config.ModelConfig{primary}, ordered...)
 	}
 

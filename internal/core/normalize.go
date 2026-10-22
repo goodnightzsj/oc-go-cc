@@ -15,6 +15,19 @@ type thinkingConfig struct {
 
 // NormalizeRequest converts an Anthropic MessageRequest to a NormalizedRequest.
 // This is a lossless extraction: all data from the Anthropic format survives.
+//
+// Scope: this is a one-way adapter for the Gemini bridge, not the pipeline's
+// canonical form. types.MessageRequest already is that - both inbound adapters
+// (the native Anthropic decoder and ResponsesToMessageRequest) produce one, and
+// every provider consumes one. NormalizedRequest exists because
+// AnthropicToGemini needs a flatter shape, and it is read in exactly two places:
+// that bridge and the debug capture.
+//
+// The distinction matters when changing effort handling: a Responses request
+// never passes through here, so a field added to NormalizedRequest cannot
+// describe what a Codex client asked for. Adding EffortSource here was proposed
+// once on the mistaken premise that both entry paths met at this type; they do
+// not, and they do not need to.
 func NormalizeRequest(anthropicReq *types.MessageRequest) *NormalizedRequest {
 	nr := &NormalizedRequest{
 		Model:     anthropicReq.Model,

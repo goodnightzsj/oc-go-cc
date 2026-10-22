@@ -164,9 +164,19 @@ func ResponsesToMessageRequest(raw []byte) (*types.MessageRequest, error) {
 		if in.Reasoning.Summary != "" {
 			return nil, fmt.Errorf("reasoning.summary is not supported by this adapter")
 		}
+		// Accept the levels OpenAI documents, minus the two that mean "do not
+		// reason": this adapter has no way to express "skip thinking" downstream
+		// (the Anthropic request carries no thinking field to disable), so
+		// accepting them would silently upgrade a request that asked for none.
 		switch in.Reasoning.Effort {
 		case "":
 		case "low", "medium", "high", "max":
+			out.OutputConfig, _ = json.Marshal(map[string]string{"effort": in.Reasoning.Effort})
+		case "none", "minimal":
+			return nil, fmt.Errorf("reasoning.effort %q asks for no reasoning, which this adapter cannot express", in.Reasoning.Effort)
+		case "xhigh":
+			// Supported downstream (output_config.effort accepts it). Rejecting
+			// it here turned a request the pipeline handles into a 400.
 			out.OutputConfig, _ = json.Marshal(map[string]string{"effort": in.Reasoning.Effort})
 		default:
 			return nil, fmt.Errorf("reasoning.effort %q has no supported upstream mapping", in.Reasoning.Effort)

@@ -494,15 +494,14 @@ func TestTransformRequestThinkingDecisionMatrix(t *testing.T) {
 		wantEffort *string
 	}{
 		{
-			name:      "deepseek request thinking first turn maps budget to effort",
+			// DeepSeek takes thinking.budget_tokens, so the budget is forwarded
+			// as-is and no derived effort is added: two controls for one
+			// decision, and the level is a lossy restatement of the budget.
+			name:      "deepseek request thinking forwards the budget without a derived effort",
 			messages:  userOnly,
 			thinking:  json.RawMessage(`{"type":"enabled","budget_tokens":4096}`),
 			model:     config.ModelConfig{ModelID: "deepseek-v4-pro"},
 			wantThink: `{"type":"enabled","budget_tokens":4096}`,
-			wantEffort: func() *string {
-				s := "medium"
-				return &s
-			}(),
 		},
 		{
 			name:      "deepseek plain assistant history guard beats request thinking",
@@ -1972,8 +1971,13 @@ func TestModelFamilyRulesStillDiscriminate(t *testing.T) {
 	// on a turn whose assistant messages carry no thinking it must send the
 	// explicit "disabled" form instead, or upstream rejects the history.
 	deepseek := payload("deepseek/deepseek-v4.1-flash", firstTurn)
-	if string(deepseek["thinking"]) != `{"type":"enabled","budget_tokens":4096}` || deepseek["reasoning_effort"] == nil {
-		t.Fatalf("deepseek first turn lost thinking mode: thinking=%s effort=%s", deepseek["thinking"], deepseek["reasoning_effort"])
+	// The budget is the control DeepSeek honours; a derived effort alongside it
+	// would be a second, contradicting answer to the same question.
+	if string(deepseek["thinking"]) != `{"type":"enabled","budget_tokens":4096}` {
+		t.Fatalf("deepseek first turn lost thinking mode: thinking=%s", deepseek["thinking"])
+	}
+	if deepseek["reasoning_effort"] != nil {
+		t.Fatalf("deepseek was sent both a budget and a derived effort: effort=%s", deepseek["reasoning_effort"])
 	}
 	if !bytes.Contains(deepseek["messages"], []byte("cache_control")) {
 		t.Fatalf("deepseek lost cache_control, so the prefix cache cannot be anchored: %s", deepseek["messages"])
@@ -1992,5 +1996,54 @@ func TestModelFamilyRulesStillDiscriminate(t *testing.T) {
 	}
 	if got := string(payload("moonshotai/Kimi-K2.7-Code", firstTurn)["temperature"]); got != "1" {
 		t.Fatalf("kimi-k2.7-code temperature = %s, want 1", got)
+	}
+}
+
+// One decision must not be expressed twice. When the upstream accepts a
+// thinking budget, the budget is sent and no derived effort is added; when it
+// only understands levels, the level is derived. Sending both hands the
+// upstream two controls that can disagree, and the derived one is a lossy
+// restatement of a number the request already carried precisely.
+func TestThinkingBudgetAndEffortAreNeverSentTogether(t *testing.T) {
+	transform := func(modelID string, thinking json.RawMessage) map[string]any {
+		t.Helper()
+		req := &types.MessageRequest{
+			Model:     modelID,
+			MaxTokens: 4096,
+			Thinking:  thinking,
+			Messages:  []types.Message{{Role: "user", Content: json.RawMessage(`"go"`)}},
+		}
+		out, err := NewRequestTransformer().TransformRequest(req, config.ModelConfig{ModelID: modelID})
+		if err != nil {
+			t.Fatalf("%s: %v", modelID, err)
+		}
+		raw, err := json.Marshal(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		return fields
+	}
+	budget := json.RawMessage(`{"type":"enabled","budget_tokens":8192}`)
+
+	// DeepSeek accepts thinking.budget_tokens: budget only.
+	deepseek := transform("deepseek/deepseek-v4.1-flash", budget)
+	if deepseek["thinking"] == nil {
+		t.Error("deepseek lost the budget the client stated")
+	}
+	if deepseek["reasoning_effort"] != nil {
+		t.Errorf("deepseek was sent a derived effort (%v) alongside its budget", deepseek["reasoning_effort"])
+	}
+
+	// An OpenAI reasoning model does not take a budget: level only.
+	openai := transform("o3-mini", budget)
+	if openai["thinking"] != nil {
+		t.Errorf("o3-mini was sent a thinking field it does not accept: %v", openai["thinking"])
+	}
+	if openai["reasoning_effort"] == nil {
+		t.Error("o3-mini lost the reasoning level; it has no other way to express intent")
 	}
 }

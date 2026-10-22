@@ -82,6 +82,18 @@ func (c *ctxReadCloser) UpstreamModel() string {
 	return reporter.UpstreamModel()
 }
 
+// ServedModel forwards the model the upstream named in its first chunk. It is
+// separate from UpstreamModel on purpose: that one is the routing block's
+// canonical slug, which arrives at the END of the stream, while this one is the
+// chunk-level model that is knowable before any content is written.
+func (c *ctxReadCloser) ServedModel() string {
+	reporter, ok := c.closer.(interface{ ServedModel() string })
+	if !ok {
+		return ""
+	}
+	return reporter.ServedModel()
+}
+
 func (c *ctxReader) Read(p []byte) (int, error) {
 	select {
 	case <-c.ctx.Done():

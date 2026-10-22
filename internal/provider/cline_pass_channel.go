@@ -27,6 +27,11 @@ type clineChannelBody struct {
 	// produced the answer. Observing it is the only way to report that without
 	// changing the response the client already received.
 	upstreamModel string
+	// servedModel is the OpenAI chunk's `model` field as the gateway filled it,
+	// which is available before any content is written. UpstreamModel is the
+	// same fact from the routing block at the end of the stream; ServedModel()
+	// prefers this one because it is the only one a response can carry.
+	servedModel string
 }
 
 func newClineChannelBody(body io.ReadCloser, target, requestID string) *clineChannelBody {
@@ -79,6 +84,18 @@ func (b *clineChannelBody) UpstreamChannel() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.actual
+}
+
+// ServedModel reports the model from the first upstream chunk, which is
+// available before any content is written. Empty until that frame arrives.
+//
+// This is the value a response can honestly carry: message_start has to be
+// emitted before the body is forwarded, and this is the one model field
+// knowable at that moment. See ServedModelReader.
+func (b *clineChannelBody) ServedModel() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.servedModel
 }
 
 // UpstreamModel reports the model the gateway says it actually ran, or "" while
@@ -142,6 +159,14 @@ func (b *clineChannelBody) observe(line []byte) {
 	}
 	var chunk struct {
 		clineRoutingMetadata
+		// Model is the OpenAI chunk's own model field, which the gateway fills
+		// on every frame with the id it actually ran. It is the authoritative
+		// answer for "what produced this", and it is available on the FIRST
+		// frame - unlike canonicalSlug, which arrives in the routing block at
+		// the end. Both are recorded because they answer from different
+		// moments: Model is what the caller can be told before any content is
+		// written, canonicalSlug is what survives to the stored record.
+		Model   string `json:"model"`
 		Choices []struct {
 			Delta   clineRoutingMetadata `json:"delta"`
 			Message clineRoutingMetadata `json:"message"`
@@ -149,6 +174,11 @@ func (b *clineChannelBody) observe(line []byte) {
 	}
 	if json.Unmarshal(data, &chunk) != nil {
 		return // Observation is advisory; the existing stream parser owns errors.
+	}
+	// The first frame wins: a later frame repeating the same value changes
+	// nothing, and one that disagrees would be reporting a second attempt.
+	if b.servedModel == "" && chunk.Model != "" {
+		b.servedModel = chunk.Model
 	}
 	remember := func(m clineRoutingMetadata) {
 		if actual := m.channel(); actual != "" {

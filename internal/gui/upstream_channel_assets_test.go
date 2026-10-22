@@ -85,14 +85,20 @@ func TestUpstreamModelBadgeOnlyForARealRewrite(t *testing.T) {
 	source := string(app)
 	// The condition, stated once. A badge rendered unconditionally would pass
 	// any assertion that only looks for the class name.
-	if !strings.Contains(source, "const upstreamModelMark = h.upstream_model && h.upstream_model !== h.model") {
-		t.Error("the upstream-model badge must be conditional on the model actually differing")
+	// The model column names what ran; the requested id is kept beside it.
+	if !strings.Contains(source, "const servedModel = h.upstream_model || h.model") {
+		t.Error("the model column must show the served model when one was observed")
 	}
-	if !strings.Contains(source, "badge-upstream-model") {
-		t.Error("the upstream-model badge class must be rendered")
+	if !strings.Contains(source, "history-requested-model") {
+		t.Error("the requested id must stay visible when the gateway ran something else")
+	}
+	// The channel badge is unchanged: it answers which upstream served the
+	// request, which is a different question from which model ran.
+	if !strings.Contains(source, "badge badge-channel") {
+		t.Error("the channel badge must still be rendered")
 	}
 	// Both locales, or the tooltip shows a raw key.
-	for _, key := range []string{"'history.upstreamModelHint'"} {
+	for _, key := range []string{"'history.upstreamModelHint'", "'history.requestedModelHint'"} {
 		if strings.Count(source, key+":") < 2 {
 			t.Errorf("translation key %s must exist in both en and zh", key)
 		}

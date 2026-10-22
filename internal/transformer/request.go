@@ -279,6 +279,13 @@ func HasThinkingBlocks(messages []types.Message) bool {
 //  5. No config, no history → leave both unset (safety guard for DeepSeek).
 //
 // budgetTokensToEffort maps Anthropic budget_tokens to OpenAI reasoning_effort.
+//
+// The bands are unchanged from when this was introduced: they are a judgement,
+// not a published conversion, and widening the ladder changes what upstreams
+// receive for every existing request. Anyone revisiting them should change both
+// this and core.EffortFromBudget - the normalized request and this path have to
+// agree, or a capture reader and the upstream would be told different levels
+// for the same request.
 func budgetTokensToEffort(budget int) string {
 	switch {
 	case budget <= 2048:
@@ -338,11 +345,17 @@ func resolveThinkingAndEffort(
 	case requestThinking:
 		// Client explicitly opted into thinking mode via the request
 		// (e.g., effortLevel in Claude Code sends thinking: {type:"enabled", budget_tokens:N}).
-		// Forward the raw thinking config if allowed, and map budget_tokens to reasoning_effort if allowed.
+		//
+		// The budget is the precise statement of intent and it is forwarded
+		// verbatim. A derived effort level is only sent when the upstream does
+		// not take a budget: sending both hands the upstream two controls for
+		// one decision, and whichever it honours, the other is a contradiction.
+		// Deriving a level also loses resolution - a 63999-token budget becomes
+		// one of five strings.
 		if allowThinkingParam {
 			openaiReq.Thinking = anthropicReq.Thinking
 		}
-		if allowEffortParam {
+		if allowEffortParam && !allowThinkingParam {
 			if budget := parseBudgetTokens(anthropicReq.Thinking); budget > 0 {
 				effort := budgetTokensToEffort(budget)
 				openaiReq.ReasoningEffort = &effort

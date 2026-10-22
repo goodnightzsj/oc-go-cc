@@ -115,7 +115,11 @@ func TestResponsesInboundRejectsUnsupportedOrInvalidInput(t *testing.T) {
 		{"file", `{"model":"m","input":[{"role":"user","content":[{"type":"input_file","file_id":"file_1"}]}]}`, "input_file"},
 		{"arguments", `{"model":"m","input":[{"type":"function_call","call_id":"c","name":"f","arguments":"oops"}]}`, "arguments"},
 		{"image url", `{"model":"m","input":[{"role":"user","content":[{"type":"input_image","image_url":"file:///private/a.png"}]}]}`, "image_url"},
-		{"reasoning effort", `{"model":"m","input":"hi","reasoning":{"effort":"xhigh"}}`, "effort"},
+		// "xhigh" used to sit here as the unsupported example. It is supported
+		// downstream (output_config.effort accepts it), so rejecting it turned a
+		// request the pipeline could serve into a 400. "ultra" is not a level
+		// OpenAI documents, which is what this case is for.
+		{"reasoning effort", `{"model":"m","input":"hi","reasoning":{"effort":"ultra"}}`, "effort"},
 		{"summary", `{"model":"m","input":"hi","reasoning":{"summary":"detailed"}}`, "summary"},
 		{"structured output", `{"model":"m","input":"hi","text":{"format":{"type":"json_schema","schema":{}}}}`, "text"},
 		{"unknown field", `{"model":"m","input":"hi","unsupported_feature":true}`, "unsupported_feature"},
@@ -301,6 +305,37 @@ func TestResponsesInboundFlattensCodexToolNamespaces(t *testing.T) {
 	} {
 		if _, err := ResponsesToMessageRequest([]byte(`{"model":"m","input":"hi","tools":[` + body + `]}`)); err == nil {
 			t.Fatalf("%s inside a namespace was accepted", name)
+		}
+	}
+}
+
+// The two effort whitelists in this package must agree on what is a level.
+// They did not: responses_inbound.go rejected "xhigh" while request.go's
+// output_config path accepted it, so a Codex request carrying xhigh failed at
+// the boundary while the same value from an Anthropic client worked.
+func TestResponsesInboundAcceptsTheLevelsThePipelineSupports(t *testing.T) {
+	for _, level := range []string{"low", "medium", "high", "xhigh", "max"} {
+		body := `{"model":"m","input":"hi","reasoning":{"effort":"` + level + `"}}`
+		req, err := ResponsesToMessageRequest([]byte(body))
+		if err != nil {
+			t.Errorf("effort %q was rejected: %v", level, err)
+			continue
+		}
+		// It has to arrive as output_config.effort, which is what request.go
+		// reads; landing anywhere else would parse fine and then do nothing.
+		if !strings.Contains(string(req.OutputConfig), level) {
+			t.Errorf("effort %q did not reach output_config: %q", level, req.OutputConfig)
+		}
+	}
+
+	// "Do not reason" has no downstream expression here, so it must fail loudly
+	// rather than quietly become a normal thinking request.
+	for _, level := range []string{"none", "minimal"} {
+		body := `{"model":"m","input":"hi","reasoning":{"effort":"` + level + `"}}`
+		if _, err := ResponsesToMessageRequest([]byte(body)); err == nil {
+			t.Errorf("effort %q must be rejected: this adapter cannot express it", level)
+		} else if !strings.Contains(err.Error(), "no reasoning") {
+			t.Errorf("effort %q: error should say why, got %v", level, err)
 		}
 	}
 }

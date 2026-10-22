@@ -59,7 +59,7 @@ HASHER="$(hash_cmd)"
 # problem, not a missing pull: whether to fetch is the operator's call, so this
 # refuses instead of deciding for them.
 if [[ "${OC_GO_CC_ALLOW_STALE:-0}" != "1" ]] && git -C "${ROOT_DIR}" rev-parse --git-dir >/dev/null 2>&1; then
-	if git -C "${ROOT_DIR}" fetch --quiet origin 2>/dev/null; then
+	if fetch_err="$(git -C "${ROOT_DIR}" fetch --quiet origin 2>&1)"; then
 		head_sha="$(git -C "${ROOT_DIR}" rev-parse HEAD)"
 		upstream_sha="$(git -C "${ROOT_DIR}" rev-parse '@{upstream}' 2>/dev/null || echo "${head_sha}")"
 		if [[ "${head_sha}" != "${upstream_sha}" ]]; then
@@ -67,6 +67,16 @@ if [[ "${OC_GO_CC_ALLOW_STALE:-0}" != "1" ]] && git -C "${ROOT_DIR}" rev-parse -
 			echo "[prod] run 'git -C ${ROOT_DIR} pull --ff-only' first, or set OC_GO_CC_ALLOW_STALE=1" >&2
 			exit 1
 		fi
+	else
+		# A fetch that could not reach the remote proves nothing about this
+		# checkout. Continuing here would rebuild whatever is checked out and
+		# report success - the same silent outcome the check above exists to
+		# prevent, reached by a different route (DNS, a proxy, an expired
+		# credential). If the remote cannot be consulted, the deploy stops.
+		echo "[prod] refusing to deploy: cannot reach origin to verify HEAD is current" >&2
+		echo "[prod] ${fetch_err}" >&2
+		echo "[prod] set OC_GO_CC_ALLOW_STALE=1 to deploy this checkout anyway" >&2
+		exit 1
 	fi
 fi
 

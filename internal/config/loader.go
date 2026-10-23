@@ -410,6 +410,11 @@ func validate(cfg *Config) error {
 	if pin := cfg.ClinePass.ChannelPin; pin != "" && !ValidChannelSlug(pin) {
 		return invalid("cline_pass.channel_pin", "channel_slug", "cline_pass.channel_pin must be a lowercase provider slug (letters, digits and hyphens)")
 	}
+	// A capability the gateway refuses fails every request for that model, so
+	// an unknown value must be caught here rather than on the live path.
+	if err := ValidateChannelCapabilities(cfg.ClinePass.ChannelPinCapabilities); err != nil {
+		return invalid("cline_pass.channel_pin_capabilities", "unknown_capability", "%s", err.Error())
+	}
 
 	if err := validateOverrideMap("models", cfg.Models); err != nil {
 		return err
@@ -458,6 +463,41 @@ var channelSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 // ValidChannelSlug reports whether a value is a single gateway channel name.
 func ValidChannelSlug(value string) bool {
 	return channelSlugPattern.MatchString(value)
+}
+
+// knownChannelCapabilities is the set of `has` values the gateway accepted when
+// measured on 2026-10-23, per model:
+//
+//	deepseek-v4.1-flash-1017 : vision, implicit-caching, reasoning, structured-output
+//	deepseek-v4-pro          : implicit-caching, reasoning, structured-output (NOT vision)
+//
+// The set is hard-coded rather than discovered at load time because a request
+// carrying an unknown value is refused with stream_initialization_failed - the
+// failure happens on the live path, so validating here is the only way to keep
+// a typo from turning into an outage. Values confirmed to be rejected by both
+// models (tools, function-calling, streaming, json-mode, image-input,
+// prompt-caching) are deliberately absent: naming one would fail every request.
+var knownChannelCapabilities = map[string]bool{
+	"vision":            true,
+	"implicit-caching":  true,
+	"reasoning":         true,
+	"structured-output": true,
+}
+
+// ValidateChannelCapabilities rejects a capability filter the gateway would
+// refuse, before the value can reach a live request.
+func ValidateChannelCapabilities(byModel map[string][]string) error {
+	for model, capabilities := range byModel {
+		for _, capability := range capabilities {
+			if !knownChannelCapabilities[capability] {
+				return fmt.Errorf(
+					"cline_pass.channel_pin_capabilities[%q]: unknown capability %q "+
+						"(accepted: vision, implicit-caching, reasoning, structured-output)",
+					model, capability)
+			}
+		}
+	}
+	return nil
 }
 
 func validateTimeouts(provider string, total, idle, streaming int) error {

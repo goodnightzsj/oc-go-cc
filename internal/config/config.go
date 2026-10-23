@@ -581,6 +581,18 @@ type ClinePassConfig struct {
 	// Cline honors it. Actual routing is observed from upstream metadata.
 	ChannelPinEnabled bool   `json:"channel_pin_enabled,omitempty"`
 	ChannelPin        string `json:"channel_pin,omitempty"`
+	// ChannelPinCapabilities is a per-model capability filter sent alongside
+	// the channel pin as `providerOptions.gateway.has`.
+	//
+	// It is not a hint. A capability the model's routed channel does not
+	// declare is refused outright with stream_initialization_failed, so a
+	// wrong value does not degrade the pin - it fails every request for that
+	// model. Measured on 2026-10-23: deepseek-v4.1-flash-1017 accepts vision
+	// and implicit-caching; deepseek-v4-pro rejects vision and accepts the
+	// rest. That is why this is keyed by model rather than global.
+	//
+	// Only `has`, never `only`, carries a capability: `only` names channels.
+	ChannelPinCapabilities map[string][]string `json:"channel_pin_capabilities,omitempty"`
 }
 
 // EffectiveAPIKeys returns the pool of API keys for ClinePass: the single

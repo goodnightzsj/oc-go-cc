@@ -10,7 +10,12 @@ import (
 )
 
 type clineChannelOptions struct {
-	Only []string `json:"only"`
+	Only []string `json:"only,omitempty"`
+	// Has is a capability filter, measured to behave differently from Only: a
+	// channel that does not declare the named capability is refused with
+	// stream_initialization_failed rather than quietly skipped. Omitting it
+	// keeps the exact request shape this proxy has always sent.
+	Has []string `json:"has,omitempty"`
 }
 
 // clineChannelBody observes routing without changing bytes, buffering the full

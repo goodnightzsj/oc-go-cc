@@ -1,6 +1,10 @@
 package catalog
 
 import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/routatic/proxy/internal/site"
@@ -62,5 +66,35 @@ func TestWorkBuddyDerivationDoesNotLoosenOtherPlatforms(t *testing.T) {
 	}
 	if _, err := SiteModelsURL(site.ClinePass, "http://127.0.0.1:3456"); err == nil {
 		t.Error("ClinePass accepted a bare host; its exact-path check must still apply")
+	}
+}
+
+// A workbuddy2api-panel gateway answers 401 without a bearer key: its roster
+// belongs to the account, not the platform. This pins that the key actually
+// reaches the request, and that the platforms which never asked for one still
+// do not send it.
+func TestModelListSendsKeyOnlyWhereItIsNeeded(t *testing.T) {
+	var seen string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Header.Get("Authorization")
+		_, _ = io.WriteString(w, `{"data":[{"id":"global:x","name":"X"}]}`)
+	}))
+	defer srv.Close()
+
+	// With a key: sent.
+	if _, err := FetchSiteModelsWithKey(context.Background(), srv.Client(), site.WorkBuddy, srv.URL+"/v1/models", "wb-key"); err != nil {
+		t.Fatal(err)
+	}
+	if seen != "Bearer wb-key" {
+		t.Errorf("Authorization = %q, want the configured key", seen)
+	}
+
+	// Without one: the plain form must not invent a header.
+	seen = ""
+	if _, err := FetchSiteModels(context.Background(), srv.Client(), site.CommandCode, srv.URL+"/v1/models"); err != nil {
+		t.Fatal(err)
+	}
+	if seen != "" {
+		t.Errorf("Authorization = %q on a public endpoint, want none", seen)
 	}
 }

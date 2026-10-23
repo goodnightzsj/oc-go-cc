@@ -110,7 +110,8 @@ func (r *ModelRouter) siteModels(ctx context.Context) []catalog.SiteModel {
 			continue // this platform has no model-list endpoint of its own
 		}
 		fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		models, err := catalog.FetchSiteModels(fetchCtx, siteModelsClient, descriptor.ID, endpoint)
+		models, err := catalog.FetchSiteModelsWithKey(fetchCtx, siteModelsClient, descriptor.ID, endpoint,
+			modelListKey(cfg, descriptor.ID))
 		cancel()
 		if err != nil {
 			slog.Warn("platform model list unavailable", "platform", descriptor.ID, "err", err)
@@ -128,6 +129,23 @@ func (r *ModelRouter) siteModels(ctx context.Context) []catalog.SiteModel {
 // hidden from the dashboard still reports its models while it is the active
 // site - routing does not consult visibility, and the listing must not
 // contradict it.
+// modelListKey returns the credential to present when fetching a platform's
+// model roster, or "" when the roster is public.
+//
+// The key is only needed where the list belongs to an account rather than the
+// platform. Sending it unconditionally would hand a credential to the public
+// endpoints that never asked for one, so the answer is a per-platform fact and
+// not "always send the first key".
+func modelListKey(cfg *config.Config, provider string) string {
+	if cfg == nil || site.Normalize(provider) != site.WorkBuddy {
+		return ""
+	}
+	if keys := cfg.ProviderAPIKeys(provider); len(keys) > 0 {
+		return keys[0]
+	}
+	return ""
+}
+
 func scopedDescriptors(active string) []site.Descriptor {
 	if active == "" {
 		return site.Visible()

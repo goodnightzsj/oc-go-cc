@@ -147,7 +147,18 @@ const maxSiteModelsBytes = 4 << 20
 // credential is attached, so this call cannot leak one to a host that did not
 // ask for it.
 func FetchSiteModels(ctx context.Context, client *http.Client, provider, endpoint string) ([]SiteModel, error) {
-	raw, err := fetchSiteModelsBody(ctx, client, provider, endpoint)
+	return FetchSiteModelsWithKey(ctx, client, provider, endpoint, "")
+}
+
+// FetchSiteModelsWithKey is FetchSiteModels for a platform whose roster is
+// authenticated.
+//
+// CommandCode and ClinePass publish their lists publicly, so the plain form has
+// always worked and stays the default. A workbuddy2api-panel gateway answers
+// 401 without a bearer key - its roster belongs to the account, not to the
+// platform - so the caller has to pass one.
+func FetchSiteModelsWithKey(ctx context.Context, client *http.Client, provider, endpoint, apiKey string) ([]SiteModel, error) {
+	raw, err := fetchSiteModelsBody(ctx, client, provider, endpoint, apiKey)
 	if err != nil {
 		return nil, err
 	}
@@ -220,12 +231,15 @@ func requireSiteModels(provider string, out []SiteModel) ([]SiteModel, error) {
 	return out, nil
 }
 
-func fetchSiteModelsBody(ctx context.Context, client *http.Client, provider, endpoint string) ([]byte, error) {
+func fetchSiteModelsBody(ctx context.Context, client *http.Client, provider, endpoint, apiKey string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build %s model list request: %w", provider, err)
 	}
 	req.Header.Set("Accept", "application/json")
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch %s model list: %w", provider, err)

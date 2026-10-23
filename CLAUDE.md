@@ -207,6 +207,24 @@ A streaming attempt that fails **after `ssePayloadWritten`** cannot fall back �
 - **Frequency, measured 2026-10-23:** of those 17, only **4** were client-visible truncations ("all upstream models failed after SSE payload started"); the other 13 were the client disconnecting (`stream read canceled by context`, `client disconnected`), which is not a fault. Three of the four were the total timeout on the retired `deepseek-v4.1-flash`, clustered around 03:00 with `no usage reported` — an upstream that stalled with nothing on the wire, not a proxy defect.
 - **Timeout budget, set from measurement rather than a guess.** 30 days of streaming requests (40448 samples): 98.03% finish under 30s, p99 = 40.0s, p99.9 = 107.3s, p99.99 = 275.4s, max = 294.6s, and **nothing at or above 5 minutes**. Every request over three minutes succeeded. The proxy had been running with all three timeouts unset, so `ProviderTimeouts` fell through to the same 5-minute constant for both the inter-byte and the total budget — which collapsed two different questions into one number. They are now separate in `cline_pass`: `stream_timeout_ms = 150000` (2.5 min, 1.4x the p99.9 total) and `streaming_timeout_ms = 600000` (10 min, 2x the observed max), with `timeout_ms = 120000` unchanged for non-streaming. A stalled upstream now fails in 2.5 minutes instead of 5 while a genuine long generation has room. The residual risk is a first byte that takes longer than 150s on a very large prompt — under p99.9 of 107s, but not impossible.
 
+### Open question: a key that always truncates is never cooled
+
+Recorded as an observation, not a defect to fix yet. The last bullet above is the reason this is visible at all now: before the recording change these failures left no row, so the pattern could not have been looked up.
+
+`Settle` fires when response headers arrive, so a mid-stream death is already scored as healthy. A key whose upstream consistently opens 200 and then drops therefore never cools, never rotates, and keeps taking traffic — the caller just sees repeated truncation. The fix, if it is ever wanted, is not local: settling at the header is what releases `inFlight` early, and a long stream would otherwise hold a concurrency slot for its whole duration.
+
+**What to check before deciding anything** (not yet done):
+
+```sql
+SELECT key_hint, COUNT(*) n, MIN(start_time), MAX(start_time)
+FROM requests
+WHERE streaming = 1 AND success = 0 AND details_known = 0
+  AND start_time >= date('now','-7 days')
+GROUP BY key_hint ORDER BY n DESC;
+```
+
+Concentration on one `key_hint` means the key is bad and the missing cooldown is costing real requests. An even spread across keys means the truncations are upstream or network noise, and cooling keys would only move the failures around. Only the first shape justifies touching the settle path.
+
 ### Analytics and Performance panels
 
 Both tabs used to run several full-window `GROUP BY` queries per poll — five for Analytics, two more for Performance — each scanning the whole window. The scan is what costs on `modernc.org/sqlite`, so they now share one grouped pass per view and cache the result against the same `history_revision` counter the history summary uses.

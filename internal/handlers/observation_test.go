@@ -56,9 +56,22 @@ func TestFailureWithoutUsageAtEntry(t *testing.T) {
 			if snapshot.RequestsReceived != 1 || snapshot.RequestsFailed != 1 || snapshot.RequestsSuccess != 0 || snapshot.UpstreamCalls != 1 {
 				t.Errorf("known failure must count once, independently of usage: %+v", snapshot)
 			}
-			_, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
-			if err != nil || total != 0 {
-				t.Fatalf("missing usage must not create a synthetic bill: rows=%d err=%v", total, err)
+			// The failure is recorded, but it must not become a bill: the row
+			// exists so the dashboard can see a truncation the caller actually
+			// received, and carries no cost or measured details because the
+			// upstream reported no usage to bill or average.
+			rows, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+			if err != nil || total != 1 {
+				t.Fatalf("an observable failure must be recorded once: rows=%d err=%v", total, err)
+			}
+			if rows[0].CostKnown {
+				t.Error("missing usage created a synthetic bill: the row carries a cost")
+			}
+			if rows[0].DetailsKnown {
+				t.Error("missing usage was recorded as measured: every average would count it")
+			}
+			if rows[0].Success {
+				t.Error("a failed stream was recorded as a success")
 			}
 		})
 	}

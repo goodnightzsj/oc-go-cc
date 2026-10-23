@@ -43,7 +43,19 @@ type RequestRecord struct {
 	CostKnown           bool    // whether CostUSD is available
 	CostSource          string  // "estimated" or "provider"
 	DetailsKnown        bool    // whether routing/status/latency fields were observed locally
-	Streaming           bool    // whether this was a streaming request
+	// UsageUnobserved marks a failure recorded before any usage arrived: the
+	// upstream said nothing about tokens, so the row carries the outcome and
+	// nothing to average. It is stored as details_known = 0, which is what keeps
+	// success rate, latency and throughput from counting a measurement nobody
+	// made.
+	//
+	// It is a separate field rather than a use of DetailsKnown because the zero
+	// value of DetailsKnown means "unknown" while every ordinary row - all four
+	// Insert call sites but one - is a measured request. Keying the column on a
+	// field whose default is false would mark every successful request
+	// unobserved.
+	UsageUnobserved bool
+	Streaming       bool    // whether this was a streaming request
 
 	Success  bool   // whether it completed successfully
 	ErrorMsg string // error message if failed

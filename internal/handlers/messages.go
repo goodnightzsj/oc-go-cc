@@ -837,20 +837,37 @@ func (h *MessagesHandler) handleStreaming(
 			// A client may disconnect after receiving an upstream error frame.
 			// Preserve that observed failure even if cancellation wins the read loop.
 			failed = failed || rw.streamErr != nil
+			// payloadWritten is the fact that separates "the client saw a broken
+			// answer" from "the client hung up on its own". Once bytes are on the
+			// wire, every failure here is visible to the caller as a truncated
+			// response; before that, the client was still waiting and chose to
+			// leave. Read under the same lock as usage so the two agree.
+			payloadWritten := rw.ssePayloadWritten
 			rw.mu.Unlock()
 			// Count the known outcome independently of billing. Preserve the
 			// existing accounting for cancellations with reported usage.
 			if failed || hasUsage {
 				h.metrics.RecordFailureForModel(model.ModelID)
 			}
-			if !hasUsage {
+			if h.storage == nil {
+				return
+			}
+			// A failure the client could see is recorded even when the upstream
+			// reported no usage. Those are exactly the requests a reader most
+			// needs to find: the answer died before producing anything, so the
+			// success rate on the dashboard was reporting 100% while the journal
+			// carried the failure. The row is written with details_known = 0 so
+			// every average - success rate, latency, throughput - skips it; only
+			// the request count and the outcome mention it.
+			//
+			// A cancellation the client made before any payload is not a failure
+			// of anything: nothing broke, the caller simply stopped waiting.
+			// Writing it would turn every interrupted prompt into a red row.
+			if !hasUsage && !payloadWritten {
 				h.logger.Warn(action+" streaming failed, no usage reported", "model", model.ModelID, "error", err)
 				return
 			}
 			h.logger.Warn("recording interrupted stream", "request_id", requestID, "record_id", recordID, "error", err)
-			if h.storage == nil {
-				return
-			}
 			// The same observations the success path records, read from the same
 			// source. A stream that failed after producing usage was being stored
 			// with these three empty, so a failed row could not say which model
@@ -880,6 +897,12 @@ func (h *MessagesHandler) handleStreaming(
 				KeyHint:             client.KeyHintOf(currentStream),
 				FirstByte:           firstByteDuration(firstByte, streamStart),
 				ReasoningEffort:     clientEffort,
+				// Usage was never reported, so the outcome is the only observed
+				// fact. Marking the row unobserved keeps it out of every average
+				// that assumes a measured request: a zero-token, zero-latency row
+				// counted as sampled would drag success rate and throughput down
+				// with a measurement nobody made.
+				UsageUnobserved: !hasUsage,
 			}
 			if err := h.storage.InsertRequest(rec); err != nil {
 				h.logger.Warn("failed to insert failed request into storage", "error", err)

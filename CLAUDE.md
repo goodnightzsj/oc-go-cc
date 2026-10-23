@@ -170,7 +170,6 @@ The gateway accepts two pin shapes, one per pipeline, and the proxy writes both 
 
 ```json
 "channel_pin_capabilities": {
-  "cline-pass/deepseek-v4.1-flash":      ["vision", "implicit-caching"],
   "cline-pass/deepseek-v4.1-flash-1017": ["vision", "implicit-caching"],
   "cline-pass/deepseek-v4-pro":          ["implicit-caching"]
 }
@@ -178,16 +177,16 @@ The gateway accepts two pin shapes, one per pipeline, and the proxy writes both 
 
 Measured acceptance, per model, `has` alone with no `only`:
 
-| capability | v4.1-flash | v4.1-flash-1017 | v4-pro |
-|---|---|---|---|
-| `vision` | inert* | accepted | **refused** |
-| `implicit-caching` | inert* | accepted | accepted |
-| `reasoning` | inert* | accepted | accepted |
-| `structured-output` | inert* | accepted | accepted |
+| capability | v4.1-flash-1017 | v4-pro |
+|---|---|---|
+| `vision` | accepted | **refused** |
+| `implicit-caching` | accepted | accepted |
+| `reasoning` | accepted | accepted |
+| `structured-output` | accepted | accepted |
 
 Capabilities measured to be refused by every model that reaches the gateway: `tools`, `function-calling`, `streaming`, `json-mode`, `image-input`, `prompt-caching`. They are absent from the whitelist, so naming one fails config load rather than producing a 100%-failure model.
 
-\* **`deepseek-v4.1-flash` (no `1017` suffix) is routed to a private channel that parses nothing.** Measured 2026-10-23 with key #0, six fresh sessions per case: all six returned `openai-compatible-private` — including a request carrying `has: ["definitely-not-real-xyz"]`, which every model that reaches the gateway rejects outright with `stream_initialization_failed`. So for that model the capability list is written into the request and never read. "inert" records that, not a capability claim: nothing here has been shown to be accepted or refused for it.
+**`deepseek-v4.1-flash` (no `1017` suffix) is deliberately absent from the map.** Measured 2026-10-23 with key #0, six fresh sessions per case: all six returned `openai-compatible-private`, and it returned that same channel even for a request carrying `has: ["definitely-not-real-xyz"]` — which every model that reaches the gateway rejects outright with `stream_initialization_failed`. That model never reaches the pinning gateway, so a capability list for it would be written into the request and never read. Configuring it would look like protection while doing nothing.
 
 Models confirmed to reach the pinning gateway, useful when testing `has` (all measured 2026-10-23): `deepseek/deepseek-v4.1-flash-1017` (vision accepted, served by `deepseek`), `deepseek/deepseek-v4-flash-vision-exp` (vision accepted, served by `deepinfra`), `deepseek/deepseek-v4-flash-0731` (vision refused), `deepseek-v4-pro` (vision refused). Those are the ones where `has` actually decides the request.
 
@@ -198,6 +197,14 @@ Unknown capability names are refused at config load (`config.ValidateChannelCapa
 **Session stickiness confounds any probe of this.** The gateway pins a session to a channel: repeating a request inside one session returns the same channel regardless of the pin field, and only a fresh `X-Session-Id` per sample shows the real distribution. Three earlier rounds of testing this produced three contradictory conclusions for exactly that reason. When probing, pair each variant against a baseline **within the same session** and compare, or use a fresh session per sample; never compare runs that differ only in elapsed time.
 
 Regression: `internal/config/channel_capability_test.go` (whitelist, per-model validation, empty config), `internal/provider/cline_pass_capability_test.go` (per-model injection, omission when unconfigured).
+
+### Stream failure recording
+
+A streaming attempt that fails **after `ssePayloadWritten`** cannot fall back — the SSE status line is already committed — so the client sees a truncated response. Three things about this are worth knowing:
+
+- **The proxy never rotates a key on a mid-stream failure.** `keyPool.Settle` runs inside `baseProvider.doSelected` (`internal/provider/provider.go:77`), i.e. when the response *headers* arrive. A stream that opens 200 and then dies is already recorded as healthy, and `Release` cannot overwrite it (`selection.settle` returns early once `done` is set). A key whose upstream always answers 200 and then drops is therefore never cooled — the client just sees repeated truncation. This is a deliberate trade: settling at the header is what releases `inFlight` early, and a long stream would otherwise hold a concurrency slot for its whole duration.
+- **A stream failure with no reported usage is not persisted.** `recordStreamFailure` (`internal/handlers/messages.go:846`) returns before `InsertRequest` when `!hasUsage`; only the in-process metrics counter sees it. The consequence is that the History tab and Analytics report a 100% success rate for streaming, because the failures that matter most — died before producing tokens — leave no row. Measured 7 days: 17 streaming failures in the journal, **0** rows with `success = 0` across 13641 requests.
+- **Frequency, measured 2026-10-23:** of those 17, only **4** were client-visible truncations ("all upstream models failed after SSE payload started"); the other 13 were the client disconnecting (`stream read canceled by context`, `client disconnected`), which is not a fault. Three of the four were the 5-minute total timeout on the retired `deepseek-v4.1-flash`, clustered around 03:00 — an upstream stall, not a proxy defect. At ~0.03% there is nothing here worth changing.
 
 ### Analytics and Performance panels
 
@@ -246,6 +253,14 @@ Navigation and preferences use different media. The active tab lives in the URL 
 **Testing caveat:** `go:embed` snapshots assets into the test binary, so an injected-bug check against `assets/*.js` can silently pass through a stale copy. Verify front-end behaviour by running the built artifact (Node loading `app.js`) rather than trusting a Go test alone.
 
 **Nil safety:** the two dependency-backed handlers fail explicitly rather than serving a second, divergent answer. `/api/metrics` falls back to the persisted roll-up when the in-process counters are empty, and reports zero counters when the metrics instance is absent. The history endpoints (`/api/history`, `/api/history/summary`, `/api/history/channels`) return **HTTP 503** without storage: the in-memory ring buffer is a live tail, not a filterable or paginated dataset, so there is no queryable history to serve.
+
+### Adjacent deployment: workbuddy2api-panel
+
+A separate service on the same host (`/workbuddy2api-panel`, `workbuddy2api.service`, `127.0.0.1:7863`, published at `https://wb.9962510.xyz/panel/`) turns WorkBuddy accounts into an OpenAI-compatible API. It is **not** part of this proxy and shares no code with it; it is listed here only because it lives on the same box and occupies one platform-shaped niche.
+
+Local modifications, deliberately kept as a patch rather than a fork: `cmd/server/config.go`, `cmd/server/main.go` and `internal/upstream/transport.go` add a `resin` config block that installs `Transport.Proxy`. The account identity for Resin's sticky routing is taken from the outgoing `X-User-Id` header — **not** `Authorization`, which is an OAuth access token that rotates hourly and would move the account to a new egress IP on every refresh. Verified: one account holds one egress IP across repeats, two accounts hold different ones.
+
+`/usr/local/bin/wb2api-update` (systemd timer, 6 hourly) pulls upstream, re-applies that patch, rebuilds, health-checks and rolls back on failure. It keeps the newest **3** version snapshots in `/root/wb2api-versions`. Two bugs were found and fixed while building it: `git checkout` without `--force` refuses to discard local changes and leaves the tree on the *old* commit with the patch still applied, so the next `git apply` reports "patch does not apply" for a conflict that does not exist; and `mapfile` is a bash builtin, so a `zsh -c` harness fails even though the script (which declares bash) is fine.
 
 ## Dual Release Channel System
 

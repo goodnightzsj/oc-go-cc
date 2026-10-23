@@ -235,12 +235,19 @@ func boolArg(b *bool) string {
 // historyRevision reads the transactional change counter in constant time.
 // Unlike a row-count fingerprint it covers UPDATE, replacement and rowid reuse,
 // including writes committed by a separate costs-reconcile process.
-func (r *Requests) historyRevision(ctx context.Context) (string, error) {
+//
+// It hangs off Database because every cached aggregate is validated by it, not
+// only the history summary.
+func (d *Database) historyRevision(ctx context.Context) (string, error) {
 	var revision int64
-	if err := r.db.DB().QueryRowContext(ctx, "SELECT revision FROM history_revision WHERE id = 1").Scan(&revision); err != nil {
+	if err := d.DB().QueryRowContext(ctx, "SELECT revision FROM history_revision WHERE id = 1").Scan(&revision); err != nil {
 		return "", err
 	}
 	return strconv.FormatInt(revision, 10), nil
+}
+
+func (r *Requests) historyRevision(ctx context.Context) (string, error) {
+	return r.db.historyRevision(ctx)
 }
 
 // Summary aggregates the exact same population as Query, without pagination.

@@ -102,45 +102,38 @@ func (h *AnalyticsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 	}
 	window = window.ForProvider(provider)
 
-	summary, err := h.store.TokenSummary(window)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	models, err := h.store.ModelBreakdown(window)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	providers, err := h.store.ProviderBreakdown(window)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	scenarios, err := h.store.ScenarioBreakdown(window)
+	// One scan answers all four; the store folds them from a single pass and
+	// caches it until the request table changes.
+	snapshot, err := h.store.Summary(window)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	resp := map[string]any{
 		"provider":     provider,
-		"summary":      summary,
-		"models":       models,
-		"providers":    providers,
-		"scenarios":    scenarios,
+		"summary":      snapshot.Summary,
+		"models":       snapshot.Models,
+		"providers":    snapshot.Providers,
+		"scenarios":    snapshot.Scenarios,
 		"generated_at": time.Now().Format(time.RFC3339),
 	}
 	if r.URL.Query().Get("compare") == "1" && !explicitRange {
 		now := time.Now().UTC()
+		// Trailing 60 seconds, deliberately not snapped: this figure is labelled
+		// "last minute" and must keep meaning that. It is also the one range here
+		// that never needs the cache - a one-minute window touches a handful of
+		// rows through the start-time index.
 		lastMinute, err := h.summaryBetween(now.Add(-time.Minute), now.Add(time.Second), provider)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		today, err := h.summaryBetween(todayStart, now.Add(time.Second), provider)
+		// Whole minutes, so this answer is cacheable across the three-second
+		// poll. The extra margin reaches the end of the current minute, which
+		// holds no rows yet and therefore changes nothing.
+		now = now.Truncate(time.Minute)
+		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		today, err := h.summaryBetween(todayStart, now.Add(time.Minute), provider)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

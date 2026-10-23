@@ -36,6 +36,21 @@ type Database struct {
 	summaryMu       sync.Mutex
 	summaries       map[string]*RequestSummary
 	summaryRevision string
+
+	// analytics caches the per-window aggregate the dashboard polls for. It is
+	// keyed by the resolved window and validated the same way summaries are -
+	// by the request table's revision counter, which every committed write
+	// advances - so one poll against an unchanged table costs one counter read.
+	analyticsMu       sync.Mutex
+	analytics         map[string]*AnalyticsSnapshot
+	analyticsRevision string
+	hourly            map[string][]DailyTokenPoint
+	hourlyRevision    string
+
+	// latency caches the performance panel's answer, validated the same way.
+	latencyMu       sync.Mutex
+	latencies       map[string]*LatencySnapshot
+	latencyRevision string
 }
 
 // AnalyticsBaseline reports the configured cutoff for analytics aggregates.

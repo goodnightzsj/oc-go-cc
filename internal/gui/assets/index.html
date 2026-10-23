@@ -702,6 +702,11 @@
         <div id="quota-cline-pass-accounts" class="quota-accounts quota-accounts-grid"></div>
       </section>
 
+      <section id="quota-workbuddy" hidden aria-live="polite">
+        <p class="quota-disclaimer" data-i18n="workbuddy.accountScope">Gateway-wide observations, including traffic outside this proxy. Keys may describe the same pool; do not add them together. Credits are not USD or a vendor bill.</p>
+        <div id="quota-workbuddy-accounts" class="quota-accounts"></div>
+      </section>
+
       <section id="quota-bedrock" hidden class="analytics-section" aria-live="polite">
         <h2 data-i18n="aws.billingTitle">AWS official service costs</h2>
         <p class="quota-disclaimer" data-i18n="aws.billingScope">Last 30 complete UTC days · UnblendedCost for the services listed below. Not an account balance or this proxy’s ledger; AWS data can be delayed or revised.</p>
@@ -728,7 +733,7 @@
         <div class="metric-band metric-grid usage-metrics">
           <div class="metric-cell"><div class="metric-label" data-i18n="analytics.totalRequests">Total Requests</div><div class="metric-value" id="quota-local-requests">--</div></div>
           <div class="metric-cell"><div class="metric-label" data-i18n="analytics.totalTokens">Total Tokens</div><div class="metric-value" id="quota-local-tokens">--</div></div>
-          <div class="metric-cell"><div class="metric-label" data-i18n="history.filteredCost">Recorded cost</div><div class="metric-value" id="quota-local-cost">--</div><div class="metric-note" id="quota-local-cost-note"></div></div>
+          <div class="metric-cell"><div class="metric-label" id="quota-local-cost-label" data-i18n="history.filteredCost">Recorded cost</div><div class="metric-value" id="quota-local-cost">--</div><div class="metric-note" id="quota-local-cost-note"></div></div>
           <div class="metric-cell"><div class="metric-label" data-i18n="quota.unknownCosts">Requests with unknown cost</div><div class="metric-value" id="quota-local-unknown">--</div></div>
         </div>
         <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th data-i18n="th.modelPlatform">Model / Platform</th><th data-i18n="analytics.requests">Requests</th><th data-i18n="analytics.cacheHitShort">Cache hit</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="analytics.throughput">Tok/s</th><th data-i18n="analytics.cost">Cost</th></tr></thead><tbody id="quota-local-model-tbody"></tbody></table></div>

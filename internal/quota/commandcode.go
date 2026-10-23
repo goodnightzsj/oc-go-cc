@@ -112,7 +112,7 @@ func FetchCommandCode(parent context.Context, client *http.Client, alphaBase, ap
 			switch i {
 			case 0:
 				data := new(CommandCodeCredits)
-				failures[i] = fetchCommandCodeJSON(ctx, client, alphaBase+path, apiKey, data)
+				failures[i] = fetchAccountJSON(ctx, client, alphaBase+path, apiKey, data)
 				if failures[i] == nil {
 					failures[i] = data.validate()
 				}
@@ -124,7 +124,7 @@ func FetchCommandCode(parent context.Context, client *http.Client, alphaBase, ap
 					Success *bool                    `json:"success"`
 					Data    *CommandCodeSubscription `json:"data"`
 				}
-				failures[i] = fetchCommandCodeJSON(ctx, client, alphaBase+path, apiKey, &envelope)
+				failures[i] = fetchAccountJSON(ctx, client, alphaBase+path, apiKey, &envelope)
 				if failures[i] == nil && (envelope.Success == nil || !*envelope.Success) {
 					failures[i] = errors.New("subscription response did not report success")
 				}
@@ -136,7 +136,7 @@ func FetchCommandCode(parent context.Context, client *http.Client, alphaBase, ap
 				}
 			case 2:
 				data := new(CommandCodeUsage)
-				failures[i] = fetchCommandCodeJSON(ctx, client, alphaBase+path, apiKey, data)
+				failures[i] = fetchAccountJSON(ctx, client, alphaBase+path, apiKey, data)
 				if failures[i] == nil && (data.TotalCount == nil || data.TotalTokensIn == nil || data.TotalTokensOut == nil || data.TotalTokens == nil || data.TotalCredits == nil || data.PeriodBasis == "") {
 					failures[i] = errors.New("usage summary is missing required counts, credits or period")
 				}
@@ -192,7 +192,7 @@ func (data *CommandCodeSubscription) validate() error {
 	return nil
 }
 
-func fetchCommandCodeJSON(ctx context.Context, client *http.Client, endpoint, apiKey string, dst any) error {
+func fetchAccountJSON(ctx context.Context, client *http.Client, endpoint, apiKey string, dst any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return errors.New("invalid account endpoint")

@@ -809,11 +809,23 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: none;
 .daily-bars.is-sparse .daily-bar-fill { opacity: .85; }
 .daily-bar.is-empty .daily-bar-fill { background: var(--ui-surface-raised); }
 .daily-bar-label { color: var(--ui-muted); font-size: 9px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.workbuddy-account { grid-template-columns: minmax(0, 1fr); }
+.workbuddy-account .quota-figures { grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); column-gap: 24px; }
+.workbuddy-account h3, .workbuddy-account h4 { margin: 12px 0 0; }
+.workbuddy-table { min-width: 640px; }
+.workbuddy-account th[scope="row"] { min-width: 160px; overflow-wrap: anywhere; white-space: normal; }
+.workbuddy-hourly th[scope="row"] { white-space: nowrap; }
+.workbuddy-bars { grid-auto-columns: minmax(38px, 1fr); height: 140px; padding-bottom: 4px; }
+.workbuddy-bars .daily-bar { height: auto; }
+.workbuddy-bars .daily-bar-fill { transition: none; min-height: 0; }
+.workbuddy-hourly summary { cursor: pointer; padding: 12px 0; }
+.workbuddy-hourly summary:focus-visible { outline: 2px solid var(--ui-indigo); outline-offset: 2px; }
 @media (max-width: 560px) {
   .daily-bars { gap: 2px; }
   /* Every other label only: at phone width the full set overlaps. */
   .daily-bar:nth-child(even) .daily-bar-label { visibility: hidden; }
 }
+.workbuddy-bars .daily-bar .daily-bar-label { visibility: visible; }
 /* One row per platform: name, breaker dot, success rate, latency. The bar is a
    hand-built width percentage rather than a chart, matching how the
    distribution rows already express a fraction. */

@@ -108,17 +108,17 @@ var registry = []Descriptor{
 		RateTable: CommandCode, PeakPriced: true},
 	{ID: ClinePass, DisplayName: "ClinePass", Order: 2, Visible: true,
 		RateTable: ClinePass, PeakPriced: true},
-	// WorkBuddy publishes no per-token rates this proxy can use: its own
-	// accounting is in credits, and converting those to USD needs the model
-	// table the vendor does not publish. With no RateTable its requests carry
-	// no cost at all rather than an invented one - the same position AWS
-	// Bedrock is in, and the dashboard shows the figure as unknown.
+	// WorkBuddy bills in credits and publishes no credits-to-USD rate, so its
+	// RateTable holds each model's public list price rather than what the
+	// platform charges. The cost column is therefore a reference figure - what
+	// this would have cost at list - and not a statement about the account.
+	// A model with no rule reports unknown rather than zero.
 	//
 	// It sits at Order 3, before the hidden platforms, because the dashboard's
 	// display order is built by concatenating its visible and hidden maps: a
 	// visible platform listed after a hidden one would sort in the wrong place
 	// in every distribution panel.
-	{ID: WorkBuddy, DisplayName: "WorkBuddy", Order: 3, Visible: true},
+	{ID: WorkBuddy, DisplayName: "WorkBuddy", Order: 3, Visible: true, RateTable: WorkBuddy},
 	{ID: OpenCodeZen, DisplayName: "OpenCode Zen", Order: 4},
 	{ID: AWSBedrock, DisplayName: "AWS Bedrock", Order: 5},
 	// OpenRouter prices two of its models by the clock. Its windows are not a

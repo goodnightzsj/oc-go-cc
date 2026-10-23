@@ -74,7 +74,7 @@ func TestRefreshPricesReachesEveryRateTable(t *testing.T) {
 	}, nil)
 
 	for _, d := range site.All() {
-		if d.RateTable == "" {
+		if d.RateTable == "" || staticRateTables[d.RateTable] {
 			continue
 		}
 		if _, ok := errs[d.RateTable]; !ok {

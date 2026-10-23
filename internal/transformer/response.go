@@ -64,6 +64,10 @@ func (t *ResponseTransformer) TransformResponse(
 				OutputTokens:             openaiResp.Usage.CompletionTokens,
 				CacheCreationInputTokens: cacheCreate,
 				CacheReadInputTokens:     cacheRead,
+				// Read through the same helper the streaming path uses, so a
+				// gateway reporting the split under either spelling reaches
+				// both paths identically.
+				ReasoningTokens: reasoningTokensOf(&openaiResp.Usage),
 			}
 		}(),
 	}

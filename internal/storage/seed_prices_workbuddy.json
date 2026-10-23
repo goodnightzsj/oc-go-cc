@@ -1,0 +1,152 @@
+[
+  {
+    "_comment": "WorkBuddy reference pricing (USD per 1M tokens). Regenerated 2026-10-24."
+  },
+  {
+    "_comment": "These are NOT WorkBuddy's own prices. WorkBuddy bills in credits, and it publishes no credits-to-USD rate this proxy can use, so there is no figure it could report as the amount charged. What is stored here is the model's public list price from the same families measured on the platforms that do publish one - deepseek-v4.1-flash at 0.15/0.60, glm-5.3 at ~2.01/6.63, and so on. That makes the cost column a reference figure: it answers 'what would this have cost at list price' and not 'what was deducted from the account'."
+  },
+  {
+    "_comment": "A model with no rule here reports an unknown cost rather than a zero. The routing aliases (default-model, fast-model, balanced-model, primary-model) are deliberately absent: they name no model, so there is no family whose price could stand in for them, and inventing one would put a confident wrong number in the cost column."
+  },
+  {
+    "_comment": "Rows are matched as substrings against the model id with longest-match winning, and the id carries the realm prefix (global:deepseek-v4.1-flash). The rules therefore use the bare family name; a longer rule must stay longer than any family it shares a prefix with, which is why glm-5.3 and glm-5.3-flash are separate rows rather than one."
+  },
+  {
+    "match": "deepseek-v4.1-flash",
+    "input": 0.15,
+    "output": 0.6,
+    "cache_read": 0.003
+  },
+  {
+    "match": "deepseek-v4-pro",
+    "input": 0.66,
+    "output": 1.98,
+    "cache_read": 0.0132
+  },
+  {
+    "match": "glm-5.3-flash",
+    "input": 0.35,
+    "output": 1.15,
+    "cache_read": 0.007
+  },
+  {
+    "match": "glm-5.3",
+    "input": 2.01,
+    "output": 6.63,
+    "cache_read": 0.0402
+  },
+  {
+    "match": "glm-5.2",
+    "input": 2.02,
+    "output": 6.17,
+    "cache_read": 0.0404
+  },
+  {
+    "match": "kimi-k3",
+    "input": 4.0,
+    "output": 20.0,
+    "cache_read": 0.08
+  },
+  {
+    "match": "kimi-k2.8-preview",
+    "input": 2.0,
+    "output": 10.0,
+    "cache_read": 0.04
+  },
+  {
+    "match": "kimi-k2.6",
+    "input": 1.79,
+    "output": 8.94,
+    "cache_read": 0.0358
+  },
+  {
+    "match": "minimax-m3.1-flash",
+    "input": 0.15,
+    "output": 0.6,
+    "cache_read": 0.003
+  },
+  {
+    "match": "grok-4.7",
+    "input": 2.0,
+    "output": 6.0,
+    "cache_read": 0.04
+  },
+  {
+    "match": "gpt-5.5",
+    "input": 5.5,
+    "output": 33.0,
+    "cache_read": 0.11
+  },
+  {
+    "match": "gpt-5.4",
+    "input": 2.9,
+    "output": 16.5,
+    "cache_read": 0.058
+  },
+  {
+    "match": "gpt-6.1-sol",
+    "input": 5.5,
+    "output": 33.0,
+    "cache_read": 0.11
+  },
+  {
+    "match": "gpt-6-astra",
+    "input": 5.5,
+    "output": 33.0,
+    "cache_read": 0.11
+  },
+  {
+    "match": "gpt-6-luna",
+    "input": 2.9,
+    "output": 16.5,
+    "cache_read": 0.058
+  },
+  {
+    "match": "gpt-5.6-luna",
+    "input": 2.9,
+    "output": 16.5,
+    "cache_read": 0.058
+  },
+  {
+    "match": "gpt-5.6-sol",
+    "input": 5.5,
+    "output": 33.0,
+    "cache_read": 0.11
+  },
+  {
+    "match": "gpt-5.6-terra",
+    "input": 5.5,
+    "output": 33.0,
+    "cache_read": 0.11
+  },
+  {
+    "match": "gemini-3.8-flash",
+    "input": 1.5,
+    "output": 7.5,
+    "cache_read": 0.03
+  },
+  {
+    "match": "hy4-preview-f",
+    "input": 0.35,
+    "output": 1.4,
+    "cache_read": 0.007
+  },
+  {
+    "match": "hy4-preview",
+    "input": 0.35,
+    "output": 1.4,
+    "cache_read": 0.007
+  },
+  {
+    "match": "hy3",
+    "input": 0.156,
+    "output": 0.629,
+    "cache_read": 0.0031
+  },
+  {
+    "match": "step-5-preview",
+    "input": 0.2,
+    "output": 0.8,
+    "cache_read": 0.004
+  }
+]

@@ -552,6 +552,19 @@ type PriceRefreshConfig struct {
 // RefreshPrices fetches every platform's table and installs whatever it got.
 // It returns the per-platform outcome so the caller can log what actually
 // changed; a failure for one platform never blocks or clears another.
+// staticRateTables names the tables that are maintained by hand and have no
+// source to refresh from.
+//
+// WorkBuddy bills in credits and publishes no credits-to-USD rate, so there is
+// nothing to fetch: its table holds each model's public list price, transcribed
+// from the platforms that do publish one. That is a deliberate ceiling, not an
+// oversight, and it is stated here so the coverage guard can distinguish "this
+// table is static" from "this table was forgotten". A platform added to this
+// map should have a comment saying why nothing can be fetched for it.
+var staticRateTables = map[string]bool{
+	site.WorkBuddy: true,
+}
+
 func RefreshPrices(ctx context.Context, cfg PriceRefreshConfig, client *http.Client) (map[string][]priceEntry, map[string]error) {
 	fetched := map[string][]priceEntry{}
 	errs := map[string]error{}

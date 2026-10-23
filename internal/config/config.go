@@ -45,6 +45,7 @@ type Config struct {
 	OpenRouter           OpenRouterConfig         `json:"openrouter"`
 	CommandCode          CommandCodeConfig        `json:"commandcode"`
 	ClinePass            ClinePassConfig          `json:"cline_pass"`
+	WorkBuddy            WorkBuddyConfig          `json:"workbuddy"`
 	AnthropicFirst       AnthropicFirstConfig     `json:"anthropic_first"`
 	Logging              LoggingConfig            `json:"logging"`
 	Catalog              CatalogConfig            `json:"catalog"`
@@ -514,6 +515,35 @@ func (c *OpenCodeGoConfig) EffectiveAPIKeys() []string {
 	return appendAPIKeys(c.APIKey, c.APIKeys)
 }
 
+// WorkBuddyConfig points at a workbuddy2api-panel instance, which exposes a
+// WorkBuddy account as an OpenAI-compatible API.
+//
+// This proxy does not speak WorkBuddy's own protocol. That gateway owns the
+// OAuth refresh, the client-impersonation headers and the tool-schema rewrites
+// the vendor requires; by the time traffic reaches here it is an ordinary Chat
+// Completions endpoint with a static bearer key. Splitting it that way is what
+// lets the key pool work at all - keyPool rotates static strings and cannot
+// express "this credential expires in an hour".
+//
+// BaseURL is a complete chat-completions endpoint.
+type WorkBuddyConfig struct {
+	BaseURL string   `json:"base_url"`
+	APIKey  string   `json:"api_key,omitempty"`
+	APIKeys []string `json:"api_keys,omitempty"`
+	// KeyStrategy names how requests are scheduled across this platform's keys.
+	// Empty means "fill_first"; see the constants above.
+	KeyStrategy        string `json:"key_strategy,omitempty"`
+	TimeoutMs          int    `json:"timeout_ms"`
+	StreamTimeoutMs    int    `json:"stream_timeout_ms"`
+	StreamingTimeoutMs int    `json:"streaming_timeout_ms,omitempty"`
+}
+
+// EffectiveAPIKeys returns the pool of API keys for WorkBuddy: the single
+// APIKey field followed by the APIKeys array.
+func (c *WorkBuddyConfig) EffectiveAPIKeys() []string {
+	return appendAPIKeys(c.APIKey, c.APIKeys)
+}
+
 // OpenRouterConfig holds the upstream OpenRouter API settings.
 type OpenRouterConfig struct {
 	BaseURL string   `json:"base_url"`
@@ -703,6 +733,9 @@ var providerKeySource = map[string]struct {
 	site.OpenRouter:  {func(c *Config) []string { return c.OpenRouter.EffectiveAPIKeys() }, true},
 	site.CommandCode: {func(c *Config) []string { return c.CommandCode.EffectiveAPIKeys() }, false},
 	site.ClinePass:   {func(c *Config) []string { return c.ClinePass.EffectiveAPIKeys() }, false},
+	// WorkBuddy authenticates to its own local gateway with that gateway's
+	// key, so another platform's global key must never be spent on it.
+	site.WorkBuddy: {func(c *Config) []string { return c.WorkBuddy.EffectiveAPIKeys() }, false},
 }
 
 // ProviderModelEndpoint is the configured API endpoint a platform's model list
@@ -777,6 +810,9 @@ var providerTimeoutSource = map[string]func(*Config) (request, idle, total int){
 	},
 	site.ClinePass: func(c *Config) (int, int, int) {
 		return c.ClinePass.TimeoutMs, c.ClinePass.StreamTimeoutMs, c.ClinePass.StreamingTimeoutMs
+	},
+	site.WorkBuddy: func(c *Config) (int, int, int) {
+		return c.WorkBuddy.TimeoutMs, c.WorkBuddy.StreamTimeoutMs, c.WorkBuddy.StreamingTimeoutMs
 	},
 }
 

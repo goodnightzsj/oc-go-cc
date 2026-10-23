@@ -51,8 +51,14 @@ async function checks() {
     assert.equal(get('quota-commandcode').hidden,provider !== 'commandcode');
     assert.equal(get('quota-cline-pass').hidden,provider !== 'cline-pass');
     // A platform the dashboard no longer offers keeps its quota view in the
-    // markup, but nothing can select it any more.
-    for (const hidden of ['quota-openrouter','quota-bedrock','quota-unavailable']) {
+    // markup, but nothing can select it any more. quota-unavailable is the
+    // fallback pane: it stays hidden for a platform that HAS a quota view, and
+    // appears for a visible platform that has none (WorkBuddy reads its plan
+    // through the gateway, not through this proxy).
+    const hasQuotaView = ['opencode-go','commandcode','cline-pass'].includes(provider);
+    assert.equal(get('quota-unavailable').hidden,hasQuotaView,
+      'quota-unavailable must back a platform with no quota view: ' + provider);
+    for (const hidden of ['quota-openrouter','quota-bedrock']) {
       assert.equal(get(hidden).hidden,true,'a hidden platform must not show its quota view: ' + hidden);
     }
     assert.equal(calls.find(url=>url.pathname === '/api/quota').searchParams.has('billing_refresh'),false,'changing provider never initiates a paid query');

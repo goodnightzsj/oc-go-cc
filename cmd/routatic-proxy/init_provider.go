@@ -62,6 +62,39 @@ var providerPresets = map[string]ProviderPreset{
 		BaseURL:     "https://api.cline.bot/api/v1/chat/completions",
 		Generator:   getClinePassConfig,
 	},
+	"workbuddy": {
+		Name:        "WorkBuddy",
+		EnvVarName:  "ROUTATIC_PROXY_WORKBUDDY_API_KEY",
+		Description: "WorkBuddy - a local workbuddy2api-panel gateway that exposes a Tencent WorkBuddy account as an OpenAI-compatible API",
+		BaseURL:     "http://127.0.0.1:7863/v1/chat/completions",
+		Generator:   getWorkBuddyConfig,
+	},
+}
+
+// getWorkBuddyConfig points at the local gateway rather than at the vendor.
+// The gateway owns the OAuth lifecycle and the desktop-client impersonation
+// WorkBuddy requires; this file only needs its address and its API key.
+func getWorkBuddyConfig() string {
+	return `{
+  "host": "127.0.0.1",
+  "port": 3456,
+  "hot_reload": false,
+  "respect_requested_model": false,
+  "models": {
+    "default": { "provider": "workbuddy", "model_id": "global:deepseek-v4.1-flash", "max_tokens": 8192 }
+  },
+  "model_overrides": {
+    "workbuddy": { "provider": "workbuddy", "model_id": "global:deepseek-v4.1-flash", "max_tokens": 8192 },
+    "global:deepseek-v4.1-flash": { "provider": "workbuddy", "model_id": "global:deepseek-v4.1-flash", "max_tokens": 8192 }
+  },
+  "workbuddy": {
+    "base_url": "http://127.0.0.1:7863",
+    "api_key": "YOUR_WORKBUDDY_GATEWAY_KEY",
+    "timeout_ms": 120000,
+    "stream_timeout_ms": 150000,
+    "streaming_timeout_ms": 600000
+  }
+}`
 }
 
 // getProviderConfig returns a config template optimized for a specific provider.

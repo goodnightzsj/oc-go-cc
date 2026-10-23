@@ -114,6 +114,7 @@ const (
 	ProviderOpenRouter  = site.OpenRouter
 	ProviderCommandCode = site.CommandCode
 	ProviderClinePass   = site.ClinePass
+	ProviderWorkBuddy   = site.WorkBuddy
 )
 
 // APIError represents an HTTP API error returned by an upstream provider.

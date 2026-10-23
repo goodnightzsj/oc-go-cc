@@ -36,6 +36,15 @@ const (
 	// Cline's other pools (cline-free, cline-cloud) are separate namespaces and
 	// would each be their own descriptor, sharing this one's config block.
 	ClinePass = "cline-pass"
+	// WorkBuddy is Tencent's desktop agent, reached through a separate local
+	// gateway (workbuddy2api-panel) that already owns the OAuth lifecycle and
+	// the client-impersonation the vendor requires. This proxy treats that
+	// gateway as an OpenAI-compatible upstream, which is why a static API key
+	// works here at all: the expiring credential never leaves that process.
+	//
+	// The id is the config block's key and the value stored in
+	// requests.provider, so it is part of the stored contract.
+	WorkBuddy = "workbuddy"
 )
 
 // Descriptor is one platform's identity.
@@ -99,8 +108,19 @@ var registry = []Descriptor{
 		RateTable: CommandCode, PeakPriced: true},
 	{ID: ClinePass, DisplayName: "ClinePass", Order: 2, Visible: true,
 		RateTable: ClinePass, PeakPriced: true},
-	{ID: OpenCodeZen, DisplayName: "OpenCode Zen", Order: 3},
-	{ID: AWSBedrock, DisplayName: "AWS Bedrock", Order: 4},
+	// WorkBuddy publishes no per-token rates this proxy can use: its own
+	// accounting is in credits, and converting those to USD needs the model
+	// table the vendor does not publish. With no RateTable its requests carry
+	// no cost at all rather than an invented one - the same position AWS
+	// Bedrock is in, and the dashboard shows the figure as unknown.
+	//
+	// It sits at Order 3, before the hidden platforms, because the dashboard's
+	// display order is built by concatenating its visible and hidden maps: a
+	// visible platform listed after a hidden one would sort in the wrong place
+	// in every distribution panel.
+	{ID: WorkBuddy, DisplayName: "WorkBuddy", Order: 3, Visible: true},
+	{ID: OpenCodeZen, DisplayName: "OpenCode Zen", Order: 4},
+	{ID: AWSBedrock, DisplayName: "AWS Bedrock", Order: 5},
 	// OpenRouter prices two of its models by the clock. Its windows are not a
 	// platform-wide rule - they come from per-model `pricing.overrides` on its
 	// own /api/v1/models endpoint, and the two models covered so far disagree on
@@ -108,7 +128,7 @@ var registry = []Descriptor{
 	// per model rather than per platform. They are transcribed there, not read
 	// at runtime: models.dev, the catalog this proxy syncs, carries no overrides
 	// at all.
-	{ID: OpenRouter, DisplayName: "OpenRouter", Order: 5, RateTable: OpenRouter, PeakPriced: true},
+	{ID: OpenRouter, DisplayName: "OpenRouter", Order: 6, RateTable: OpenRouter, PeakPriced: true},
 }
 
 // All returns every descriptor in presentation order. Callers must not assume

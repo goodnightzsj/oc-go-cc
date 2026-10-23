@@ -776,12 +776,13 @@ func TestEnabledProvidersCoversEveryConfiguredPlatform(t *testing.T) {
 // stops being selectable. This is the general form of the CommandCode omission
 // above, so a platform added later cannot reintroduce it here.
 func TestEnabledProvidersMatchesRegistryCoverage(t *testing.T) {
-	// A global key covers legacy platforms; CommandCode and ClinePass each have
-	// a dedicated key and must not inherit one.
+	// A global key covers legacy platforms; CommandCode, ClinePass and
+	// WorkBuddy each have a dedicated key and must not inherit one.
 	enabled := enabledProviders(&config.Config{
 		APIKey:      "global-key",
 		CommandCode: config.CommandCodeConfig{APIKey: "cc-key"},
 		ClinePass:   config.ClinePassConfig{APIKey: "cp-key"},
+		WorkBuddy:   config.WorkBuddyConfig{APIKey: "wb-key"},
 	})
 	for _, d := range site.All() {
 		if !enabled[d.ID] {

@@ -80,6 +80,9 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 	clinePassProvider := provider.NewClinePassProvider(atomic, captureLogger)
 	_ = providerRegistry.Register(clinePassProvider)
 	_ = providerRegistry.Register(provider.NewOpenRouterProvider(atomic, captureLogger))
+	// WorkBuddy reaches a local workbuddy2api-panel gateway, which owns the
+	// vendor's OAuth and impersonation. See provider/workbuddy.go.
+	_ = providerRegistry.Register(provider.NewWorkBuddyProvider(atomic, captureLogger))
 
 	// Create status store for the statusline endpoint.
 	statusStore := status.NewStore(0)

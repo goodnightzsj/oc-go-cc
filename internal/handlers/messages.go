@@ -69,6 +69,7 @@ type responseWriter struct {
 		outputTokens             int
 		cacheReadInputTokens     int
 		cacheCreationInputTokens int
+		reasoningTokens          int
 	}
 }
 
@@ -137,6 +138,7 @@ func (w *responseWriter) observeSSEEvent() error {
 		OutputTokens             *int `json:"output_tokens"`
 		CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
 		CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
+		ReasoningTokens          *int `json:"reasoning_tokens"`
 	}
 	var event struct {
 		Type    string     `json:"type"`
@@ -177,6 +179,9 @@ func (w *responseWriter) observeSSEEvent() error {
 	}
 	if usage.CacheCreationInputTokens != nil {
 		w.usage.cacheCreationInputTokens = *usage.CacheCreationInputTokens
+	}
+	if usage.ReasoningTokens != nil && *usage.ReasoningTokens > 0 {
+		w.usage.reasoningTokens = *usage.ReasoningTokens
 	}
 	return nil
 }
@@ -807,6 +812,7 @@ func (h *MessagesHandler) handleStreaming(
 				OutputTokens:        rw.usage.outputTokens,
 				CacheReadTokens:     rw.usage.cacheReadInputTokens,
 				CacheCreationTokens: rw.usage.cacheCreationInputTokens,
+				ReasoningTokens:     rw.usage.reasoningTokens,
 				Streaming:           true,
 				Success:             true,
 				Attempt:             attempt + 1,
@@ -888,6 +894,7 @@ func (h *MessagesHandler) handleStreaming(
 				OutputTokens:        rw.usage.outputTokens,
 				CacheReadTokens:     rw.usage.cacheReadInputTokens,
 				CacheCreationTokens: rw.usage.cacheCreationInputTokens,
+				ReasoningTokens:     rw.usage.reasoningTokens,
 				Streaming:           true,
 				Success:             false,
 				Attempt:             attempt + 1,
@@ -1229,6 +1236,7 @@ func (h *MessagesHandler) handleNonStreaming(
 		OutputTokens:        usage.OutputTokens,
 		CacheReadTokens:     usage.CacheReadInputTokens,
 		CacheCreationTokens: usage.CacheCreationInputTokens,
+		ReasoningTokens:     usage.ReasoningTokens,
 		Streaming:           false,
 		Success:             writeErr == nil,
 		Attempt:             result.Attempted,

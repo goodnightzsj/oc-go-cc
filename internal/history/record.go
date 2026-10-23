@@ -39,6 +39,15 @@ type RequestRecord struct {
 	OutputTokens        int     // output tokens from SSE usage event
 	CacheReadTokens     int     // prompt-cache read tokens
 	CacheCreationTokens int     // prompt-cache write tokens
+	// ReasoningTokens is how much of OutputTokens was spent thinking. It is a
+	// breakdown of that figure, not an addition to it, so a total computed by
+	// summing the token columns must not add this one again.
+	//
+	// Zero means either "the model did not reason" or "this platform does not
+	// report the split", and those are not distinguishable here. Only the
+	// gateways that publish it fill it - WorkBuddy answers with
+	// completion_tokens_details.reasoning_tokens.
+	ReasoningTokens int
 	CostUSD             float64 // provider cost in USD, estimated when CostSource is "estimated"
 	CostKnown           bool    // whether CostUSD is available
 	CostSource          string  // "estimated" or "provider"

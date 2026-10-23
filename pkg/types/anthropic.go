@@ -266,6 +266,15 @@ type Usage struct {
 	OutputTokens             int `json:"output_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	// ReasoningTokens is how much of OutputTokens was spent thinking. It is a
+	// breakdown of that figure, not an addition to it.
+	//
+	// Anthropic's own API does not publish this field; it is carried here so a
+	// gateway that does report it (WorkBuddy answers with
+	// completion_tokens_details.reasoning_tokens) does not lose the figure on
+	// the way through. Omitted when zero, so a platform that never reports one
+	// produces the same bytes it always did.
+	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
 }
 
 // Delta represents a partial update in a streaming response.

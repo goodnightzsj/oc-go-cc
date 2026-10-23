@@ -242,10 +242,16 @@ func (p *ClinePassProvider) request(ctx context.Context, req *types.MessageReque
 			if target == "zai" || target == "z-ai" {
 				direct, planner = "z-ai", "zai"
 			}
-			out.Provider = &clineChannelOptions{Only: []string{direct}}
+			// The capability filter is per model because it is a hard refusal,
+			// not a hint: vision is accepted for deepseek-v4.1-flash-1017 and
+			// rejected for deepseek-v4-pro. A model absent from the map sends
+			// no `has` at all, which is the behaviour every existing deployment
+			// already has.
+			has := cfg.ClinePass.ChannelPinCapabilities[model.ModelID]
+			out.Provider = &clineChannelOptions{Only: []string{direct}, Has: has}
 			out.ProviderOptions = &struct {
 				Gateway clineChannelOptions `json:"gateway"`
-			}{Gateway: clineChannelOptions{Only: []string{planner}}}
+			}{Gateway: clineChannelOptions{Only: []string{planner}, Has: has}}
 		}
 		var payload []byte
 		payload, err = json.Marshal(out)

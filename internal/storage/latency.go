@@ -134,7 +134,7 @@ func (l *Latency) GetStats(since time.Time) ([]ModelLatencyStats, error) {
 	return snapshot.Stats, nil
 }
 
-func (l *Latency) getStats(ctx context.Context, since time.Time) ([]ModelLatencyStats, error) {	// Cap samples per provider/model so a chatty platform cannot starve another
+func (l *Latency) getStats(ctx context.Context, since time.Time) ([]ModelLatencyStats, error) { // Cap samples per provider/model so a chatty platform cannot starve another
 	// platform's samples for the same model. Each Count is a bounded sample count,
 	// not the total number of requests used to calculate success rates.
 	// duration_ms on requests is the same measurement the dedicated
@@ -259,7 +259,8 @@ func (d *Database) storeLatency(key, revision string, snapshot *LatencySnapshot)
 	d.latencies[key] = snapshot
 }
 
-func calculateStats(model string, samples []int64) ModelLatencyStats {	if len(samples) == 0 {
+func calculateStats(model string, samples []int64) ModelLatencyStats {
+	if len(samples) == 0 {
 		return ModelLatencyStats{Model: model}
 	}
 

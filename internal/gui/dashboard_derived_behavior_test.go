@@ -216,13 +216,17 @@ async function checks() {
   AnalyticsModule.renderPriceTables({ tables: {
     'commandcode': { rules: 70, seed_rules: 70, live: true, refreshed_at: new Date().toISOString() },
     'cline-pass': { rules: 15, seed_rules: 15, live: false },
+    'workbuddy': { rules: 5, seed_rules: 5, live: false, reference_only: true },
   }});
   assert.equal(get('price-tables').hidden, false, 'the panel shows when tables are reported');
   html = get('price-tables-tbody').innerHTML;
   assert.ok(html.includes(t('analytics.priceLive')), 'a refreshed table reads as live');
   assert.ok(html.includes(t('analytics.priceSeed')), 'an unrefreshed table reads as the snapshot');
   assert.equal((html.match(/price-live/g) || []).length, 1, 'only the refreshed platform is marked live');
-  assert.equal((html.match(/price-seed/g) || []).length, 1, 'only the unrefreshed platform is marked as a snapshot');
+  assert.equal((html.match(/price-seed/g) || []).length, 2, 'unrefreshed tables retain snapshot styling');
+  const referenceRow = html.match(/<tr data-provider="workbuddy">([\s\S]*?)<\/tr>/)[1];
+  assert.ok(referenceRow.includes(t('analytics.priceReference')), 'reference rates are labelled explicitly');
+  assert.ok(referenceRow.includes(t('analytics.priceReferenceHint')), 'reference rates must not imply account charges');
 
   // A live flag without a timestamp is not live: there would be no age to show,
   // and claiming liveness without one is the failure the panel exists to catch.

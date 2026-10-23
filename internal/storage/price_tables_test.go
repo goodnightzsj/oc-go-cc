@@ -22,11 +22,12 @@ func TestPriceTablesReportsSeedBeforeRefresh(t *testing.T) {
 	priceOverrides.Store(nil)
 	priceRefreshedAt.Store(nil)
 
-	// No refresh has run, so nothing is live. The embedded seeds are not
-	// reported by PriceTables (they are always present and not worth a row);
-	// what matters is that nothing claims to be live.
-	if got := PriceTables(); len(got) != 0 {
-		t.Errorf("PriceTables before any refresh = %+v, want empty (nothing live yet)", got)
+	tables := PriceTables()
+	for name, rules := range priceSeedCounts() {
+		state, ok := tables[name]
+		if !ok || state.Rules != rules || state.SeedRules != rules || state.Live || !state.RefreshedAt.IsZero() {
+			t.Errorf("seed %s = %+v, present=%v; want %d static rules", name, state, ok, rules)
+		}
 	}
 }
 
@@ -39,6 +40,8 @@ func TestPriceTablesMarksRefreshedPlatformsLive(t *testing.T) {
 		priceOverrides.Store(prevOverrides)
 		priceRefreshedAt.Store(prevAt)
 	})
+	priceOverrides.Store(nil)
+	priceRefreshedAt.Store(nil)
 
 	fetched := map[string][]priceEntry{
 		site.CommandCode: {{Match: "deepseek", Input: 0.15, Output: 0.60}},
@@ -67,10 +70,8 @@ func TestPriceTablesMarksRefreshedPlatformsLive(t *testing.T) {
 	if cc.RefreshedAt.Before(before.Add(-time.Minute)) || cc.RefreshedAt.After(time.Now().UTC().Add(time.Minute)) {
 		t.Errorf("refreshed_at = %v, want approximately now", cc.RefreshedAt)
 	}
-	// A platform that was not fetched must be absent rather than reported live
-	// with a zero timestamp, which would read as "refreshed at the epoch".
-	if _, ok := tables[site.ClinePass]; ok {
-		t.Errorf("%s reported without being fetched: %+v", site.ClinePass, tables[site.ClinePass])
+	if state, ok := tables[site.ClinePass]; !ok || state.Live || !state.RefreshedAt.IsZero() || state.Rules == 0 {
+		t.Errorf("unfetched platform must retain seed provenance: %+v, present=%v", state, ok)
 	}
 }
 

@@ -635,7 +635,7 @@ func (d *Database) clearCatalogAPIKeys(ctx context.Context) error {
 }
 
 // BackfillRequestCosts fills missing trustworthy per-request costs when the
-// provider's prices are known. Stored provider costs and unknown prices remain unchanged.
+// provider's prices are known. Unobserved usage and stored costs remain unchanged.
 func (d *Database) BackfillRequestCosts(ctx context.Context) (int64, error) {
 	baseline := ""
 	if !d.analyticsBaseline.IsZero() {
@@ -654,6 +654,7 @@ func (d *Database) BackfillRequestCosts(ctx context.Context) (int64, error) {
 		FROM requests r
 		LEFT JOIN models m ON m.name = r.model AND m.provider = COALESCE(NULLIF(r.provider, ''), 'opencode-go')
 		WHERE r.cost_usd IS NULL
+		  AND (r.details_known = 1 OR r.usage_trusted = 1)
 		  AND (? = '' OR julianday(r.start_time) >= julianday(?) OR r.usage_trusted = 1)
 	`, baseline, baseline)
 	if err != nil {

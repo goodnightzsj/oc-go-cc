@@ -392,15 +392,11 @@ func (h *StreamHandler) processSSELine(
 	*decodeErrors = 0
 	if chunk.Usage != nil {
 		*terminalUsage = chunk.Usage
-		// Every OpenAI chunk carries cumulative usage; the last one seen
-		// before an upstream failure is the exact count the platform bills
-		// for a partially produced stream, so surface it on the writer even
-		// when the stream never completes.
+		// Preserve reported usage even when the terminal event never arrives.
 		if uw, ok := w.(interface {
-			SetPartialUsage(in, out, cacheRead, cacheCreate int)
+			SetPartialUsage(*types.Usage)
 		}); ok {
-			in, cacheRead, cacheCreate := splitPromptTokens(chunk.Usage)
-			uw.SetPartialUsage(in, chunk.Usage.CompletionTokens, cacheRead, cacheCreate)
+			uw.SetPartialUsage(usageInfoToAnthropic(chunk.Usage))
 		}
 	}
 
@@ -896,9 +892,8 @@ func (h *StreamHandler) processResponsesSSELine(
 	}
 	if usage != nil {
 		state.usage = usage
-		if recorder, ok := w.(interface{ SetPartialUsage(int, int, int, int) }); ok {
-			converted := responsesUsageToAnthropic(usage)
-			recorder.SetPartialUsage(converted.InputTokens, converted.OutputTokens, converted.CacheReadInputTokens, converted.CacheCreationInputTokens)
+		if recorder, ok := w.(interface{ SetPartialUsage(*types.Usage) }); ok {
+			recorder.SetPartialUsage(responsesUsageToAnthropic(usage))
 		}
 	}
 	if chunk.Type == "response.failed" || chunk.Type == "error" {

@@ -35,10 +35,10 @@ type RequestRecord struct {
 	// it asked for none. It records intent, not effect: an upstream that ignores
 	// the field leaves this populated and the response unchanged.
 	ReasoningEffort     string
-	InputTokens         int     // raw (non-cache) input tokens from SSE usage event
-	OutputTokens        int     // output tokens from SSE usage event
-	CacheReadTokens     int     // prompt-cache read tokens
-	CacheCreationTokens int     // prompt-cache write tokens
+	InputTokens         int // raw (non-cache) input tokens from SSE usage event
+	OutputTokens        int // output tokens from SSE usage event
+	CacheReadTokens     int // prompt-cache read tokens
+	CacheCreationTokens int // prompt-cache write tokens
 	// ReasoningTokens is how much of OutputTokens was spent thinking. It is a
 	// breakdown of that figure, not an addition to it, so a total computed by
 	// summing the token columns must not add this one again.
@@ -48,10 +48,10 @@ type RequestRecord struct {
 	// gateways that publish it fill it - WorkBuddy answers with
 	// completion_tokens_details.reasoning_tokens.
 	ReasoningTokens int
-	CostUSD             float64 // provider cost in USD, estimated when CostSource is "estimated"
-	CostKnown           bool    // whether CostUSD is available
-	CostSource          string  // "estimated" or "provider"
-	DetailsKnown        bool    // whether routing/status/latency fields were observed locally
+	CostUSD         float64 // provider cost in USD, estimated when CostSource is "estimated"
+	CostKnown       bool    // whether CostUSD is available
+	CostSource      string  // "estimated" or "provider"
+	DetailsKnown    bool    // whether routing/status/latency fields were observed locally
 	// UsageUnobserved marks a failure recorded before any usage arrived: the
 	// upstream said nothing about tokens, so the row carries the outcome and
 	// nothing to average. It is stored as details_known = 0, which is what keeps
@@ -64,7 +64,7 @@ type RequestRecord struct {
 	// field whose default is false would mark every successful request
 	// unobserved.
 	UsageUnobserved bool
-	Streaming       bool    // whether this was a streaming request
+	Streaming       bool // whether this was a streaming request
 
 	Success  bool   // whether it completed successfully
 	ErrorMsg string // error message if failed

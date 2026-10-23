@@ -85,8 +85,8 @@ type responsesUsageRecorder struct {
 	usage [4]int
 }
 
-func (w *responsesUsageRecorder) SetPartialUsage(in, out, read, create int) {
-	w.usage = [4]int{in, out, read, create}
+func (w *responsesUsageRecorder) SetPartialUsage(usage *types.Usage) {
+	w.usage = [4]int{usage.InputTokens, usage.OutputTokens, usage.CacheReadInputTokens, usage.CacheCreationInputTokens}
 }
 
 func TestResponsesUpstreamStreamToolsOrderingAndUsage(t *testing.T) {

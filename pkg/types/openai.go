@@ -139,13 +139,13 @@ type Choice struct {
 // DeepSeek-style prompt_cache_hit/miss_tokens, and OpenAI-standard
 // prompt_tokens_details.cached_tokens (used by OpenCode Go's oa-compat gateway).
 type UsageInfo struct {
-	PromptTokens          int                  `json:"prompt_tokens"`
-	CompletionTokens      int                  `json:"completion_tokens"`
-	TotalTokens           int                  `json:"total_tokens"`
-	PromptTokensDetails   *PromptTokensDetails `json:"prompt_tokens_details,omitempty"`
+	PromptTokens            int                      `json:"prompt_tokens"`
+	CompletionTokens        int                      `json:"completion_tokens"`
+	TotalTokens             int                      `json:"total_tokens"`
+	PromptTokensDetails     *PromptTokensDetails     `json:"prompt_tokens_details,omitempty"`
 	CompletionTokensDetails *CompletionTokensDetails `json:"completion_tokens_details,omitempty"`
-	PromptCacheHitTokens  int                  `json:"prompt_cache_hit_tokens,omitempty"`
-	PromptCacheMissTokens int                  `json:"prompt_cache_miss_tokens,omitempty"`
+	PromptCacheHitTokens    int                      `json:"prompt_cache_hit_tokens,omitempty"`
+	PromptCacheMissTokens   int                      `json:"prompt_cache_miss_tokens,omitempty"`
 	// CompletionThinkingTokens is the DeepSeek-family spelling of the same
 	// figure CompletionTokensDetails.ReasoningTokens carries. Both appear on
 	// the wire from different gateways; reading either means a reasoning

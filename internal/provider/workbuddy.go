@@ -131,10 +131,7 @@ func (p *WorkBuddyProvider) request(ctx context.Context, req *types.MessageReque
 		}
 		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(body), RetryAfter: retryAfter}
 	}
-	// Observations are attached before capture, not instead of it. Wrapping in
-	// the other order loses them entirely: captureReadCloser forwards neither
-	// KeyHint nor FirstByteAt, so a captured body answers "" and the history
-	// row records no credential and no latency while looking well-formed.
+	// Stamp the raw read before capture's tee; CaptureBody forwards observations.
 	var body io.ReadCloser = newWorkBuddyBody(resp.Body, sel.KeyHint())
 	if p.capture != nil {
 		body = client.CaptureBody(body, func(data []byte) {

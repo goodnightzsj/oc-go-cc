@@ -394,10 +394,14 @@ func responsesInputContent(raw json.RawMessage, allowImage bool) ([]types.Conten
 
 func responsesUsage(usage types.Usage) map[string]any {
 	input := usage.InputTokens + usage.CacheReadInputTokens + usage.CacheCreationInputTokens
-	return map[string]any{
+	result := map[string]any{
 		"input_tokens": input, "output_tokens": usage.OutputTokens, "total_tokens": input + usage.OutputTokens,
 		"input_tokens_details": map[string]int{"cached_tokens": usage.CacheReadInputTokens, "cache_write_tokens": usage.CacheCreationInputTokens},
 	}
+	if usage.ReasoningTokens > 0 {
+		result["output_tokens_details"] = map[string]int{"reasoning_tokens": usage.ReasoningTokens}
+	}
+	return result
 }
 
 func newInboundResponse(model string) map[string]any {
@@ -722,6 +726,10 @@ func (w *ResponsesStreamWriter) event(data []byte) error {
 				w.usage.CacheReadInputTokens = value
 			case "cache_creation_input_tokens":
 				w.usage.CacheCreationInputTokens = value
+			case "reasoning_tokens":
+				if value > 0 {
+					w.usage.ReasoningTokens = value
+				}
 			default:
 				continue
 			}

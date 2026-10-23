@@ -79,32 +79,6 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 	return err
 }
 
-// modelNameForPricing strips a realm prefix before a catalog lookup.
-//
-// A gateway that fronts several realms names its models `global:deepseek-v4.1-flash`
-// and `cn:deepseek-v4.1-flash`, while the catalog stores the bare name once.
-// The prefix is meaningful on the wire - it selects which realm serves the
-// request - but it is not part of the model's identity for pricing, so a lookup
-// that kept it found nothing and reported an unknown cost for every request
-// through that platform.
-//
-// Only a leading `<word>:` is removed, and only when what follows is non-empty.
-// A model id containing a colon for any other reason is left alone, because
-// stripping part of a real name would price it against the wrong row.
-func modelNameForPricing(model string) string {
-	idx := strings.IndexByte(model, ':')
-	if idx <= 0 || idx == len(model)-1 {
-		return model
-	}
-	prefix := model[:idx]
-	for _, r := range prefix {
-		if !(r >= 'a' && r <= 'z') && !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') && r != '-' && r != '_' {
-			return model
-		}
-	}
-	return model[idx+1:]
-}
-
 // requestedModelForRecord returns the model to store, or NULL when the client
 // asked for the model that served it.
 //
@@ -839,7 +813,7 @@ func (r *Requests) costForRecord(ctx context.Context, rec history.RequestRecord)
 		SELECT cost_input_per_m, cost_output_per_m, cost_tiers
 		FROM models
 		WHERE provider = ? AND name = ?
-	`, provider, modelNameForPricing(rec.Model)).Scan(&modelsInputPerM, &modelsOutputPerM, &tiersJSON)
+	`, provider, modelNameForPricing(provider, rec.Model)).Scan(&modelsInputPerM, &modelsOutputPerM, &tiersJSON)
 	if err != nil && err != sql.ErrNoRows {
 		return sql.NullFloat64{}, "", err
 	}

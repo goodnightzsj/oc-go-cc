@@ -153,6 +153,19 @@ Responses name the served model too, for every caller downstream: streaming read
 
 Every observation added to a stream body must be forwarded by every wrapper around it — `ctxReadCloser`, `captureReadCloser` and `peekedBody` each erased one at some point, five times in total, and `internal/client/upstream_channel_test.go` holds all of them across bare/capture/context/both. One of those was invisible to tests because the fixture ran with capture off while production runs with it on.
 
+**Wrapping order matters as much as forwarding.** An observation wrapper must go *inside* capture, never outside:
+
+```go
+body := newObserver(resp.Body)          // inner: the observation
+if capture != nil {
+    body = client.CaptureBody(body, …)  // outer: capture sees the same bytes
+}
+```
+
+Capture is a tee that reads from its inner body, so an observer placed outside it sits on the caller's read path and still works — but one placed *outside* while capture is *inside* never sees a byte, because nothing reads through it. The failure is silent: `captureReadCloser` forwards neither `KeyHint` nor `FirstByteAt`, so the body answers `""` and `time.Time{}`, the history row stores NULL in both columns, and the row still looks well-formed. WorkBuddy shipped this way until it was noticed: 168 of its first 181 requests recorded no credential and 169 no latency — and it was only caught by reading the column, not by any test, because the existing fixtures ran with capture off.
+
+The rule: **the observation wrapper is always the innermost one.** If a new wrapper is added, it goes outside; if capture is present, capture goes outermost. `workbuddy_observation_test.go` pins both figures through a capture-enabled body, which is the shape production actually uses.
+
 `channel` filters on `requests.upstream_channel`, the upstream channel the gateway reported serving the request on. Only ClinePass publishes one, so it narrows that platform's rows; every other platform stores NULL. `GET /api/history/channels?provider=` reports the channels this instance actually recorded, not the gateway's advertised candidate list — filtering by a channel that never served a request returns an empty page. The dashboard offers the control only while a concrete platform is selected, since "all platforms" is not a platform whose channel this could be.
 
 ### ClinePass channel pinning

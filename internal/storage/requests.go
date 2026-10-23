@@ -47,7 +47,7 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 			cost_usd, cost_source, details_known, usage_trusted, streaming, success, error_msg, attempt,
 			peak_multiplier, upstream_channel, upstream_model, first_byte_ms, reasoning_effort,
 			key_hint
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		rec.ID,
 		rec.Model,
@@ -62,6 +62,7 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 		rec.CacheCreationTokens,
 		costUSD,
 		costSource,
+		boolToInt(!rec.UsageUnobserved),
 		boolToInt(rec.Streaming),
 		boolToInt(rec.Success),
 		rec.ErrorMsg,
@@ -786,6 +787,13 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 }
 
 func (r *Requests) costForRecord(ctx context.Context, rec history.RequestRecord) (sql.NullFloat64, string, error) {
+	// A row whose usage was never observed has no cost: pricing zero tokens
+	// yields zero, and a stored 0 is indistinguishable from a genuinely free
+	// request. NULL is the honest answer, and it is what makes the row land in
+	// the unknown-cost bucket rather than in every total that sums cost.
+	if rec.UsageUnobserved {
+		return sql.NullFloat64{}, "", nil
+	}
 	if rec.CostKnown || rec.CostUSD != 0 {
 		source := rec.CostSource
 		if source != CostSourceProvider {

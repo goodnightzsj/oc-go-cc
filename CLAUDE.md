@@ -155,6 +155,50 @@ Every observation added to a stream body must be forwarded by every wrapper arou
 
 `channel` filters on `requests.upstream_channel`, the upstream channel the gateway reported serving the request on. Only ClinePass publishes one, so it narrows that platform's rows; every other platform stores NULL. `GET /api/history/channels?provider=` reports the channels this instance actually recorded, not the gateway's advertised candidate list — filtering by a channel that never served a request returns an empty page. The dashboard offers the control only while a concrete platform is selected, since "all platforms" is not a platform whose channel this could be.
 
+### ClinePass channel pinning
+
+The gateway accepts two pin shapes, one per pipeline, and the proxy writes both (`internal/provider/cline_pass.go`): `provider.only` for the direct pipeline (OpenRouter) and `providerOptions.gateway.only` for the planner (Vercel AI Gateway). `channel_pin` defaults to `deepseek` when unset.
+
+**`only` and `has` are different mechanisms, measured 2026-10-23 against the live gateway with a fresh session per sample:**
+
+| field | meaning | measured behaviour |
+|---|---|---|
+| `only` | name a channel | honoured on planner (16/16), ignored on direct (74/76 over 7 days) |
+| `has` | require a capability | **hard refusal** — a capability the routed channel does not declare fails the request with `stream_initialization_failed` |
+
+`has` is not a hint and not a preference: it does not move traffic, it rejects. The capability set is therefore **per model**, in `cline_pass.channel_pin_capabilities` keyed by model id:
+
+```json
+"channel_pin_capabilities": {
+  "cline-pass/deepseek-v4.1-flash":      ["vision", "implicit-caching"],
+  "cline-pass/deepseek-v4.1-flash-1017": ["vision", "implicit-caching"],
+  "cline-pass/deepseek-v4-pro":          ["implicit-caching"]
+}
+```
+
+Measured acceptance, per model, `has` alone with no `only`:
+
+| capability | v4.1-flash | v4.1-flash-1017 | v4-pro |
+|---|---|---|---|
+| `vision` | inert* | accepted | **refused** |
+| `implicit-caching` | inert* | accepted | accepted |
+| `reasoning` | inert* | accepted | accepted |
+| `structured-output` | inert* | accepted | accepted |
+
+Capabilities measured to be refused by every model that reaches the gateway: `tools`, `function-calling`, `streaming`, `json-mode`, `image-input`, `prompt-caching`. They are absent from the whitelist, so naming one fails config load rather than producing a 100%-failure model.
+
+\* **`deepseek-v4.1-flash` (no `1017` suffix) is routed to a private channel that parses nothing.** Measured 2026-10-23 with key #0, six fresh sessions per case: all six returned `openai-compatible-private` — including a request carrying `has: ["definitely-not-real-xyz"]`, which every model that reaches the gateway rejects outright with `stream_initialization_failed`. So for that model the capability list is written into the request and never read. "inert" records that, not a capability claim: nothing here has been shown to be accepted or refused for it.
+
+Models confirmed to reach the pinning gateway, useful when testing `has` (all measured 2026-10-23): `deepseek/deepseek-v4.1-flash-1017` (vision accepted, served by `deepseek`), `deepseek/deepseek-v4-flash-vision-exp` (vision accepted, served by `deepinfra`), `deepseek/deepseek-v4-flash-0731` (vision refused), `deepseek-v4-pro` (vision refused). Those are the ones where `has` actually decides the request.
+
+**The one-model list must never be shared.** A single global list containing `vision` fails every `deepseek-v4-pro` request. That measurement is also the explanation for the circulating claim that pinning "only works on 1017" — the cap set `["vision","implicit-caching"]` happens to be satisfied only by 1017, not because `has` is model-specific.
+
+Unknown capability names are refused at config load (`config.ValidateChannelCapabilities`, whitelist `config.knownChannelCapabilities`), because the gateway's own refusal arrives on a live request after the pin is chosen and the key spent. Adding a capability to the whitelist requires measuring it first. A model absent from the map sends no `has` field at all (`omitempty`), which is the shape every earlier deployment already sent.
+
+**Session stickiness confounds any probe of this.** The gateway pins a session to a channel: repeating a request inside one session returns the same channel regardless of the pin field, and only a fresh `X-Session-Id` per sample shows the real distribution. Three earlier rounds of testing this produced three contradictory conclusions for exactly that reason. When probing, pair each variant against a baseline **within the same session** and compare, or use a fresh session per sample; never compare runs that differ only in elapsed time.
+
+Regression: `internal/config/channel_capability_test.go` (whitelist, per-model validation, empty config), `internal/provider/cline_pass_capability_test.go` (per-model injection, omission when unconfigured).
+
 ### Analytics and Performance panels
 
 Both tabs used to run several full-window `GROUP BY` queries per poll — five for Analytics, two more for Performance — each scanning the whole window. The scan is what costs on `modernc.org/sqlite`, so they now share one grouped pass per view and cache the result against the same `history_revision` counter the history summary uses.

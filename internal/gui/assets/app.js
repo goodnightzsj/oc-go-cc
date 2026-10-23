@@ -400,6 +400,9 @@ const TRANSLATIONS = {
     'clinepass.accountScope': 'Official plan usage. ClinePass is a flat monthly subscription measured against reference rates, so these are percentages of each window, not an amount owed. Each key is shown separately.',
     'setting.clinePassHint': 'Chat Completions only · plan usage',
     'clinepass.keyHint': 'Uses its own Cline API key; global keys are never sent to Cline.',
+    'workbuddy.keyHint': 'Uses the API key of a local workbuddy2api-panel instance; global keys are never sent to it.',
+    'workbuddy.gatewayHint': 'The gateway holds the WorkBuddy sign-in and refreshes it; this proxy only needs a static key for it.',
+    'setting.workBuddyHint': 'Local gateway · Chat Completions only',
     'clinepass.noAnthropic': 'The Cline API publishes no Messages endpoint, so this platform always uses Chat Completions.',
     'clinepass.quotaHint': 'Reads the plan usage windows with this platform API key. No browser session is required. The endpoint is undocumented, so its fields may change.',
     'clinepass.subscription': 'Subscription dashboard',
@@ -986,6 +989,9 @@ const TRANSLATIONS = {
     'clinepass.accountScope': '官方套餐用量。ClinePass 是按月固定订阅、以参考价折算，因此这里是各窗口的百分比，而不是应付金额。每个密钥分别显示。',
     'setting.clinePassHint': '仅 Chat Completions · 套餐用量',
     'clinepass.keyHint': '使用本平台自己的 Cline API 密钥；全局密钥不会发送给 Cline。',
+    'workbuddy.keyHint': '使用本地 workbuddy2api-panel 实例的 API 密钥；全局密钥不会发送给它。',
+    'workbuddy.gatewayHint': '登录状态由该网关持有并自动刷新，本项目只需要一个静态密钥。',
+    'setting.workBuddyHint': '本地网关 · 仅 Chat Completions',
     'clinepass.noAnthropic': 'Cline API 未提供 Messages 端点，因此该平台始终使用 Chat Completions。',
     'clinepass.quotaHint': '使用本平台 API 密钥读取套餐用量窗口，无需浏览器会话。该端点未公开，字段可能变化。',
     'clinepass.subscription': '订阅面板',
@@ -3245,6 +3251,7 @@ const PROVIDERS = {
   'opencode-go': {name: 'OpenCode Go', color: '#818cf8'},
   'commandcode': {name: 'CommandCode', color: '#22d3ee'},
   'cline-pass': {name: 'ClinePass', color: '#f472b6'},
+  'workbuddy': {name: 'WorkBuddy', color: '#facc15'},
 };
 
 function providerInfo(provider) {
@@ -3784,6 +3791,14 @@ const CONFIG_FIELDS = [
   ['cline_pass.streaming_timeout_ms', 'cfg-cline-pass-streaming-timeout', 'int'],
   ['cline_pass.channel_pin_enabled', 'cfg-cline-pass-channel-pin-enabled', 'bool'],
   ['cline_pass.channel_pin', 'cfg-cline-pass-channel-pin', 'string'],
+
+  // WorkBuddy. Points at a local workbuddy2api-panel gateway, which owns the
+  // vendor's OAuth; there is nothing here that speaks WorkBuddy's own protocol.
+  ['workbuddy.base_url', 'cfg-workbuddy-base-url', 'string'],
+  ['workbuddy.api_keys', 'cfg-workbuddy-api-keys', 'keys'],
+  ['workbuddy.timeout_ms', 'cfg-workbuddy-timeout', 'int'],
+  ['workbuddy.stream_timeout_ms', 'cfg-workbuddy-stream-timeout', 'int'],
+  ['workbuddy.streaming_timeout_ms', 'cfg-workbuddy-streaming-timeout', 'int'],
 
   // Logging
   // Routing scope. The option list carries the visible platforms; which of

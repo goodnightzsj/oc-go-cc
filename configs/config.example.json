@@ -552,6 +552,14 @@
     "streaming_timeout_ms": 600000,
     "zero_data_retention": false
   },
+  "workbuddy": {
+    "//": "Points at a local workbuddy2api-panel gateway, which owns the WorkBuddy sign-in and refreshes it. This proxy only needs its address and key.",
+    "base_url": "http://127.0.0.1:7863",
+    "api_keys": [],
+    "timeout_ms": 120000,
+    "stream_timeout_ms": 150000,
+    "streaming_timeout_ms": 600000
+  },
   "logging": {
     "level": "info",
     "requests": true,

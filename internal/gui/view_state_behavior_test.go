@@ -84,3 +84,27 @@ async function checks() {
   localStorage.removeItem(VIEW_STATE_KEY);
 }
 ` + platformBehaviorRunScript
+
+// Switching tabs has to update the address bar. The filters moved to
+// localStorage, and for a while nothing wrote the tab name either, so the URL
+// kept naming whichever page the panel had opened on - a reload then went back
+// there instead of where the reader was.
+func TestTabChangesFollowTheAddressBar(t *testing.T) {
+	runPlatformBehavior(t, navigationBehaviorDOMScript+`
+async function checks() {
+  await bootView();
+  for (const tab of ['history', 'analytics', 'quota', 'fallback', 'overview']) {
+    document.getElementById('nav-' + tab).click();
+    await settleView();
+    assert.equal(activeTab, tab);
+    assert.equal(location.hash, '#' + tab, 'the address bar must name the current tab: ' + tab);
+    assert.equal(parseViewHash(location.hash).params.toString(), '', 'the hash carries the tab and nothing else');
+  }
+
+  // A programmatic switch counts too: opening a provider's settings section
+  // moves the panel without a click on the tab bar.
+  activateTab('settings');
+  assert.equal(location.hash, '#settings', 'a programmatic tab change must update the URL as well');
+}
+`+platformBehaviorRunScript)
+}

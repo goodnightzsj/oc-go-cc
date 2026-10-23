@@ -1803,6 +1803,12 @@ function activateTab(name) {
   heading.dataset.i18n = 'tab.' + name;
   heading.textContent = t('tab.' + name);
   activeTab = name;
+  // The address bar follows the page. This lives here rather than at the click
+  // handler because the tab is also switched programmatically - opening a
+  // provider's settings section, jumping to history - and those paths have to
+  // keep the URL truthful too. syncViewHash is a no-op when the hash already
+  // names this tab, so the hashchange handler cannot loop through it.
+  syncViewHash();
   if (name === 'overview') refreshOverviewUsage();
   if (name === 'performance') PerfModule.refresh();
   if (name === 'analytics' && AnalyticsModule && AnalyticsModule.load) {

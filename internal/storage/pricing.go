@@ -25,6 +25,32 @@ func parseRequestTime(s string) time.Time {
 	return t
 }
 
+// costForTokens prices a token mix in USD using the platform's own published
+// rates. Callers must already have established that the platform publishes a
+// rate for this model; complete request estimates go through
+// costForProviderTokensAt, which retains unknown-price semantics.
+func costForTokens(provider, model string, in, out, cacheRead, cacheCreate int64) float64 {
+	// The published context bands are measured against the whole prompt, not
+	// the cache-miss part alone: a request that reads 500K cached tokens and
+	// misses on 1K still bills in the > 256K band.
+	ipm, opm, crpm, cwpm, _ := PriceForProviderModel(provider, model, in+cacheRead+cacheCreate)
+	// Cache semantics: cache CREATION (first-time prompt write) bills at the
+	// cache_write price when the model publishes one, otherwise at the input
+	// price; cache READ bills at the cheap cache_read price.
+	// `in` is the cache-miss part already (splitPromptTokens strips the cached
+	// prefix before storage), so no deduction applies. Verified against the
+	// platform invoice: bill = miss*input + hit*cache_read + out*output,
+	// never miss-cacheRead (that under-prices rows where miss > hit).
+	cacheWriteRate := ipm
+	if cwpm > 0 {
+		cacheWriteRate = cwpm
+	}
+	return (float64(in)*ipm +
+		float64(cacheCreate)*cacheWriteRate +
+		float64(cacheRead)*crpm +
+		float64(out)*opm) / 1_000_000
+}
+
 // costForProviderTokensAt returns a complete estimate only when every consumed
 // token category has a known rate. Catalog prices are provider-specific and do
 // not include cache rates; a missing rate must not be interpreted as free usage.

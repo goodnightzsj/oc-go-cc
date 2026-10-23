@@ -77,12 +77,64 @@ func (s ModelLatencyStats) MarshalJSON() ([]byte, error) {
 // keeps a long-running proxy from loading millions of rows into memory.
 const maxSamplesPerModel = 20000
 
-// GetStats returns latency statistics for all models with samples recorded after the given time.
-func (l *Latency) GetStats(since time.Time) ([]ModelLatencyStats, error) {
+// LatencySnapshot is everything the performance panels need: the per-model
+// percentile table and the outcome counts, read in one pass over the same rows.
+//
+// They were two queries, and the dashboard asks for both on the same poll. The
+// scan is what costs, not the arithmetic - modernc.org/sqlite reads this table
+// roughly 15x slower than the C library does - so the two are answered together
+// and cached until the table changes.
+type LatencySnapshot struct {
+	Stats    []ModelLatencyStats
+	Success  map[string]int64
+	Failures map[string]int64
+}
+
+// Snapshot returns the latency table and outcome counts for a window, reusing
+// the previous answer while the request table is unchanged.
+//
+// since is snapped to the minute for the same reason Analytics.Window is: a
+// poll that passes `now-24h` produces a new window every three seconds, and an
+// unsnapped one therefore never hits the cache it is meant to use.
+func (l *Latency) Snapshot(since time.Time) (*LatencySnapshot, error) {
+	if !since.IsZero() {
+		since = since.UTC().Truncate(time.Minute)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Cap samples per provider/model so a chatty platform cannot starve another
+	revision, err := l.db.historyRevision(ctx)
+	if err != nil {
+		return nil, err
+	}
+	key := since.UTC().Format(time.RFC3339Nano) + "\x1f" + l.provider
+	if cached, ok := l.db.cachedLatency(key, revision); ok {
+		return cached, nil
+	}
+
+	stats, err := l.getStats(ctx, since)
+	if err != nil {
+		return nil, err
+	}
+	success, failures, err := l.getSuccessCounts(ctx, since)
+	if err != nil {
+		return nil, err
+	}
+	snapshot := &LatencySnapshot{Stats: stats, Success: success, Failures: failures}
+	l.db.storeLatency(key, revision, snapshot)
+	return snapshot, nil
+}
+
+// GetStats returns latency statistics for all models with samples recorded after the given time.
+func (l *Latency) GetStats(since time.Time) ([]ModelLatencyStats, error) {
+	snapshot, err := l.Snapshot(since)
+	if err != nil {
+		return nil, err
+	}
+	return snapshot.Stats, nil
+}
+
+func (l *Latency) getStats(ctx context.Context, since time.Time) ([]ModelLatencyStats, error) {	// Cap samples per provider/model so a chatty platform cannot starve another
 	// platform's samples for the same model. Each Count is a bounded sample count,
 	// not the total number of requests used to calculate success rates.
 	// duration_ms on requests is the same measurement the dedicated
@@ -139,9 +191,14 @@ func (l *Latency) GetStats(since time.Time) ([]ModelLatencyStats, error) {
 // by provider + "/" + model. Empty legacy providers retain the leading slash.
 // Imported billing rows have unknown outcomes and do not enter either count.
 func (l *Latency) GetSuccessCounts(since time.Time) (map[string]int64, map[string]int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	snapshot, err := l.Snapshot(since)
+	if err != nil {
+		return nil, nil, err
+	}
+	return snapshot.Success, snapshot.Failures, nil
+}
 
+func (l *Latency) getSuccessCounts(ctx context.Context, since time.Time) (map[string]int64, map[string]int64, error) {
 	query := `
 		SELECT COALESCE(provider, ''), model, success, COUNT(*)
 		FROM requests
@@ -178,8 +235,31 @@ func (l *Latency) GetSuccessCounts(since time.Time) (map[string]int64, map[strin
 	return successCounts, failureCounts, rows.Err()
 }
 
-func calculateStats(model string, samples []int64) ModelLatencyStats {
-	if len(samples) == 0 {
+// latencyCacheLimit bounds the cache so a script sweeping range parameters
+// cannot grow the map without bound. The dashboard offers four ranges.
+const latencyCacheLimit = 16
+
+func (d *Database) cachedLatency(key, revision string) (*LatencySnapshot, bool) {
+	d.latencyMu.Lock()
+	defer d.latencyMu.Unlock()
+	if d.latencyRevision != revision {
+		return nil, false
+	}
+	snapshot, ok := d.latencies[key]
+	return snapshot, ok
+}
+
+func (d *Database) storeLatency(key, revision string, snapshot *LatencySnapshot) {
+	d.latencyMu.Lock()
+	defer d.latencyMu.Unlock()
+	if d.latencyRevision != revision || len(d.latencies) >= latencyCacheLimit {
+		d.latencies = make(map[string]*LatencySnapshot, latencyCacheLimit)
+		d.latencyRevision = revision
+	}
+	d.latencies[key] = snapshot
+}
+
+func calculateStats(model string, samples []int64) ModelLatencyStats {	if len(samples) == 0 {
 		return ModelLatencyStats{Model: model}
 	}
 

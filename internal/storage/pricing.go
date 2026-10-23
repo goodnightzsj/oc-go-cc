@@ -60,10 +60,14 @@ func costForProviderTokensAt(provider, model string, in, out, cacheRead, cacheCr
 	// resolves to no descriptor, which leaves the table empty - the same
 	// conservative answer the name comparison gave.
 	descriptor, _ := site.Lookup(provider)
+	// A realm-prefixed id (`global:deepseek-v4.1-flash`) names the same model the
+	// catalog stores without the prefix. Rate rules match on the bare name, so
+	// both the table lookup and the peak-schedule lookup use it.
+	pricingModel := modelNameForPricing(model)
 	if descriptor.RateTable != "" {
-		if _, _, _, _, ok := PriceForProviderModel(provider, model, in+cacheRead+cacheCreate); ok {
-			return costForTokens(provider, model, in, out, cacheRead, cacheCreate) *
-				history.ProviderPeakMultiplier(provider, model, t), true
+		if _, _, _, _, ok := PriceForProviderModel(provider, pricingModel, in+cacheRead+cacheCreate); ok {
+			return costForTokens(provider, pricingModel, in, out, cacheRead, cacheCreate) *
+				history.ProviderPeakMultiplier(provider, pricingModel, t), true
 		}
 	}
 	// Insert and historical backfill select catalog bands from the same whole

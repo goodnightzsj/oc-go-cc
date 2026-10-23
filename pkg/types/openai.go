@@ -143,8 +143,23 @@ type UsageInfo struct {
 	CompletionTokens      int                  `json:"completion_tokens"`
 	TotalTokens           int                  `json:"total_tokens"`
 	PromptTokensDetails   *PromptTokensDetails `json:"prompt_tokens_details,omitempty"`
+	CompletionTokensDetails *CompletionTokensDetails `json:"completion_tokens_details,omitempty"`
 	PromptCacheHitTokens  int                  `json:"prompt_cache_hit_tokens,omitempty"`
 	PromptCacheMissTokens int                  `json:"prompt_cache_miss_tokens,omitempty"`
+	// CompletionThinkingTokens is the DeepSeek-family spelling of the same
+	// figure CompletionTokensDetails.ReasoningTokens carries. Both appear on
+	// the wire from different gateways; reading either means a reasoning
+	// count is not lost to a spelling.
+	CompletionThinkingTokens int `json:"completion_thinking_tokens,omitempty"`
+}
+
+// CompletionTokensDetails carries the reasoning split of the completion.
+//
+// reasoning_tokens are already inside completion_tokens: the figure says how
+// much of the answer was spent thinking, not an extra charge. A caller adding
+// the two together double-counts.
+type CompletionTokensDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
 }
 
 // PromptTokensDetails carries OpenAI-standard prompt token breakdown.

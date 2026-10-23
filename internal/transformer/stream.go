@@ -639,7 +639,26 @@ func usageInfoToAnthropic(usage *types.UsageInfo) *types.Usage {
 		OutputTokens:             usage.CompletionTokens,
 		CacheCreationInputTokens: cacheCreate,
 		CacheReadInputTokens:     cacheRead,
+		ReasoningTokens:          reasoningTokensOf(usage),
 	}
+}
+
+// reasoningTokensOf reads the thinking split of the completion, under either
+// spelling a gateway uses for it.
+//
+// The two fields are the same figure: `completion_tokens_details.reasoning_tokens`
+// is the OpenAI-standard shape and `completion_thinking_tokens` is what the
+// DeepSeek-family gateways publish alongside it. Reading both means a count is
+// not lost to whichever one a particular upstream chose, and reading only the
+// first non-zero one keeps a gateway that sends both from doubling it.
+func reasoningTokensOf(usage *types.UsageInfo) int {
+	if usage == nil {
+		return 0
+	}
+	if usage.CompletionTokensDetails != nil && usage.CompletionTokensDetails.ReasoningTokens > 0 {
+		return usage.CompletionTokensDetails.ReasoningTokens
+	}
+	return usage.CompletionThinkingTokens
 }
 
 func responsesUsageToAnthropic(usage *types.ResponsesUsage) *types.Usage {

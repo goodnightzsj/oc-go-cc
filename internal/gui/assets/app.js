@@ -283,13 +283,15 @@ const TRANSLATIONS = {
     'analytics.requests': 'Requests',
     'analytics.avgLatency': 'Average latency',
     'analytics.priceTables': 'Price sources',
-    'analytics.priceTablesNote': 'Cost figures are computed from the rates each platform publishes. A platform below that has not refreshed is still priced from the build-time snapshot, which may be out of date.',
+    'analytics.priceTablesNote': 'Estimates use the rate tables below. Snapshots may be out of date. WorkBuddy uses static model reference prices, not actual account charges.',
     'analytics.priceTablesMeta': '{live} of {total} live',
     'analytics.priceRules': 'Rules',
     'analytics.priceSourceCol': 'Source',
     'analytics.priceLive': 'Live',
     'analytics.priceSeed': 'Snapshot',
     'analytics.priceSeedHint': 'Priced from the rates embedded at build time; the published table has not been fetched on this run yet.',
+    'analytics.priceReference': 'Static reference',
+    'analytics.priceReferenceHint': 'Model list prices for estimation only; not WorkBuddy account charges. No automatic price refresh.',
     'analytics.priceUpdated': 'Updated',
 
     'analytics.throughput': 'Tok/s',
@@ -872,13 +874,15 @@ const TRANSLATIONS = {
     'analytics.requests': '请求数',
     'analytics.avgLatency': '平均延迟',
     'analytics.priceTables': '价格来源',
-    'analytics.priceTablesNote': '费用按各平台公布的价格计算。下表中未刷新过的平台仍使用构建时的快照价格，可能已经过时。',
+    'analytics.priceTablesNote': '估算费用采用下表价格，快照可能已经过时。WorkBuddy 使用静态模型参考价，不代表账户实际扣款。',
     'analytics.priceTablesMeta': '{live} / {total} 已刷新',
     'analytics.priceRules': '规则数',
     'analytics.priceSourceCol': '来源',
     'analytics.priceLive': '实时',
     'analytics.priceSeed': '快照',
     'analytics.priceSeedHint': '按构建时内置的价格计算；本次运行尚未抓取平台公布的价格表。',
+    'analytics.priceReference': '静态参考价',
+    'analytics.priceReferenceHint': '模型公开标价，仅供估算，不代表 WorkBuddy 账户实际扣款；不自动刷新价格。',
     'analytics.priceUpdated': '更新时间',
 
     'analytics.throughput': 'Tok/s',
@@ -6793,10 +6797,12 @@ const AnalyticsModule = {
       // here is its site id; fall back to the raw name if a table has no site.
       const label = PROVIDERS[name]?.name || name;
       const live = !!state.live && state.refreshed_at;
+      const source = state.reference_only ? 'priceReference' : (live ? 'priceLive' : 'priceSeed');
+      const hint = state.reference_only ? t('analytics.priceReferenceHint') : (live ? '' : t('analytics.priceSeedHint'));
       return `<tr data-provider="${this.escapeHtml(name)}">
         <td>${this.escapeHtml(label)}</td>
         <td>${Number(state.rules || 0).toLocaleString()}</td>
-        <td>${live ? `<span class="price-live">${this.escapeHtml(t('analytics.priceLive'))}</span>` : `<span class="price-seed" title="${this.escapeHtml(t('analytics.priceSeedHint'))}">${this.escapeHtml(t('analytics.priceSeed'))}</span>`}</td>
+        <td><span class="${live ? 'price-live' : 'price-seed'}" title="${this.escapeHtml(hint)}">${this.escapeHtml(t('analytics.' + source))}</span></td>
         <td>${live ? this.escapeHtml(fmtAge(Math.max(0, (Date.now() - new Date(state.refreshed_at).getTime()) / 1000))) : '—'}</td>
       </tr>`;
     }).join('');

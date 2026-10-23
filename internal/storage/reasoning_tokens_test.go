@@ -15,7 +15,7 @@ func TestReasoningTokensRoundTrip(t *testing.T) {
 	db := newCostTestDB(t)
 	insertCostRecord(t, db, history.RequestRecord{
 		ID: "reasoning-1", Model: "m", Provider: "p",
-		StartTime: time.Now().Add(-time.Minute),
+		StartTime:    time.Now().Add(-time.Minute),
 		OutputTokens: 36, ReasoningTokens: 26, Success: true,
 	})
 

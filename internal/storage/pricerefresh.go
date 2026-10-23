@@ -112,10 +112,11 @@ var priceSeedCounts = sync.OnceValue(func() map[string]int {
 // installed, how many the embedded seed carries, and when the live refresh last
 // succeeded. A zero RefreshedAt means the seed is in use.
 type PriceTableState struct {
-	Rules       int       `json:"rules"`
-	SeedRules   int       `json:"seed_rules"`
-	RefreshedAt time.Time `json:"refreshed_at,omitempty"`
-	Live        bool      `json:"live"`
+	Rules         int       `json:"rules"`
+	SeedRules     int       `json:"seed_rules"`
+	RefreshedAt   time.Time `json:"refreshed_at,omitempty"`
+	Live          bool      `json:"live"`
+	ReferenceOnly bool      `json:"reference_only,omitempty"` // Model list prices, not account charges.
 }
 
 // PriceTables reports the installed price table state per platform. Platforms
@@ -124,6 +125,11 @@ type PriceTableState struct {
 func PriceTables() map[string]PriceTableState {
 	out := map[string]PriceTableState{}
 	seeds := priceSeedCounts()
+	for name, rules := range seeds {
+		if rules > 0 {
+			out[name] = PriceTableState{Rules: rules, SeedRules: rules, ReferenceOnly: name == site.WorkBuddy}
+		}
+	}
 	if p := priceOverrides.Load(); p != nil {
 		for name, entries := range *p {
 			// Count rules, not entries: the installed table is the merged result
@@ -136,7 +142,9 @@ func PriceTables() map[string]PriceTableState {
 					rules++
 				}
 			}
-			out[name] = PriceTableState{Rules: rules, SeedRules: seeds[name], Live: true}
+			state := out[name]
+			state.Rules, state.Live = rules, true
+			out[name] = state
 		}
 	}
 	if at := priceRefreshedAt.Load(); at != nil {

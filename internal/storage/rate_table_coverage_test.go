@@ -52,9 +52,8 @@ func TestRateTableFilesCoversRegistry(t *testing.T) {
 // TestRefreshPricesReachesEveryRateTable. RefreshPrices wires its sources as
 // inline branches rather than driven by the registry, so a platform with a
 // published table can be added to the descriptor list and the seed map without
-// ever being refreshed. Its prices then age at whatever the binary was built
-// with, and PriceTables() does not report it as stale either - that list only
-// covers platforms present in priceOverrides, so the platform is simply absent.
+// ever being refreshed. Its prices then remain at the embedded snapshot;
+// only deliberately static tables may be exempt from refresh coverage.
 //
 // The check is about coverage, not fetching, so both sources are made to fail:
 // RefreshPrices reports a failure per platform it attempts, which makes the

@@ -203,18 +203,17 @@ func (w *responseWriter) finish() error {
 	return nil
 }
 
-// SetPartialUsage records usage surfaced by the transformer from a
-// mid-stream OpenAI chunk (every chunk carries cumulative usage, so the last
-// value seen before an upstream failure is the exact count the platform
-// bills for a partially produced stream). Called from the transform
-// goroutine, the same one that calls observeSSE via Write.
-func (w *responseWriter) SetPartialUsage(in, out, cacheRead, cacheCreate int) {
+// SetPartialUsage retains the last reported cumulative usage if the stream fails.
+func (w *responseWriter) SetPartialUsage(usage *types.Usage) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.usage.inputTokens = in
-	w.usage.outputTokens = out
-	w.usage.cacheReadInputTokens = cacheRead
-	w.usage.cacheCreationInputTokens = cacheCreate
+	w.usage.inputTokens = usage.InputTokens
+	w.usage.outputTokens = usage.OutputTokens
+	w.usage.cacheReadInputTokens = usage.CacheReadInputTokens
+	w.usage.cacheCreationInputTokens = usage.CacheCreationInputTokens
+	if usage.ReasoningTokens > 0 {
+		w.usage.reasoningTokens = usage.ReasoningTokens
+	}
 }
 
 func (w *responseWriter) hasContent() bool {

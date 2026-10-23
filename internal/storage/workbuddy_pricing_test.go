@@ -9,8 +9,8 @@ import (
 // empty, which is what shipped: the table existed but every lookup missed.
 func TestWorkBuddyRealmPrefixedModelsArePriced(t *testing.T) {
 	for _, tc := range []struct {
-		model          string
-		wantInputPerM  float64
+		model         string
+		wantInputPerM float64
 	}{
 		{"global:deepseek-v4.1-flash", 0.15},
 		{"global:deepseek-v4-pro", 0.66},
@@ -19,7 +19,7 @@ func TestWorkBuddyRealmPrefixedModelsArePriced(t *testing.T) {
 		{"global:kimi-k3", 4.0},
 		{"global:gemini-3.8-flash", 1.5},
 	} {
-		got, _, _, _, ok := PriceForProviderModel("workbuddy", modelNameForPricing(tc.model), 0)
+		got, _, _, _, ok := PriceForProviderModel("workbuddy", modelNameForPricing("workbuddy", tc.model), 0)
 		if !ok {
 			t.Errorf("%s: no rate matched", tc.model)
 			continue

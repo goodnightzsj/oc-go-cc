@@ -81,7 +81,7 @@ func TestNativeAnthropicUsageUpdatesOnlyPresentFields(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			rw := &responseWriter{ResponseWriter: recorder}
-			rw.SetPartialUsage(11, 7, 90, 3)
+			rw.SetPartialUsage(&types.Usage{InputTokens: 11, OutputTokens: 7, CacheReadInputTokens: 90, CacheCreationInputTokens: 3})
 			body := "data: {\"type\":\"message_delta\",\"usage\":" + tc.usage + "}\n\n" +
 				"data: {\"type\":\"message_stop\"}\n\n"
 			_, err := io.WriteString(rw, body)

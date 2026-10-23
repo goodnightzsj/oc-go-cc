@@ -65,7 +65,7 @@ func TestNoChannelCapabilitiesIsValid(t *testing.T) {
 // therefore check every model's list, not just the first.
 func TestEveryModelsCapabilityListIsChecked(t *testing.T) {
 	err := ValidateChannelCapabilities(map[string][]string{
-		"deepseek-v4.1-flash-1017": {"vision"}, // valid
+		"deepseek-v4.1-flash-1017": {"vision"},      // valid
 		"deepseek-v4-pro":          {"image-input"}, // rejected by the gateway
 	})
 	if err == nil {

@@ -754,6 +754,11 @@ func (c *Config) ProviderModelEndpoint(provider string) string {
 		return c.CommandCode.BaseURL
 	case site.ClinePass:
 		return c.ClinePass.BaseURL
+	case site.WorkBuddy:
+		// A workbuddy2api-panel gateway publishes its roster at the standard
+		// OpenAI path. catalog.SiteModelsURL accepts any spelling of this
+		// endpoint and derives /v1/models from its origin.
+		return c.WorkBuddy.BaseURL
 	default:
 		return ""
 	}

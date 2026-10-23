@@ -55,6 +55,9 @@ func SiteModelsURL(provider, apiEndpoint string) (string, error) {
 	if name == site.ClinePass {
 		return clinePassModelsURL(apiEndpoint)
 	}
+	if name == site.WorkBuddy {
+		return workBuddyModelsURL(apiEndpoint)
+	}
 	suffix, ok := siteModelPathSuffix[name]
 	if !ok {
 		return "", fmt.Errorf("no model-list endpoint is known for %s", provider)
@@ -92,6 +95,36 @@ func clinePassModelsURL(apiEndpoint string) (string, error) {
 		return "", fmt.Errorf("cline-pass api endpoint must end with %q so its model list can be located", "/api/v1/chat/completions")
 	}
 	parsed.Path = clinePassModelsPath
+	parsed.RawPath = ""
+	return parsed.String(), nil
+}
+
+// workBuddyModelsURL derives the model list from a workbuddy2api-panel
+// gateway, accepting every spelling an operator actually types.
+//
+// The generic suffix rule would reject all but one of them: it insists the
+// endpoint end in "chat/completions", while the gateway's own panel shows a
+// bare host and the OpenAI convention stops at "/v1". Forcing the operator to
+// remember which one this particular platform wants is a papercut with no
+// upside, and the derivation is unambiguous either way - the list always lives
+// at <origin>/v1/models.
+//
+// Unlike ClinePass there is no second host to guard against: this endpoint is
+// a gateway the operator runs, so rewriting the path cannot send their
+// credential somewhere they did not intend.
+func workBuddyModelsURL(apiEndpoint string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(apiEndpoint))
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("workbuddy api endpoint must be an absolute URL without credentials, query or fragment")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("workbuddy api endpoint must use http or https")
+	}
+	// Strip to the origin, then append the one path the gateway publishes.
+	// Every accepted spelling - bare host, /v1, /v1/chat/completions - reduces
+	// to the same origin here, which is why this does not need the suffix check
+	// the generic rule uses.
+	parsed.Path = "/v1/models"
 	parsed.RawPath = ""
 	return parsed.String(), nil
 }

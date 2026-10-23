@@ -155,6 +155,18 @@ Every observation added to a stream body must be forwarded by every wrapper arou
 
 `channel` filters on `requests.upstream_channel`, the upstream channel the gateway reported serving the request on. Only ClinePass publishes one, so it narrows that platform's rows; every other platform stores NULL. `GET /api/history/channels?provider=` reports the channels this instance actually recorded, not the gateway's advertised candidate list — filtering by a channel that never served a request returns an empty page. The dashboard offers the control only while a concrete platform is selected, since "all platforms" is not a platform whose channel this could be.
 
+### Analytics and Performance panels
+
+Both tabs used to run several full-window `GROUP BY` queries per poll — five for Analytics, two more for Performance — each scanning the whole window. The scan is what costs on `modernc.org/sqlite`, so they now share one grouped pass per view and cache the result against the same `history_revision` counter the history summary uses.
+
+`Analytics.Summary` groups by `model, provider, scenario, DATE(start_time)` once and folds the groups into the summary, the three breakdowns and the daily trend in Go. `Latency.Snapshot` does the same for the per-model percentile table and the outcome counts. Measured on a 32K-row window: 212ms → 78ms cold, 79µs warm; perf 115ms → 25ms cold, 16µs warm.
+
+The hourly trend is a **separate, separately cached** query. Bucketing the same rows into an hour granularity costs about as much as the whole daily snapshot, and no panel asks for it by default; giving it its own cache key means opening an hourly view cannot evict the daily snapshot the rest of the tab is reading.
+
+`Analytics.Window` and `Latency.Snapshot` snap to whole minutes. Unsnapped, the overview's rolling `?days=7` produced a new window — and therefore a new cache key — on every poll, so the most frequently requested aggregate was the only one that could never reuse an answer. Snapping is a property of the window rather than of the cache, so a hit and a fresh computation describe exactly the same rows. The "last minute" figure is the exception and keeps its real trailing-60s meaning.
+
+Guards: `internal/storage/analytics_snapshot_test.go` (cross-dimension totals agree, each rate uses its own population, hourly and daily trends reconcile, the cache follows the table and separates windows), `analytics_throughput_test.go`, `analytics_baseline_test.go`.
+
 ### GUI Config Editing
 
 The Settings tab exposes all config fields as editable form inputs. On save, only changed fields are sent to the backend as a JSON patch. The backend reads the current config from disk, merges the patch, writes back, and reloads atomically — the running proxy picks up changes immediately without restart.
@@ -165,6 +177,29 @@ The Settings tab exposes all config fields as editable form inputs. On save, onl
 3. Backend merges patch fields onto current config via JSON marshal/unmarshal
 4. Backend validates essential fields (host, port)
 5. Backend writes merged config to disk and calls `atomicCfg.Reload()`
+
+### Fallback page: edits write through
+
+The Fallback tab has no Save button and no Preview. The chain, its order, additions and removals, and the cross-platform switch are persisted at the moment they change.
+
+Three constraints hold that together:
+
+1. **Every mutation calls `persist()`.** Missing one draws a change the proxy never received. `TestFallbackPageHasNoSaveOrPreview` checks each mutating function.
+2. **Writes are serialised.** Two quick edits would otherwise race: the later request returns 204 with a payload the earlier one had already superseded, leaving the page showing both edits while the config kept one. `pending` holds only the newest complete state and `persisting` keeps one request in flight.
+3. **The cross-platform switch is sent only when it is what changed.** A chain edit therefore patches `fallbacks` alone and can never silently flip a routing policy.
+
+The switch's handler pointed at `FallbackModule.onCrossPlatformChange()`, which did not exist, so toggling it threw — invisible until then because the old Save path read the checkbox directly rather than going through the handler.
+
+### Dashboard view state
+
+Navigation and preferences use different media. The active tab lives in the URL hash (`#history`) so deep links, reloads and the back button work; filters, date ranges, sort, page and the fallback page's platform/search live in `localStorage` under `routatic-proxy-view-state`. Filters were in the hash originally: a shared link carried the sender's filters, the address bar grew without bound, and browser hash normalisation dropped parameters so a reload reset them.
+
+- `VIEW_CONTROLS` in `internal/gui/assets/app.js` is the **only** key table. Adding a filter is one row, not a branch; `buildViewState` and `applyViewState` both iterate it.
+- The hash is written in exactly one place, `activateTab`, because tabs also switch programmatically (opening platform settings, jumping to history) and a click handler would miss those.
+- `syncViewHash()` returns early when the hash already names the tab, so `hashchange` → `activateTab` → `syncViewHash` cannot loop.
+- The fallback page's platform filter (`fplatform`) is separate from the global `platform` key: the first narrows the model picker, the second narrows history and analytics. Sharing one key would silently filter every other tab.
+
+**Testing caveat:** `go:embed` snapshots assets into the test binary, so an injected-bug check against `assets/*.js` can silently pass through a stale copy. Verify front-end behaviour by running the built artifact (Node loading `app.js`) rather than trusting a Go test alone.
 
 **Nil safety:** the two dependency-backed handlers fail explicitly rather than serving a second, divergent answer. `/api/metrics` falls back to the persisted roll-up when the in-process counters are empty, and reports zero counters when the metrics instance is absent. The history endpoints (`/api/history`, `/api/history/summary`, `/api/history/channels`) return **HTTP 503** without storage: the in-memory ring buffer is a live tail, not a filterable or paginated dataset, so there is no queryable history to serve.
 

@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
@@ -129,13 +131,69 @@ func (p *WorkBuddyProvider) request(ctx context.Context, req *types.MessageReque
 		}
 		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(body), RetryAfter: retryAfter}
 	}
+	// Observations are attached before capture, not instead of it. Wrapping in
+	// the other order loses them entirely: captureReadCloser forwards neither
+	// KeyHint nor FirstByteAt, so a captured body answers "" and the history
+	// row records no credential and no latency while looking well-formed.
+	var body io.ReadCloser = newWorkBuddyBody(resp.Body, sel.KeyHint())
 	if p.capture != nil {
-		return client.CaptureBody(resp.Body, func(data []byte) {
+		body = client.CaptureBody(body, func(data []byte) {
 			p.capture.CaptureUpstreamResponse(rid(ctx), p.Name(), data)
-		}), nil
+		})
 	}
-	return p.withKeyHint(resp.Body, sel), nil
+	return body, nil
 }
+
+// workBuddyBody stamps when the upstream's first byte arrives.
+//
+// Only ClinePass used to report this, because only it has a peek that reads
+// ahead before handing the body over. Every other platform left first_byte_ms
+// NULL, which the dashboard shows as unmeasured - indistinguishable from "this
+// platform does not report it", which was true but not inevitable: the first
+// byte is observable here at the same boundary, on the first read that returns
+// data.
+//
+// The stamp is taken on the first read that yields bytes, not when the response
+// headers arrive: a gateway can answer 200 and then think for several seconds,
+// and that gap is exactly the figure the column exists to show.
+type workBuddyBody struct {
+	io.ReadCloser
+	mu   sync.Mutex
+	at   time.Time
+	hint string
+}
+
+func newWorkBuddyBody(body io.ReadCloser, hint string) *workBuddyBody {
+	return &workBuddyBody{ReadCloser: body, hint: hint}
+}
+
+func (b *workBuddyBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if n > 0 {
+		b.mu.Lock()
+		if b.at.IsZero() {
+			b.at = time.Now()
+		}
+		b.mu.Unlock()
+	}
+	return n, err
+}
+
+// KeyHint reports the masked label of the credential that carried this attempt.
+func (b *workBuddyBody) KeyHint() string { return b.hint }
+
+// FirstByteAt reports when the upstream's first byte arrived, or the zero time
+// when it was never observed.
+func (b *workBuddyBody) FirstByteAt() time.Time {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.at
+}
+
+// MarkFirstByte is part of the observation contract the handler looks for. The
+// stamp is already taken on the first read, so this is a no-op kept so a caller
+// that marks explicitly does not change the answer.
+func (b *workBuddyBody) MarkFirstByte() {}
 
 // chatCompletionsEndpoint resolves the configured BaseURL to the chat
 // completions path.

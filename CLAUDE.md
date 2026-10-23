@@ -281,6 +281,24 @@ Local modifications, deliberately kept as a patch rather than a fork: `cmd/serve
 
 `/usr/local/bin/wb2api-update` (systemd timer, 6 hourly) pulls upstream, re-applies that patch, rebuilds, health-checks and rolls back on failure. It keeps the newest **3** version snapshots in `/root/wb2api-versions`. Two bugs were found and fixed while building it: `git checkout` without `--force` refuses to discard local changes and leaves the tree on the *old* commit with the patch still applied, so the next `git apply` reports "patch does not apply" for a conflict that does not exist; and `mapfile` is a bash builtin, so a `zsh -c` harness fails even though the script (which declares bash) is fine.
 
+### WorkBuddy as a platform
+
+WorkBuddy is reachable only through the local gateway described above (`workbuddy2api-panel`), so this proxy speaks ordinary Chat Completions to it and nothing else. The split is what makes routing work at all: `keyPool` rotates static strings and cannot express a credential that expires, and WorkBuddy's own API wants an OAuth token that rotates hourly plus a spoofed desktop identity. Neither exists in this repository and none is planned.
+
+**The model id is sent untouched, prefix included.** The gateway names its models `global:deepseek-v4.1-flash`, and that realm prefix is part of the wire id the same way `cline-pass/` is for ClinePass. A test pins the pass-through.
+
+**The model roster is fetched, not configured.** `ProviderModelEndpoint` returns the platform's BaseURL and `catalog.workBuddyModelsURL` derives `<origin>/v1/models` from it, accepting a bare host, `/v1` or the full chat path — the gateway's own panel shows the first, the OpenAI convention the second, and forcing an operator to remember which is a papercut with no upside. This is the one platform where rewriting the path is safe: the endpoint is a gateway the operator runs, so the credential cannot be steered at a host they did not configure. A guard test pins that the loosening did not spread to CommandCode or ClinePass.
+
+**That roster is authenticated.** `FetchSiteModelsWithKey` sends a bearer key; the plain `FetchSiteModels` sends none, because the other two platforms publish their lists publicly. `modelListKey` decides per platform — sending a key to an endpoint that never asked for it would be invisible, since those endpoints ignore the header and still answer 200.
+
+**Prices come from a static reference table, not from the account.** WorkBuddy bills in credits and publishes no credits-to-USD rate, so no honest per-token figure for what the account was debited exists. `seed_prices_workbuddy.json` holds each model's public list price from the platforms that do publish one, which makes the cost column answer "what would this have cost at list". It must be a rate table rather than rows in `models`: the catalog sync replaces that table wholesale every hour, so a row written there would vanish. `staticRateTables` declares that this table has no source to refresh from, which is what lets the coverage guard tell a deliberate static table from a forgotten one. Routing aliases (`default-model`, `fast-model`, `balanced-model`, `primary-model`) are deliberately unpriced — they name no model, so there is no family to borrow a rate from.
+
+**Realm prefixes are stripped before any catalog lookup.** `modelNameForPricing` removes a leading `<word>:` in `costForRecord` and in the rate-rule lookup. Without it every WorkBuddy request reported an unknown cost while the row still looked well-formed — a silent failure. Only a plain-word prefix is stripped, so a colon that is part of a real name is never truncated.
+
+**Reasoning tokens are recorded.** The gateway reports how much of the completion was spent thinking, under either `completion_tokens_details.reasoning_tokens` or `completion_thinking_tokens`. `reasoningTokensOf` reads whichever is present (details first, so a gateway sending both does not double it), and the figure reaches `requests.reasoning_tokens`. It is a breakdown of `output_tokens`, never additional to it: a reader summing the token columns must not add it again.
+
+The dashboard shows the platform at Order 3, ahead of the hidden platforms, because its display order is built by concatenating the visible and hidden maps — a visible platform listed after a hidden one would sort wrongly in every distribution panel.
+
 ## Dual Release Channel System
 
 This project uses a dual release channel system for separating beta and production releases:

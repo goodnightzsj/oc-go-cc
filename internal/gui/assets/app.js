@@ -34,8 +34,8 @@ const TRANSLATIONS = {
     'fallback.description': 'Set the model order for each routing scenario.',
     'fallback.guideTitle': 'Routing order',
     'fallback.orderHint': 'The primary model comes from the scenario configuration. Drag or use the arrow buttons to arrange the fallback models below it.',
-    'fallback.saveTitle': 'Review, then apply',
-    'fallback.saveHint': 'Preview the chain before saving. Save applies your pending fallback changes; platform credentials stay unchanged.',
+    'fallback.saveTitle': 'Applied immediately',
+    'fallback.saveHint': 'Changes on this page are saved as you make them. Platform credentials stay unchanged.',
     'setting.platformsHint': 'Configure each platform independently. Only changed fields are saved; masked credentials stay untouched.',
     'setting.bedrockHint': 'Inference & billing identity',
     'setting.openrouterHint': 'Inference & account credits',
@@ -508,11 +508,7 @@ const TRANSLATIONS = {
     'fallback.longContext': 'Long Context',
     'fallback.chainOrder': 'Fallback Chain Order',
     'fallback.addModel': '+ Add Model',
-    'fallback.preview': 'Preview',
-    'fallback.save': 'Save',
     'fallback.empty': 'No models configured',
-    'fallback.previewTitle': 'Fallback Chain Preview',
-    'fallback.selectModel': 'Select a model',
     'fallback.crossPlatform': 'Allow fallbacks on other platforms',
     'fallback.crossPlatformHint': 'Off by default. Entries on another platform are skipped and counted in the log, so you can see how often it would fire before spending another account\'s quota.',
     'fallback.addHint': '{m} models from {n} platforms, grouped by platform.',
@@ -526,18 +522,11 @@ const TRANSLATIONS = {
     'fallback.unreachable': 'Inactive',
     'fallback.unreachableHint': 'This platform is outside the active site, so this entry is skipped and never serves a request.',
     'fallback.noReachableModels': 'No platform currently has a usable credential, so there is nothing to fall back to.',
-    'fallback.saving': 'Saving fallback chain...',
     'fallback.saved': 'Fallback chain saved successfully!',
-    'fallback.saveFailed': 'Failed to save fallback chain',
     'fallback.noChanges': 'No changes to save',
-    'fallback.unsaved': 'Unsaved chain changes',
     'fallback.moveUp': 'Move {model} up',
     'fallback.moveDown': 'Move {model} down',
     'fallback.remove': 'Remove {model}',
-    'fallback.primary': 'Primary model',
-    'fallback.readOnly': 'read-only',
-    'fallback.primaryReadOnly': 'Set by the scenario configuration, not by this page. Requests on this instance are routed by the model the client names, so this entry does not run.',
-    'fallback.primaryNote': 'Configured default: {model}. It applies only when a request names no model.',
     'perf.lastHour': 'Last Hour',
     'perf.last24h': 'Last 24 Hours',
     'perf.last7d': 'Last 7 Days',
@@ -632,8 +621,8 @@ const TRANSLATIONS = {
     'fallback.description': '为不同路由场景设置清晰的模型优先顺序。',
     'fallback.guideTitle': '路由顺序',
     'fallback.orderHint': '主模型来自场景配置。可拖拽或使用上下箭头，调整后续降级模型的优先顺序。',
-    'fallback.saveTitle': '预览后应用',
-    'fallback.saveHint': '保存前可预览模型链。保存会应用尚未保存的降级修改，不改变平台凭证。',
+    'fallback.saveTitle': '改动即时生效',
+    'fallback.saveHint': '本页的改动会立即保存，不需要点保存按钮。平台凭证不受影响。',
     'setting.platformsHint': '每个平台独立配置，仅保存修改过的字段，未修改的脱敏凭证保持不变。',
     'setting.bedrockHint': '推理接口与账单身份',
     'setting.openrouterHint': '推理接口与账户点数',
@@ -1130,11 +1119,7 @@ const TRANSLATIONS = {
     'fallback.longContext': '长上下文',
     'fallback.chainOrder': '降级链顺序',
     'fallback.addModel': '+ 添加模型',
-    'fallback.preview': '预览',
-    'fallback.save': '保存',
     'fallback.empty': '未配置模型',
-    'fallback.previewTitle': '降级链预览',
-    'fallback.selectModel': '选择模型',
     'fallback.crossPlatform': '允许跨平台降级',
     'fallback.crossPlatformHint': '默认关闭。其他平台的条目会被跳过并在日志中计数，这样可以在消耗另一个账号额度之前先看清它有多频繁。',
     'fallback.addHint': '共 {m} 个模型，来自 {n} 个平台，按平台分组。',
@@ -1148,18 +1133,11 @@ const TRANSLATIONS = {
     'fallback.unreachable': '不生效',
     'fallback.unreachableHint': '该平台不在当前 active site 内，此条目会被跳过，永远不会承接请求。',
     'fallback.noReachableModels': '当前没有平台持有可用凭据，无法配置降级模型。',
-    'fallback.saving': '保存中...',
     'fallback.saved': '降级链保存成功！',
-    'fallback.saveFailed': '保存失败',
     'fallback.noChanges': '无更改',
-    'fallback.unsaved': '降级链有未保存的修改',
     'fallback.moveUp': '上移 {model}',
     'fallback.moveDown': '下移 {model}',
     'fallback.remove': '移除 {model}',
-    'fallback.primary': '主模型',
-    'fallback.readOnly': '只读',
-    'fallback.primaryReadOnly': '由场景配置决定，不是在本页选择的。本实例的请求按客户端指定的模型路由，因此这个条目不会被执行。',
-    'fallback.primaryNote': '配置的默认值：{model}。仅当请求没有指定模型时才会用到。',
     'perf.lastHour': '最近 1 小时',
     'perf.last24h': '最近 24 小时',
     'perf.last7d': '最近 7 天',
@@ -5121,8 +5099,9 @@ function configModelKey(model) {
 const FallbackModule = {
   chains: {},
   currentScenario: 'default',
-  originalChains: null,
   availableModels: [],
+  pending: null,
+  persisting: null,
 
   init() {
     this.loadConfig();
@@ -5214,7 +5193,6 @@ const FallbackModule = {
       this.populateAddSelect();
       const crossBox = document.getElementById('fallback-cross-platform');
       if (crossBox) crossBox.checked = config.enable_cross_platform_fallback === true;
-      this.originalChains = JSON.parse(JSON.stringify(this.chains));
       this.renderChain();
     } catch (e) {
       console.error('Failed to load fallback config:', e);
@@ -5492,6 +5470,7 @@ const FallbackModule = {
     this.togglePicker(false);
     this.renderChain();
     this.populateAddSelect();
+    this.persist();
   },
 
   // Keyboard: arrows move, Enter picks, Escape closes. Handled on the list so
@@ -5525,8 +5504,6 @@ const FallbackModule = {
     // runs: requests are routed by the model the client names, so the entry was
     // a value nobody could act on that read as a current selection. The chain
     // below is the part of this page that actually decides anything.
-    this.setStatus(t(this.originalChains && JSON.stringify(this.chains) !== JSON.stringify(this.originalChains)
-      ? 'fallback.unsaved' : 'fallback.noChanges'));
 
     if (!chain || chain.length === 0) {
       list.innerHTML = '<li class="empty-state">' + t('fallback.empty') + '</li>';
@@ -5616,6 +5593,7 @@ const FallbackModule = {
     const [entry] = chain.splice(fromIndex, 1);
     chain.splice(toIndex, 0, entry);
     this.renderChain();
+    this.persist();
     if (direction) {
       const row = document.querySelector(`.fallback-item[data-index="${toIndex}"]`);
       const moved = row?.querySelector(`[data-direction="${direction}"]`);
@@ -5635,7 +5613,6 @@ const FallbackModule = {
     this.currentScenario = select.value;
     this.renderChain();
     this.populateAddSelect();
-    document.getElementById('fallback-preview').style.display = 'none';
   },
 
   removeModel(index) {
@@ -5643,6 +5620,7 @@ const FallbackModule = {
     if (chain) {
       chain.splice(index, 1);
       this.renderChain();
+      this.persist();
       const next = document.querySelector(`.fallback-item[data-index="${Math.min(index, chain.length - 1)}"] .chain-remove`);
       const trigger = document.getElementById('fallback-add-trigger');
       (next || trigger)?.focus();
@@ -5656,73 +5634,64 @@ const FallbackModule = {
     status.className = 'page-meta ' + (type === 'error' ? 'is-error' : '');
   },
 
-  preview() {
-    const previewEl = document.getElementById('fallback-preview');
-    const contentEl = document.getElementById('fallback-preview-content');
-    const chain = this.chains[this.currentScenario];
-
-    if (!chain || chain.length === 0) {
-      contentEl.innerHTML = '<div class="empty-state">' + t('fallback.empty') + '</div>';
-    } else {
-      contentEl.innerHTML = '<div class="fallback-preview-chain">' +
-        chain.map((entry, i) => {
-          const modelId = entry.model_id || entry;
-          const displayName = `${modelId} (${entry.provider || 'opencode-go'})`;
-          return `
-            <span class="fallback-preview-model ${i === 0 ? 'primary' : ''}">${escapeHtml(displayName)}</span>
-            ${i < chain.length - 1 ? '<span class="fallback-preview-arrow">→</span>' : ''}
-          `;
-        }).join('') +
-        '</div>';
+  // Every mutation on this page writes through to the config. There is no Save
+  // button: a page whose values are live and whose preview is the chain itself
+  // has nothing left for a commit step to add, and a pending-changes state is
+  // one more thing that can disagree with what the proxy is actually doing.
+  //
+  // Writes are serialised. Two quick edits would otherwise race, and the loser
+  // would return 204 to a request whose payload the winner had already
+  // superseded - so the page would show the union while the config held only
+  // one of the two edits.
+  //
+  // The cross-platform switch is sent only when it is the thing that changed,
+  // or when the config could not be read and the switch is therefore the only
+  // statement of intent available. A chain edit alone stays scoped to
+  // `fallbacks`, so it can never silently flip a routing policy.
+  persist({ crossPlatform = false } = {}) {
+    const chains = JSON.parse(JSON.stringify(this.chains));
+    const crossBox = document.getElementById('fallback-cross-platform');
+    const cross = !!(crossBox && crossBox.checked);
+    const body = { fallbacks: chains };
+    if (crossPlatform || (currentProxyConfig && cross !== (currentProxyConfig.enable_cross_platform_fallback === true))) {
+      body.enable_cross_platform_fallback = cross;
     }
-
-    previewEl.style.display = 'block';
+    // A queue of one: whatever is pending is always replaced by the newest
+    // complete state, so the last write always describes the page.
+    this.pending = body;
+    if (this.persisting) return this.persisting;
+    this.persisting = (async () => {
+      try {
+        while (this.pending) {
+          const next = this.pending;
+          this.pending = null;
+          await settingsRequest('/api/proxy/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(next)
+          }, true);
+          if (currentProxyConfig) {
+            currentProxyConfig.fallbacks = next.fallbacks;
+            if ('enable_cross_platform_fallback' in next) {
+              currentProxyConfig.enable_cross_platform_fallback = next.enable_cross_platform_fallback;
+            }
+          }
+          this.setStatus(t('fallback.saved'), 'success');
+        }
+      } catch (e) {
+        // The page keeps the change it drew. Saying so is the only honest
+        // option: silently reverting would look like the click did nothing,
+        // and the config really does differ from what is on screen.
+        this.setStatus(e.settingsError ? e.message : t('save.rejected'), 'error');
+      } finally {
+        this.persisting = null;
+      }
+    })();
+    return this.persisting;
   },
 
-  async save() {
-    const crossBox = document.getElementById('fallback-cross-platform');
-    const crossNow = !!(crossBox && crossBox.checked);
-    const crossChanged = crossNow !== (currentProxyConfig?.enable_cross_platform_fallback === true);
-    const hasChanges = crossChanged || (this.originalChains && (
-      JSON.stringify(this.chains) !== JSON.stringify(this.originalChains)
-    ));
-
-    if (!hasChanges) {
-      this.setStatus(t('fallback.noChanges'));
-      return;
-    }
-
-    const saveBtn = document.querySelector('.fallback-actions .btn-primary');
-    if (saveBtn?.disabled) return;
-    if (saveBtn) {
-      saveBtn.disabled = true;
-      saveBtn.textContent = t('fallback.saving');
-    }
-
-    try {
-      const submitted = JSON.parse(JSON.stringify(this.chains));
-      const patch = { fallbacks: submitted };
-      if (crossChanged) patch.enable_cross_platform_fallback = crossNow;
-      await settingsRequest('/api/proxy/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patch)
-      }, true);
-      this.originalChains = submitted;
-      if (currentProxyConfig) {
-        currentProxyConfig.fallbacks = submitted;
-        currentProxyConfig.enable_cross_platform_fallback = crossNow;
-      }
-      const pending = JSON.stringify(this.chains) !== JSON.stringify(submitted);
-      this.setStatus(t('fallback.saved') + (pending ? ' ' + t('fallback.unsaved') : ''), 'success');
-    } catch (e) {
-      this.setStatus(e.settingsError ? e.message : t('save.rejected'), 'error');
-    } finally {
-      if (saveBtn) {
-        saveBtn.disabled = false;
-        saveBtn.textContent = t('fallback.save');
-      }
-    }
+  onCrossPlatformChange() {
+    this.persist({crossPlatform: true});
   }
 };
 

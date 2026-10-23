@@ -50,24 +50,73 @@ func TestFallbackAddHintElementExists(t *testing.T) {
 	}
 }
 
-// The cross-platform switch has to exist and be wired into the save patch: an
+// The cross-platform switch has to exist and actually reach the config: an
 // operator who cannot see it cannot learn the feature exists, and one that
-// saves but is not sent is worse - it looks enabled.
+// looks enabled but is never sent is worse.
 func TestCrossPlatformToggleIsWired(t *testing.T) {
 	html := readEmbeddedAsset(t, "assets/index.html")
 	if !strings.Contains(html, `id="fallback-cross-platform"`) {
 		t.Fatal("the cross-platform toggle is missing from the Fallback tab")
 	}
+	// Its handler must be defined. The page had none for a while: the markup
+	// called FallbackModule.onCrossPlatformChange() and no such method existed,
+	// so every toggle threw.
+	if !strings.Contains(html, "FallbackModule.onCrossPlatformChange()") {
+		t.Error("the toggle has no change handler")
+	}
 	js := readEmbeddedAsset(t, "assets/app.js")
 	if !strings.Contains(js, "enable_cross_platform_fallback") {
 		t.Error("the toggle is not written into the settings patch")
 	}
-	if !strings.Contains(js, "patch.enable_cross_platform_fallback = crossNow") {
+	if !strings.Contains(js, "onCrossPlatformChange()") {
+		t.Fatal("onCrossPlatformChange is called from the markup but never defined")
+	}
+	// There is no Save button, so a toggle that does not write through is a
+	// toggle that does nothing at all.
+	if !strings.Contains(js, `body.enable_cross_platform_fallback = cross`) {
 		t.Error("toggling it alone would save nothing; the patch must carry it")
 	}
 	for _, key := range []string{"fallback.crossPlatform", "fallback.crossPlatformHint"} {
 		if n := strings.Count(js, "'"+key+"':"); n < 2 {
 			t.Errorf("%q needs an English and a Chinese entry, found %d", key, n)
+		}
+	}
+}
+
+// The chain page applies edits immediately. A Save button that no longer has a
+// job is not merely clutter: it leaves the reader believing changes are pending
+// when they are already live.
+func TestFallbackPageHasNoSaveOrPreview(t *testing.T) {
+	html := readEmbeddedAsset(t, "assets/index.html")
+	for _, stale := range []string{
+		`id="fallback-preview"`, "FallbackModule.save()", "FallbackModule.preview()",
+	} {
+		if strings.Contains(html, stale) {
+			t.Errorf("index.html still contains %s", stale)
+		}
+	}
+	js := readEmbeddedAsset(t, "assets/app.js")
+	if strings.Contains(js, "originalChains") {
+		t.Error("a pending-changes baseline is meaningless once edits write through")
+	}
+	// Every mutation path has to reach persist(), or the page draws a change the
+	// proxy never received.
+	for _, fn := range []string{"  chooseModel(key) {", "  moveModel(fromIndex, toIndex, direction) {",
+		"  removeModel(index) {", "  onCrossPlatformChange() {"} {
+		at := strings.Index(js, fn)
+		if at < 0 {
+			t.Fatalf("%s not found", strings.TrimSpace(fn))
+		}
+		rest := js[at:]
+		end := strings.Index(rest[1:], "\n  },")
+		if end < 0 {
+			end = strings.Index(rest[1:], "\n  }")
+		}
+		if end < 0 {
+			end = len(rest) - 1
+		}
+		if !strings.Contains(rest[:end], "persist(") {
+			t.Errorf("%s does not write through", strings.TrimSpace(fn))
 		}
 	}
 }

@@ -168,12 +168,6 @@ input:checked + .toggle-slider::before { transform: translateX(18px); }
 .model-meta { font-size: 11px; color: var(--ui-muted); margin-left: 8px; }
 
 /* ── Fallback Preview ─────────────────────────────────────── */
-.fallback-preview { margin-top: 16px; background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: 10px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
-.fallback-preview-header { font-size: 14px; font-weight: 600; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--ui-line); }
-.fallback-preview-chain { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.fallback-preview-model { display: inline-flex; align-items: center; padding: 8px 12px; background: var(--ui-surface-raised); border: 1px solid var(--ui-line); border-radius: 4px; font-size: 13px; }
-.fallback-preview-model.primary { background: var(--ui-action); color: white; border-color: var(--ui-action); }
-.fallback-preview-arrow { color: var(--ui-muted); font-size: 18px; }
 
 /* ── Sort ─────────────────────────────────────────────────── */
 .sortable { cursor: pointer; user-select: none; }
@@ -1649,12 +1643,8 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
 }
 .fallback-toolbar-fields .theme-select { min-width: 0; width: auto; }
 .fallback-toolbar-fields .theme-select-trigger { min-width: 132px; max-width: 220px; }
-.fallback-actions { display: flex; gap: 8px; }
 .routing-layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; align-items: start; gap: 24px; }
 .routing-workspace { min-width: 0; padding: 20px; border: 1px solid var(--ui-line); border-radius: 10px; background: var(--ui-surface); }
-.fallback-primary-card { display: grid; gap: 8px; padding: 0 0 20px; border-bottom: 1px solid var(--ui-line); }
-.fallback-primary-card .metric-label { margin: 0; }
-.fallback-primary-card strong { font-size: 16px; overflow-wrap: anywhere; }
 .routing-notes { min-width: 0; padding-top: 4px; }
 .routing-notes h3 { margin: 24px 0 8px; font-size: 13px; font-weight: 600; }
 .routing-notes p { color: var(--ui-muted); font-size: 13px; line-height: 1.7; }
@@ -1695,7 +1685,6 @@ details > summary { padding: 12px 0; color: var(--ui-text); font-weight: 600; cu
   background: var(--ui-action);
   border-radius: 9px;
 }
-.fallback-preview { box-shadow: none; border: 0; border-top: 1px solid var(--ui-line); border-radius: 0; background: transparent; }
 .quota-source-details { color: var(--ui-muted); font-size: 12px; }
 .quota-source-details > summary { padding: 4px 0; color: inherit; font-weight: 400; }
 .quota-endpoint { font-family: inherit; white-space: normal; overflow-wrap: anywhere; }

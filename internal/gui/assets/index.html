@@ -472,10 +472,6 @@
             <select id="fallback-platform-filter" onchange="FallbackModule.onPlatformFilterChange()" class="filter-select"></select>
           </div>
         </div>
-        <div class="fallback-actions">
-          <button type="button" class="btn btn-small" onclick="FallbackModule.preview()" data-i18n="fallback.preview">Preview</button>
-          <button type="button" class="btn btn-primary btn-small" onclick="FallbackModule.save()" data-i18n="fallback.save">Save</button>
-        </div>
       </div>
       <div class="routing-layout">
       <section class="routing-workspace">
@@ -504,12 +500,8 @@
         <li class="empty-state" data-i18n="fallback.empty">No models configured</li>
       </ul>
       <p class="page-meta" id="fallback-status" role="status" aria-live="polite"></p>
-      <div class="fallback-preview" id="fallback-preview" style="display: none;">
-        <div class="fallback-preview-header" data-i18n="fallback.previewTitle">Fallback Chain Preview</div>
-        <div id="fallback-preview-content"></div>
-      </div>
       </section>
-      <aside class="routing-notes"><h2 class="section-heading" data-i18n="fallback.guideTitle">Routing order</h2><p data-i18n="fallback.orderHint">The primary model comes from the scenario configuration. Drag or use the arrow buttons to arrange the fallback models below it.</p><h3 data-i18n="fallback.saveTitle">Review, then apply</h3><p data-i18n="fallback.saveHint">Preview the chain before saving. Save applies your pending fallback changes; platform credentials stay unchanged.</p></aside>
+      <aside class="routing-notes"><h2 class="section-heading" data-i18n="fallback.guideTitle">Routing order</h2><p data-i18n="fallback.orderHint">The primary model comes from the scenario configuration. Drag or use the arrow buttons to arrange the fallback models below it.</p><h3 data-i18n="fallback.saveTitle">Applied immediately</h3><p data-i18n="fallback.saveHint">Changes to this page are saved as you make them. Platform credentials stay unchanged.</p></aside>
       </div>
     </div>
   </div>

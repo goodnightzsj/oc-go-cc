@@ -133,19 +133,20 @@ async function checks() {
   assert.equal(toggle.getAttribute('aria-invalid'),'true');
   assert.match(get('save-status').textContent,/自启动/);
 
-  FallbackModule.originalChains = {default:[]};
+  // The chain page has no Save button: edits write through. What must survive is
+  // the settings tab's independence - a chain write is scoped to fallbacks and
+  // must not carry a pending settings edit with it.
   FallbackModule.chains = {default:[{model_id:'first'}]};
   fetch = async()=>{await new Promise(resolve => {resolvePost = resolve});return ok({})};
-  const fallbackSave = FallbackModule.save();
+  const fallbackSave = FallbackModule.persist();
   FallbackModule.chains.default.push({model_id:'second'});
-  resolvePost(); await fallbackSave;
-  assert.equal(FallbackModule.originalChains.default.length,1,'save baseline must not include later chain edits');
+  const secondWrite = FallbackModule.persist();
+  resolvePost(); await fallbackSave; await secondWrite;
   assert.equal(FallbackModule.chains.default.length,2);
-  assert.ok(get('fallback-status').textContent.includes(t('fallback.unsaved')),'later edits must remain visibly unsaved');
   fetch = async()=>failure(400,{code:'unknown_provider',message:'请选择已有平台。',saved:false});
-  await FallbackModule.save();
+  FallbackModule.removeModel(0);
+  await FallbackModule.persist();
   assert.equal(get('fallback-status').textContent,'请选择已有平台。');
-  assert.equal(FallbackModule.chains.default.length,2);
   await handleConfigImport({text:async()=>'{private-sentinel'});
   assert.equal(get('save-status').textContent,t('save.invalidJSON'));
   assert.ok(!get('save-status').textContent.includes('private-sentinel'));

@@ -32,15 +32,16 @@ const limitsRefreshTTL = 24 * time.Hour
 // limitsFetchTimeout is the per-attempt bound for pulling the docs page.
 const limitsFetchTimeout = 20 * time.Second
 
-// quotaAccount reports one key's quota, never an aggregate account balance.
-// Reports and Error are mutually exclusive; CommandCode retains block errors
-// inside a partially successful report.
+// quotaAccount reports one credential's view, never a sum across keys.
+// WorkBuddy's view covers the entire gateway pool, not one vendor account.
+// Reports and Error are mutually exclusive; partial reports retain block errors.
 type quotaAccount struct {
 	KeyHint     string                   `json:"key_hint"`
 	Report      *quota.Report            `json:"report,omitempty"`
 	OpenRouter  *quota.OpenRouterKey     `json:"openrouter,omitempty"`
 	CommandCode *quota.CommandCodeReport `json:"commandcode,omitempty"`
 	ClinePass   *quota.ClinePassReport   `json:"cline_pass,omitempty"`
+	WorkBuddy   *quota.WorkBuddyReport   `json:"workbuddy,omitempty"`
 	Error       string                   `json:"error,omitempty"`
 
 	// Ledger is this instance's own record for the same billing period, set
@@ -203,6 +204,10 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 	case "aws-bedrock":
 		resp.Links = []quotaLink{{Kind: "billing", URL: "https://console.aws.amazon.com/billing/home"}, {Kind: "docs", URL: "https://docs.aws.amazon.com/cost-management/latest/userguide/ce-api.html"}}
 		s.handleBedrockBilling(w, r, cfg, resp)
+		return
+	case "workbuddy":
+		resp.Source = "gateway_api"
+		s.handleWorkBuddyQuota(w, r, cfg, resp)
 		return
 	}
 	if len(cfg.ProviderAPIKeys(provider)) == 0 {
@@ -519,6 +524,11 @@ func quotaStatus(resp quotaResponse) string {
 			if report.Error != "" {
 				failed++
 			}
+		} else if report := account.WorkBuddy; report != nil {
+			available++
+			if report.OverviewError != "" || report.UsageError != "" {
+				failed++
+			}
 		}
 	}
 	if resp.Credits != nil {
@@ -565,6 +575,8 @@ func fetchQuotaAccounts(parent context.Context, provider, endpoint string, keys 
 				accounts[i].CommandCode, err = quota.FetchCommandCode(ctx, client, endpoint, key)
 			case "cline-pass":
 				accounts[i].ClinePass, err = quota.FetchClinePass(ctx, client, endpoint, key)
+			case "workbuddy":
+				accounts[i].WorkBuddy, err = quota.FetchWorkBuddy(ctx, client, endpoint, key)
 			default:
 				accounts[i].Report, err = quota.Fetch(ctx, client, endpoint, key)
 			}

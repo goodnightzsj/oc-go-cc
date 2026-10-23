@@ -50,12 +50,8 @@ async function checks() {
     assert.equal(get('quota-go').hidden,provider !== 'opencode-go');
     assert.equal(get('quota-commandcode').hidden,provider !== 'commandcode');
     assert.equal(get('quota-cline-pass').hidden,provider !== 'cline-pass');
-    // A platform the dashboard no longer offers keeps its quota view in the
-    // markup, but nothing can select it any more. quota-unavailable is the
-    // fallback pane: it stays hidden for a platform that HAS a quota view, and
-    // appears for a visible platform that has none (WorkBuddy reads its plan
-    // through the gateway, not through this proxy).
-    const hasQuotaView = ['opencode-go','commandcode','cline-pass'].includes(provider);
+    // WorkBuddy has its own gateway view, including the unconfigured state.
+    const hasQuotaView = ['opencode-go','commandcode','cline-pass','workbuddy'].includes(provider);
     assert.equal(get('quota-unavailable').hidden,hasQuotaView,
       'quota-unavailable must back a platform with no quota view: ' + provider);
     for (const hidden of ['quota-openrouter','quota-bedrock']) {
@@ -98,6 +94,10 @@ async function checks() {
       const amounts = (passHtml.match(/commandcode-window-amount/g) || []).length;
       assert.equal(amounts,2,'only the two windows with a published ceiling may render an amount');
       assert.equal(get('quota-source').textContent,t('quota.source.official_api'));
+    } else if (provider === 'workbuddy') {
+      assert.equal(get('quota-workbuddy').hidden,false);
+      assert.ok(get('quota-workbuddy-accounts').innerHTML.includes(t('quota.noProviderKey').replace('{provider}','WorkBuddy')));
+      assert.equal(get('quota-local-cost-label').textContent,t('workbuddy.localCost'));
     } else if (provider !== 'openrouter') {
       assert.ok(get('quota-unavailable-note').textContent.includes('No public account quota API'));
       assert.equal(get('quota-source').textContent,t('quota.source.none'));

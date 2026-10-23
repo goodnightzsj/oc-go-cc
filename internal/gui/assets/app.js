@@ -404,6 +404,41 @@ const TRANSLATIONS = {
     'clinepass.keyHint': 'Uses its own Cline API key; global keys are never sent to Cline.',
     'workbuddy.keyHint': 'Uses the API key of a local workbuddy2api-panel instance; global keys are never sent to it.',
     'workbuddy.gatewayHint': 'The gateway holds the WorkBuddy sign-in and refreshes it; this proxy only needs a static key for it.',
+    'quota.source.gateway_api': 'WorkBuddy gateway observations',
+    'workbuddy.accountScope': 'Gateway-wide observations, including traffic outside this proxy. Keys may describe the same pool; do not add them together. Credits are not USD or a vendor bill.',
+    'workbuddy.pool': 'Account pool',
+    'workbuddy.total': 'Accounts',
+    'workbuddy.healthy': 'Healthy',
+    'workbuddy.cooling': 'Cooling',
+    'workbuddy.disabled': 'Disabled',
+    'workbuddy.paused': 'Paused',
+    'workbuddy.full': 'At concurrency limit',
+    'workbuddy.reserve': 'Credit reserve',
+    'workbuddy.ready': 'No pool restriction',
+    'workbuddy.account': 'Account {n}',
+    'workbuddy.realm': 'Realm',
+    'workbuddy.balance': 'Remaining credits',
+    'workbuddy.ceiling': 'Credit ceiling',
+    'workbuddy.unlimited': 'Unlimited',
+    'workbuddy.snapshotNote': 'Gateway balance snapshot, not a live balance query. Last background refresh: {time} · interval: {seconds}s. Missing or zero ceiling means unknown, not unlimited.',
+    'workbuddy.noAccounts': 'No accounts in this gateway pool. Manage accounts in the upstream panel.',
+    'workbuddy.usage': 'Gateway usage · {hours} hourly buckets',
+    'workbuddy.usageNote': 'Includes the current incomplete hour. Counts are upstream attempts, including retries and failures. Tokens keep the gateway convention; cache is already part of prompt tokens.',
+    'workbuddy.attempts': 'Attempts',
+    'workbuddy.errors': 'Failed attempts',
+    'workbuddy.credits': 'Observed credits',
+    'workbuddy.localCost': 'Reference estimate (USD)',
+    'workbuddy.creditSamples': 'Credit samples',
+    'workbuddy.creditNote': 'Credits sum only observed usage.credit samples. No samples means unknown; an observed zero remains zero. This subtotal is not a complete account bill.',
+    'workbuddy.prompt': 'Prompt (incl. cache)',
+    'workbuddy.output': 'Output',
+    'workbuddy.cache': 'Cache hit / miss',
+    'workbuddy.latency': 'Observed avg. latency (ms)',
+    'workbuddy.tps': 'Observed avg. tok/s',
+    'workbuddy.trend': 'Tokens by recorded hour',
+    'workbuddy.hourDetails': 'Hourly values · gateway local time',
+    'workbuddy.trendNote': 'Only returned buckets are shown; gaps are not filled with zeros. Hour labels use the gateway time zone.',
+    'workbuddy.noUsage': 'No recorded attempts in this window. This does not mean the account has no balance or usage elsewhere.',
     'setting.workBuddyHint': 'Local gateway · Chat Completions only',
     'clinepass.noAnthropic': 'The Cline API publishes no Messages endpoint, so this platform always uses Chat Completions.',
     'clinepass.quotaHint': 'Reads the plan usage windows with this platform API key. No browser session is required. The endpoint is undocumented, so its fields may change.',
@@ -995,6 +1030,41 @@ const TRANSLATIONS = {
     'clinepass.keyHint': '使用本平台自己的 Cline API 密钥；全局密钥不会发送给 Cline。',
     'workbuddy.keyHint': '使用本地 workbuddy2api-panel 实例的 API 密钥；全局密钥不会发送给它。',
     'workbuddy.gatewayHint': '登录状态由该网关持有并自动刷新，本项目只需要一个静态密钥。',
+    'quota.source.gateway_api': 'WorkBuddy 网关观测数据',
+    'workbuddy.accountScope': '网关全实例观测，含未经过本代理的流量。不同密钥可能对应同一账户池，请勿相加。积分不是美元，也不是官方账单。',
+    'workbuddy.pool': '账户池',
+    'workbuddy.total': '账户数',
+    'workbuddy.healthy': '健康',
+    'workbuddy.cooling': '冷却中',
+    'workbuddy.disabled': '已禁用',
+    'workbuddy.paused': '已暂停',
+    'workbuddy.full': '并发已满',
+    'workbuddy.reserve': '积分保留限制',
+    'workbuddy.ready': '未标记池限制',
+    'workbuddy.account': '账户 {n}',
+    'workbuddy.realm': '区域',
+    'workbuddy.balance': '剩余积分',
+    'workbuddy.ceiling': '积分总额度',
+    'workbuddy.unlimited': '不限量',
+    'workbuddy.snapshotNote': '网关余额快照，非实时余额查询。最近后台刷新：{time} · 周期：{seconds} 秒。总额度缺失或为 0 表示未知，不表示不限量。',
+    'workbuddy.noAccounts': '该网关账户池为空，请在上游面板管理账户。',
+    'workbuddy.usage': '网关用量 · 最近 {hours} 个小时桶',
+    'workbuddy.usageNote': '包含当前未结束小时。次数为上游尝试数，含重试及失败。Token 保留网关口径，缓存已包含在 prompt 中，不另加到总量。',
+    'workbuddy.attempts': '调用尝试',
+    'workbuddy.errors': '失败尝试',
+    'workbuddy.credits': '实测积分小计',
+    'workbuddy.localCost': '参考价估算（USD）',
+    'workbuddy.creditSamples': '积分样本数',
+    'workbuddy.creditNote': '仅累加观测到 usage.credit 的样本。无样本为未知，已观测的 0 保留为 0；该小计不代表完整账户账单。',
+    'workbuddy.prompt': 'Prompt（含缓存）',
+    'workbuddy.output': '输出',
+    'workbuddy.cache': '缓存命中 / 未命中',
+    'workbuddy.latency': '观测平均延迟（ms）',
+    'workbuddy.tps': '观测平均 tok/s',
+    'workbuddy.trend': '已记录小时的 Token 分布',
+    'workbuddy.hourDetails': '小时明细 · 网关当地时间',
+    'workbuddy.trendNote': '仅展示上游返回的小时桶，缺口不补零；时间标签使用网关时区。',
+    'workbuddy.noUsage': '该窗口未记录调用尝试，不代表账户余额为零或其他渠道没有用量。',
     'setting.workBuddyHint': '本地网关 · 仅 Chat Completions',
     'clinepass.noAnthropic': 'Cline API 未提供 Messages 端点，因此该平台始终使用 Chat Completions。',
     'clinepass.quotaHint': '使用本平台 API 密钥读取套餐用量窗口，无需浏览器会话。该端点未公开，字段可能变化。',
@@ -6974,6 +7044,7 @@ const QuotaModule = {
 
   renderLocalUsage() {
     const days = document.getElementById('quota-local-days')?.value || '30';
+    this.setText('quota-local-cost-label', t(this.provider === 'workbuddy' ? 'workbuddy.localCost' : 'history.filteredCost'));
     this.setText('quota-local-note', t('quota.localNote').replace('{provider}', PROVIDERS[this.provider]?.name || this.provider).replace('{days}', days));
     const error = document.getElementById('quota-local-error');
     if (error) {
@@ -7010,18 +7081,21 @@ const QuotaModule = {
     const isBedrock = this.provider === 'aws-bedrock';
     const isCommandCode = this.provider === 'commandcode';
     const isClinePass = this.provider === 'cline-pass';
+    const isWorkBuddy = this.provider === 'workbuddy';
     const go = document.getElementById('quota-go');
     const openrouter = document.getElementById('quota-openrouter');
     const bedrock = document.getElementById('quota-bedrock');
     const commandcode = document.getElementById('quota-commandcode');
     const clinepass = document.getElementById('quota-cline-pass');
+    const workbuddy = document.getElementById('quota-workbuddy');
     const unavailable = document.getElementById('quota-unavailable');
     if (go) go.hidden = !isGo;
     if (openrouter) openrouter.hidden = !isOpenRouter;
     if (bedrock) bedrock.hidden = !isBedrock;
     if (commandcode) commandcode.hidden = !isCommandCode;
     if (clinepass) clinepass.hidden = !isClinePass;
-    if (unavailable) unavailable.hidden = isGo || isOpenRouter || isBedrock || isCommandCode || isClinePass;
+    if (workbuddy) workbuddy.hidden = !isWorkBuddy;
+    if (unavailable) unavailable.hidden = isGo || isOpenRouter || isBedrock || isCommandCode || isClinePass || isWorkBuddy;
     this.syncRefreshButton();
     const view = this.view?.provider && this.view.provider !== this.provider ? null : this.view;
     const goSummary = document.getElementById('quota-go-summary');
@@ -7066,6 +7140,10 @@ const QuotaModule = {
       if (isClinePass) {
         this.renderClinePass(view);
         this.tickCountdowns();
+        return;
+      }
+      if (isWorkBuddy) {
+        this.renderWorkBuddy(view);
         return;
       }
       this.setText('quota-unavailable-title', t('quota.notRetrieved').replace('{provider}', PROVIDERS[this.provider]?.name || this.provider));
@@ -7375,6 +7453,66 @@ const QuotaModule = {
           <p class="page-meta">${t('clinepass.percentNote')}</p>
         </section>
       </div></section>`;
+  },
+
+  renderWorkBuddy(view) {
+    const root = document.getElementById('quota-workbuddy-accounts');
+    if (!root) return;
+    if (!view) {
+      root.innerHTML = `<div class="quota-notice">${t(this.loading ? 'data.loading' : 'detail.unavailable')}</div>`;
+    } else if (view.error) {
+      root.innerHTML = `<div class="quota-notice is-error" role="alert">${escapeHtml(view.error)}</div>`;
+    } else if (!view.accounts?.length) {
+      root.innerHTML = `<div class="quota-notice"><strong>${t('quota.noProviderKey').replace('{provider}', 'WorkBuddy')}</strong><span>${t('quota.noProviderKeyHint')}</span></div>`;
+    } else {
+      root.innerHTML = view.accounts.map(account => this.renderWorkBuddyAccount(account)).join('');
+    }
+  },
+
+  renderWorkBuddyAccount(account) {
+    const head = `<div class="quota-account-head"><span class="quota-key">${t('quota.keyLabel')} <code>${escapeHtml(account.key_hint || '—')}</code></span></div>`;
+    const error = message => `<div class="quota-notice is-error" role="alert">${escapeHtml(message)}</div>`;
+    const data = account.workbuddy;
+    if (account.error || !data) return `<section class="quota-account analytics-section">${head}${error(account.error || t('data.invalid'))}</section>`;
+    const table = (labels, rows) => `<div class="analytics-table-scroll"><table class="analytics-table workbuddy-table"><thead><tr>${labels.map(label => `<th scope="col">${t(label)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
+    const facts = rows => `<dl class="quota-figures">${rows.map(([label, value]) => `<div><dt>${t(label)}</dt><dd>${value}</dd></div>`).join('')}</dl>`;
+    const credits = row => row?.credit_samples > 0 && Number.isFinite(row.credits) ? row.credits.toLocaleString(undefined, {maximumSignificantDigits: 10}) : '—';
+    const overview = data.overview;
+    let pool = error(data.overview_error || t('data.invalid'));
+    if (overview) {
+      const rows = (overview.accounts || []).map((entry, i) => {
+        const unlimited = entry.credits_total === -1;
+        const state = entry.disabled ? 'disabled' : entry.paused ? 'paused' : entry.cooling ? 'cooling' : entry.reserve_blocked ? 'reserve' : 'ready';
+        return `<tr><th scope="row">${t('workbuddy.account').replace('{n}', i + 1)}</th><td>${escapeHtml(entry.realm || '—')}</td><td>${t('workbuddy.' + state)}</td><td>${unlimited ? t('workbuddy.unlimited') : fmt(entry.credits)}</td><td>${unlimited ? t('workbuddy.unlimited') : entry.credits_total > 0 ? fmt(entry.credits_total) : '—'}</td></tr>`;
+      }).join('');
+      const stamp = overview.balance_refreshed_at;
+      const refreshed = stamp && !stamp.startsWith('0001-') ? `${fmtDate(stamp)} ${fmtTime(stamp)}` : '—';
+      pool = facts([['total','total'], ['healthy','healthy'], ['cooling','cooling'], ['disabled','disabled'], ['paused','paused'], ['in_flight_full','full']].map(([key, label]) => ['workbuddy.' + label, fmt(overview[key])]))
+        + `<p class="page-meta">${escapeHtml(t('workbuddy.snapshotNote').replace('{time}', refreshed).replace('{seconds}', fmt(overview.balance_refresh_sec)))}</p>`
+        + (rows ? table(['workbuddy.pool','workbuddy.realm','th.status','workbuddy.balance','workbuddy.ceiling'], rows) : `<p class="quota-notice">${t('workbuddy.noAccounts')}</p>`);
+    }
+    const usage = data.usage;
+    let usageHTML = error(data.usage_error || t('data.invalid'));
+    if (usage) {
+      const total = usage.totals;
+      const metrics = [['workbuddy.attempts', fmt(total.requests)], ['workbuddy.errors', fmt(total.errors)], ['analytics.totalTokens', fmt(total.total_tokens)], ['workbuddy.credits', credits(total)]];
+      usageHTML = `<div class="metric-band metric-grid usage-metrics">${metrics.map(([label, value]) => `<div class="metric-cell"><div class="metric-label">${t(label)}</div><div class="metric-value">${value}</div></div>`).join('')}</div>`
+        + `<p class="page-meta">${t('workbuddy.usageNote')}</p>`
+        + facts([['workbuddy.prompt', fmt(total.prompt_tokens)], ['workbuddy.output', fmt(total.completion_tokens)], ['workbuddy.cache', `${fmt(total.cache_hit_tokens)} / ${fmt(total.cache_miss_tokens)}`], ['workbuddy.creditSamples', fmt(total.credit_samples)], ['workbuddy.latency', total.avg_latency_ms > 0 ? fmt(total.avg_latency_ms) : '—'], ['workbuddy.tps', total.avg_tokens_per_second > 0 ? fmt(total.avg_tokens_per_second) : '—']])
+        + `<p class="page-meta">${t('workbuddy.creditNote')}</p>`;
+      if (total.requests === 0) usageHTML += `<p class="quota-notice">${t('workbuddy.noUsage')}</p>`;
+      const modelRows = (usage.by_model || []).map(row => `<tr><th scope="row">${escapeHtml(row.key)}</th><td>${fmt(row.requests)}</td><td>${fmt(row.errors)}</td><td>${fmt(row.total_tokens)}</td><td>${credits(row)}</td><td>${fmt(row.credit_samples)}</td></tr>`).join('');
+      if (modelRows) usageHTML += table(['quota.model','workbuddy.attempts','workbuddy.errors','analytics.totalTokens','workbuddy.credits','workbuddy.creditSamples'], modelRows);
+      const series = usage.series || [];
+      if (series.length) {
+        const max = Math.max(1, ...series.map(row => row.total_tokens));
+        const bars = series.map(row => `<div class="daily-bar"><span class="daily-bar-value">${fmtTok(row.total_tokens)}</span><div class="daily-bar-fill" style="height:${row.total_tokens / max * 80}px" title="${escapeHtml(row.t)} · ${fmt(row.total_tokens)}"></div><span class="daily-bar-label">${escapeHtml(row.t.slice(11))}</span></div>`).join('');
+        const hourlyRows = series.map(row => `<tr><th scope="row">${escapeHtml(row.t.replace('T', ' '))}:00</th><td>${fmt(row.requests)}</td><td>${fmt(row.errors)}</td><td>${fmt(row.total_tokens)}</td><td>${credits(row)}</td></tr>`).join('');
+        usageHTML += `<h4>${t('workbuddy.trend')}</h4><div class="analytics-table-scroll"><div class="daily-bars workbuddy-bars" aria-hidden="true">${bars}</div></div><p class="page-meta">${t('workbuddy.trendNote')}</p><details class="workbuddy-hourly"><summary>${t('workbuddy.hourDetails')}</summary>${table(['th.time','workbuddy.attempts','workbuddy.errors','analytics.totalTokens','workbuddy.credits'], hourlyRows)}</details>`;
+      }
+      usageHTML += `<p class="page-meta">${escapeHtml(t('quota.updated').replace('{time}', fmtTime(usage.generated)))}</p>`;
+    }
+    return `<section class="quota-account analytics-section workbuddy-account">${head}<h3>${t('workbuddy.pool')}</h3>${pool}<h3>${t('workbuddy.usage').replace('{hours}', usage?.hours || '24')}</h3>${usageHTML}</section>`;
   },
 
   renderAccount(account) {

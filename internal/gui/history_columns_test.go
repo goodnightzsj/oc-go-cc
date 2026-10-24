@@ -74,7 +74,7 @@ func TestHistoryHeaderColumnsMatchTheRow(t *testing.T) {
 	if thStart < 0 {
 		t.Fatal("could not find the Tok/s <th> opening tag")
 	}
-	if !strings.Contains(head[thStart:rel], `data-sort="tokens_per_second"`) {
-		t.Error("the History Tok/s heading must carry data-sort=\"tokens_per_second\"")
+	if !strings.Contains(head[thStart:rel], `data-sort="generation_tokens_per_second"`) {
+		t.Error("the History Tok/s heading must sort by source generation speed")
 	}
 }

@@ -78,6 +78,16 @@ async function checks() {
   assert.equal(buildViewHash(), '#history', 'the hash must name the tab and nothing else');
   assert.equal(syncViewHash, syncViewHash, 'syncViewHash exists');
 
+  // A saved choice of the Tok/s column must follow its new displayed metric,
+  // not invisibly retain the legacy average ordering after an upgrade.
+  for (const field of ['tokens_per_second', 'generation_tokens_per_second']) {
+    applyViewState({sort:field,dir:'asc'});
+    assert.equal(currentSort.field, 'generation_tokens_per_second');
+    assert.equal(currentSort.dir, 'asc');
+    assert.equal(historyQueryParams().get('sort'), 'generation_tokens_per_second');
+    assert.equal(buildViewState().sort, 'generation_tokens_per_second');
+  }
+
   // A corrupt store must not stop the panel from loading.
   localStorage.setItem(VIEW_STATE_KEY, '{not json');
   assert.equal(JSON.stringify(readSavedView()), '{}', 'a corrupt store reads as empty');

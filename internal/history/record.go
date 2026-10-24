@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/routatic/proxy/internal/core"
+	"github.com/routatic/proxy/internal/metrics"
 	"github.com/routatic/proxy/internal/models"
 	"github.com/routatic/proxy/internal/site"
 	"github.com/routatic/proxy/pkg/types"
@@ -36,6 +37,9 @@ type RequestRecord struct {
 	FirstEventMs   *int64
 	FirstContentMs *int64
 	MessageEndMs   *int64
+	// Source-stream timing and output count; independent of billing and the
+	// legacy application-output milestones above. Nil for unobserved streams.
+	GenerationSample *metrics.GenerationSample
 	// ReasoningEffort is the level the client asked for, normalized. Empty when
 	// it asked for none. It records intent, not effect: an upstream that ignores
 	// the field leaves this populated and the response unchanged.

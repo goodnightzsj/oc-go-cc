@@ -441,6 +441,7 @@ vm.runInContext(` + "`" + `
   // position of a value that belongs to a known column can.
   const measured = {id:'m', provider:'opencode-go', model:'deepseek-v4.1-flash', scenario:'default',
     details_known:true, success:true, streaming:true, duration_ms:2000, output_tokens:400,
+    generation_tokens_per_second:250,
     input_tokens:100, cache_read_tokens:0, cache_creation_tokens:0, cost_usd:0.01, start_time:'2026-09-27T10:00:00+08:00'};
   allHistory = [measured];
   renderHistory();
@@ -458,12 +459,12 @@ vm.runInContext(` + "`" + `
   const timingClass = 'class=' + String.fromCharCode(34) + 'timing';
   assert.ok(historyCells[8].includes(timingClass),
     'cell 9 must be the graded Duration figure; got ' + historyCells[8]);
-  assert.ok(historyCells[9].includes('Output tokens divided by'),
+  assert.ok(historyCells[9].includes(t('analytics.generationThroughputHint')),
     'cell 10 must carry the Tok/s cell, whose tooltip is the throughput hint; got ' + historyCells[9]);
   assert.ok(!historyCells[9].includes(timingClass),
     'cell 10 must not be the Duration cell - the two are adjacent and swapping them still counts ten');
   // 400 output tokens over 2000 ms is 200 tok/s.
-  assert.equal(Math.round(requestThroughput(measured)), 200, 'the row helper and the cell must use one definition');
+  assert.equal(Math.round(requestThroughput(measured)), 200, 'the old average still drives duration grading');
 
   allHistory = [unknownRecord];
   renderHistory();
@@ -476,7 +477,7 @@ vm.runInContext(` + "`" + `
   const cellText = cell => cell.slice(cell.indexOf('>') + 1).replace(/<[^>]*>/g, '').trim();
   assert.equal(cellText(unknownCells[9]), '—',
     'an unmeasured row must show a dash, not a fabricated rate; got ' + unknownCells[9]);
-  assert.equal(cellText(historyCells[9]), '200',
+  assert.equal(cellText(historyCells[9]), '250.0 tok/s',
     'the measured row must show its own rate under the Tok/s heading; got ' + historyCells[9]);
   // TTFT and Effort sit left of Duration. Both show a dash when the row has no
   // value - a fixture without them must not read as instant or as effort-free.

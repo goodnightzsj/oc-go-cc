@@ -491,6 +491,10 @@ func (d *Database) migrateColumns(ctx context.Context) error {
 		{"requests", "first_event_ms", `ALTER TABLE requests ADD COLUMN first_event_ms INTEGER`},
 		{"requests", "first_content_ms", `ALTER TABLE requests ADD COLUMN first_content_ms INTEGER`},
 		{"requests", "message_end_ms", `ALTER TABLE requests ADD COLUMN message_end_ms INTEGER`},
+		// One source-stream sample, independent of the legacy output milestones.
+		{"requests", "generation_first_output_ms", `ALTER TABLE requests ADD COLUMN generation_first_output_ms INTEGER`},
+		{"requests", "generation_duration_ms", `ALTER TABLE requests ADD COLUMN generation_duration_ms INTEGER`},
+		{"requests", "generation_output_tokens", `ALTER TABLE requests ADD COLUMN generation_output_tokens INTEGER`},
 		// The reasoning level the client asked for, after normalization. NULL
 		// means the client expressed no level - which is not the same as asking
 		// for the weakest one, so an empty string is stored as NULL.

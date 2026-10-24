@@ -119,21 +119,23 @@ type TokenSummary struct {
 
 // ModelBreakdown holds per-model usage and performance stats.
 type ModelBreakdown struct {
-	Model                  string   `json:"model"`
-	Provider               string   `json:"provider"`
-	Requests               int64    `json:"requests"`
-	KnownRequests          int64    `json:"known_requests"`
-	InputTokens            int64    `json:"input_tokens"`
-	OutputTokens           int64    `json:"output_tokens"`
-	CacheReadTokens        int64    `json:"cache_read_tokens"`
-	CacheCreationTokens    int64    `json:"cache_creation_tokens"`
-	AvgLatencyMs           float64  `json:"avg_latency_ms"`
-	SuccessRate            float64  `json:"success_rate"`
-	TokensPerSecond        float64  `json:"tokens_per_second"`
-	ContentTokensPerSecond *float64 `json:"content_tokens_per_second,omitempty"`
-	ContentSamples         int64    `json:"content_samples"`
-	EstCostUSD             float64  `json:"est_cost_usd"` // sum of known stored request costs
-	UnknownCostRequests    int64    `json:"unknown_cost_requests"`
+	Model                     string   `json:"model"`
+	Provider                  string   `json:"provider"`
+	Requests                  int64    `json:"requests"`
+	KnownRequests             int64    `json:"known_requests"`
+	InputTokens               int64    `json:"input_tokens"`
+	OutputTokens              int64    `json:"output_tokens"`
+	CacheReadTokens           int64    `json:"cache_read_tokens"`
+	CacheCreationTokens       int64    `json:"cache_creation_tokens"`
+	AvgLatencyMs              float64  `json:"avg_latency_ms"`
+	SuccessRate               float64  `json:"success_rate"`
+	TokensPerSecond           float64  `json:"tokens_per_second"`
+	ContentTokensPerSecond    *float64 `json:"content_tokens_per_second,omitempty"`
+	ContentSamples            int64    `json:"content_samples"`
+	GenerationTokensPerSecond *float64 `json:"generation_tokens_per_second,omitempty"`
+	GenerationSamples         int64    `json:"generation_samples"`
+	EstCostUSD                float64  `json:"est_cost_usd"` // sum of known stored request costs
+	UnknownCostRequests       int64    `json:"unknown_cost_requests"`
 }
 
 // throughputCounters carries the two sums TokensPerSecond is derived from.
@@ -168,21 +170,23 @@ func (c throughputCounters) rate() float64 {
 // measured duration. Both are zero when nothing qualifying is in the window,
 // which the panel renders as unknown rather than as 0%.
 type ProviderBreakdown struct {
-	Provider               string   `json:"provider"`
-	Requests               int64    `json:"requests"`
-	KnownRequests          int64    `json:"known_requests"`
-	InputTokens            int64    `json:"input_tokens"`
-	OutputTokens           int64    `json:"output_tokens"`
-	CacheReadTokens        int64    `json:"cache_read_tokens"`
-	CacheCreationTokens    int64    `json:"cache_creation_tokens"`
-	AvgLatencyMs           float64  `json:"avg_latency_ms"`
-	SuccessRate            float64  `json:"success_rate"`
-	TokensPerSecond        float64  `json:"tokens_per_second"`
-	ContentTokensPerSecond *float64 `json:"content_tokens_per_second,omitempty"`
-	ContentSamples         int64    `json:"content_samples"`
-	FallbackRate           float64  `json:"fallback_rate"` // % of known requests that were fallbacks
-	EstCostUSD             float64  `json:"est_cost_usd"`
-	UnknownCostRequests    int64    `json:"unknown_cost_requests"`
+	Provider                  string   `json:"provider"`
+	Requests                  int64    `json:"requests"`
+	KnownRequests             int64    `json:"known_requests"`
+	InputTokens               int64    `json:"input_tokens"`
+	OutputTokens              int64    `json:"output_tokens"`
+	CacheReadTokens           int64    `json:"cache_read_tokens"`
+	CacheCreationTokens       int64    `json:"cache_creation_tokens"`
+	AvgLatencyMs              float64  `json:"avg_latency_ms"`
+	SuccessRate               float64  `json:"success_rate"`
+	TokensPerSecond           float64  `json:"tokens_per_second"`
+	ContentTokensPerSecond    *float64 `json:"content_tokens_per_second,omitempty"`
+	ContentSamples            int64    `json:"content_samples"`
+	GenerationTokensPerSecond *float64 `json:"generation_tokens_per_second,omitempty"`
+	GenerationSamples         int64    `json:"generation_samples"`
+	FallbackRate              float64  `json:"fallback_rate"` // % of known requests that were fallbacks
+	EstCostUSD                float64  `json:"est_cost_usd"`
+	UnknownCostRequests       int64    `json:"unknown_cost_requests"`
 }
 
 // ScenarioBreakdown holds proxy-owned request aggregates. Scenarios are not
@@ -268,24 +272,27 @@ func (a *Analytics) Summary(ctx context.Context, window Window) (*AnalyticsSnaps
 // analyticBucket accumulates one group's aggregates. It is a plain struct rather
 // than the wire types so the same fold can feed all five views.
 type analyticBucket struct {
-	requests        int64
-	known           int64
-	errors          int64
-	successes       int64
-	input           int64
-	output          int64
-	cacheRead       int64
-	cacheCreation   int64
-	cost            float64
-	costRows        int64
-	fallbacks       int64
-	latencySum      int64
-	latencyCount    int64
-	tpTokens        int64
-	tpDuration      int64
-	contentTokens   int64
-	contentDuration int64
-	contentSamples  int64
+	requests           int64
+	known              int64
+	errors             int64
+	successes          int64
+	input              int64
+	output             int64
+	cacheRead          int64
+	cacheCreation      int64
+	cost               float64
+	costRows           int64
+	fallbacks          int64
+	latencySum         int64
+	latencyCount       int64
+	tpTokens           int64
+	tpDuration         int64
+	contentTokens      int64
+	contentDuration    int64
+	contentSamples     int64
+	generationTokens   int64
+	generationDuration int64
+	generationSamples  int64
 }
 
 func (b *analyticBucket) add(o analyticBucket) {
@@ -307,6 +314,9 @@ func (b *analyticBucket) add(o analyticBucket) {
 	b.contentTokens += o.contentTokens
 	b.contentDuration += o.contentDuration
 	b.contentSamples += o.contentSamples
+	b.generationTokens += o.generationTokens
+	b.generationDuration += o.generationDuration
+	b.generationSamples += o.generationSamples
 }
 
 // successRate is zero when no request in the group reported an outcome, which
@@ -337,6 +347,14 @@ func (b analyticBucket) contentTokensPerSecond() *float64 {
 	return &rate
 }
 
+func (b analyticBucket) generationTokensPerSecond() *float64 {
+	if b.generationSamples == 0 {
+		return nil
+	}
+	rate := throughputCounters{OutputTokens: b.generationTokens, DurationMs: b.generationDuration}.rate()
+	return &rate
+}
+
 // Two conditions are measured per row rather than per window. Both are spelled
 // once here because the latency panel and the throughput column must not drift
 // apart: a request whose duration was never observed contributes to neither.
@@ -349,6 +367,11 @@ const (
 	measuredContentThroughput = measuredThroughput + ` AND r.streaming = 1 ` +
 		`AND r.first_content_ms >= 0 AND r.message_end_ms > r.first_content_ms ` +
 		`AND r.message_end_ms <= r.duration_ms`
+	// Shared by history sorting and aggregation; matches GenerationTokensPerSecond.
+	measuredGenerationThroughput = `details_known = 1 AND success = 1 AND streaming = 1 ` +
+		`AND generation_first_output_ms >= 0 AND generation_duration_ms >= 100 ` +
+		`AND generation_output_tokens >= 0 AND generation_output_tokens <= 9007199254740991 ` +
+		`AND generation_duration_ms <= duration_ms AND generation_first_output_ms <= duration_ms - generation_duration_ms`
 )
 
 // snapshot runs the one scan every aggregate is folded from.
@@ -377,7 +400,10 @@ func (a *Analytics) snapshot(ctx context.Context, window Window) (*AnalyticsSnap
 		       COALESCE(SUM(CASE WHEN `+measuredThroughput+` THEN r.duration_ms ELSE 0 END), 0),
 		       COALESCE(SUM(CASE WHEN `+measuredContentThroughput+` THEN r.output_tokens ELSE 0 END), 0),
 		       COALESCE(SUM(CASE WHEN `+measuredContentThroughput+` THEN r.message_end_ms - r.first_content_ms ELSE 0 END), 0),
-		       COUNT(CASE WHEN `+measuredContentThroughput+` THEN 1 END)
+		       COUNT(CASE WHEN `+measuredContentThroughput+` THEN 1 END),
+		       COALESCE(SUM(CASE WHEN `+measuredGenerationThroughput+` THEN generation_output_tokens ELSE 0 END), 0),
+		       COALESCE(SUM(CASE WHEN `+measuredGenerationThroughput+` THEN generation_duration_ms ELSE 0 END), 0),
+		       COUNT(CASE WHEN `+measuredGenerationThroughput+` THEN 1 END)
 		FROM requests r
 		WHERE julianday(r.start_time) >= julianday(?)
 		  AND julianday(r.start_time) < julianday(?)
@@ -416,7 +442,8 @@ func (a *Analytics) snapshot(ctx context.Context, window Window) (*AnalyticsSnap
 			&b.input, &b.output, &b.cacheRead, &b.cacheCreation,
 			&b.cost, &b.costRows, &b.fallbacks,
 			&b.latencySum, &b.latencyCount, &b.tpTokens, &b.tpDuration,
-			&b.contentTokens, &b.contentDuration, &b.contentSamples); err != nil {
+			&b.contentTokens, &b.contentDuration, &b.contentSamples,
+			&b.generationTokens, &b.generationDuration, &b.generationSamples); err != nil {
 			return nil, err
 		}
 		total.add(b)
@@ -476,6 +503,7 @@ func (a *Analytics) snapshot(ctx context.Context, window Window) (*AnalyticsSnap
 			AvgLatencyMs: b.avgLatencyMs(), SuccessRate: b.successRate(),
 			TokensPerSecond:        b.tokensPerSecond(),
 			ContentTokensPerSecond: b.contentTokensPerSecond(), ContentSamples: b.contentSamples,
+			GenerationTokensPerSecond: b.generationTokensPerSecond(), GenerationSamples: b.generationSamples,
 			EstCostUSD: b.cost, UnknownCostRequests: b.requests - b.costRows,
 		})
 	}
@@ -505,6 +533,7 @@ func (a *Analytics) snapshot(ctx context.Context, window Window) (*AnalyticsSnap
 			AvgLatencyMs: b.avgLatencyMs(), SuccessRate: b.successRate(),
 			TokensPerSecond: b.tokensPerSecond(), FallbackRate: fallbackRate,
 			ContentTokensPerSecond: b.contentTokensPerSecond(), ContentSamples: b.contentSamples,
+			GenerationTokensPerSecond: b.generationTokensPerSecond(), GenerationSamples: b.generationSamples,
 			EstCostUSD: b.cost, UnknownCostRequests: b.requests - b.costRows,
 		})
 	}

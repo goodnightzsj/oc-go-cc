@@ -1159,6 +1159,7 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .detail-token span { display: block; margin-bottom: 4px; color: var(--ui-muted); font-size: 10px; }
 .detail-token strong { display: block; overflow: hidden; font-size: 14px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; }
 .detail-metadata { padding: 0 20px 18px; }
+.detail-timing-note { margin: 0 20px 18px; }
 .detail-row { padding: 9px 0; border-color: var(--ui-line); }
 .detail-error { margin: 0 20px 18px; padding: 10px 12px; border-left: 3px solid var(--ui-red); border-radius: 4px; color: var(--ui-red); background: rgba(251, 113, 133, .08); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/routatic/proxy/internal/history"
+	"github.com/routatic/proxy/internal/metrics"
 	"github.com/routatic/proxy/internal/storage"
 )
 
@@ -64,6 +65,72 @@ func TestHistoryTimingAPIKeepsUnknownAndMeasuredZeroDistinct(t *testing.T) {
 					}
 				}
 			}
+		}
+	}
+}
+
+func TestHistoryGenerationAPI(t *testing.T) {
+	db, err := storage.Open(storage.Config{DatabasePath: filepath.Join(t.TempDir(), "generation.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	for _, id := range []string{"measured", "zero", "short", "legacy", "failed", "nonstream"} {
+		r := history.RequestRecord{ID: id, Model: "synthetic", Provider: "workbuddy", StartTime: time.Now(), Duration: 16 * time.Second, OutputTokens: 999, Success: id != "failed", Streaming: id != "nonstream"}
+		if id == "measured" || id == "zero" || id == "short" {
+			r.GenerationSample = &metrics.GenerationSample{FirstOutputMs: 0, DurationMs: 1000, OutputTokens: 100}
+			if id == "zero" {
+				r.GenerationSample.OutputTokens = 0
+			}
+			if id == "short" {
+				r.GenerationSample.DurationMs = 99
+			}
+		}
+		if err := storage.NewRequests(db).Insert(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := httptest.NewRecorder()
+	(&Server{storage: db}).handleHistory(w, httptest.NewRequest("GET", "/api/history", nil))
+	if w.Code != 200 {
+		t.Fatalf("HTTP %d %s", w.Code, w.Body)
+	}
+	var body struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Items) != 6 {
+		t.Fatal("missing rows")
+	}
+	for _, r := range body.Items {
+		id := r["id"]
+		sample, exists := r["generation_sample"]
+		if id == "legacy" || id == "failed" || id == "nonstream" {
+			if exists {
+				t.Fatalf("fabricated sample for %s", id)
+			}
+		} else if s, ok := sample.(map[string]any); !ok || len(s) != 3 || s["first_output_ms"] != float64(0) {
+			t.Fatalf("raw sample changed: %+v", sample)
+		}
+		rate, exists := r["generation_tokens_per_second"]
+		switch id {
+		case "measured":
+			if rate != float64(100) {
+				t.Fatalf("rate not same-source: %v", rate)
+			}
+		case "zero":
+			if rate != float64(0) {
+				t.Fatal("zero confused with unknown")
+			}
+		default:
+			if exists {
+				t.Fatalf("fabricated rate for %s: %v", id, rate)
+			}
+		}
+		if r["output_tokens"] != float64(999) {
+			t.Fatal("billing altered")
 		}
 	}
 }

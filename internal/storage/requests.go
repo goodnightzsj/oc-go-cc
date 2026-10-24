@@ -3,12 +3,14 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/routatic/proxy/internal/history"
+	"github.com/routatic/proxy/internal/metrics"
 )
 
 const (
@@ -28,6 +30,13 @@ func NewRequests(db *Database) *Requests {
 
 // Insert stores a request record, replacing any existing record with the same ID.
 func (r *Requests) Insert(rec history.RequestRecord) error {
+	var generationStart, generationDuration, generationOutput *int64
+	if s := rec.GenerationSample; s != nil {
+		if !rec.ValidGenerationSample() {
+			return fmt.Errorf("invalid generation sample for request %q", rec.ID)
+		}
+		generationStart, generationDuration, generationOutput = &s.FirstOutputMs, &s.DurationMs, &s.OutputTokens
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -46,8 +55,9 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens,
 			cost_usd, cost_source, details_known, usage_trusted, streaming, success, error_msg, attempt,
 			peak_multiplier, upstream_channel, upstream_model, first_byte_ms, reasoning_effort,
-			key_hint, first_event_ms, first_content_ms, message_end_ms
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			key_hint, first_event_ms, first_content_ms, message_end_ms,
+			generation_first_output_ms, generation_duration_ms, generation_output_tokens
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		rec.ID,
 		rec.Model,
@@ -77,6 +87,7 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 		rec.FirstEventMs,
 		rec.FirstContentMs,
 		rec.MessageEndMs,
+		generationStart, generationDuration, generationOutput,
 	)
 
 	return err
@@ -473,7 +484,8 @@ func (r *Requests) Query(q RequestQuery) ([]history.RequestRecord, int64, error)
 		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens,
 		       cost_usd, cost_source, details_known, streaming, success, error_msg, attempt,
 		       peak_multiplier, upstream_channel, upstream_model, first_byte_ms, reasoning_effort,
-		       key_hint, first_event_ms, first_content_ms, message_end_ms
+		       key_hint, first_event_ms, first_content_ms, message_end_ms,
+		       generation_first_output_ms, generation_duration_ms, generation_output_tokens
 		FROM requests`+where+`
 		ORDER BY `+orderBy+`
 		LIMIT ? OFFSET ?
@@ -625,27 +637,15 @@ func requestSortColumn(field string) string {
 		return "(CASE WHEN first_byte_ms IS NULL THEN 1 ELSE 0 END) ASC, first_byte_ms"
 	case "duration_ms":
 		return "COALESCE(duration_ms, 0)"
+	case "generation_tokens_per_second":
+		return "(CASE WHEN " + measuredGenerationThroughput + " THEN 0 ELSE 1 END) ASC, " +
+			"CASE WHEN " + measuredGenerationThroughput + " THEN generation_output_tokens * 1000.0 / generation_duration_ms ELSE NULL END"
 	case "tokens_per_second":
-		// The rate is output over seconds, and a row without both figures has no
-		// rate at all: the cell shows a dash, not a zero.
-		//
-		// The measurable test must match the cell's own condition exactly. The
-		// cell renders a rate only when the row has details, succeeded, and has
-		// both figures - a failed request's output is a partial count, so its rate
-		// is not comparable. A key that omitted either flag would rank rows the
-		// column shows as blank, so the reader would see dashes in the middle of
-		// an ordered list. Kept in the same order as historyHasDetails in app.js
-		// so the two can be read side by side.
+		// Preserve the legacy API's whole-request average ordering; the visible
+		// Tok/s column now uses generation_tokens_per_second above.
 		const measurable = "details_known = 1 AND success = 1 " +
 			"AND COALESCE(output_tokens, 0) > 0 AND COALESCE(duration_ms, 0) > 0"
-		//
-		// SQLite sorts NULL before every value, so a bare NULL would leave the
-		// unmeasurable rows at the top of an ascending sort - the user asking for
-		// the slowest requests would get a screen of dashes first. The leading term
-		// pins them to the bottom in both directions.
-		//
-		// Integer division would truncate to 0 for any request under a second per
-		// token, so the numerator is cast to REAL before dividing.
+		// Unknowns stay last in both directions; REAL division preserves fractions.
 		return "(CASE WHEN " + measurable + " THEN 0 ELSE 1 END) ASC, " +
 			"CASE WHEN " + measurable +
 			" THEN CAST(COALESCE(output_tokens, 0) AS REAL) / (COALESCE(duration_ms, 0) / 1000.0) " +
@@ -721,6 +721,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		var provider, scenario, requestedModel sql.NullString
 		var upstreamChannel, upstreamModel sql.NullString
 		var firstByteMS sql.NullInt64
+		var generationStart, generationDuration, generationOutput sql.NullInt64
 		var reasoningEffort, keyHint sql.NullString
 		var peakMul float64
 		err := rows.Scan(
@@ -752,6 +753,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 			&rec.FirstEventMs,
 			&rec.FirstContentMs,
 			&rec.MessageEndMs,
+			&generationStart, &generationDuration, &generationOutput,
 		)
 		if err != nil {
 			return nil, err
@@ -791,6 +793,12 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		rec.DetailsKnown = detailsKnown.Valid && detailsKnown.Int64 == 1 &&
 			success.Valid && (success.Int64 == 0 || success.Int64 == 1)
 		rec.Duration = time.Duration(rec.Duration) * time.Millisecond
+		if generationStart.Valid || generationDuration.Valid || generationOutput.Valid {
+			rec.GenerationSample = &metrics.GenerationSample{FirstOutputMs: generationStart.Int64, DurationMs: generationDuration.Int64, OutputTokens: generationOutput.Int64}
+			if !generationStart.Valid || !generationDuration.Valid || !generationOutput.Valid || !rec.ValidGenerationSample() {
+				return nil, fmt.Errorf("invalid stored generation sample for request %q", rec.ID)
+			}
+		}
 
 		records = append(records, rec)
 	}

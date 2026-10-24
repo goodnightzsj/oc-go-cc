@@ -75,6 +75,9 @@ func (b *baseProvider) doSelected(req *http.Request, sel *selection) (*http.Resp
 		outcome = &client.APIError{StatusCode: resp.StatusCode, RetryAfter: resp.Header.Get("Retry-After")}
 	}
 	sel.Settle(outcome)
+	if err == nil {
+		metrics.ObserveGenerationResponse(req.Context(), resp)
+	}
 	return resp, err
 }
 

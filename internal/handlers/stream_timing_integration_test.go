@@ -50,7 +50,7 @@ func timingFrames(wire core.WireFormat) []string {
 		return []string{
 			`{"choices":[{"delta":{"role":"assistant","content":""}}]}`,
 			`{"choices":[{"delta":{"content":"hello"}}]}`,
-			`{"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":600,"completion_tokens_details":{"reasoning_tokens":100}}}`,
+			`{"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":600,"completion_tokens_details":{"reasoning_tokens":100}}}` + "\n\ndata: [DONE]",
 		}
 	}
 }
@@ -107,11 +107,13 @@ func TestStreamTimingAcrossProtocolsAndCapture(t *testing.T) {
 						// Gemini's existing stream path does not report usage. Timing
 						// must not invent accounting to manufacture a throughput.
 						if wire == core.WireFormatGemini {
-							if r.OutputTokens != 0 || r.ContentTokensPerSecond() != nil {
+							if r.OutputTokens != 0 || r.ContentTokensPerSecond() != nil || r.GenerationSample != nil {
 								t.Fatal("unreported Gemini usage was fabricated")
 							}
 						} else if r.OutputTokens != 600 || r.ReasoningTokens != 100 {
 							t.Fatalf("usage changed: %+v", r)
+						} else if s := r.GenerationSample; s == nil || s.FirstOutputMs != 3000 || s.DurationMs != 3000 || s.OutputTokens != 600 {
+							t.Fatalf("source timing included transformation or HTTP cleanup: %+v", s)
 						}
 					})
 				})
@@ -150,15 +152,31 @@ func TestStreamTimingFallbackAndInterruptedHistory(t *testing.T) {
 					t.Fatalf("fallback reset execution origin: %+v", r)
 				}
 				if interrupted {
-					if r.Success || r.MessageEndMs != nil || r.ContentTokensPerSecond() != nil || r.EventTokensPerSecond() != nil {
+					if r.Success || r.MessageEndMs != nil || r.ContentTokensPerSecond() != nil || r.EventTokensPerSecond() != nil || r.GenerationSample != nil {
 						t.Fatalf("interruption fabricated success: %+v", r)
 					}
 				} else if !r.Success || r.MessageEndMs == nil || *r.MessageEndMs != 8000 || r.Duration != 9*time.Second {
 					t.Fatalf("completion after fallback: %+v", r)
+				} else if s := r.GenerationSample; s == nil || s.FirstOutputMs != 5000 || s.DurationMs != 3000 || s.OutputTokens != 600 {
+					t.Fatalf("source sample mixed attempts or reset request origin: %+v", s)
 				}
 			})
 		})
 	}
+}
+
+func TestGenerationSampleDiscardedWhenForwardingFailsAfterTerminal(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		body := &timingScriptedBody{frames: timingFrames(core.WireFormatAnthropic), finalErr: io.ErrUnexpectedEOF}
+		provider := &timingProvider{body: body, wire: core.WireFormatAnthropic}
+		h, records := newTimingHandler(t, provider)
+		h.handleStreaming(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/messages", nil),
+			&types.MessageRequest{Stream: boolPtr(true), MaxTokens: 1000},
+			[]config.ModelConfig{{Provider: provider.Name(), ModelID: "synthetic"}}, nil, router.ScenarioDefault, "synthetic")
+		if len(records.rows) != 1 || records.rows[0].Success || records.rows[0].GenerationSample != nil || records.rows[0].OutputTokens != 600 {
+			t.Fatalf("sampling changed forwarding failure or billing: %+v", records.rows)
+		}
+	})
 }
 
 type timingScriptedBody struct {
@@ -207,13 +225,17 @@ func (p *timingProvider) WireFormat(string) core.WireFormat { return p.wire }
 func (p *timingProvider) Execute(context.Context, *types.MessageRequest, config.ModelConfig) (*core.ExecuteResult, error) {
 	return nil, errors.New("unexpected non-streaming call")
 }
-func (p *timingProvider) Stream(context.Context, *types.MessageRequest, config.ModelConfig) (io.ReadCloser, error) {
+func (p *timingProvider) Stream(ctx context.Context, _ *types.MessageRequest, _ config.ModelConfig) (io.ReadCloser, error) {
 	p.calls++
 	if p.refuseFirst && p.calls == 1 {
 		time.Sleep(2 * time.Second)
 		return nil, errors.New("synthetic refusal before payload")
 	}
-	return p.body, nil
+	// Stand in for the shared provider HTTP boundary; real providers are also
+	// exercised with capture and pre-reading in provider/generation_test.go.
+	response := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: p.body}
+	metrics.ObserveGenerationResponse(ctx, response)
+	return response.Body, nil
 }
 
 type timingRecordStore struct{ rows []history.RequestRecord }

@@ -21,10 +21,8 @@ func TestHistoryAssetsKeepKeyboardDialogAndPromptTokens(t *testing.T) {
 		"window.CustomSelect", "window.HistoryDateRange", "renderHistorySummary", "detail.title",
 		"historyBreakdownMetric", "history-summary-token-note", "input_tokens", "cache_creation_tokens", "history-page-size", "bindPlotTooltip", "details_known",
 		"history-token-trigger", "bindHistoryTokenTooltips", "history-stream-state", "h.streaming", "document.querySelectorAll('.chart-tip')",
-		// The Tok/s cell shares requestThroughput with the Duration cell's grading
-		// and the detail dialog, so the row cannot report two different rates for
-		// one request. Asserted as the shared call, not the literal figure.
-		"fmtThroughput(requestThroughput(h))",
+		// The primary cell consumes the source rate; the old average is diagnostic.
+		"fmtGenerationThroughput(h.generation_tokens_per_second)",
 	} {
 		if !strings.Contains(string(app), marker) {
 			t.Errorf("app.js missing History accessibility marker %q", marker)

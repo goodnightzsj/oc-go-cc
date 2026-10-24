@@ -493,12 +493,14 @@ type historyEntry struct {
 	UpstreamModel string `json:"upstream_model,omitempty"`
 	// FirstByteMs is how long the upstream took to send its first byte. Omitted
 	// when it was not measured, which is a different answer from zero.
-	FirstByteMs            int64    `json:"first_byte_ms,omitempty"`
-	FirstEventMs           *int64   `json:"first_event_ms,omitempty"`
-	FirstContentMs         *int64   `json:"first_content_ms,omitempty"`
-	MessageEndMs           *int64   `json:"message_end_ms,omitempty"`
-	ContentTokensPerSecond *float64 `json:"content_tokens_per_second,omitempty"`
-	EventTokensPerSecond   *float64 `json:"event_tokens_per_second,omitempty"`
+	FirstByteMs               int64                     `json:"first_byte_ms,omitempty"`
+	FirstEventMs              *int64                    `json:"first_event_ms,omitempty"`
+	FirstContentMs            *int64                    `json:"first_content_ms,omitempty"`
+	MessageEndMs              *int64                    `json:"message_end_ms,omitempty"`
+	ContentTokensPerSecond    *float64                  `json:"content_tokens_per_second,omitempty"`
+	EventTokensPerSecond      *float64                  `json:"event_tokens_per_second,omitempty"`
+	GenerationSample          *metrics.GenerationSample `json:"generation_sample,omitempty"`
+	GenerationTokensPerSecond *float64                  `json:"generation_tokens_per_second,omitempty"`
 	// ReasoningEffort is the level the client asked for. Omitted when it asked
 	// for none - a blank is a different answer from "the lowest level".
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
@@ -686,35 +688,37 @@ func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 			scenario = "override"
 		}
 		entry := historyEntry{
-			ID:                     rec.ID,
-			Model:                  rec.Model,
-			RequestedModel:         rec.RequestedModel,
-			Provider:               rec.Provider,
-			UpstreamChannel:        rec.UpstreamChannel,
-			UpstreamModel:          rec.UpstreamModel,
-			FirstByteMs:            rec.FirstByte.Milliseconds(),
-			FirstEventMs:           rec.FirstEventMs,
-			FirstContentMs:         rec.FirstContentMs,
-			MessageEndMs:           rec.MessageEndMs,
-			ContentTokensPerSecond: rec.ContentTokensPerSecond(),
-			EventTokensPerSecond:   rec.EventTokensPerSecond(),
-			ReasoningEffort:        rec.ReasoningEffort,
-			KeyHint:                rec.KeyHint,
-			Scenario:               scenario,
-			StartTime:              rec.StartTime.Format("2006-01-02T15:04:05Z07:00"),
-			DurationMs:             rec.Duration.Milliseconds(),
-			InputTokens:            rec.InputTokens,
-			PromptTokens:           rec.DisplayInputTokens(),
-			OutputTokens:           rec.OutputTokens,
-			ReasoningTokens:        rec.ReasoningTokens,
-			CacheReadTokens:        rec.CacheReadTokens,
-			CacheCreationTokens:    rec.CacheCreationTokens,
-			DetailsKnown:           rec.DetailsKnown,
-			Streaming:              rec.Streaming,
-			Attempt:                rec.Attempt,
-			Success:                rec.Success,
-			ErrorMsg:               rec.ErrorMsg,
-			PeakMultiplier:         rec.PeakMultiplier,
+			ID:                        rec.ID,
+			Model:                     rec.Model,
+			RequestedModel:            rec.RequestedModel,
+			Provider:                  rec.Provider,
+			UpstreamChannel:           rec.UpstreamChannel,
+			UpstreamModel:             rec.UpstreamModel,
+			FirstByteMs:               rec.FirstByte.Milliseconds(),
+			FirstEventMs:              rec.FirstEventMs,
+			FirstContentMs:            rec.FirstContentMs,
+			MessageEndMs:              rec.MessageEndMs,
+			ContentTokensPerSecond:    rec.ContentTokensPerSecond(),
+			EventTokensPerSecond:      rec.EventTokensPerSecond(),
+			GenerationSample:          rec.GenerationSample,
+			GenerationTokensPerSecond: rec.GenerationTokensPerSecond(),
+			ReasoningEffort:           rec.ReasoningEffort,
+			KeyHint:                   rec.KeyHint,
+			Scenario:                  scenario,
+			StartTime:                 rec.StartTime.Format("2006-01-02T15:04:05Z07:00"),
+			DurationMs:                rec.Duration.Milliseconds(),
+			InputTokens:               rec.InputTokens,
+			PromptTokens:              rec.DisplayInputTokens(),
+			OutputTokens:              rec.OutputTokens,
+			ReasoningTokens:           rec.ReasoningTokens,
+			CacheReadTokens:           rec.CacheReadTokens,
+			CacheCreationTokens:       rec.CacheCreationTokens,
+			DetailsKnown:              rec.DetailsKnown,
+			Streaming:                 rec.Streaming,
+			Attempt:                   rec.Attempt,
+			Success:                   rec.Success,
+			ErrorMsg:                  rec.ErrorMsg,
+			PeakMultiplier:            rec.PeakMultiplier,
 		}
 		if rec.CostKnown || rec.CostUSD != 0 {
 			entry.CostUSD = &rec.CostUSD

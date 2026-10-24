@@ -120,7 +120,7 @@ async function checks() {
 
   // --- throughput reaches the model table ---
   AnalyticsModule.renderModelTable([
-    { model: 'glm-5.2', provider: 'opencode-go', requests: 2, tokens_per_second: 42.25 },
+    { model: 'glm-5.2', provider: 'opencode-go', requests: 2, tokens_per_second: 12, generation_tokens_per_second: 42.25 },
     { model: 'kimi-k2.6', provider: 'opencode-go', requests: 1, tokens_per_second: 0 },
   ]);
   html = get('analytics-model-tbody').innerHTML;
@@ -133,7 +133,7 @@ async function checks() {
   assert.ok(rows[0][4].includes('42.3'), 'a measured throughput is shown: ' + rows[0][4]);
   assert.equal(rows[1][4], '—', 'an unmeasured model shows a dash, not zero: ' + rows[1][4]);
   // The column exists in the header too, or the cells above would be misaligned.
-  assert.ok(page.includes('data-i18n="analytics.throughput"'), 'the table declares a Tok/s column');
+  assert.ok(page.includes('data-i18n="th.tokensPerSecond"'), 'the table declares a plain Tok/s column');
 
   // --- a truncated distribution says so ---
   const many = Array.from({ length: 20 }, (_, i) => ({
@@ -179,9 +179,8 @@ async function checks() {
   const multi = get('daily-spend-note').textContent;
   assert.ok(!multi.includes('4.50'), 'the single-day caption does not survive a re-render: ' + multi);
 
-  // The detail dialog carries the same rate the model table reports, computed
-  // from that one request, so a row's figure can be checked against the model's
-  // average. 2000 output tokens over 4s is 500 tok/s.
+  // The detail dialog retains the whole-request average separately from the
+  // primary source generation speed. 2000 output tokens over 4s is 500 tok/s.
   const tpsRow = record => {
     html = get('modal-body').innerHTML;
     // Match the whole row, so the assertion sees the label and its value
@@ -193,7 +192,7 @@ async function checks() {
   showHistoryDetail({ id:'r1', provider:'opencode-go', model:'glm-5.2', scenario:'default',
     details_known:true, success:true, streaming:true, duration_ms:4000, output_tokens:2000,
     attempt:1, start_time:'2026-09-07T02:00:00Z' });
-  assert.equal(tpsRow(), '500', 'the dialog states the request rate');
+  assert.equal(tpsRow(), '500.0 tok/s', 'the dialog retains the whole-request average with units');
   // Unknown outcome, unmeasured output or a failed request means no rate: the
   // row is absent rather than zero, which would read as a stalled request. The
   // assertion is on the row's presence, not on its text - a zeroed rate renders

@@ -793,6 +793,7 @@ func (h *MessagesHandler) handleStreaming(
 		timeout := h.client.StreamingTimeout(model)
 		attemptCtx, cancelAttempt := context.WithTimeout(clientCtx, timeout)
 		idleTimeout := h.client.StreamIdleTimeout(model)
+		var generation *metrics.GenerationObservation
 
 		// recordStreamSuccess records a successful stream completion and
 		// marks the model attempt as done.
@@ -840,6 +841,7 @@ func (h *MessagesHandler) handleStreaming(
 				ReasoningEffort:     clientEffort,
 			}
 			rw.timing.applyTo(&rec)
+			rec.GenerationSample = generation.Sample()
 			if h.storage != nil {
 				if err := h.storage.InsertRequest(rec); err != nil {
 					h.logger.Warn("failed to insert request into storage", "error", err)
@@ -1006,6 +1008,8 @@ func (h *MessagesHandler) handleStreaming(
 			complete(clientCtx, lastStreamErr)
 			continue
 		}
+		wireFormat := core.ModelWireFormat(prov, model)
+		attemptCtx, generation = metrics.WithGenerationObservation(attemptCtx, streamStart, wireFormat)
 		streamBody, err := prov.Stream(attemptCtx, anthropicReq, model)
 		if err != nil {
 			cancelAttempt()
@@ -1029,7 +1033,6 @@ func (h *MessagesHandler) handleStreaming(
 		streamReader := transformer.NewCtxReadCloser(attemptCtx, streamBody)
 		currentStream = streamReader
 
-		wireFormat := core.ModelWireFormat(prov, model)
 		if wireFormat == core.WireFormatAnthropic {
 			atomic.StoreInt32(&heartbeatPaused, 1)
 		}

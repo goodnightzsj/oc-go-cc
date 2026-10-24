@@ -3,6 +3,7 @@ package transformer
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http/httptest"
 	"strings"
@@ -82,11 +83,82 @@ func TestChatResponseUsesSharedCacheSplit(t *testing.T) {
 
 type responsesUsageRecorder struct {
 	*httptest.ResponseRecorder
-	usage [4]int
+	usage     [4]int
+	reasoning int
 }
 
 func (w *responsesUsageRecorder) SetPartialUsage(usage *types.Usage) {
 	w.usage = [4]int{usage.InputTokens, usage.OutputTokens, usage.CacheReadInputTokens, usage.CacheCreationInputTokens}
+	w.reasoning = usage.ReasoningTokens
+}
+
+func TestResponsesReasoningUsageIsAnOptionalOutputSplit(t *testing.T) {
+	for _, tc := range []struct {
+		name, details string
+		want          int
+	}{
+		{"absent", "", 0},
+		{"zero", `,"output_tokens_details":{"reasoning_tokens":0}`, 0},
+		{"reported", `,"output_tokens_details":{"reasoning_tokens":26}`, 26},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var wire types.ResponsesResponse
+			if err := json.Unmarshal([]byte(`{"usage":{"input_tokens":101,"output_tokens":36,"input_tokens_details":{"cached_tokens":90}`+tc.details+`}}`), &wire); err != nil {
+				t.Fatal(err)
+			}
+			normalized, err := ResponsesToNormalized(&wire, "synthetic")
+			if err != nil {
+				t.Fatal(err)
+			}
+			usage := core.DenormalizeResponse(normalized).Usage
+			if usage.InputTokens != 11 || usage.CacheReadInputTokens != 90 || usage.OutputTokens != 36 || usage.ReasoningTokens != tc.want {
+				t.Fatalf("usage = %+v", usage)
+			}
+			raw, err := json.Marshal(usage)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(raw), "reasoning_tokens") != (tc.want > 0) {
+				t.Fatalf("unknown/zero split must stay omitted: %s", raw)
+			}
+		})
+	}
+}
+
+func TestResponsesStreamRetainsReasoningObservations(t *testing.T) {
+	const observation = `{"type":"response.output_text.delta","delta":"ok","usage":{"input_tokens":101,"output_tokens":36,"input_tokens_details":{"cached_tokens":90},"output_tokens_details":{"reasoning_tokens":26}}}`
+	for _, tc := range []struct {
+		name, tail string
+		want       int
+		failed     bool
+	}{
+		{"top-level", `{"type":"response.done","usage":{"input_tokens":101,"output_tokens":36,"output_tokens_details":{"reasoning_tokens":26}}}`, 26, false},
+		{"missing usage", `{"type":"response.completed","response":{"status":"completed"}}`, 26, false},
+		{"missing split", `{"type":"response.completed","response":{"usage":{"input_tokens":101,"output_tokens":36}}}`, 26, false},
+		{"zero split", `{"type":"response.completed","response":{"usage":{"input_tokens":101,"output_tokens":36,"output_tokens_details":{"reasoning_tokens":0}}}}`, 26, false},
+		{"updated split", `{"type":"response.completed","response":{"usage":{"input_tokens":101,"output_tokens":36,"output_tokens_details":{"reasoning_tokens":30}}}}`, 30, false},
+		{"failed", `{"type":"response.failed","response":{"usage":{"input_tokens":101,"output_tokens":36}}}`, 26, true},
+		{"truncated", "", 26, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			w := &responsesUsageRecorder{ResponseRecorder: httptest.NewRecorder()}
+			err := NewStreamHandler().ProxyResponsesStream(w, sseLines(observation, tc.tail), "synthetic", ctx, 0, cancel)
+			if (err != nil) != tc.failed || w.reasoning != tc.want {
+				t.Fatalf("reasoning=%d want=%d err=%v", w.reasoning, tc.want, err)
+			}
+			if tc.failed {
+				if strings.Contains(w.Body.String(), "message_stop") {
+					t.Fatal("failed stream became successful")
+				}
+				return
+			}
+			if !strings.Contains(w.Body.String(), fmt.Sprintf(`"reasoning_tokens":%d`, tc.want)) {
+				t.Fatalf("terminal delta lost reasoning: %s", w.Body.String())
+			}
+		})
+	}
 }
 
 func TestResponsesUpstreamStreamToolsOrderingAndUsage(t *testing.T) {

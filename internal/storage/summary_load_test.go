@@ -23,11 +23,43 @@ func TestAggregateLoadWaitCanBeCancelled(t *testing.T) {
 	}
 }
 
+func TestCanceledSummaryWaiterDoesNotCancelOwner(t *testing.T) {
+	for _, name := range []string{"history", "analytics", "hourly", "performance"} {
+		t.Run(name, func(t *testing.T) {
+			db := summaryLoadDB(t, 1)
+			if err := db.lockAggregate(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			_, err := summaryLoadQueries(ctx, db)[name]()
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("canceled aggregate waiter = %v", err)
+			}
+			// The canceled waiter must neither consume nor release the owner's gate.
+			select {
+			case <-db.aggregateLoad:
+			default:
+				t.Fatal("waiter released another load's gate")
+			}
+			query := summaryLoadQueries(t.Context(), db)[name]
+			first, err := query()
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := query()
+			if err != nil || reflect.ValueOf(first).Pointer() != reflect.ValueOf(second).Pointer() {
+				t.Fatalf("independent load/cache failed after canceled waiter: %v", err)
+			}
+		})
+	}
+}
+
 func TestSummaryLoadsReleaseGateAfterQueryFailure(t *testing.T) {
 	for _, name := range []string{"history", "analytics", "hourly", "performance"} {
 		t.Run(name, func(t *testing.T) {
 			db := summaryLoadDB(t, 1)
-			query := summaryLoadQueries(db)[name]
+			query := summaryLoadQueries(t.Context(), db)[name]
 			if _, err := db.DB().Exec("ALTER TABLE requests RENAME TO unavailable_requests"); err != nil {
 				t.Fatal(err)
 			}
@@ -75,20 +107,20 @@ func summaryLoadDB(t testing.TB, count int) *Database {
 	return db
 }
 
-func summaryLoadQueries(db *Database) map[string]func() (any, error) {
+func summaryLoadQueries(ctx context.Context, db *Database) map[string]func() (any, error) {
 	a := NewAnalytics(db)
 	window, _ := a.WindowBetween(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC))
 	return map[string]func() (any, error){
-		"history":     func() (any, error) { return NewRequests(db).Summary(RequestQuery{}) },
-		"analytics":   func() (any, error) { return a.Summary(window) },
-		"hourly":      func() (any, error) { return a.TokenTrend(window, "hour") },
-		"performance": func() (any, error) { return NewLatency(db).Snapshot(time.Time{}) },
+		"history":     func() (any, error) { return NewRequests(db).Summary(ctx, RequestQuery{}) },
+		"analytics":   func() (any, error) { return a.Summary(ctx, window) },
+		"hourly":      func() (any, error) { return a.TokenTrend(ctx, window, "hour") },
+		"performance": func() (any, error) { return NewLatency(db).Snapshot(ctx, time.Time{}) },
 	}
 }
 
 func TestConcurrentSummaryLoadsShareSnapshot(t *testing.T) {
 	db := summaryLoadDB(t, 8000)
-	for name, query := range summaryLoadQueries(db) {
+	for name, query := range summaryLoadQueries(t.Context(), db) {
 		t.Run(name, func(t *testing.T) {
 			const readers = 8
 			results := make([]any, readers)
@@ -114,7 +146,7 @@ func TestConcurrentSummaryLoadsShareSnapshot(t *testing.T) {
 
 func BenchmarkSummaryLoad(b *testing.B) {
 	db := summaryLoadDB(b, 65000)
-	for name, query := range summaryLoadQueries(db) {
+	for name, query := range summaryLoadQueries(b.Context(), db) {
 		for _, mode := range []string{"cold", "cold-parallel", "hot"} {
 			b.Run(name+"/"+mode, func(b *testing.B) {
 				if _, err := query(); err != nil {

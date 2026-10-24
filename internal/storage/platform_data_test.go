@@ -125,14 +125,14 @@ func TestPlatformDataAggregatesKeepKnownCosts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	summary, err := a.TokenSummary(window)
+	summary, err := a.TokenSummary(t.Context(), window)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if summary.EstCostUSD != 26.5 || summary.UnknownCostRequests != 2 || summary.KnownRequests != 3 || math.Abs(summary.SuccessRate-2.0/3) > 1e-9 {
 		t.Errorf("summary lost stored costs or known-detail denominator: %+v", summary)
 	}
-	models, err := a.ModelBreakdown(window)
+	models, err := a.ModelBreakdown(t.Context(), window)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestPlatformDataAggregatesKeepKnownCosts(t *testing.T) {
 			t.Errorf("model aggregate combines providers or replaces stored costs: %+v", row)
 		}
 	}
-	providers, err := a.ProviderBreakdown(window)
+	providers, err := a.ProviderBreakdown(t.Context(), window)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestPlatformDataAggregatesKeepKnownCosts(t *testing.T) {
 			t.Errorf("provider cost or known-detail denominator = %+v", row)
 		}
 	}
-	scenarios, err := a.ScenarioBreakdown(window)
+	scenarios, err := a.ScenarioBreakdown(t.Context(), window)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestPlatformDataAggregatesKeepKnownCosts(t *testing.T) {
 	if scenarios[0].EstCostUSD != 26.5 || scenarios[0].UnknownCostRequests != 2 || scenarios[0].KnownRequests != 3 || math.Abs(scenarios[0].SuccessRate-2.0/3) > 1e-9 {
 		t.Errorf("scenario cost or known-detail denominator = %+v", scenarios)
 	}
-	historySummary, err := NewRequests(db).Summary(RequestQuery{})
+	historySummary, err := NewRequests(db).Summary(t.Context(), RequestQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestPlatformDataAggregatesKeepKnownCosts(t *testing.T) {
 			t.Errorf("history model loses provider or unknown costs: %+v", row)
 		}
 	}
-	trend, err := a.TokenTrend(window, "day")
+	trend, err := a.TokenTrend(t.Context(), window, "day")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +345,7 @@ func TestPlatformDataUTCTrendBucketsAndWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	summary, err := a.TokenSummary(window)
+	summary, err := a.TokenSummary(t.Context(), window)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +359,7 @@ func TestPlatformDataUTCTrendBucketsAndWindow(t *testing.T) {
 		{"day", []string{"2026-09-10"}},
 		{"hour", []string{"2026-09-10T16:00:00Z", "2026-09-10T20:00:00Z"}},
 	} {
-		points, err := a.TokenTrend(window, tt.granularity)
+		points, err := a.TokenTrend(t.Context(), window, tt.granularity)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -400,11 +400,11 @@ func TestPlatformDataBackfillRollsBackFailedBatch(t *testing.T) {
 func TestPlatformDataEmptyBreakdownsKeepArrayShape(t *testing.T) {
 	a := NewAnalytics(newCostTestDB(t))
 	window := a.Window(1)
-	providers, err := a.ProviderBreakdown(window)
+	providers, err := a.ProviderBreakdown(t.Context(), window)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scenarios, err := a.ScenarioBreakdown(window)
+	scenarios, err := a.ScenarioBreakdown(t.Context(), window)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -443,49 +443,49 @@ func TestPlatformDataUnknownOutcomesDoNotBecomeFailures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			summary, err := a.TokenSummary(window)
+			summary, err := a.TokenSummary(t.Context(), window)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if summary.TotalRequests != wantKnown+2 || summary.KnownRequests != wantKnown || summary.ErrorRequests != wantErrors || summary.SuccessRate != wantRate {
 				t.Errorf("summary must exclude unknown outcomes from rates: %+v", summary)
 			}
-			models, err := a.ModelBreakdown(window)
+			models, err := a.ModelBreakdown(t.Context(), window)
 			if err != nil || len(models) != 1 {
 				t.Fatalf("model breakdown = %+v, %v", models, err)
 			}
 			if models[0].KnownRequests != wantKnown || models[0].SuccessRate != wantRate {
 				t.Errorf("model outcomes = %+v", models[0])
 			}
-			scenarios, err := a.ScenarioBreakdown(window)
+			scenarios, err := a.ScenarioBreakdown(t.Context(), window)
 			if err != nil || len(scenarios) != 1 {
 				t.Fatalf("scenario breakdown = %+v, %v", scenarios, err)
 			}
 			if scenarios[0].KnownRequests != wantKnown || scenarios[0].SuccessRate != wantRate {
 				t.Errorf("scenario outcomes = %+v", scenarios[0])
 			}
-			providers, err := a.ProviderBreakdown(window)
+			providers, err := a.ProviderBreakdown(t.Context(), window)
 			if err != nil || len(providers) != 1 {
 				t.Fatalf("provider breakdown = %+v, %v", providers, err)
 			}
 			if providers[0].KnownRequests != wantKnown || providers[0].FallbackRate != wantFallback {
 				t.Errorf("provider outcomes = %+v", providers[0])
 			}
-			trend, err := a.TokenTrend(window, "day")
+			trend, err := a.TokenTrend(t.Context(), window, "day")
 			if err != nil || len(trend) != 1 {
 				t.Fatalf("trend = %+v, %v", trend, err)
 			}
 			if trend[0].KnownRequests != wantKnown || trend[0].ErrorRequests != wantErrors {
 				t.Errorf("trend outcomes = %+v", trend[0])
 			}
-			history, err := NewRequests(db).Summary(RequestQuery{})
+			history, err := NewRequests(db).Summary(t.Context(), RequestQuery{})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if history.TotalRequests != wantKnown+2 || history.SuccessRows != wantKnown || history.SuccessRate != wantRate {
 				t.Errorf("history outcomes = %+v", history)
 			}
-			success, failure, err := NewLatency(db).GetSuccessCounts(time.Time{})
+			success, failure, err := NewLatency(db).GetSuccessCounts(t.Context(), time.Time{})
 			if err != nil {
 				t.Fatal(err)
 			}

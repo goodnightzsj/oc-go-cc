@@ -226,6 +226,7 @@ func ResponsesToNormalized(responsesResp *types.ResponsesResponse, modelID strin
 	usage := responsesUsageToAnthropic(responsesResp.Usage)
 	nr.Usage = core.NormalizedUsage{
 		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, CacheReadTokens: usage.CacheReadInputTokens,
+		ReasoningTokens: usage.ReasoningTokens,
 	}
 
 	return nr, nil

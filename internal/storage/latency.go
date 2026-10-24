@@ -96,11 +96,11 @@ type LatencySnapshot struct {
 // since is snapped to the minute for the same reason Analytics.Window is: a
 // poll that passes `now-24h` produces a new window every three seconds, and an
 // unsnapped one therefore never hits the cache it is meant to use.
-func (l *Latency) Snapshot(since time.Time) (*LatencySnapshot, error) {
+func (l *Latency) Snapshot(ctx context.Context, since time.Time) (*LatencySnapshot, error) {
 	if !since.IsZero() {
 		since = since.UTC().Truncate(time.Minute)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := l.db.lockAggregate(ctx); err != nil {
 		return nil, err
@@ -130,8 +130,8 @@ func (l *Latency) Snapshot(since time.Time) (*LatencySnapshot, error) {
 }
 
 // GetStats returns latency statistics for all models with samples recorded after the given time.
-func (l *Latency) GetStats(since time.Time) ([]ModelLatencyStats, error) {
-	snapshot, err := l.Snapshot(since)
+func (l *Latency) GetStats(ctx context.Context, since time.Time) ([]ModelLatencyStats, error) {
+	snapshot, err := l.Snapshot(ctx, since)
 	if err != nil {
 		return nil, err
 	}
@@ -194,8 +194,8 @@ func (l *Latency) getStats(ctx context.Context, since time.Time) ([]ModelLatency
 // GetSuccessCounts returns known request outcomes since the given time, keyed
 // by provider + "/" + model. Empty legacy providers retain the leading slash.
 // Imported billing rows have unknown outcomes and do not enter either count.
-func (l *Latency) GetSuccessCounts(since time.Time) (map[string]int64, map[string]int64, error) {
-	snapshot, err := l.Snapshot(since)
+func (l *Latency) GetSuccessCounts(ctx context.Context, since time.Time) (map[string]int64, map[string]int64, error) {
+	snapshot, err := l.Snapshot(ctx, since)
 	if err != nil {
 		return nil, nil, err
 	}

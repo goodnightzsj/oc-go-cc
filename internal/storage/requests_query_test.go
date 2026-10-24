@@ -219,7 +219,7 @@ func TestRequestsQueryFiltersAndSortsFullDataset(t *testing.T) {
 	if total != 1 || len(rows) != 1 || rows[0].ID != "r3" {
 		t.Fatalf("provider-cost rows = %+v, total = %d; want only r3", rows, total)
 	}
-	summary, err := repo.Summary(RequestQuery{Provider: "provider-b", Scenario: "complex"})
+	summary, err := repo.Summary(t.Context(), RequestQuery{Provider: "provider-b", Scenario: "complex"})
 	if err != nil {
 		t.Fatalf("filtered summary: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestRequestsQueryPreservesUnknownOutcomesAndUsage(t *testing.T) {
 			t.Errorf("filter success=%v included unknown or mismatched outcome: %+v", success, rows[0])
 		}
 	}
-	summary, err := repo.Summary(RequestQuery{})
+	summary, err := repo.Summary(t.Context(), RequestQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}

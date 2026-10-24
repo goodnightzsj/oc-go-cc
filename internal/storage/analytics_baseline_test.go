@@ -50,7 +50,7 @@ func TestAnalyticsWindow_DaysAndExplicitRangeAgree(t *testing.T) {
 	// Everything the dashboard serves, in wire form, for one resolved window.
 	snapshot := func(label string, window Window) string {
 		t.Helper()
-		summary, err := a.TokenSummary(window)
+		summary, err := a.TokenSummary(t.Context(), window)
 		if err != nil {
 			t.Fatalf("%s summary: %v", label, err)
 		}
@@ -65,19 +65,19 @@ func TestAnalyticsWindow_DaysAndExplicitRangeAgree(t *testing.T) {
 		if !summary.PeriodStart.Equal(baseline) {
 			t.Errorf("%s: PeriodStart = %v, want the clamped baseline %v", label, summary.PeriodStart, baseline)
 		}
-		models, err := a.ModelBreakdown(window)
+		models, err := a.ModelBreakdown(t.Context(), window)
 		if err != nil {
 			t.Fatalf("%s models: %v", label, err)
 		}
-		providers, err := a.ProviderBreakdown(window)
+		providers, err := a.ProviderBreakdown(t.Context(), window)
 		if err != nil {
 			t.Fatalf("%s providers: %v", label, err)
 		}
-		scenarios, err := a.ScenarioBreakdown(window)
+		scenarios, err := a.ScenarioBreakdown(t.Context(), window)
 		if err != nil {
 			t.Fatalf("%s scenarios: %v", label, err)
 		}
-		trend, err := a.TokenTrend(window, "day")
+		trend, err := a.TokenTrend(t.Context(), window, "day")
 		if err != nil {
 			t.Fatalf("%s trend: %v", label, err)
 		}
@@ -124,7 +124,7 @@ func TestAnalyticsBaseline_ExcludesUntrustworthyRows(t *testing.T) {
 	})
 
 	full := NewAnalytics(db)
-	fullSummary, err := full.TokenSummary(full.Window(30))
+	fullSummary, err := full.TokenSummary(t.Context(), full.Window(30))
 	if err != nil {
 		t.Fatalf("GetTokenSummary (no baseline): %v", err)
 	}
@@ -135,7 +135,7 @@ func TestAnalyticsBaseline_ExcludesUntrustworthyRows(t *testing.T) {
 	// Same package: construct with the baseline directly rather than via a
 	// production setter that exists only for tests.
 	scoped := &Analytics{db: db, baseline: cutoff}
-	scopedSummary, err := scoped.TokenSummary(scoped.Window(30))
+	scopedSummary, err := scoped.TokenSummary(t.Context(), scoped.Window(30))
 	if err != nil {
 		t.Fatalf("GetTokenSummary (baseline): %v", err)
 	}
@@ -164,7 +164,7 @@ func TestAnalyticsBaseline_ExcludesUntrustworthyRows(t *testing.T) {
 	}
 
 	// Every aggregate must honour the same cutoff, not just the summary.
-	models, err := scoped.ModelBreakdown(scoped.Window(30))
+	models, err := scoped.ModelBreakdown(t.Context(), scoped.Window(30))
 	if err != nil {
 		t.Fatalf("GetModelBreakdown: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestAnalyticsBaseline_ExcludesUntrustworthyRows(t *testing.T) {
 		t.Errorf("model breakdown requests = %d, want 1", modelRequests)
 	}
 
-	providers, err := scoped.ProviderBreakdown(scoped.Window(30))
+	providers, err := scoped.ProviderBreakdown(t.Context(), scoped.Window(30))
 	if err != nil {
 		t.Fatalf("GetProviderBreakdown: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestAnalyticsBaseline_DoesNotWidenWindow(t *testing.T) {
 
 	a := &Analytics{db: db, baseline: time.Now().AddDate(0, 0, -90)} // older than the 7-day window
 
-	summary, err := a.TokenSummary(a.Window(7))
+	summary, err := a.TokenSummary(t.Context(), a.Window(7))
 	if err != nil {
 		t.Fatalf("GetTokenSummary: %v", err)
 	}

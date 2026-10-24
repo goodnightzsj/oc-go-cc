@@ -157,7 +157,7 @@ func (p *OpenCodeGoProvider) executeResponses(ctx context.Context, req *types.Me
 		return nil, err
 	}
 	encoded, err := json.Marshal(core.DenormalizeResponse(normalized))
-	return &core.ExecuteResult{Body: encoded}, err
+	return &core.ExecuteResult{Body: encoded, KeyHint: client.KeyHintOf(body)}, err
 }
 
 func (p *OpenCodeGoProvider) streamResponses(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
@@ -226,7 +226,7 @@ func (p *OpenCodeGoProvider) executeAnthropic(ctx context.Context, req *types.Me
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	return &core.ExecuteResult{Body: body}, nil
+	return &core.ExecuteResult{Body: body, KeyHint: sel.KeyHint()}, nil
 }
 
 func (p *OpenCodeGoProvider) streamAnthropic(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
@@ -271,9 +271,9 @@ func (p *OpenCodeGoProvider) streamAnthropic(ctx context.Context, req *types.Mes
 	}
 
 	if p.capture != nil {
-		return client.CaptureBody(resp.Body, func(data []byte) {
+		resp.Body = client.CaptureBody(resp.Body, func(data []byte) {
 			p.capture.CaptureUpstreamResponse(rid(ctx), p.Name(), data)
-		}), nil
+		})
 	}
 	return p.withKeyHint(resp.Body, sel), nil
 }

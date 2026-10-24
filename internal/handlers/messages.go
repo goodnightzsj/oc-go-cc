@@ -1173,7 +1173,8 @@ func (h *MessagesHandler) handleNonStreaming(
 						StartTime: attemptStart, Duration: time.Since(attemptStart),
 						InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 						CacheReadTokens: usage.CacheReadInputTokens, CacheCreationTokens: usage.CacheCreationInputTokens,
-						Success: false, ErrorMsg: execErr.Error(), Attempt: attempt,
+						ReasoningTokens: usage.ReasoningTokens,
+						Success:         false, ErrorMsg: execErr.Error(), Attempt: attempt,
 					}
 					if err := h.storage.InsertRequest(rec); err != nil {
 						h.logger.Warn("failed to insert request into storage", "error", err)

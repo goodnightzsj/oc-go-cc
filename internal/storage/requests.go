@@ -269,8 +269,8 @@ func (r *Requests) historyRevision(ctx context.Context) (string, error) {
 // roughly 2.3x faster end to end, and verified field for field against the five
 // queries it replaces: every aggregate of every group matched, so the wire
 // response is unchanged.
-func (r *Requests) Summary(q RequestQuery) (*RequestSummary, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (r *Requests) Summary(ctx context.Context, q RequestQuery) (*RequestSummary, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if err := r.db.lockAggregate(ctx); err != nil {
 		return nil, err

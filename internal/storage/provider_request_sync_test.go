@@ -100,7 +100,7 @@ func TestSyncProviderUsageRequestsCorrectsHistoryAndIsIdempotent(t *testing.T) {
 		t.Fatalf("exact request provider changed: %+v", byID["exact-local"])
 	}
 	analytics := &Analytics{db: db, baseline: observedAt.Add(30 * time.Minute)}
-	summary, err := analytics.TokenSummary(analytics.Window(30))
+	summary, err := analytics.TokenSummary(t.Context(), analytics.Window(30))
 	if err != nil {
 		t.Fatalf("analytics after sync: %v", err)
 	}

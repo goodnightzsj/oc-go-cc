@@ -42,14 +42,14 @@ func TestLatencyScopesProviderAndKnownDetails(t *testing.T) {
 	since := time.Date(2026, 9, 10, 2, 30, 0, 0, time.UTC)
 	for _, zone := range []*time.Location{time.UTC, time.FixedZone("UTC+8", 8*60*60)} {
 		t.Run(zone.String(), func(t *testing.T) {
-			stats, err := latency.GetStats(since.In(zone))
+			stats, err := latency.GetStats(t.Context(), since.In(zone))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if len(stats) != len(want) {
 				t.Fatalf("provider groups = %+v, want %d", stats, len(want))
 			}
-			success, failure, err := latency.GetSuccessCounts(since.In(zone))
+			success, failure, err := latency.GetSuccessCounts(t.Context(), since.In(zone))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -94,7 +94,7 @@ func TestLatencySampleLimitIsPerProviderNotSuccessCount(t *testing.T) {
 		t.Fatal(err)
 	}
 	latency := NewLatency(db)
-	stats, err := latency.GetStats(time.Time{})
+	stats, err := latency.GetStats(t.Context(), time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestLatencySampleLimitIsPerProviderNotSuccessCount(t *testing.T) {
 			t.Errorf("stats = %+v, want count %d/average %v", stat, wantCount, wantAvg)
 		}
 	}
-	success, failure, err := latency.GetSuccessCounts(time.Time{})
+	success, failure, err := latency.GetSuccessCounts(t.Context(), time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}

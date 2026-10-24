@@ -1,13 +1,67 @@
 package provider
 
 import (
+	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/routatic/proxy/internal/client"
+	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/debug"
 	"github.com/routatic/proxy/internal/transformer"
+	"github.com/routatic/proxy/pkg/types"
 )
+
+func TestOpenCodeGoKeyHintAcrossFormatsAndCapture(t *testing.T) {
+	for format, response := range map[string]string{
+		"openai":    `{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`,
+		"responses": `{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`,
+		"anthropic": `{"type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`,
+	} {
+		for _, stream := range []bool{false, true} {
+			for _, captureEnabled := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/stream=%t/capture=%t", format, stream, captureEnabled), func(t *testing.T) {
+					p := responseContractProviders(response)[0].(*OpenCodeGoProvider)
+					p.atomic.Get().OpenCodeGo.AnthropicBaseURL = "https://synthetic.invalid/messages"
+					if captureEnabled {
+						store, err := debug.NewStorage(config.DebugCapture{Enabled: true, Directory: filepath.Join(t.TempDir(), "capture"), MaxFiles: 2, MaxFileSize: 1 << 20})
+						if err != nil {
+							t.Fatal(err)
+						}
+						t.Cleanup(func() { _ = store.Close() })
+						p.capture = debug.NewCaptureLogger(store, true)
+						t.Cleanup(func() { _ = p.capture.Close() })
+					}
+					req := &types.MessageRequest{MaxTokens: 16}
+					model := config.ModelConfig{Provider: p.Name(), ModelID: "synthetic", WireFormat: format}
+					var hint string
+					if stream {
+						body, err := p.Stream(t.Context(), req, model)
+						if err != nil {
+							t.Fatal(err)
+						}
+						defer body.Close()
+						if _, err := io.Copy(io.Discard, body); err != nil {
+							t.Fatal(err)
+						}
+						hint = client.KeyHintOf(body)
+					} else {
+						result, err := p.Execute(t.Context(), req, model)
+						if err != nil {
+							t.Fatal(err)
+						}
+						hint = result.KeyHint
+					}
+					if hint != "****etic" {
+						t.Fatalf("key hint = %q, want masked credential label", hint)
+					}
+				})
+			}
+		}
+	}
+}
 
 // The label has to survive every wrapper between the provider and the handler.
 // Each one erases a method it does not declare, which this project has hit five

@@ -78,9 +78,10 @@ type ResponsesContent struct {
 
 // ResponsesUsage represents token usage in a Responses response.
 type ResponsesUsage struct {
-	InputTokens        int                  `json:"input_tokens"`
-	OutputTokens       int                  `json:"output_tokens"`
-	InputTokensDetails *PromptTokensDetails `json:"input_tokens_details,omitempty"`
+	InputTokens         int                      `json:"input_tokens"`
+	OutputTokens        int                      `json:"output_tokens"`
+	InputTokensDetails  *PromptTokensDetails     `json:"input_tokens_details,omitempty"`
+	OutputTokensDetails *CompletionTokensDetails `json:"output_tokens_details,omitempty"`
 }
 
 // ResponsesChunk represents a streaming chunk from the Responses API.

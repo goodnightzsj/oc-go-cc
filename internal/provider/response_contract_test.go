@@ -47,7 +47,7 @@ func TestResponsesTerminalStatusContract(t *testing.T) {
 		if status == "incomplete" {
 			details, stopReason = `,"incomplete_details":{"reason":"max_output_tokens"}`, "max_tokens"
 		}
-		body := fmt.Sprintf(`{"id":"synthetic","status":%q%s,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"partial"}]}],"usage":{"input_tokens":101,"output_tokens":7,"input_tokens_details":{"cached_tokens":90}}}`, status, details)
+		body := fmt.Sprintf(`{"id":"synthetic","status":%q%s,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"partial"}]}],"usage":{"input_tokens":101,"output_tokens":7,"input_tokens_details":{"cached_tokens":90},"output_tokens_details":{"reasoning_tokens":3}}}`, status, details)
 		for _, p := range responseContractProviders(body)[:3] {
 			t.Run(p.Name()+"/"+status, func(t *testing.T) {
 				result, err := p.Execute(context.Background(), &types.MessageRequest{MaxTokens: 16}, config.ModelConfig{Provider: p.Name(), ModelID: "synthetic", WireFormat: "responses"})
@@ -56,7 +56,7 @@ func TestResponsesTerminalStatusContract(t *testing.T) {
 						t.Fatalf("upstream %s became success: %s", status, result.Body)
 					}
 					var failure *core.ResponsesStatusError
-					if !errors.As(err, &failure) || failure.Status != status || failure.Usage == nil || failure.Usage.InputTokens != 11 || failure.Usage.CacheReadInputTokens != 90 || failure.Usage.OutputTokens != 7 {
+					if !errors.As(err, &failure) || failure.Status != status || failure.Usage == nil || failure.Usage.InputTokens != 11 || failure.Usage.CacheReadInputTokens != 90 || failure.Usage.OutputTokens != 7 || failure.Usage.ReasoningTokens != 3 {
 						t.Fatalf("failed status/usage lost: %v", err)
 					}
 					return
@@ -68,7 +68,7 @@ func TestResponsesTerminalStatusContract(t *testing.T) {
 				if err := json.Unmarshal(result.Body, &got); err != nil {
 					t.Fatal(err)
 				}
-				if got.StopReason != stopReason || got.Usage.InputTokens != 11 || got.Usage.CacheReadInputTokens != 90 || got.Usage.OutputTokens != 7 {
+				if got.StopReason != stopReason || got.Usage.InputTokens != 11 || got.Usage.CacheReadInputTokens != 90 || got.Usage.OutputTokens != 7 || got.Usage.ReasoningTokens != 3 {
 					t.Fatalf("completion/usage changed: %+v", got)
 				}
 			})

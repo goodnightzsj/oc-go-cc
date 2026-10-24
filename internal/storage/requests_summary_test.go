@@ -52,7 +52,7 @@ func TestHistorySummaryFoldsEveryDimension(t *testing.T) {
 	summaryFixture(t, db)
 	repo := NewRequests(db)
 
-	got, err := repo.Summary(RequestQuery{})
+	got, err := repo.Summary(t.Context(), RequestQuery{})
 	if err != nil {
 		t.Fatalf("summary: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestHistorySummaryAppliesFiltersToEveryDimension(t *testing.T) {
 	summaryFixture(t, db)
 	repo := NewRequests(db)
 
-	got, err := repo.Summary(RequestQuery{Provider: "cline-pass"})
+	got, err := repo.Summary(t.Context(), RequestQuery{Provider: "cline-pass"})
 	if err != nil {
 		t.Fatalf("filtered summary: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestHistorySummaryAndQueryAgreeOnTheChannelFilter(t *testing.T) {
 	if total != 1 || len(rows) != 1 || rows[0].ID != "m6" {
 		t.Fatalf("channel query = %d rows (total %d), want only m6", len(rows), total)
 	}
-	summary, err := repo.Summary(RequestQuery{Channel: "deepseek"})
+	summary, err := repo.Summary(t.Context(), RequestQuery{Channel: "deepseek"})
 	if err != nil {
 		t.Fatalf("summary: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestHistorySummaryAndQueryAgreeOnTheChannelFilter(t *testing.T) {
 	}
 	// A platform with no channel records must match nothing rather than
 	// everything: an unmatched equality on a NULL column is not a wildcard.
-	empty, err := repo.Summary(RequestQuery{Channel: "fireworks"})
+	empty, err := repo.Summary(t.Context(), RequestQuery{Channel: "fireworks"})
 	if err != nil {
 		t.Fatalf("unobserved channel: %v", err)
 	}

@@ -18,14 +18,14 @@ func TestSummarySeesReconciledCosts(t *testing.T) {
 		InputTokens: 10, OutputTokens: 2, Success: true,
 		CostKnown: true, CostUSD: 1, CostSource: CostSourceEstimated,
 	})
-	before, err := repo.Summary(RequestQuery{})
+	before, err := repo.Summary(t.Context(), RequestQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if before.CostUSD != 1 {
 		t.Fatalf("initial cost=%v", before.CostUSD)
 	}
-	providerBefore, err := repo.Summary(RequestQuery{CostSource: CostSourceProvider})
+	providerBefore, err := repo.Summary(t.Context(), RequestQuery{CostSource: CostSourceProvider})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,14 +55,14 @@ func TestSummarySeesReconciledCosts(t *testing.T) {
 	if len(recs) != 1 || math.Abs(recs[0].CostUSD-2) > 1e-12 {
 		t.Fatalf("current rows=%+v", recs)
 	}
-	after, err := repo.Summary(RequestQuery{})
+	after, err := repo.Summary(t.Context(), RequestQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if after.CostUSD != 2 {
 		t.Errorf("summary cost=%v but persisted row cost=%v", after.CostUSD, recs[0].CostUSD)
 	}
-	providerAfter, err := repo.Summary(RequestQuery{CostSource: CostSourceProvider})
+	providerAfter, err := repo.Summary(t.Context(), RequestQuery{CostSource: CostSourceProvider})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,11 +105,11 @@ func TestHistoryRevisionTracksAllCommittedWrites(t *testing.T) {
 		}
 		prev = next
 	}
-	before, err := repo.Summary(RequestQuery{})
+	before, err := repo.Summary(t.Context(), RequestQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	hit, err := repo.Summary(RequestQuery{})
+	hit, err := repo.Summary(t.Context(), RequestQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestHistoryRevisionTracksAllCommittedWrites(t *testing.T) {
 	if revision() != prev {
 		t.Fatal("rolled back transaction invalidated revision")
 	}
-	after, err := repo.Summary(RequestQuery{})
+	after, err := repo.Summary(t.Context(), RequestQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}

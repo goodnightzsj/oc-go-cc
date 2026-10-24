@@ -44,7 +44,7 @@ func TestNonStreamingResponsesFailureRetainsEachAttemptUsage(t *testing.T) {
 							}
 							usage := ""
 							if usageMode == "present" {
-								usage = `,"usage":{"input_tokens":101,"output_tokens":7,"input_tokens_details":{"cached_tokens":90}}`
+								usage = `,"usage":{"input_tokens":101,"output_tokens":7,"input_tokens_details":{"cached_tokens":90},"output_tokens_details":{"reasoning_tokens":3}}`
 							}
 							if usageMode == "zero" {
 								usage = `,"usage":{"input_tokens":0,"output_tokens":0}`
@@ -132,11 +132,11 @@ func TestNonStreamingResponsesFailureRetainsEachAttemptUsage(t *testing.T) {
 							if !strings.Contains(row.ErrorMsg, status) {
 								t.Errorf("failure status lost: %+v", row)
 							}
-							wantIn, wantRead, wantOut := 0, 0, 0
+							wantIn, wantRead, wantOut, wantReasoning := 0, 0, 0, 0
 							if usageMode == "present" {
-								wantIn, wantRead, wantOut = 11, 90, 7
+								wantIn, wantRead, wantOut, wantReasoning = 11, 90, 7, 3
 							}
-							if row.InputTokens != wantIn || row.CacheReadTokens != wantRead || row.OutputTokens != wantOut {
+							if row.InputTokens != wantIn || row.CacheReadTokens != wantRead || row.OutputTokens != wantOut || row.ReasoningTokens != wantReasoning {
 								t.Errorf("failure usage mismatch: %+v", row)
 							}
 						}

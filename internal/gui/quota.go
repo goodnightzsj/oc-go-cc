@@ -240,7 +240,10 @@ func (s *Server) handleGoQuota(w http.ResponseWriter, r *http.Request, cfg *conf
 
 	resp.Accounts = fetchQuotaAccounts(r.Context(), resp.Provider, endpoint, keys)
 	resp.ModelLimits = s.ensureModelLimits(r.Context())
-	resp.ModelUsage, err = s.monthlyModelUsage(resp.Accounts, resp.ModelLimits)
+	resp.ModelUsage, err = s.monthlyModelUsage(r.Context(), resp.Accounts, resp.ModelLimits)
+	if r.Context().Err() != nil {
+		return // A canceled local query must not replace the account cache.
+	}
 	if err != nil {
 		resp.ModelUsageError = err.Error()
 	}
@@ -369,7 +372,10 @@ func (s *Server) handleCommandCodeQuota(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	resp.Accounts = fetchQuotaAccounts(r.Context(), resp.Provider, endpoint, keys)
-	s.attachCommandCodeLedger(resp.Accounts)
+	s.attachCommandCodeLedger(r.Context(), resp.Accounts)
+	if r.Context().Err() != nil {
+		return // A canceled local query must not replace the account cache.
+	}
 	resp.Status = quotaStatus(resp)
 	resp.FetchedAt = time.Now().UTC()
 	s.storeQuota(endpoint, keys, resp)
@@ -391,7 +397,7 @@ func (s *Server) handleCommandCodeQuota(w http.ResponseWriter, r *http.Request, 
 // cannot describe a pool. A missing or unparsable period leaves Ledger nil
 // rather than guessing a window, because a wrong window would look like a real
 // reconciliation gap.
-func (s *Server) attachCommandCodeLedger(accounts []quotaAccount) {
+func (s *Server) attachCommandCodeLedger(ctx context.Context, accounts []quotaAccount) {
 	if s.storage == nil || len(accounts) != 1 {
 		return
 	}
@@ -408,7 +414,7 @@ func (s *Server) attachCommandCodeLedger(accounts []quotaAccount) {
 	if err != nil {
 		return
 	}
-	breakdown, err := storage.NewAnalytics(s.storage).ProviderBreakdown(win)
+	breakdown, err := storage.NewAnalytics(s.storage).ProviderBreakdown(ctx, win)
 	if err != nil {
 		return
 	}
@@ -671,7 +677,7 @@ func (s *Server) limitsLoop(ctx context.Context) {
 // after the subscription start implied by resets_at (2026-09-06T06:44Z minus
 // 31 days = 2026-08-06T06:44Z). Sizing it as 30 days would drop 8/6 from the
 // window and undercount every opening day of the cycle.
-func (s *Server) monthlyModelUsage(accounts []quotaAccount, limits *quota.ModelLimits) ([]quotaModelUsage, error) {
+func (s *Server) monthlyModelUsage(ctx context.Context, accounts []quotaAccount, limits *quota.ModelLimits) ([]quotaModelUsage, error) {
 	// Local records do not carry account/key identity. A first-account window
 	// cannot safely be used to attribute traffic across a multi-key pool.
 	if limits == nil || s.storage == nil || len(accounts) != 1 {
@@ -685,7 +691,7 @@ func (s *Server) monthlyModelUsage(accounts []quotaAccount, limits *quota.ModelL
 	if err != nil {
 		return nil, err
 	}
-	breakdown, err := storage.NewAnalytics(s.storage).ModelBreakdown(win)
+	breakdown, err := storage.NewAnalytics(s.storage).ModelBreakdown(ctx, win)
 	if err != nil {
 		return nil, err
 	}

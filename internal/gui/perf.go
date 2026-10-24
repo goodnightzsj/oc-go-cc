@@ -53,7 +53,7 @@ func (s *Server) handlePerformance(w http.ResponseWriter, r *http.Request) {
 	if s.storage != nil {
 		latency := storage.NewLatency(s.storage).ForProvider(provider)
 
-		modelStats, err := latency.GetStats(since)
+		modelStats, err := latency.GetStats(r.Context(), since)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -64,7 +64,7 @@ func (s *Server) handlePerformance(w http.ResponseWriter, r *http.Request) {
 			result[stat.Provider+"/"+stat.Model] = perf
 		}
 
-		successCounts, failureCounts, err := latency.GetSuccessCounts(since)
+		successCounts, failureCounts, err := latency.GetSuccessCounts(r.Context(), since)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -137,7 +137,7 @@ func (s *Server) handlePerformanceAggregate(w http.ResponseWriter, r *http.Reque
 
 	if s.storage != nil {
 		latency := storage.NewLatency(s.storage).ForProvider(provider)
-		latencyStats, err := latency.GetStats(since)
+		latencyStats, err := latency.GetStats(r.Context(), since)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -154,7 +154,7 @@ func (s *Server) handlePerformanceAggregate(w http.ResponseWriter, r *http.Reque
 			}
 		}
 
-		successCounts, failureCounts, err := latency.GetSuccessCounts(since)
+		successCounts, failureCounts, err := latency.GetSuccessCounts(r.Context(), since)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

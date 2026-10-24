@@ -238,8 +238,8 @@ type AnalyticsSnapshot struct {
 // Summary returns every aggregate for the window. It reuses the previous answer
 // while the request table has not changed, which is the normal case for a poll
 // that runs every three seconds against a table growing by a few rows a minute.
-func (a *Analytics) Summary(window Window) (*AnalyticsSnapshot, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func (a *Analytics) Summary(ctx context.Context, window Window) (*AnalyticsSnapshot, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := a.db.lockAggregate(ctx); err != nil {
 		return nil, err
@@ -527,8 +527,8 @@ func (a *Analytics) snapshot(ctx context.Context, window Window) (*AnalyticsSnap
 
 // TokenSummary returns aggregated token/request metrics for a resolved window.
 // Corrected rows remain included through usage_trusted semantics.
-func (a *Analytics) TokenSummary(window Window) (*TokenSummary, error) {
-	snapshot, err := a.Summary(window)
+func (a *Analytics) TokenSummary(ctx context.Context, window Window) (*TokenSummary, error) {
+	snapshot, err := a.Summary(ctx, window)
 	if err != nil {
 		return nil, err
 	}
@@ -536,8 +536,8 @@ func (a *Analytics) TokenSummary(window Window) (*TokenSummary, error) {
 }
 
 // ModelBreakdown returns usage stats per model for a resolved window.
-func (a *Analytics) ModelBreakdown(window Window) ([]ModelBreakdown, error) {
-	snapshot, err := a.Summary(window)
+func (a *Analytics) ModelBreakdown(ctx context.Context, window Window) ([]ModelBreakdown, error) {
+	snapshot, err := a.Summary(ctx, window)
 	if err != nil {
 		return nil, err
 	}
@@ -546,8 +546,8 @@ func (a *Analytics) ModelBreakdown(window Window) ([]ModelBreakdown, error) {
 
 // ScenarioBreakdown returns local usage grouped by routing scenario for a
 // resolved window.
-func (a *Analytics) ScenarioBreakdown(window Window) ([]ScenarioBreakdown, error) {
-	snapshot, err := a.Summary(window)
+func (a *Analytics) ScenarioBreakdown(ctx context.Context, window Window) ([]ScenarioBreakdown, error) {
+	snapshot, err := a.Summary(ctx, window)
 	if err != nil {
 		return nil, err
 	}
@@ -556,8 +556,8 @@ func (a *Analytics) ScenarioBreakdown(window Window) ([]ScenarioBreakdown, error
 
 // ProviderBreakdown returns usage by provider (with fallback rate) for a
 // resolved window.
-func (a *Analytics) ProviderBreakdown(window Window) ([]ProviderBreakdown, error) {
-	snapshot, err := a.Summary(window)
+func (a *Analytics) ProviderBreakdown(ctx context.Context, window Window) ([]ProviderBreakdown, error) {
+	snapshot, err := a.Summary(ctx, window)
 	if err != nil {
 		return nil, err
 	}
@@ -569,16 +569,16 @@ func (a *Analytics) ProviderBreakdown(window Window) ([]ProviderBreakdown, error
 // A daily trend reuses the grouped snapshot. An hourly trend needs its own
 // query: no panel asks for it by default, and grouping the same rows into 689
 // hour buckets costs about as much as the whole daily snapshot.
-func (a *Analytics) TokenTrend(window Window, granularity string) ([]DailyTokenPoint, error) {
+func (a *Analytics) TokenTrend(ctx context.Context, window Window, granularity string) ([]DailyTokenPoint, error) {
 	switch granularity {
 	case "day":
-		snapshot, err := a.Summary(window)
+		snapshot, err := a.Summary(ctx, window)
 		if err != nil {
 			return nil, err
 		}
 		return snapshot.Trend, nil
 	case "hour":
-		return a.hourlyTrend(window)
+		return a.hourlyTrend(ctx, window)
 	default:
 		return nil, errors.New("analytics granularity must be day or hour")
 	}
@@ -589,8 +589,8 @@ func (a *Analytics) TokenTrend(window Window, granularity string) ([]DailyTokenP
 // Cached like the snapshot: the analytics tab polls every three seconds while
 // it is open, and an hourly view is the one configuration that pays for this
 // query on every poll.
-func (a *Analytics) hourlyTrend(window Window) ([]DailyTokenPoint, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func (a *Analytics) hourlyTrend(ctx context.Context, window Window) ([]DailyTokenPoint, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := a.db.lockAggregate(ctx); err != nil {
 		return nil, err

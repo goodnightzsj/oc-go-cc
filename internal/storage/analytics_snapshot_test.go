@@ -47,7 +47,7 @@ func TestAnalyticsSnapshotAgreesAcrossDimensions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snap, err := a.Summary(window)
+	snap, err := a.Summary(t.Context(), window)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestAnalyticsSnapshotRatesUseTheirOwnPopulations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snap, err := a.Summary(window)
+	snap, err := a.Summary(t.Context(), window)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,11 +176,11 @@ func TestHourlyTrendAgreesWithTheDailySnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hourly, err := a.TokenTrend(window, "hour")
+	hourly, err := a.TokenTrend(t.Context(), window, "hour")
 	if err != nil {
 		t.Fatal(err)
 	}
-	daily, err := a.TokenTrend(window, "day")
+	daily, err := a.TokenTrend(t.Context(), window, "day")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,14 +218,14 @@ func TestAnalyticsSnapshotCacheFollowsTheTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := a.Summary(window)
+	first, err := a.Summary(t.Context(), window)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.Summary.TotalRequests != 4 {
 		t.Fatalf("initial total = %d", first.Summary.TotalRequests)
 	}
-	repeated, err := a.Summary(window)
+	repeated, err := a.Summary(t.Context(), window)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestAnalyticsSnapshotCacheFollowsTheTable(t *testing.T) {
 		ID: "a3", Model: "alpha", Provider: "opencode-go", StartTime: at.Add(4 * time.Hour),
 		InputTokens: 50, Success: true, Attempt: 1,
 	})
-	after, err := a.Summary(window)
+	after, err := a.Summary(t.Context(), window)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,14 +266,14 @@ func TestAnalyticsSnapshotCacheSeparatesWindows(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	everything, err := a.Summary(all)
+	everything, err := a.Summary(t.Context(), all)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if everything.Summary.TotalRequests != 4 {
 		t.Fatalf("unfiltered total = %d, want 4", everything.Summary.TotalRequests)
 	}
-	filtered, err := a.Summary(clineOnly.ForProvider("cline-pass"))
+	filtered, err := a.Summary(t.Context(), clineOnly.ForProvider("cline-pass"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestAnalyticsSnapshotCacheSeparatesWindows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	narrow, err := a.Summary(shorter)
+	narrow, err := a.Summary(t.Context(), shorter)
 	if err != nil {
 		t.Fatal(err)
 	}

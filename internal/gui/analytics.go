@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -104,7 +105,7 @@ func (h *AnalyticsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 
 	// One scan answers all four; the store folds them from a single pass and
 	// caches it until the request table changes.
-	snapshot, err := h.store.Summary(window)
+	snapshot, err := h.store.Summary(r.Context(), window)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -123,7 +124,7 @@ func (h *AnalyticsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		// "last minute" and must keep meaning that. It is also the one range here
 		// that never needs the cache - a one-minute window touches a handful of
 		// rows through the start-time index.
-		lastMinute, err := h.summaryBetween(now.Add(-time.Minute), now.Add(time.Second), provider)
+		lastMinute, err := h.summaryBetween(r.Context(), now.Add(-time.Minute), now.Add(time.Second), provider)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -133,14 +134,14 @@ func (h *AnalyticsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		// holds no rows yet and therefore changes nothing.
 		now = now.Truncate(time.Minute)
 		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-		today, err := h.summaryBetween(todayStart, now.Add(time.Minute), provider)
+		today, err := h.summaryBetween(r.Context(), todayStart, now.Add(time.Minute), provider)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		// The storage baseline still governs this wide window, so retained means
 		// every trustworthy row rather than an arbitrary client-side date limit.
-		retained, err := h.store.TokenSummary(h.store.Window(36500).ForProvider(provider))
+		retained, err := h.store.TokenSummary(r.Context(), h.store.Window(36500).ForProvider(provider))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -163,12 +164,12 @@ func (h *AnalyticsHandler) window(days int, from, to time.Time, explicitRange bo
 	return h.store.Window(days), nil
 }
 
-func (h *AnalyticsHandler) summaryBetween(from, to time.Time, provider string) (*storage.TokenSummary, error) {
+func (h *AnalyticsHandler) summaryBetween(ctx context.Context, from, to time.Time, provider string) (*storage.TokenSummary, error) {
 	window, err := h.store.WindowBetween(from, to)
 	if err != nil {
 		return nil, err
 	}
-	return h.store.TokenSummary(window.ForProvider(provider))
+	return h.store.TokenSummary(ctx, window.ForProvider(provider))
 }
 
 // TokenTrend returns daily token/request aggregates.
@@ -197,7 +198,7 @@ func (h *AnalyticsHandler) TokenTrend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	trend, err := h.store.TokenTrend(window.ForProvider(provider), granularity)
+	trend, err := h.store.TokenTrend(r.Context(), window.ForProvider(provider), granularity)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

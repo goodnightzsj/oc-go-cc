@@ -1862,12 +1862,17 @@ func TestModelFamilySurvivesVendorPrefixedNames(t *testing.T) {
 		{Role: "user", Content: json.RawMessage(`"again"`)},
 	}
 
-	// Two ids are the same family when they differ only by vendor prefix and
-	// case. Anything the family decides must be identical.
-	pairs := []struct{ opencode, commandcode string }{
+	// Vendor and known realm prefixes do not change family-specific behavior.
+	pairs := []struct{ bare, prefixed string }{
 		{"deepseek-v4-pro", "deepseek/deepseek-v4-pro"},
 		{"kimi-k2.6", "moonshotai/Kimi-K2.6"},
 		{"kimi-k2.7-code", "moonshotai/Kimi-K2.7-Code"},
+		{"deepseek-v4-pro", "global:deepseek-v4-pro"},
+		{"deepseek-v4-pro", "cn:deepseek-v4-pro"},
+		{"kimi-k2.6", "global:kimi-k2.6"},
+		{"kimi-k2.6", "cn:kimi-k2.6"},
+		{"kimi-k2.7-code", "global:kimi-k2.7-code"},
+		{"kimi-k2.7-code", "cn:kimi-k2.7-code"},
 	}
 	scenarios := []struct {
 		name     string
@@ -1878,11 +1883,16 @@ func TestModelFamilySurvivesVendorPrefixedNames(t *testing.T) {
 		{"assistant history without thinking", plainAssistantHistory, json.RawMessage(`{"type":"enabled","budget_tokens":4096}`)},
 		{"assistant history with thinking", thinkingHistory, json.RawMessage(`{"type":"enabled","budget_tokens":4096}`)},
 		{"midturn system reminder", midConversationSystem, nil},
+		{"explicitly disabled", plainAssistantHistory, json.RawMessage(`{"type":"disabled"}`)},
+		{"tool history", []types.Message{
+			{Role: "assistant", Content: json.RawMessage(`[{"type":"tool_use","id":"call1","name":"read","input":{}}]`)},
+			{Role: "user", Content: json.RawMessage(`[{"type":"tool_result","tool_use_id":"call1","content":"ok"}]`)},
+		}, nil},
 	}
 
 	for _, pair := range pairs {
 		for _, scenario := range scenarios {
-			t.Run(pair.commandcode+"/"+scenario.name, func(t *testing.T) {
+			t.Run(pair.prefixed+"/"+scenario.name, func(t *testing.T) {
 				transform := func(modelID string) map[string]json.RawMessage {
 					t.Helper()
 					temperature := 0.5
@@ -1900,6 +1910,9 @@ func TestModelFamilySurvivesVendorPrefixedNames(t *testing.T) {
 					if err != nil {
 						t.Fatalf("TransformRequest(%q) error = %v", modelID, err)
 					}
+					if out.Model != modelID {
+						t.Fatalf("wire model changed from %s to %s", modelID, out.Model)
+					}
 					encoded, err := json.Marshal(out)
 					if err != nil {
 						t.Fatalf("marshal payload: %v", err)
@@ -1912,8 +1925,8 @@ func TestModelFamilySurvivesVendorPrefixedNames(t *testing.T) {
 					return fields
 				}
 
-				flat := transform(pair.opencode)
-				prefixed := transform(pair.commandcode)
+				flat := transform(pair.bare)
+				prefixed := transform(pair.prefixed)
 				for field, want := range flat {
 					if got := prefixed[field]; string(got) != string(want) {
 						t.Fatalf("vendor-prefixed id changed %s:\n flat     %s\n prefixed %s", field, want, got)

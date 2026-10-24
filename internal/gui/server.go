@@ -575,7 +575,7 @@ func (s *Server) handleHistorySummary(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "persistent history is unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	summary, err := storage.NewRequests(s.storage).Summary(query)
+	summary, err := storage.NewRequests(s.storage).Summary(r.Context(), query)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

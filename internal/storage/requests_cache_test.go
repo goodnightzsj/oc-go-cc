@@ -34,11 +34,11 @@ func TestSummaryCacheReturnsTheSameAnswerForTheSameFilter(t *testing.T) {
 	summaryCacheFixture(t, db)
 	repo := NewRequests(db)
 
-	first, err := repo.Summary(RequestQuery{})
+	first, err := repo.Summary(t.Context(), RequestQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := repo.Summary(RequestQuery{})
+	second, err := repo.Summary(t.Context(), RequestQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestSummaryCacheSeparatesFilters(t *testing.T) {
 	summaryCacheFixture(t, db)
 	repo := NewRequests(db)
 
-	all, err := repo.Summary(RequestQuery{})
+	all, err := repo.Summary(t.Context(), RequestQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestSummaryCacheSeparatesFilters(t *testing.T) {
 		t.Fatalf("unfiltered total = %d, want 2", all.TotalRequests)
 	}
 	// Same call shape, different provider: must be 1, not the cached 2.
-	one, err := repo.Summary(RequestQuery{Provider: "provider-a"})
+	one, err := repo.Summary(t.Context(), RequestQuery{Provider: "provider-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestSummaryCacheSeparatesFilters(t *testing.T) {
 		t.Errorf("provider filter returned %d requests, want 1 (cache leaked across filters)", one.TotalRequests)
 	}
 	// And the unfiltered answer must still be intact afterwards.
-	again, err := repo.Summary(RequestQuery{})
+	again, err := repo.Summary(t.Context(), RequestQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestSummaryCacheSeparatesFilters(t *testing.T) {
 		t.Errorf("unfiltered total became %d after a filtered query", again.TotalRequests)
 	}
 	// A search term is part of the key too.
-	found, err := repo.Summary(RequestQuery{Search: "model-b"})
+	found, err := repo.Summary(t.Context(), RequestQuery{Search: "model-b"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestSummaryCacheSeparatesFilters(t *testing.T) {
 		t.Errorf("search summary = %d, want 1", found.TotalRequests)
 	}
 	// As is the channel.
-	none, err := repo.Summary(RequestQuery{Channel: "deepseek"})
+	none, err := repo.Summary(t.Context(), RequestQuery{Channel: "deepseek"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestSummaryCacheSeesNewRows(t *testing.T) {
 	summaryCacheFixture(t, db)
 	repo := NewRequests(db)
 
-	before, err := repo.Summary(RequestQuery{})
+	before, err := repo.Summary(t.Context(), RequestQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestSummaryCacheSeesNewRows(t *testing.T) {
 		ID: "c3", Model: "model-c", Provider: "provider-a",
 		StartTime: time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC), InputTokens: 300, Success: true,
 	})
-	after, err := repo.Summary(RequestQuery{})
+	after, err := repo.Summary(t.Context(), RequestQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestSummaryCacheSeesDeletedAndReplacedRows(t *testing.T) {
 	summaryCacheFixture(t, db)
 	repo := NewRequests(db)
 
-	if _, err := repo.Summary(RequestQuery{}); err != nil {
+	if _, err := repo.Summary(t.Context(), RequestQuery{}); err != nil {
 		t.Fatal(err)
 	}
 	// Delete one row and add another: the count is unchanged at 2, so a
@@ -147,7 +147,7 @@ func TestSummaryCacheSeesDeletedAndReplacedRows(t *testing.T) {
 		ID: "c4", Model: "model-d", Provider: "provider-b",
 		StartTime: time.Date(2026, 8, 8, 13, 0, 0, 0, time.UTC), InputTokens: 999, Success: true,
 	})
-	after, err := repo.Summary(RequestQuery{})
+	after, err := repo.Summary(t.Context(), RequestQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}

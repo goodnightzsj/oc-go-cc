@@ -67,4 +67,5 @@ type NormalizedUsage struct {
 	OutputTokens        int
 	CacheReadTokens     int
 	CacheCreationTokens int
+	ReasoningTokens     int // Included in OutputTokens, not an additional count.
 }

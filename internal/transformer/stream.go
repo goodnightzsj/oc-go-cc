@@ -667,7 +667,7 @@ func responsesUsageToAnthropic(usage *types.ResponsesUsage) *types.Usage {
 	}
 	return usageInfoToAnthropic(&types.UsageInfo{
 		PromptTokens: usage.InputTokens, CompletionTokens: usage.OutputTokens,
-		PromptTokensDetails: usage.InputTokensDetails,
+		PromptTokensDetails: usage.InputTokensDetails, CompletionTokensDetails: usage.OutputTokensDetails,
 	})
 }
 
@@ -895,6 +895,10 @@ func (h *StreamHandler) processResponsesSSELine(
 		usage = chunk.Response.Usage
 	}
 	if usage != nil {
+		// Later totals may omit the split; retain an already observed count.
+		if state.usage != nil && (usage.OutputTokensDetails == nil || usage.OutputTokensDetails.ReasoningTokens <= 0) {
+			usage.OutputTokensDetails = state.usage.OutputTokensDetails
+		}
 		state.usage = usage
 		if recorder, ok := w.(interface{ SetPartialUsage(*types.Usage) }); ok {
 			recorder.SetPartialUsage(responsesUsageToAnthropic(usage))

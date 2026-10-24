@@ -48,7 +48,7 @@ func TestModelBreakdownThroughputWeightsByDuration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows, err := a.ModelBreakdown(window)
+	rows, err := a.ModelBreakdown(t.Context(), window)
 	if err != nil {
 		t.Fatalf("ModelBreakdown: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestModelBreakdownThroughputWeightsByDuration(t *testing.T) {
 
 	// The provider row aggregates the same requests and must report the same
 	// figure, or the platform health line would contradict the model table.
-	providers, err := a.ProviderBreakdown(window)
+	providers, err := a.ProviderBreakdown(t.Context(), window)
 	if err != nil {
 		t.Fatalf("ProviderBreakdown: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestThroughputExcludesUnmeasuredRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows, err := a.ModelBreakdown(window)
+	rows, err := a.ModelBreakdown(t.Context(), window)
 	if err != nil {
 		t.Fatalf("ModelBreakdown: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestThroughputIsUnknownWithoutMeasuredRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows, err := a.ModelBreakdown(window)
+	rows, err := a.ModelBreakdown(t.Context(), window)
 	if err != nil {
 		t.Fatalf("ModelBreakdown: %v", err)
 	}

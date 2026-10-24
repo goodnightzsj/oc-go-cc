@@ -272,6 +272,10 @@ func (r *Requests) historyRevision(ctx context.Context) (string, error) {
 func (r *Requests) Summary(q RequestQuery) (*RequestSummary, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if err := r.db.lockAggregate(ctx); err != nil {
+		return nil, err
+	}
+	defer func() { <-r.db.aggregateLoad }()
 
 	revision, err := r.historyRevision(ctx)
 	if err != nil {

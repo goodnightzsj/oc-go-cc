@@ -67,3 +67,6 @@ MIGRATION.md
 # Local working docs (not part of the shipped source)
 /docs/
 /llmdoc/
+
+# Local project instructions — deployment topology, never published
+/CLAUDE.md

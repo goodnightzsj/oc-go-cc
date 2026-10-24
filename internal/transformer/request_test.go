@@ -2047,3 +2047,67 @@ func TestThinkingBudgetAndEffortAreNeverSentTogether(t *testing.T) {
 		t.Error("o3-mini lost the reasoning level; it has no other way to express intent")
 	}
 }
+
+// WorkBuddy's wire ids carry a realm prefix ("global:deepseek-v4.1-flash").
+// Every family rule below is written against the bare name, so before
+// BareModelID existed a realm-prefixed model matched none of them: the client's
+// thinking config was dropped, the gateway substituted its own default effort,
+// and nothing in the outbound body said the caller had asked for anything.
+func TestTransformRequestSeesThroughTheRealmPrefix(t *testing.T) {
+	tr := NewRequestTransformer()
+	model := config.ModelConfig{ModelID: "global:deepseek-v4.1-flash"}
+	firstTurn := []types.Message{
+		{Role: "user", Content: json.RawMessage(`"solve this carefully"`)},
+	}
+
+	budget := json.RawMessage(`{"type":"enabled","budget_tokens":63999}`)
+	openaiReq, err := tr.TransformRequest(&types.MessageRequest{
+		Model:     "claude-test",
+		MaxTokens: 256,
+		Thinking:  budget,
+		Messages:  firstTurn,
+	}, model)
+	if err != nil {
+		t.Fatalf("TransformRequest() error = %v", err)
+	}
+	if got, want := string(openaiReq.Thinking), string(budget); got != want {
+		t.Fatalf("Thinking = %s, want the client's budget forwarded (%s)", got, want)
+	}
+
+	// The disabled form is the one that changes what the model does, so it is
+	// pinned separately: dropping it turns thinking on, which is the opposite
+	// of what the caller asked for.
+	openaiReq, err = tr.TransformRequest(&types.MessageRequest{
+		Model:     "claude-test",
+		MaxTokens: 256,
+		Thinking:  json.RawMessage(`{"type":"disabled"}`),
+		Messages:  firstTurn,
+	}, model)
+	if err != nil {
+		t.Fatalf("TransformRequest() error = %v", err)
+	}
+	if got, want := string(openaiReq.Thinking), `{"type":"disabled"}`; got != want {
+		t.Fatalf("Thinking = %s, want %s", got, want)
+	}
+}
+
+// Only a known realm is a realm. A colon that belongs to the model's own name
+// must not be truncated into a different model's family.
+func TestTransformRequestDoesNotStripAnUnknownPrefix(t *testing.T) {
+	tr := NewRequestTransformer()
+
+	openaiReq, err := tr.TransformRequest(&types.MessageRequest{
+		Model:     "claude-test",
+		MaxTokens: 256,
+		Thinking:  json.RawMessage(`{"type":"enabled","budget_tokens":4096}`),
+		Messages: []types.Message{
+			{Role: "user", Content: json.RawMessage(`"hello"`)},
+		},
+	}, config.ModelConfig{ModelID: "custom:deepseek-v4.1-flash"})
+	if err != nil {
+		t.Fatalf("TransformRequest() error = %v", err)
+	}
+	if len(openaiReq.Thinking) != 0 {
+		t.Fatalf("Thinking = %s, want nothing for a model whose family is unknown", openaiReq.Thinking)
+	}
+}

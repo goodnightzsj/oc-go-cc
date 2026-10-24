@@ -21,6 +21,34 @@ func ModelFamily(modelID string) string {
 	return strings.ToLower(modelID)
 }
 
+// knownRealms are the realm prefixes a gateway puts in front of a model id.
+// WorkBuddy names its models "global:deepseek-v4.1-flash" and "cn:...", and the
+// realm is part of the wire id the same way a provider pool prefix is. Only
+// these two are stripped: a colon anywhere else belongs to the model's own name,
+// and truncating it would look up a different model.
+var knownRealms = []string{"global", "cn"}
+
+// BareModelID removes a leading realm prefix. It is the query-side counterpart
+// of the wire id: nothing sent upstream changes, but every rule written against
+// a bare family name has to see one.
+//
+// Without this, "global:deepseek-v4.1-flash" matches no family at all: the
+// DeepSeek thinking/effort rules, the Kimi cache_control and temperature rules
+// and the built-in capability metadata all silently stop applying, and the only
+// symptom is that requests behave as if the model were unknown.
+func BareModelID(modelID string) string {
+	prefix, name, found := strings.Cut(modelID, ":")
+	if !found || name == "" {
+		return modelID
+	}
+	for _, realm := range knownRealms {
+		if prefix == realm {
+			return name
+		}
+	}
+	return modelID
+}
+
 // EndpointType determines which API endpoint format to use for a model.
 type EndpointType int
 

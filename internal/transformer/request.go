@@ -43,7 +43,7 @@ func isThinkingDisabled(thinking json.RawMessage) bool {
 // normaliser lives in internal/models so the peak-billing rules and these
 // request-shaping rules cannot drift apart on how an id is spelled.
 func modelFamily(modelID string) string {
-	return models.ModelFamily(modelID)
+	return models.ModelFamily(models.BareModelID(modelID))
 }
 
 // isDeepSeekModel returns true for DeepSeek models that require thinking mode handling.

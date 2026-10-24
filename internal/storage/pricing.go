@@ -2,20 +2,17 @@ package storage
 
 import (
 	"database/sql"
-	"strings"
 	"time"
 
 	"github.com/routatic/proxy/internal/history"
+	"github.com/routatic/proxy/internal/models"
 	"github.com/routatic/proxy/internal/site"
 )
 
 // Only WorkBuddy's known realms are outside the pricing identity; other colons belong to the model.
 func modelNameForPricing(provider, model string) string {
 	if site.Normalize(provider) == site.WorkBuddy {
-		prefix, name, found := strings.Cut(model, ":")
-		if found && name != "" && (prefix == "global" || prefix == "cn") {
-			return name
-		}
+		return models.BareModelID(model)
 	}
 	return model
 }

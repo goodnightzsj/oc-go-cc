@@ -350,3 +350,32 @@ func TestIsZenAnthropicModel(t *testing.T) {
 		})
 	}
 }
+
+// A realm prefix is part of the wire id but not part of the model's identity.
+// Every family rule is written against the bare name, so the lookup has to see
+// through it — "global:deepseek-v4.1-flash" otherwise matches nothing and the
+// rules silently stop applying.
+func TestBareModelID(t *testing.T) {
+	tests := []struct {
+		name string
+		id   string
+		want string
+	}{
+		{"global realm", "global:deepseek-v4.1-flash", "deepseek-v4.1-flash"},
+		{"cn realm", "cn:glm-5.3", "glm-5.3"},
+		{"no prefix", "deepseek-v4-pro", "deepseek-v4-pro"},
+		{"pool prefix is not a realm", "cline-pass/deepseek-v4.1-flash", "cline-pass/deepseek-v4.1-flash"},
+		{"unknown prefix belongs to the model", "custom:v2", "custom:v2"},
+		{"trailing colon", "global:", "global:"},
+		{"colon inside the name", "vendor:model:v2", "vendor:model:v2"},
+		{"empty", "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := BareModelID(tt.id); got != tt.want {
+				t.Fatalf("BareModelID(%q) = %q, want %q", tt.id, got, tt.want)
+			}
+		})
+	}
+}

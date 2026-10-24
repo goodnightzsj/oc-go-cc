@@ -118,5 +118,12 @@ func TestNativeResponsesReasoningReachesBothProtocolsAndHistory(t *testing.T) {
 		if row.KeyHint != "****-key" {
 			t.Errorf("history stream=%t key_hint=%q, want masked credential label", row.Streaming, row.KeyHint)
 		}
+		if row.Streaming {
+			if row.FirstEventMs == nil || row.FirstContentMs == nil || row.MessageEndMs == nil {
+				t.Error("real HTTP streaming path lost timing")
+			}
+		} else if row.FirstEventMs != nil || row.FirstContentMs != nil || row.MessageEndMs != nil {
+			t.Error("non-streaming HTTP path fabricated stream timing")
+		}
 	}
 }

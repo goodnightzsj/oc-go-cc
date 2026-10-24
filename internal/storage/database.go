@@ -487,6 +487,10 @@ func (d *Database) migrateColumns(ctx context.Context) error {
 		// and an attempt that failed before the body opened never had one. Zero
 		// is not used for that: it would read as an instant response.
 		{"requests", "first_byte_ms", `ALTER TABLE requests ADD COLUMN first_byte_ms INTEGER`},
+		// Missing stream milestones stay NULL, including every pre-migration row.
+		{"requests", "first_event_ms", `ALTER TABLE requests ADD COLUMN first_event_ms INTEGER`},
+		{"requests", "first_content_ms", `ALTER TABLE requests ADD COLUMN first_content_ms INTEGER`},
+		{"requests", "message_end_ms", `ALTER TABLE requests ADD COLUMN message_end_ms INTEGER`},
 		// The reasoning level the client asked for, after normalization. NULL
 		// means the client expressed no level - which is not the same as asking
 		// for the weakest one, so an empty string is stored as NULL.

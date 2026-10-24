@@ -46,8 +46,8 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens,
 			cost_usd, cost_source, details_known, usage_trusted, streaming, success, error_msg, attempt,
 			peak_multiplier, upstream_channel, upstream_model, first_byte_ms, reasoning_effort,
-			key_hint
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			key_hint, first_event_ms, first_content_ms, message_end_ms
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		rec.ID,
 		rec.Model,
@@ -74,6 +74,9 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 		nullIfZero(int64(rec.FirstByte.Milliseconds())),
 		nullIfEmpty(rec.ReasoningEffort),
 		nullIfEmpty(rec.KeyHint),
+		rec.FirstEventMs,
+		rec.FirstContentMs,
+		rec.MessageEndMs,
 	)
 
 	return err
@@ -470,7 +473,7 @@ func (r *Requests) Query(q RequestQuery) ([]history.RequestRecord, int64, error)
 		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens,
 		       cost_usd, cost_source, details_known, streaming, success, error_msg, attempt,
 		       peak_multiplier, upstream_channel, upstream_model, first_byte_ms, reasoning_effort,
-		       key_hint
+		       key_hint, first_event_ms, first_content_ms, message_end_ms
 		FROM requests`+where+`
 		ORDER BY `+orderBy+`
 		LIMIT ? OFFSET ?
@@ -746,6 +749,9 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 			&firstByteMS,
 			&reasoningEffort,
 			&keyHint,
+			&rec.FirstEventMs,
+			&rec.FirstContentMs,
+			&rec.MessageEndMs,
 		)
 		if err != nil {
 			return nil, err

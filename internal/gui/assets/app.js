@@ -294,8 +294,12 @@ const TRANSLATIONS = {
     'analytics.priceReferenceHint': 'Model list prices for estimation only; not WorkBuddy account charges. No automatic price refresh.',
     'analytics.priceUpdated': 'Updated',
 
-    'analytics.throughput': 'Tok/s',
+    'analytics.throughput': 'Execution Tok/s',
     'analytics.throughputHint': 'Output tokens divided by the whole request duration, so it includes the wait for the first token. Blank when no successful request was measured.',
+    'analytics.contentThroughput': 'Content Tok/s',
+    'analytics.contentThroughputHint': 'Output tokens divided by time from first non-empty text, thinking, or valid tool content to message completion. Aggregates use total tokens / total time from the same successful streaming samples. Unknown is —, not zero.',
+    'analytics.contentSamples': '{n} samples',
+    'analytics.timingNote': 'Execution includes the initial wait. Content measures first content to message completion; rates use the same qualified samples. Buffering or hidden reasoning can inflate content rates: this is not pure decoding speed.',
     'analytics.showingTop': 'top {n} of {total}',
     'analytics.platformHealth': 'Platform health',
     'analytics.dailySpend': 'Daily cost',
@@ -349,6 +353,12 @@ const TRANSLATIONS = {
     'detail.upstreamModel': 'Upstream model',
     'detail.effort': 'Reasoning effort',
     'detail.firstByte': 'Time to first byte',
+    'detail.firstEvent': 'First event offset',
+    'detail.firstContent': 'Wait for first content',
+    'detail.messageEnd': 'Message completion offset',
+    'detail.eventThroughput': 'After-event Tok/s (diagnostic)',
+    'detail.eventThroughputHint': 'Output tokens / (execution duration − first business event offset). An envelope can be the first event; heartbeats are excluded.',
+    'detail.streamTimingNote': 'Offsets start at execution, including fallback attempts, and are observed after successful application-output writes, not client receipt. Content rate ends at message completion; after-event rate ends at stream return. Hidden reasoning and buffering can inflate rates. — means unmeasurable; reasoning tokens are already part of output.',
     'detail.scenario': 'Scenario',
     'detail.requestType': 'Request type',
     'detail.streaming': 'Streaming',
@@ -434,7 +444,7 @@ const TRANSLATIONS = {
     'workbuddy.output': 'Output',
     'workbuddy.cache': 'Cache hit / miss',
     'workbuddy.latency': 'Observed avg. latency (ms)',
-    'workbuddy.tps': 'Observed avg. tok/s',
+    'workbuddy.tps': 'Upstream gateway avg. tok/s',
     'workbuddy.trend': 'Tokens by recorded hour',
     'workbuddy.hourDetails': 'Hourly values · gateway local time',
     'workbuddy.trendNote': 'Only returned buckets are shown; gaps are not filled with zeros. Hour labels use the gateway time zone.',
@@ -485,7 +495,7 @@ const TRANSLATIONS = {
     'th.firstByte': 'TTFT',
     'th.firstByteHint': 'Time from the request starting to the upstream sending its first byte. What the upstream controls, as opposed to the model thinking time included in Duration.',
     'th.duration': 'Duration',
-    'th.tokensPerSecond': 'Tok/s',
+    'th.tokensPerSecond': 'Execution Tok/s',
     'th.status': 'Status',
     'empty.noHistory': 'No history yet',
     'setting.proxy': 'Proxy Service',
@@ -920,8 +930,12 @@ const TRANSLATIONS = {
     'analytics.priceReferenceHint': '模型公开标价，仅供估算，不代表 WorkBuddy 账户实际扣款；不自动刷新价格。',
     'analytics.priceUpdated': '更新时间',
 
-    'analytics.throughput': 'Tok/s',
+    'analytics.throughput': '执行 Tok/s',
     'analytics.throughputHint': '输出 token 除以整个请求耗时，因此包含等待首 token 的时间。没有可测量的成功请求时留空。',
+    'analytics.contentThroughput': '内容阶段 Tok/s',
+    'analytics.contentThroughputHint': '输出 token 除以首个非空文本、思考或有效工具内容至消息完成的耗时。聚合使用同一批有效成功流式样本的总 token / 总时间。未知显示 —，不当作零。',
+    'analytics.contentSamples': '{n} 个样本',
+    'analytics.timingNote': '执行速率包含首响应等待；内容阶段从首内容计至消息完成，按同一批有效样本加权。缓冲或隐藏推理可能抬高内容速率，不代表纯模型解码速度。',
     'analytics.showingTop': '前 {n} / {total}',
     'analytics.platformHealth': '平台健康',
     'analytics.dailySpend': '每日费用',
@@ -975,6 +989,12 @@ const TRANSLATIONS = {
     'detail.upstreamModel': '上游模型',
     'detail.effort': '思考强度',
     'detail.firstByte': '首字节时间',
+    'detail.firstEvent': '首事件偏移',
+    'detail.firstContent': '首内容等待',
+    'detail.messageEnd': '消息完成偏移',
+    'detail.eventThroughput': '首事件后 Tok/s（诊断）',
+    'detail.eventThroughputHint': '输出 token /（执行耗时 − 首业务事件偏移）。首事件可以只是响应信封，不包含心跳。',
+    'detail.streamTimingNote': '偏移从执行开始计算，包含回退尝试，在应用输出完整写入成功后观测，不代表客户端收包。内容速率截止消息完成，首事件后速率截止流返回。隐藏推理或缓冲可能抬高速率；— 表示不可测，推理 token 已包含在输出中。',
     'detail.scenario': '使用场景',
     'detail.requestType': '请求类型',
     'detail.streaming': '流式请求',
@@ -1060,7 +1080,7 @@ const TRANSLATIONS = {
     'workbuddy.output': '输出',
     'workbuddy.cache': '缓存命中 / 未命中',
     'workbuddy.latency': '观测平均延迟（ms）',
-    'workbuddy.tps': '观测平均 tok/s',
+    'workbuddy.tps': '上游网关平均 tok/s',
     'workbuddy.trend': '已记录小时的 Token 分布',
     'workbuddy.hourDetails': '小时明细 · 网关当地时间',
     'workbuddy.trendNote': '仅展示上游返回的小时桶，缺口不补零；时间标签使用网关时区。',
@@ -1111,7 +1131,7 @@ const TRANSLATIONS = {
     'th.firstByte': '首字节',
     'th.firstByteHint': '从请求开始到上游返回第一个字节的时间。这是上游可控的部分；Duration 里还包含模型思考时间。',
     'th.duration': '耗时',
-    'th.tokensPerSecond': 'Tok/s',
+    'th.tokensPerSecond': '执行 Tok/s',
     'th.status': '状态',
     'empty.noHistory': '暂无历史请求',
     'setting.proxy': '代理服务',
@@ -3228,6 +3248,11 @@ const HISTORY_CSV_COLUMNS = [
   ['attempt', r => historyHasDetails(r) ? r.attempt : null],
   ['success', r => historyHasDetails(r) ? r.success : null],
   ['error_msg', r => r.error_msg || ''],
+  ['first_event_ms', r => r.first_event_ms ?? null],
+  ['first_content_ms', r => r.first_content_ms ?? null],
+  ['message_end_ms', r => r.message_end_ms ?? null],
+  ['content_tokens_per_second', r => r.content_tokens_per_second ?? null],
+  ['event_tokens_per_second', r => r.event_tokens_per_second ?? null],
 ];
 
 // Export walks the API rather than the rendered page so the file covers the
@@ -3518,6 +3543,10 @@ function fmtThroughput(v) {
   if (n >= 100) return n.toFixed(0);
   if (n >= 10) return n.toFixed(1);
   return n.toFixed(2);
+}
+
+function contentSampleLabel(record) {
+  return t('analytics.contentSamples').replace('{n}', Number(record.content_samples ?? 0).toLocaleString());
 }
 
 // A request's own throughput, or null when nothing was measured. Shared by the
@@ -4828,7 +4857,15 @@ function showHistoryDetail(record) {
       <div class="detail-row"><span class="detail-label">${t('detail.attempt')}</span><span class="detail-value">${detailsKnown ? (record.attempt || 1) : t('detail.unavailable')}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.duration')}</span><span class="detail-value">${detailsKnown ? gradeDuration(record, fmtDuration(record.duration_ms)) : t('detail.unavailable')}</span></div>
       ${tpsOfRow == null ? '' : `<div class="detail-row"><span class="detail-label">${t('analytics.throughput')}</span><span class="detail-value" title="${escapeHtml(t('analytics.throughputHint'))}">${fmtThroughput(tpsOfRow)}</span></div>`}
+      ${record.streaming ? [
+        ['detail.firstEvent', record.first_event_ms],
+        ['detail.firstContent', record.first_content_ms],
+        ['detail.messageEnd', record.message_end_ms],
+      ].map(([key, value]) => `<div class="detail-row"><span class="detail-label">${t(key)}</span><span class="detail-value">${fmtDuration(value)}</span></div>`).join('') : ''}
+      ${record.streaming ? `<div class="detail-row"><span class="detail-label">${t('analytics.contentThroughput')}</span><span class="detail-value" title="${escapeHtml(t('analytics.contentThroughputHint'))}">${fmtThroughput(record.content_tokens_per_second)}</span></div>
+      <div class="detail-row"><span class="detail-label">${t('detail.eventThroughput')}</span><span class="detail-value" title="${escapeHtml(t('detail.eventThroughputHint'))}">${fmtThroughput(record.event_tokens_per_second)}</span></div>` : ''}
     </div>
+    ${record.streaming ? `<p class="page-meta">${t('detail.streamTimingNote')}</p>` : ''}
     ${record.error_msg ? `<div class="detail-error"><strong>${t('detail.error')}</strong><br>${escapeHtml(record.error_msg)}</div>` : ''}
   `;
   openHistoryModal('detail.title');
@@ -6391,7 +6428,7 @@ const AnalyticsModule = {
       document.getElementById(id).innerHTML = `<div class="empty-state">${message}</div>`;
     });
     document.getElementById('analytics-period-tbody').innerHTML = `<tr><td colspan="9" class="empty-state">${message}</td></tr>`;
-    document.getElementById('analytics-model-tbody').innerHTML = `<tr><td colspan="6" class="empty-state">${message}</td></tr>`;
+    document.getElementById('analytics-model-tbody').innerHTML = `<tr><td colspan="7" class="empty-state">${message}</td></tr>`;
     document.getElementById('price-tables').hidden = true;
   },
 
@@ -6539,6 +6576,7 @@ const AnalyticsModule = {
       if (latency > 0) meta.push(`${t('analytics.avgLatency')} ${fmtDuration(latency)}`);
       const tps = fmtThroughput(item.tokens_per_second);
       if (tps !== '—') meta.push(`${tps} ${t('analytics.throughput')}`);
+      meta.push(`${t('analytics.contentThroughput')} ${fmtThroughput(item.content_tokens_per_second)} (${contentSampleLabel(item)})`);
       meta.push(`${Number(item.requests || 0).toLocaleString()} ${t('analytics.requests')}`);
       // Fallback rate is the share of answered requests the primary model did
       // not serve. It is computed and stored server-side; showing it here is
@@ -6839,8 +6877,8 @@ const AnalyticsModule = {
       // zeroed when nothing measurable was recorded: a model with no measured
       // success is unknown, not infinitely slow.
       const tps=fmtThroughput(item.tokens_per_second);
-      return `<tr data-provider="${this.escapeHtml(item.provider || '')}"><td><code title="${this.escapeHtml(item.model || '')}">${this.escapeHtml(item.model||t('detail.unknown'))}</code><br><small>${this.escapeHtml(providerLabel(item.provider))}</small></td><td>${Number(item.requests||0).toLocaleString()}</td><td>${prompt>0?rate.toFixed(1)+'%':'—'}</td><td>${totalUsageTokens(item).toLocaleString()}</td><td title="${this.escapeHtml(t('analytics.throughputHint'))}">${tps}</td><td title="${this.escapeHtml(costCoverageNote(item))}">${fmtAggregateCost(item)}</td></tr>`;
-    }).join('') || `<tr><td colspan="6" class="empty-state">${t('analytics.noData')}</td></tr>`;
+      return `<tr data-provider="${this.escapeHtml(item.provider || '')}"><td><code title="${this.escapeHtml(item.model || '')}">${this.escapeHtml(item.model||t('detail.unknown'))}</code><br><small>${this.escapeHtml(providerLabel(item.provider))}</small></td><td>${Number(item.requests||0).toLocaleString()}</td><td>${prompt>0?rate.toFixed(1)+'%':'—'}</td><td>${totalUsageTokens(item).toLocaleString()}</td><td title="${this.escapeHtml(t('analytics.throughputHint'))}">${tps}</td><td title="${this.escapeHtml(t('analytics.contentThroughputHint'))}">${fmtThroughput(item.content_tokens_per_second)}<br><small>${this.escapeHtml(contentSampleLabel(item))}</small></td><td title="${this.escapeHtml(costCoverageNote(item))}">${fmtAggregateCost(item)}</td></tr>`;
+    }).join('') || `<tr><td colspan="7" class="empty-state">${t('analytics.noData')}</td></tr>`;
   },
 
   // Shows where each platform's prices came from and when they were fetched.
@@ -7056,7 +7094,7 @@ const QuotaModule = {
       ['quota-local-requests', 'quota-local-tokens', 'quota-local-cost', 'quota-local-unknown'].forEach(id => this.setText(id, this.localLoading ? '…' : '—'));
       this.setText('quota-local-cost-note', '');
       const body = document.getElementById('quota-local-model-tbody');
-      if (body) body.innerHTML = `<tr><td colspan="6" class="empty-state">${t(this.localLoading ? 'data.loading' : 'detail.unavailable')}</td></tr>`;
+      if (body) body.innerHTML = `<tr><td colspan="7" class="empty-state">${t(this.localLoading ? 'data.loading' : 'detail.unavailable')}</td></tr>`;
       return;
     }
     const s = data.summary;

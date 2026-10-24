@@ -232,7 +232,7 @@
               <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="cost_usd" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.cost">Cost</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
               <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="first_byte_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.firstByte">TTFT</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
               <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="duration_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.duration">Duration</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="tokens_per_second" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.tokensPerSecond">Tok/s</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="tokens_per_second" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.tokensPerSecond">Execution Tok/s</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
             </tr>
           </thead>
           <tbody id="history-tbody">
@@ -609,7 +609,8 @@
       <div class="analytics-comparison-grid">
         <section class="analytics-section">
           <div class="section-heading" data-i18n="analytics.modelDetails">Model details</div>
-          <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th data-i18n="filter.model">Model</th><th data-i18n="analytics.requests">Requests</th><th data-i18n="analytics.cacheHitShort">Cache hit</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="analytics.throughput">Tok/s</th><th data-i18n="analytics.cost">Cost</th></tr></thead><tbody id="analytics-model-tbody"></tbody></table></div>
+          <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th data-i18n="filter.model">Model</th><th data-i18n="analytics.requests">Requests</th><th data-i18n="analytics.cacheHitShort">Cache hit</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="analytics.throughput">Execution Tok/s</th><th data-i18n="analytics.contentThroughput">Content Tok/s</th><th data-i18n="analytics.cost">Cost</th></tr></thead><tbody id="analytics-model-tbody"></tbody></table></div>
+          <p class="page-meta" data-i18n="analytics.timingNote">Execution includes the initial wait. Content measures first content to message completion; buffering or hidden reasoning can inflate it.</p>
         </section>
         <section class="analytics-section">
           <div class="section-heading"><span data-i18n="analytics.byProvider">Platform distribution</span><span class="section-meta" id="provider-distribution-count"></span></div>
@@ -736,7 +737,8 @@
           <div class="metric-cell"><div class="metric-label" id="quota-local-cost-label" data-i18n="history.filteredCost">Recorded cost</div><div class="metric-value" id="quota-local-cost">--</div><div class="metric-note" id="quota-local-cost-note"></div></div>
           <div class="metric-cell"><div class="metric-label" data-i18n="quota.unknownCosts">Requests with unknown cost</div><div class="metric-value" id="quota-local-unknown">--</div></div>
         </div>
-        <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th data-i18n="th.modelPlatform">Model / Platform</th><th data-i18n="analytics.requests">Requests</th><th data-i18n="analytics.cacheHitShort">Cache hit</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="analytics.throughput">Tok/s</th><th data-i18n="analytics.cost">Cost</th></tr></thead><tbody id="quota-local-model-tbody"></tbody></table></div>
+        <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th data-i18n="th.modelPlatform">Model / Platform</th><th data-i18n="analytics.requests">Requests</th><th data-i18n="analytics.cacheHitShort">Cache hit</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="analytics.throughput">Execution Tok/s</th><th data-i18n="analytics.contentThroughput">Content Tok/s</th><th data-i18n="analytics.cost">Cost</th></tr></thead><tbody id="quota-local-model-tbody"></tbody></table></div>
+        <p class="page-meta" data-i18n="analytics.timingNote">Execution includes the initial wait. Content measures first content to message completion; buffering or hidden reasoning can inflate it.</p>
       </section>
     </div>
   </div>

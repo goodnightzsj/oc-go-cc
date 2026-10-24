@@ -31,6 +31,11 @@ type RequestRecord struct {
 	// the part the gateway controls. On a proxied provider the gap between them
 	// is where queueing and fallback attempts show up.
 	FirstByte time.Duration
+	// Application-output milestones relative to StartTime; nil is unobserved,
+	// while a measured zero-millisecond offset remains a real observation.
+	FirstEventMs   *int64
+	FirstContentMs *int64
+	MessageEndMs   *int64
 	// ReasoningEffort is the level the client asked for, normalized. Empty when
 	// it asked for none. It records intent, not effect: an upstream that ignores
 	// the field leaves this populated and the response unchanged.

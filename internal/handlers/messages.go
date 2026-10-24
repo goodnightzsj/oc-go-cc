@@ -64,6 +64,7 @@ type responseWriter struct {
 	sseEvent          string
 	messageStopped    bool
 	streamErr         error
+	timing            streamTiming
 	usage             struct {
 		inputTokens              int
 		outputTokens             int
@@ -89,26 +90,34 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 		w.wroteHeader = true
 		w.ResponseWriter.WriteHeader(http.StatusOK)
 	}
+	var observed streamMilestones
 	if len(b) > 0 {
 		w.ssePayloadWritten = true
-		if err := w.observeSSE(b); err != nil {
+		var err error
+		observed, err = w.observeSSE(b)
+		if err != nil {
 			w.streamErr = err
 			return 0, err
 		}
 	}
-	return w.ResponseWriter.Write(b)
+	n, err := w.ResponseWriter.Write(b)
+	if err == nil && n == len(b) {
+		w.timing.record(observed)
+	}
+	return n, err
 }
 
 // observeSSE reads complete events without changing forwarded bytes. Native
 // streams may split any JSON token between writes and report input/cache usage
 // only in message_start; message_delta updates only fields actually present.
 // Write holds mu while calling this method.
-func (w *responseWriter) observeSSE(b []byte) error {
+func (w *responseWriter) observeSSE(b []byte) (streamMilestones, error) {
+	var observed streamMilestones
 	w.sseBuffer = append(w.sseBuffer, b...)
 	for {
 		i := bytes.IndexByte(w.sseBuffer, '\n')
 		if i < 0 {
-			return nil
+			return observed, nil
 		}
 		line := strings.TrimSuffix(string(w.sseBuffer[:i]), "\r")
 		w.sseBuffer = w.sseBuffer[i+1:]
@@ -120,9 +129,13 @@ func (w *responseWriter) observeSSE(b []byte) error {
 			w.sseData = append(w.sseData, '\n')
 		case line == "":
 			if len(w.sseData) > 0 {
-				if err := w.observeSSEEvent(); err != nil {
-					return err
+				event, err := w.observeSSEEvent(w.timing.firstContent.IsZero() && !observed.content)
+				if err != nil {
+					return streamMilestones{}, err
 				}
+				observed.event = observed.event || event.event
+				observed.content = observed.content || event.content
+				observed.end = observed.end || event.end
 			}
 			w.sseData = w.sseData[:0]
 			w.sseEvent = ""
@@ -130,7 +143,7 @@ func (w *responseWriter) observeSSE(b []byte) error {
 	}
 }
 
-func (w *responseWriter) observeSSEEvent() error {
+func (w *responseWriter) observeSSEEvent(needContent bool) (streamMilestones, error) {
 	// Usage also carries non-integer metadata. Only token counts are ours to
 	// parse; pointers preserve the distinction between omitted and zero deltas.
 	type tokenUsage struct {
@@ -150,7 +163,7 @@ func (w *responseWriter) observeSSEEvent() error {
 	data := w.sseData
 	w.sseData = nil
 	if err := json.Unmarshal(data, &event); err != nil {
-		return fmt.Errorf("invalid upstream SSE event: %w", err)
+		return streamMilestones{}, fmt.Errorf("invalid upstream SSE event: %w", err)
 	}
 	if event.Type == "" {
 		event.Type = w.sseEvent
@@ -183,7 +196,11 @@ func (w *responseWriter) observeSSEEvent() error {
 	if usage.ReasoningTokens != nil && *usage.ReasoningTokens > 0 {
 		w.usage.reasoningTokens = *usage.ReasoningTokens
 	}
-	return nil
+	return streamMilestones{
+		event:   event.Type != "" && event.Type != "ping",
+		content: needContent && hasTimingContent(data, event.Type),
+		end:     event.Type == "message_stop",
+	}, nil
 }
 
 // finish checks the observed protocol terminal event before accounting. An
@@ -822,6 +839,7 @@ func (h *MessagesHandler) handleStreaming(
 				FirstByte:           firstByteDuration(firstByte, streamStart),
 				ReasoningEffort:     clientEffort,
 			}
+			rw.timing.applyTo(&rec)
 			if h.storage != nil {
 				if err := h.storage.InsertRequest(rec); err != nil {
 					h.logger.Warn("failed to insert request into storage", "error", err)
@@ -910,6 +928,7 @@ func (h *MessagesHandler) handleStreaming(
 				// with a measurement nobody made.
 				UsageUnobserved: !hasUsage,
 			}
+			rw.timing.applyTo(&rec)
 			if err := h.storage.InsertRequest(rec); err != nil {
 				h.logger.Warn("failed to insert failed request into storage", "error", err)
 			}

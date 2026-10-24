@@ -507,6 +507,7 @@ type historyEntry struct {
 	InputTokens         int      `json:"input_tokens"`
 	PromptTokens        int      `json:"prompt_tokens"`
 	OutputTokens        int      `json:"output_tokens"`
+	ReasoningTokens     int      `json:"reasoning_tokens,omitempty"`
 	CacheReadTokens     int      `json:"cache_read_tokens"`
 	CacheCreationTokens int      `json:"cache_creation_tokens"`
 	CostUSD             *float64 `json:"cost_usd"`
@@ -695,6 +696,7 @@ func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 			InputTokens:         rec.InputTokens,
 			PromptTokens:        rec.DisplayInputTokens(),
 			OutputTokens:        rec.OutputTokens,
+			ReasoningTokens:     rec.ReasoningTokens,
 			CacheReadTokens:     rec.CacheReadTokens,
 			CacheCreationTokens: rec.CacheCreationTokens,
 			DetailsKnown:        rec.DetailsKnown,

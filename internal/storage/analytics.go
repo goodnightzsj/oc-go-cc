@@ -241,6 +241,10 @@ type AnalyticsSnapshot struct {
 func (a *Analytics) Summary(window Window) (*AnalyticsSnapshot, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if err := a.db.lockAggregate(ctx); err != nil {
+		return nil, err
+	}
+	defer func() { <-a.db.aggregateLoad }()
 
 	revision, err := a.db.historyRevision(ctx)
 	if err != nil {
@@ -588,6 +592,10 @@ func (a *Analytics) TokenTrend(window Window, granularity string) ([]DailyTokenP
 func (a *Analytics) hourlyTrend(window Window) ([]DailyTokenPoint, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if err := a.db.lockAggregate(ctx); err != nil {
+		return nil, err
+	}
+	defer func() { <-a.db.aggregateLoad }()
 
 	revision, err := a.db.historyRevision(ctx)
 	if err != nil {

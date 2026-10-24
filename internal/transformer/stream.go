@@ -391,6 +391,10 @@ func (h *StreamHandler) processSSELine(
 	}
 	*decodeErrors = 0
 	if chunk.Usage != nil {
+		// Like request accounting, retain an observed split when later totals omit it.
+		if reasoningTokensOf(chunk.Usage) == 0 {
+			chunk.Usage.CompletionThinkingTokens = reasoningTokensOf(*terminalUsage)
+		}
 		*terminalUsage = chunk.Usage
 		// Preserve reported usage even when the terminal event never arrives.
 		if uw, ok := w.(interface {

@@ -102,6 +102,10 @@ func (l *Latency) Snapshot(since time.Time) (*LatencySnapshot, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if err := l.db.lockAggregate(ctx); err != nil {
+		return nil, err
+	}
+	defer func() { <-l.db.aggregateLoad }()
 
 	revision, err := l.db.historyRevision(ctx)
 	if err != nil {

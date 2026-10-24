@@ -29,6 +29,10 @@ type Database struct {
 	// full history is analysed.
 	analyticsBaseline time.Time
 
+	// SQLite has one connection; queued aggregates must recheck the cache after
+	// the preceding load completes instead of repeating the same cold scan.
+	aggregateLoad chan struct{}
+
 	// summaries caches history summaries, keyed by the query that produced
 	// them, and is valid only while summaryRevision still matches the table.
 	// It lives here rather than on Requests because that type is built per HTTP
@@ -186,8 +190,9 @@ func Open(cfg Config) (*Database, error) {
 	}
 
 	database := &Database{
-		db:   db,
-		path: path,
+		db:            db,
+		path:          path,
+		aggregateLoad: make(chan struct{}, 1),
 	}
 
 	// Parse the baseline here so a malformed timestamp surfaces at startup

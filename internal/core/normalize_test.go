@@ -139,7 +139,7 @@ func TestReasoningSupportForAppliesConfigOverrides(t *testing.T) {
 	// Only the ladder is overridden; the rest of the table survives.
 	levels := []string{"low", "high"}
 	budget := false
-	override := ReasoningSupportFor(modelID, config.ModelConfig{
+	override := ReasoningSupportFor(config.ModelConfig{
 		ModelID:   modelID,
 		Reasoning: &config.ReasoningConfig{Levels: levels, Budget: &budget},
 	})
@@ -154,12 +154,12 @@ func TestReasoningSupportForAppliesConfigOverrides(t *testing.T) {
 	}
 
 	// No override means the built-in table, unchanged.
-	if got := ReasoningSupportFor(modelID, config.ModelConfig{ModelID: modelID}); len(got.Levels) != len(builtin.Levels) {
+	if got := ReasoningSupportFor(config.ModelConfig{ModelID: modelID}); len(got.Levels) != len(builtin.Levels) {
 		t.Errorf("no override changed the ladder: %v", got.Levels)
 	}
 
 	// An override can also teach the table about a model it has never seen.
-	unknown := ReasoningSupportFor("vendor/brand-new", config.ModelConfig{
+	unknown := ReasoningSupportFor(config.ModelConfig{
 		ModelID:   "vendor/brand-new",
 		Reasoning: &config.ReasoningConfig{Levels: []string{"low", "medium"}},
 	})
@@ -168,5 +168,44 @@ func TestReasoningSupportForAppliesConfigOverrides(t *testing.T) {
 	}
 	if got, ok := unknown.ClampLevel("max"); !ok || got != "medium" {
 		t.Errorf("ClampLevel(max) = %q,%v; want the nearest declared rung medium", got, ok)
+	}
+}
+
+// The platform decides the control, not the model alone.
+//
+// Measured 2026-10-26 with the same reasoning-heavy prompt, interleaved samples:
+// deepseek-v4.1-flash reaches max through the WorkBuddy gateway (reasoning
+// tokens max 462 against high's 305) while the same family through ClinePass
+// showed no separation at all. The forwarding path is the variable.
+//
+// ClinePass therefore declares no ladder rather than an invented one: returning
+// the family table would clamp a caller's "max" to "high" on a platform where
+// neither value was measured to change anything, discarding the caller's word
+// for a claim nobody measured.
+func TestPlatformDecidesTheControl(t *testing.T) {
+	// A provider with no opinion falls through to the family table.
+	deepseek := config.ModelConfig{Provider: "workbuddy", ModelID: "global:deepseek-v4.1-flash"}
+	if got := ReasoningSupportFor(deepseek); len(got.Levels) == 0 || !got.EffortDriven {
+		t.Fatalf("workbuddy deepseek lost its family entry: %+v", got)
+	}
+
+	// ClinePass overrides it, with no ladder of its own.
+	cline := config.ModelConfig{Provider: "cline-pass", ModelID: "cline-pass/kimi-k3"}
+	support := ReasoningSupportFor(cline)
+	if len(support.Levels) != 0 {
+		t.Errorf("cline-pass declared a ladder it never measured: %v", support.Levels)
+	}
+	if _, ok := support.ClampLevel("max"); ok {
+		t.Error("ClampLevel answered for a platform that declared no ladder")
+	}
+
+	// An operator can still declare one, and it then wins.
+	levels := []string{"low", "high"}
+	override := ReasoningSupportFor(config.ModelConfig{
+		Provider: "cline-pass", ModelID: "cline-pass/kimi-k3",
+		Reasoning: &config.ReasoningConfig{Levels: levels},
+	})
+	if got, ok := override.ClampLevel("max"); !ok || got != "high" {
+		t.Errorf("override ClampLevel(max) = %q,%v; want high", got, ok)
 	}
 }

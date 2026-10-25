@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/site"
 )
 
 // Reasoning control vocabulary.
@@ -35,6 +36,29 @@ func splitRealm(modelID string) (family, realm string) {
 		}
 	}
 	return name, ""
+}
+
+// platformReasoningSupport answers for platforms whose forwarding path decides
+// the control, regardless of what the underlying model accepts when called
+// directly.
+//
+// ClinePass is the measured case: it accepts both fields, answers 200, and
+// neither moves the reasoning-token count beyond the platform's own natural
+// variance (144-439 across four control samples). Saying "no levels, no budget"
+// is more honest than forwarding a control that does nothing - and it is what
+// lets an operator override it once a future version starts honouring one.
+func platformReasoningSupport(provider string) (ThinkingSupport, bool) {
+	switch site.Normalize(provider) {
+	case site.ClinePass:
+		// No ladder. Returning the family table here would clamp a caller's
+		// "max" to "high" on a platform where neither value was measured to
+		// change the outcome - it would discard the caller's word for a claim
+		// nobody measured. An empty capability makes ClampLevel decline, which
+		// means the level is forwarded as stated.
+		return ThinkingSupport{}, true
+	default:
+		return ThinkingSupport{}, false
+	}
 }
 
 // BudgetForEffort is the inverse of EffortFromBudget: the token budget that
@@ -128,7 +152,7 @@ func (s ThinkingSupport) ClampBudget(budget int) int {
 // because a missing entry forwards the client's own words while a wrong entry
 // overrides them.
 func ReasoningSupport(modelID string) ThinkingSupport {
-	return ReasoningSupportFor(modelID, config.ModelConfig{ModelID: modelID})
+	return ReasoningSupportFor(config.ModelConfig{ModelID: modelID})
 }
 
 // ReasoningSupportFor answers the same question, letting an operator's
@@ -139,8 +163,8 @@ func ReasoningSupport(modelID string) ThinkingSupport {
 // dropping them because the field was omitted would turn a correction into a
 // regression. The config is the more specific statement, so it wins wherever it
 // speaks.
-func ReasoningSupportFor(modelID string, model config.ModelConfig) ThinkingSupport {
-	support := builtinReasoningSupport(modelID)
+func ReasoningSupportFor(model config.ModelConfig) ThinkingSupport {
+	support := builtinReasoningSupport(model.Provider, model.ModelID)
 	if override := model.Reasoning; override != nil {
 		if len(override.Levels) > 0 {
 			support.Levels = override.Levels
@@ -167,8 +191,19 @@ func ReasoningSupportFor(modelID string, model config.ModelConfig) ThinkingSuppo
 	return support
 }
 
-func builtinReasoningSupport(modelID string) ThinkingSupport {
+func builtinReasoningSupport(provider, modelID string) ThinkingSupport {
 	family, realm := splitRealm(modelID)
+
+	// A platform can decide the control regardless of the model, because what
+	// the model accepts through that platform is not what it accepts directly.
+	// Measured 2026-10-26 with the same reasoning-heavy prompt, interleaved
+	// samples: deepseek-v4.1-flash reaches max through the WorkBuddy gateway
+	// (reasoning_effort max averaged 462 tokens against high's 305) while the
+	// same family through ClinePass showed no separation at all - the
+	// platform's forwarding path is the variable, not the model.
+	if capability, ok := platformReasoningSupport(provider); ok {
+		return capability
+	}
 
 	switch {
 	case strings.HasPrefix(family, "deepseek"):

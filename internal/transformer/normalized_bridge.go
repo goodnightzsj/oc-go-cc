@@ -131,7 +131,7 @@ func AnthropicToResponses(anthropicReq *types.MessageRequest, model config.Model
 // geminiThinkingBudget resolves the budget to send to Gemini, or nil when the
 // request said nothing about reasoning.
 func geminiThinking(req *core.NormalizedRequest, modelID string) *types.GeminiThinkingConfig {
-	support := core.ReasoningSupport(modelID)
+	support := core.ReasoningSupportFor(config.ModelConfig{ModelID: modelID})
 	// Gemini 3 and later take a discrete level; 2.5 and earlier take a token
 	// budget. Sending both is the conflict Gemini documents as a 400, so the
 	// capability decides which one this target gets.

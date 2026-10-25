@@ -380,7 +380,7 @@ func resolveThinkingAndEffort(
 			// unsupported value is an error. A model this proxy knows nothing
 			// about keeps the caller's own words.
 			effort := statedEffort
-			support := core.ReasoningSupportFor(model.ModelID, model)
+			support := core.ReasoningSupportFor(model)
 			if clamped, ok := support.ClampLevel(statedEffort); ok {
 				effort = clamped
 			}
@@ -416,7 +416,7 @@ func resolveThinkingAndEffort(
 		// max. The thinking block rides along because it carries the on/off
 		// switch - the same request with thinking disabled produced zero
 		// reasoning tokens.
-		support := core.ReasoningSupportFor(model.ModelID, model)
+		support := core.ReasoningSupportFor(model)
 		if allowEffortParam && (!allowThinkingParam || support.EffortDriven) {
 			if budget := parseBudgetTokens(anthropicReq.Thinking); budget > 0 {
 				derived := core.EffortFromBudget(budget)
@@ -440,7 +440,7 @@ func resolveThinkingAndEffort(
 		}
 		if allowEffortParam {
 			if !isThinkingDisabled(openaiReq.Thinking) || !isDeepSeek {
-				setReasoningEffort(openaiReq, model.ReasoningEffort)
+				setReasoningEffort(openaiReq, model)
 			}
 		}
 
@@ -451,7 +451,7 @@ func resolveThinkingAndEffort(
 		}
 		if allowEffortParam {
 			if !isThinkingDisabled(openaiReq.Thinking) || !isDeepSeek {
-				setReasoningEffort(openaiReq, model.ReasoningEffort)
+				setReasoningEffort(openaiReq, model)
 			}
 		}
 
@@ -461,7 +461,7 @@ func resolveThinkingAndEffort(
 			openaiReq.Thinking = json.RawMessage(`{"type":"enabled"}`)
 		}
 		if allowEffortParam {
-			setReasoningEffort(openaiReq, model.ReasoningEffort)
+			setReasoningEffort(openaiReq, model)
 		}
 
 	default:
@@ -552,7 +552,8 @@ func thinkingForUpstream(raw json.RawMessage, isDeepSeek bool) json.RawMessage {
 
 // setReasoningEffort sets reasoning_effort on the request, defaulting to
 // "high" when the config value is empty.
-func setReasoningEffort(openaiReq *types.ChatCompletionRequest, effort string) {
+func setReasoningEffort(openaiReq *types.ChatCompletionRequest, model config.ModelConfig) {
+	effort := model.ReasoningEffort
 	if effort == "" {
 		defaultEffort := "high"
 		openaiReq.ReasoningEffort = &defaultEffort
@@ -565,7 +566,7 @@ func setReasoningEffort(openaiReq *types.ChatCompletionRequest, effort string) {
 	if _, ok := core.NormalizeEffort(effort); !ok {
 		return
 	}
-	if clamped, ok := core.ReasoningSupport(openaiReq.Model).ClampLevel(effort); ok {
+	if clamped, ok := core.ReasoningSupportFor(model).ClampLevel(effort); ok {
 		effort = clamped
 	}
 	openaiReq.ReasoningEffort = &effort

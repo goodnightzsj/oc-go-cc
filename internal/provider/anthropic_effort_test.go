@@ -136,3 +136,25 @@ func TestRaiseMaxTokensAboveBudget(t *testing.T) {
 		})
 	}
 }
+
+// Extended thinking pins the sampling knobs: Anthropic accepts only
+// temperature 1 while thinking is on and answers 400 otherwise. The caller's
+// temperature is meaningless in that mode, so the field is removed rather than
+// rewritten - the model's defaults are what thinking wants.
+//
+// The DTO path has to be exercised directly because the raw pass-through path
+// rewrites the captured body instead.
+func TestThinkingEnabledDropsSamplingKnobs(t *testing.T) {
+	if !thinkingEnabled([]byte(`{"type":"enabled","budget_tokens":4096}`)) {
+		t.Error("enabled thinking was not detected")
+	}
+	if !thinkingEnabled([]byte(`{"type":"adaptive"}`)) {
+		t.Error("adaptive thinking was not detected")
+	}
+	if thinkingEnabled([]byte(`{"type":"disabled"}`)) {
+		t.Error("disabled thinking was treated as enabled")
+	}
+	if thinkingEnabled(nil) {
+		t.Error("a missing thinking block was treated as enabled")
+	}
+}

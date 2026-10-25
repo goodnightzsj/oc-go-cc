@@ -41,6 +41,16 @@ func anthropicPayload(ctx context.Context, req *types.MessageRequest, model conf
 	fields["model"], _ = json.Marshal(model.ModelID)
 	fields["stream"], _ = json.Marshal(stream)
 	fields["max_tokens"], _ = json.Marshal(req.MaxTokens)
+	// Extended thinking pins the sampling knobs: Anthropic accepts only
+	// temperature 1 (and top_p 0.95..1) while thinking is on, and answers 400
+	// otherwise. A caller's temperature is meaningless in that mode anyway -
+	// the point of thinking is that the model explores before answering - so
+	// the fields are removed rather than rewritten: dropping them lets the
+	// model's own defaults apply, which is exactly what thinking wants.
+	if thinkingEnabled(fields["thinking"]) {
+		delete(fields, "temperature")
+		delete(fields, "top_p")
+	}
 	// This is the one place the wire really is Anthropic, and the pass-through
 	// deliberately forwards everything else untouched. Effort is the exception:
 	// a Codex client's "none"/"minimal" are OpenAI rungs with no Anthropic
@@ -55,6 +65,23 @@ func anthropicPayload(ctx context.Context, req *types.MessageRequest, model conf
 		return nil, err
 	}
 	return raiseMaxTokensAboveBudget(encoded), nil
+}
+
+// thinkingEnabled reports whether a native thinking block asks the model to
+// think. "disabled" and a missing block both mean no.
+func thinkingEnabled(raw json.RawMessage) bool {
+	var thinking struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &thinking); err != nil {
+		return false
+	}
+	switch thinking.Type {
+	case "enabled", "adaptive":
+		return true
+	default:
+		return false
+	}
 }
 
 // raiseMaxTokensAboveBudget enforces the one relation Anthropic checks across

@@ -2348,6 +2348,7 @@ function clearOverviewUsage(loading = false) {
 
 function renderOverviewUsage(data, trend, latency) {
   const summary = data.summary || {};
+  trend = (trend || []).map(point => ({...point, provider: data.provider}));
   document.getElementById('overview-empty').hidden = summary.total_requests !== 0;
   document.getElementById('overview-insights').hidden = summary.total_requests === 0;
   const input = Number(summary.input_tokens || 0);
@@ -2365,7 +2366,7 @@ function renderOverviewUsage(data, trend, latency) {
     if (el) el.textContent = value;
   };
   set('m-total', fmt(summary.total_requests));
-  set('m-cost', fmtAggregateCost(summary));
+  set('m-cost', fmtAggregateCost(summary, data.provider));
   set('m-tokens', hasUsageTokens(summary) ? fmtTok(total) : '—');
   set('m-cache-hit', hasUsageTokens(summary) && prompt > 0 ? `${(cacheRead / prompt * 100).toFixed(1)}%` : '—');
   // A total alone says how much, not whether that is a lot. These subtitles
@@ -2395,7 +2396,7 @@ function renderOverviewUsage(data, trend, latency) {
     : '');
   set('m-cache-hit-note', summary.cache_read_tokens != null ? `${fmtTok(cacheRead)} ${currentLang === 'zh' ? '读取' : 'read'}` : '');
   set('m-cost-note', Number(summary.unknown_cost_requests || 0) > 0 ? costCoverageNote(summary) : today.est_cost_usd != null
-    ? `${currentLang === 'zh' ? '今日' : 'Today'} (UTC) ${fmtAggregateCost(today)} · ${t('data.retained')} ${fmtAggregateCost(retained)}`
+    ? `${currentLang === 'zh' ? '今日' : 'Today'} (UTC) ${fmtAggregateCost(today, data.provider)} · ${t('data.retained')} ${fmtAggregateCost(retained, data.provider)}`
     : t('analytics.currencyUSD'));
   set('m-throughput', lastMinute.total_requests != null ? `${fmt(lastMinute.total_requests)} RPM` : '—');
   set('m-throughput-note', hasUsageTokens(lastMinute) ? `${compactTotal(lastMinute)} TPM` : '');
@@ -2687,7 +2688,7 @@ async function refreshHistory() {
     }
     renderHistory();
     renderHistoryPager();
-    renderHistorySummary(summary);
+    renderHistorySummary({...summary, provider: params.get('provider') || ''});
     if (errorEl) errorEl.hidden = true;
   } catch(e) {
     if (seq !== historyLoadSeq) return;
@@ -2742,12 +2743,12 @@ function renderHistorySummary(summary) {
   ].join(' · '));
   set('history-summary-cost', fmtAggregateCost(summary));
   set('history-summary-cost-note', costCoverageNote(summary));
-  renderCompactBreakdown('history-model-breakdown', summary.models || []);
-  renderCompactBreakdown('history-provider-breakdown', summary.providers || [], 'provider');
-  renderCompactBreakdown('history-scenario-breakdown', summary.scenarios || []);
+  renderCompactBreakdown('history-model-breakdown', summary.models || [], 'model', summary.provider);
+  renderCompactBreakdown('history-provider-breakdown', summary.providers || [], 'provider', summary.provider);
+  renderCompactBreakdown('history-scenario-breakdown', summary.scenarios || [], 'scenario', summary.provider);
 }
 
-function renderCompactBreakdown(id, items, dimension) {
+function renderCompactBreakdown(id, items, dimension, provider) {
   const root = document.getElementById(id);
   if (!root) return;
   const metricKey = historyBreakdownMetric === 'cost' ? 'cost_usd' : historyBreakdownMetric;
@@ -2770,7 +2771,7 @@ function renderCompactBreakdown(id, items, dimension) {
       <span class="compact-breakdown-name">${escapeHtml(label)}</span>
       <span class="compact-breakdown-stat"><strong>${Number(item.requests || 0).toLocaleString()}</strong><small>${t('analytics.requests')}</small></span>
       <span class="compact-breakdown-stat"><strong>${fmtTok(Number(item.tokens || 0))}</strong><small>Token</small></span>
-      <span class="compact-breakdown-stat" title="${escapeHtml(costCoverageNote(item))}"><strong>${fmtAggregateCost(item)}</strong><small>${t('analytics.cost')}</small></span>
+      <span class="compact-breakdown-stat" title="${escapeHtml(costCoverageNote(item))}"><strong>${fmtAggregateCost(item, dimension === 'provider' ? item.name : item.provider || provider)}</strong><small>${t('analytics.cost')}</small></span>
     </div>`;
   }).join('');
 }
@@ -3634,12 +3635,12 @@ function fmtRelativeTime(iso) {
 }
 
 // Aggregate amounts are known subtotals, not zero-cost promises for unpriced rows.
-function fmtAggregateCost(item) {
+function fmtAggregateCost(item, provider = item?.provider) {
   const unknown = Number(item?.unknown_cost_requests || 0);
   const requests = Number(item?.total_requests ?? item?.requests ?? 0);
   if (unknown > 0 && unknown >= requests) return '—';
   const value = fmtCost(item?.cost_usd ?? item?.est_cost_usd);
-  return unknown > 0 ? t('analytics.knownSubtotal').replace('{value}', value) : value;
+  return unknown > 0 && provider !== 'workbuddy' ? t('analytics.knownSubtotal').replace('{value}', value) : value;
 }
 
 function costCoverageNote(item) {
@@ -6386,7 +6387,7 @@ const AnalyticsModule = {
         throw new Error(t('data.invalid'));
       }
       this.currentView = summary;
-      this.currentTrend = this.fillTrend(trend.trend || [], params);
+      this.currentTrend = this.fillTrend(trend.trend || [], params).map(point => ({...point, provider: summary.provider}));
       document.getElementById('analytics-empty').hidden = summary.summary.total_requests !== 0;
       document.getElementById('analytics-insights').hidden = summary.summary.total_requests === 0;
       this.renderKPIs(summary);
@@ -6455,7 +6456,7 @@ const AnalyticsModule = {
     // arrived as prompt (fresh input + cache read + cache creation). Dividing by
     // total tokens instead would fold output in and drift with response length.
     const promptTok = (s.input_tokens||0) + (s.cache_read_tokens||0) + (s.cache_creation_tokens||0);
-    document.getElementById('kpi-cost').textContent = fmtAggregateCost(s);
+    document.getElementById('kpi-cost').textContent = fmtAggregateCost(s, data.provider);
     document.getElementById('kpi-cost-note').textContent = costCoverageNote(s);
     document.getElementById('kpi-cache-read').textContent = tokenValue(s.cache_read_tokens);
     document.getElementById('kpi-cache-rate').textContent = hasUsageTokens(s) && promptTok > 0
@@ -7100,7 +7101,7 @@ const QuotaModule = {
     const s = data.summary;
     this.setText('quota-local-requests', fmt(s.total_requests));
     this.setText('quota-local-tokens', hasUsageTokens(s) ? fmtTok(totalUsageTokens(s)) : '—');
-    this.setText('quota-local-cost', fmtAggregateCost(s));
+    this.setText('quota-local-cost', fmtAggregateCost(s, data.provider));
     this.setText('quota-local-unknown', fmt(s.unknown_cost_requests));
     this.setText('quota-local-cost-note', costCoverageNote(s));
     AnalyticsModule.renderModelTable(data.models || [], 'quota-local-model-tbody');

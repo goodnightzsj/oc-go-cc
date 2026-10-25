@@ -133,7 +133,7 @@ vm.runInContext(` + "`" + `
   }
   assert.ok(document.getElementById('provider-filter').listeners.change?.includes(scheduleHistoryRefresh), 'the themed platform picker must refresh history on change');
   assert.equal(fmtAggregateCost({requests: 2, unknown_cost_requests: 2, cost_usd: 0}), '—');
-  assert.equal(fmtAggregateCost({requests: 2, unknown_cost_requests: 1, cost_usd: 0.25}), 'Known $0.25');
+  assert.equal(fmtAggregateCost({requests: 2, unknown_cost_requests: 1, cost_usd: 0.25}), '$0.25');
   assert.equal(fmtAggregateCost({requests: 1, unknown_cost_requests: 0, cost_usd: 0}), '$0.00');
   assert.ok(costCoverageNote({unknown_cost_requests: 3}).includes('3'));
   assert.equal(utcDateInputValue(new Date('2026-09-10T00:30:00+08:00')), '2026-09-09');

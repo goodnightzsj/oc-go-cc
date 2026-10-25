@@ -63,7 +63,7 @@ async function checks() {
   for(const lang of ['en','zh']) {
     currentLang = lang;
     const cost = fmtAggregateCost({requests:2,unknown_cost_requests:1,cost_usd:0.25});
-    assert.equal(cost,t('analytics.knownSubtotal').replace('{value}',fmtCost(0.25)));
+    assert.equal(cost,fmtCost(0.25));
     assert.ok(costCoverageNote({unknown_cost_requests:1}).includes('1'),'unknown records remain explicit beside a known subtotal');
     for(const key of ['setting.changeCount','setting.noChanges','setting.invalidChanges','quota.openSettings','perf.sampleHint','fallback.moveUp','fallback.moveDown','fallback.remove','commandcode.accountScope']) assert.notEqual(t(key),key);
   }

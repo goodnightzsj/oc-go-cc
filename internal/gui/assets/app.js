@@ -177,7 +177,6 @@ const TRANSLATIONS = {
     'analytics.cost': 'Cost',
     'analytics.currencyUSD': 'USD',
     'analytics.unknownCosts': '{n} requests with unknown cost; totals include known costs only',
-    'analytics.knownSubtotal': 'Known {value}',
     'analytics.otherSeries': 'Other',
     'analytics.seriesTotal': 'Total',
     'analytics.utc': 'Analytics dates and time buckets use UTC',
@@ -811,7 +810,6 @@ const TRANSLATIONS = {
     'analytics.cost': '费用',
     'analytics.currencyUSD': '美元（USD）',
     'analytics.unknownCosts': '{n} 条请求费用未知；合计只包含已知费用',
-    'analytics.knownSubtotal': '已知 {value}',
     'analytics.otherSeries': '其他',
     'analytics.seriesTotal': '合计',
     'analytics.utc': '用量分析的日期与时间桶统一使用 UTC',
@@ -2366,7 +2364,7 @@ function renderOverviewUsage(data, trend, latency) {
     if (el) el.textContent = value;
   };
   set('m-total', fmt(summary.total_requests));
-  set('m-cost', fmtAggregateCost(summary, data.provider));
+  set('m-cost', fmtAggregateCost(summary));
   set('m-tokens', hasUsageTokens(summary) ? fmtTok(total) : '—');
   set('m-cache-hit', hasUsageTokens(summary) && prompt > 0 ? `${(cacheRead / prompt * 100).toFixed(1)}%` : '—');
   // A total alone says how much, not whether that is a lot. These subtitles
@@ -2396,13 +2394,13 @@ function renderOverviewUsage(data, trend, latency) {
     : '');
   set('m-cache-hit-note', summary.cache_read_tokens != null ? `${fmtTok(cacheRead)} ${currentLang === 'zh' ? '读取' : 'read'}` : '');
   set('m-cost-note', Number(summary.unknown_cost_requests || 0) > 0 ? costCoverageNote(summary) : today.est_cost_usd != null
-    ? `${currentLang === 'zh' ? '今日' : 'Today'} (UTC) ${fmtAggregateCost(today, data.provider)} · ${t('data.retained')} ${fmtAggregateCost(retained, data.provider)}`
+    ? `${currentLang === 'zh' ? '今日' : 'Today'} (UTC) ${fmtAggregateCost(today)} · ${t('data.retained')} ${fmtAggregateCost(retained)}`
     : t('analytics.currencyUSD'));
   set('m-throughput', lastMinute.total_requests != null ? `${fmt(lastMinute.total_requests)} RPM` : '—');
   set('m-throughput-note', hasUsageTokens(lastMinute) ? `${compactTotal(lastMinute)} TPM` : '');
   const known = Number(summary.known_requests || 0);
   set('m-success', known > 0 && summary.success_rate != null ? `${(Number(summary.success_rate) * 100).toFixed(1)}%` : '—');
-  set('m-success-note', t('analytics.knownRecords').replace('{n}', known.toLocaleString()));
+  set('m-success-note', t('analytics.knownRecords').replace('{n}', known.toLocaleString('en-US')));
   // Says when the figures were taken and how often they refresh, so a reader
   // can tell a stale panel from a quiet system. The interval is the same 3s the
   // overview poll actually runs at, not a rounded-down claim.
@@ -2730,7 +2728,7 @@ function renderHistorySummary(summary) {
     const el = document.getElementById(id);
     if (el) el.textContent = value;
   };
-  set('history-summary-requests', Number(summary.total_requests || 0).toLocaleString());
+  set('history-summary-requests', Number(summary.total_requests || 0).toLocaleString('en-US'));
   set('history-summary-success', Number(summary.success_rows || 0) > 0
     ? `${(Number(summary.success_rate || 0) * 100).toFixed(1)}%`
     : '—');
@@ -2743,12 +2741,12 @@ function renderHistorySummary(summary) {
   ].join(' · '));
   set('history-summary-cost', fmtAggregateCost(summary));
   set('history-summary-cost-note', costCoverageNote(summary));
-  renderCompactBreakdown('history-model-breakdown', summary.models || [], 'model', summary.provider);
-  renderCompactBreakdown('history-provider-breakdown', summary.providers || [], 'provider', summary.provider);
-  renderCompactBreakdown('history-scenario-breakdown', summary.scenarios || [], 'scenario', summary.provider);
+  renderCompactBreakdown('history-model-breakdown', summary.models || [], 'model');
+  renderCompactBreakdown('history-provider-breakdown', summary.providers || [], 'provider');
+  renderCompactBreakdown('history-scenario-breakdown', summary.scenarios || [], 'scenario');
 }
 
-function renderCompactBreakdown(id, items, dimension, provider) {
+function renderCompactBreakdown(id, items, dimension) {
   const root = document.getElementById(id);
   if (!root) return;
   const metricKey = historyBreakdownMetric === 'cost' ? 'cost_usd' : historyBreakdownMetric;
@@ -2769,9 +2767,9 @@ function renderCompactBreakdown(id, items, dimension, provider) {
     <div class="compact-breakdown-row">
       <i class="compact-breakdown-fill" style="width:${Math.max(value > 0 ? 2 : 0, value / total * 100).toFixed(1)}%"></i>
       <span class="compact-breakdown-name">${escapeHtml(label)}</span>
-      <span class="compact-breakdown-stat"><strong>${Number(item.requests || 0).toLocaleString()}</strong><small>${t('analytics.requests')}</small></span>
+      <span class="compact-breakdown-stat"><strong>${Number(item.requests || 0).toLocaleString('en-US')}</strong><small>${t('analytics.requests')}</small></span>
       <span class="compact-breakdown-stat"><strong>${fmtTok(Number(item.tokens || 0))}</strong><small>Token</small></span>
-      <span class="compact-breakdown-stat" title="${escapeHtml(costCoverageNote(item))}"><strong>${fmtAggregateCost(item, dimension === 'provider' ? item.name : item.provider || provider)}</strong><small>${t('analytics.cost')}</small></span>
+      <span class="compact-breakdown-stat" title="${escapeHtml(costCoverageNote(item))}"><strong>${fmtAggregateCost(item)}</strong><small>${t('analytics.cost')}</small></span>
     </div>`;
   }).join('');
 }
@@ -2866,7 +2864,7 @@ function renderHistory() {
     // are the removed columns' values - prompt_tokens is raw input plus cache,
     // so calling it "input" here would name it after a different number.
     const tokenSplit = detailsKnown
-      ? `${Number(h.prompt_tokens || 0).toLocaleString()} ${t('th.promptTokens')} / ${Number(h.output_tokens || 0).toLocaleString()} ${t('th.outputTokens')}`
+      ? `${Number(h.prompt_tokens || 0).toLocaleString('en-US')} ${t('th.promptTokens')} / ${Number(h.output_tokens || 0).toLocaleString('en-US')} ${t('th.outputTokens')}`
       : t('detail.unknown');
     const pm = effectivePeakMultiplier(h);
     const peakMark = pm > 1
@@ -2898,7 +2896,7 @@ function renderHistory() {
       <td><div class="history-model-cell"><strong title="${escapeHtml(servedModel)}">${escapeHtml(servedModel) || '—'}</strong><small>${escapeHtml(providerLabel(h.provider))}${channelMark}</small></div></td>
       <td>${h.reasoning_effort ? `<span class="badge badge-effort" title="${escapeHtml(t('th.effortHint'))}">${escapeHtml(h.reasoning_effort)}</span>` : '—'}</td>
       <td>${h.key_hint ? `<code class="history-key-hint" title="${escapeHtml(t('th.keyHintTooltip'))}">${escapeHtml(h.key_hint)}</code>` : '—'}</td>
-      <td><button type="button" class="history-token-trigger" data-token-id="${escapeHtml(rowId)}" aria-label="${t('detail.title')}">${totalTokens.toLocaleString()}</button><br><small>${tokenSplit}</small></td>
+      <td><button type="button" class="history-token-trigger" data-token-id="${escapeHtml(rowId)}" aria-label="${t('detail.title')}">${totalTokens.toLocaleString('en-US')}</button><br><small>${tokenSplit}</small></td>
       <td>${cost}<br><small>${costSourceLabel(h.cost_source)}</small></td>
       <td>${h.first_byte_ms ? fmtDuration(h.first_byte_ms) : '—'}</td>
       <td>${detailsKnown ? gradeDuration(h, fmtDuration(h.duration_ms)) : '—'}</td>
@@ -2948,13 +2946,13 @@ function bindHistoryTokenTooltips(root) {
       const total = prompt + Number(record.output_tokens || 0);
       const rate = prompt > 0 ? Number(record.cache_read_tokens || 0) / prompt * 100 : 0;
       tip.innerHTML = chartTooltipMarkup(currentLang === 'zh' ? 'Token 明细' : 'Token details', [
-        {label:t('detail.inputTokens'),value:Number(record.input_tokens||0).toLocaleString(),color:'#818cf8'},
-        {label:t('detail.cacheRead'),value:Number(record.cache_read_tokens||0).toLocaleString(),color:'#fbbf24'},
-        {label:t('detail.cacheCreation'),value:Number(record.cache_creation_tokens||0).toLocaleString(),color:'#fb7185'},
-        {label:t('detail.outputTokens'),value:Number(record.output_tokens||0).toLocaleString(),color:'#34d399'},
+        {label:t('detail.inputTokens'),value:Number(record.input_tokens||0).toLocaleString('en-US'),color:'#818cf8'},
+        {label:t('detail.cacheRead'),value:Number(record.cache_read_tokens||0).toLocaleString('en-US'),color:'#fbbf24'},
+        {label:t('detail.cacheCreation'),value:Number(record.cache_creation_tokens||0).toLocaleString('en-US'),color:'#fb7185'},
+        {label:t('detail.outputTokens'),value:Number(record.output_tokens||0).toLocaleString('en-US'),color:'#34d399'},
       ], [
         {label:t('analytics.cacheHitShort'),value:prompt>0?`${rate.toFixed(1)}%`:'—'},
-        {label:t('analytics.totalTokens'),value:total.toLocaleString()},
+        {label:t('analytics.totalTokens'),value:total.toLocaleString('en-US')},
       ]);
       tip.style.display = 'block';
       const rect = trigger.getBoundingClientRect();
@@ -3133,9 +3131,9 @@ const CatalogModule = {
         .sort((a, b) => a.id.localeCompare(b.id))
         .map(m => {
           const badges = [];
-          if (m.context_window) badges.push(`${Math.round(m.context_window / 1000)}K ctx`);
-          if (m.max_output) badges.push(`${Math.round(m.max_output / 1000)}K out`);
-          if (m.input_per_m || m.output_per_m) badges.push(`$${m.input_per_m} / $${m.output_per_m}`);
+          if (m.context_window) badges.push(`${fmtCompactTokens(m.context_window)} ctx`);
+          if (m.max_output) badges.push(`${fmtCompactTokens(m.max_output)} out`);
+          if (m.input_per_m || m.output_per_m) badges.push(`$${fmtDecimal(m.input_per_m)} / $${fmtDecimal(m.output_per_m)}`);
           if (m.tool_call) badges.push('tools');
           if (m.vision) badges.push('vision');
           if (m.reasoning) badges.push('reasoning');
@@ -3467,7 +3465,11 @@ function viewProviderHistory(provider) {
   syncViewState();
 }
 
-function fmt(n) { return n != null ? Number(n).toLocaleString() : '—'; }
+function fmt(n) { return n != null ? Number(n).toLocaleString('en-US') : '—'; }
+// Credits and unit prices can be much smaller than the generic number's three decimals.
+function fmtDecimal(n) {
+  return Number.isFinite(n) ? n.toLocaleString('en-US', {maximumSignificantDigits: 10}) : '—';
+}
 function fmtTok(n) {
   const value = Number(n || 0);
   if (value >= 1_000_000_000_000) return (value / 1_000_000_000_000).toFixed(1) + 'T';
@@ -3519,9 +3521,10 @@ function fmtCost(v) {
   const n = Number(v);
   if (n === 0) return '$0.00';
   const abs = Math.abs(n);
+  if (abs < 0.000000001) return '$' + fmtDecimal(n);
   if (abs < 0.000001) return '$' + n.toFixed(9);
   if (abs < 0.01) return '$' + n.toFixed(6);
-  return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 });
 }
 
 // A per-request average is a derived figure, not a bill, so it is rounded to a
@@ -3532,6 +3535,7 @@ function fmtAvgCost(v) {
   const n = Number(v);
   if (n === 0) return '$0.00';
   const abs = Math.abs(n);
+  if (abs < 0.00005) return fmtCost(n);
   if (abs < 0.001) return '$' + n.toFixed(4);
   if (abs < 0.01) return '$' + n.toFixed(3);
   return '$' + n.toFixed(2);
@@ -3556,7 +3560,7 @@ function fmtGenerationThroughput(value) {
 
 function generationThroughputHint(record, average) {
   const parts = [t('analytics.generationThroughputHint')];
-  if (record.generation_samples != null) parts.push(t('analytics.generationSamples').replace('{n}', Number(record.generation_samples).toLocaleString()));
+  if (record.generation_samples != null) parts.push(t('analytics.generationSamples').replace('{n}', Number(record.generation_samples).toLocaleString('en-US')));
   parts.push(t('analytics.throughput') + ': ' + (average > 0 ? fmtGenerationThroughput(average) : '—'));
   return parts.join('\n');
 }
@@ -3635,17 +3639,16 @@ function fmtRelativeTime(iso) {
 }
 
 // Aggregate amounts are known subtotals, not zero-cost promises for unpriced rows.
-function fmtAggregateCost(item, provider = item?.provider) {
+function fmtAggregateCost(item) {
   const unknown = Number(item?.unknown_cost_requests || 0);
   const requests = Number(item?.total_requests ?? item?.requests ?? 0);
   if (unknown > 0 && unknown >= requests) return '—';
-  const value = fmtCost(item?.cost_usd ?? item?.est_cost_usd);
-  return unknown > 0 && provider !== 'workbuddy' ? t('analytics.knownSubtotal').replace('{value}', value) : value;
+  return fmtCost(item?.cost_usd ?? item?.est_cost_usd);
 }
 
 function costCoverageNote(item) {
   const unknown = Number(item?.unknown_cost_requests || 0);
-  return unknown > 0 ? t('analytics.unknownCosts').replace('{n}', unknown.toLocaleString()) : t('analytics.currencyUSD');
+  return unknown > 0 ? t('analytics.unknownCosts').replace('{n}', unknown.toLocaleString('en-US')) : t('analytics.currencyUSD');
 }
 
 function chartTooltipMarkup(title, rows, footer) {
@@ -3681,7 +3684,7 @@ const TOOLTIP_MAX_SERIES = 8;
 // put "1,200" beside "800" for the same quantity.
 function tooltipSeries(rows, options) {
   const opts = options || {};
-  const format = opts.format || (v => v.toLocaleString());
+  const format = opts.format || (v => v.toLocaleString('en-US'));
   const numeric = (rows || []).map(row => ({...row, n: Number(row.n ?? row.value ?? 0)}));
   const sorted = numeric.slice().sort((a, b) => b.n - a.n);
   const shown = sorted.slice(0, TOOLTIP_MAX_SERIES).map(row => ({...row, value: format(row.n)}));
@@ -3848,7 +3851,7 @@ function fmtDate(iso) {
 
 function fmtDuration(ms) {
   if (!ms && ms !== 0) return '—';
-  if (ms < 1000) return ms + ' ms';
+  if (ms < 1000) return fmt(ms) + ' ms';
   return (ms / 1000).toFixed(1) + ' s';
 }
 
@@ -4824,7 +4827,7 @@ let modalReturnFocus = null;
 
 function showHistoryDetail(record) {
   modal.querySelector('.modal-footer')?.remove();
-  const tokenValue = value => value != null ? Number(value).toLocaleString() : '—';
+  const tokenValue = value => value != null ? Number(value).toLocaleString('en-US') : '—';
   const detailsKnown = historyHasDetails(record);
   // Keep the legacy whole-request rate for diagnosis, not as a source-rate fallback.
   const tpsOfRow = detailsKnown && record.success ? requestThroughput(record) : null;
@@ -5529,7 +5532,7 @@ const FallbackModule = {
     // model, and conflating the two would make a platform with no price table
     // look like the cheapest option on the page.
     const price = hasRate
-      ? `$${trimNumber(model.input_per_m)} / $${trimNumber(model.output_per_m)}`
+      ? `$${fmtDecimal(model.input_per_m)} / $${fmtDecimal(model.output_per_m)}`
       : '';
     const tier = this.priceTier(model);
     const badges = [];
@@ -5883,12 +5886,6 @@ function fmtCompactTokens(n) {
   return String(n);
 }
 
-// trimNumber drops trailing zeros so a rate reads $0.15, not $0.1500.
-function trimNumber(v) {
-  if (!Number.isFinite(v)) return '0';
-  return String(Number(v.toFixed(4)));
-}
-
 const TestModule = {
   testModal: null,
   testPrompt: null,
@@ -6070,7 +6067,7 @@ const TestModule = {
       });
 
       const latency = Math.round(performance.now() - start);
-      if (this.testLatency) this.testLatency.textContent = latency + ' ms';
+      if (this.testLatency) this.testLatency.textContent = fmtDuration(latency);
 
       if (!r.ok) {
         this.testResponse.innerHTML = '';
@@ -6097,7 +6094,7 @@ const TestModule = {
 
       const usage = this.extractUsage(text);
       if (usage && this.testTokens) {
-        this.testTokens.textContent = `${usage.input || 0} in / ${usage.output || 0} out`;
+        this.testTokens.textContent = `${fmt(usage.input || 0)} in / ${fmt(usage.output || 0)} out`;
       }
     } catch (e) {
       const pre = document.createElement('pre');
@@ -6441,14 +6438,13 @@ const AnalyticsModule = {
 
   renderKPIs(data) {
     const s = data.summary || {};
-    const fmt = (n) => n != null ? Number(n).toLocaleString() : '—';
     const tokenValue = n => n != null ? fmtTok(n) : '—';
     document.getElementById('kpi-requests').textContent = fmt(s.total_requests);
     // Total tokens = input (non-cached new) + output + cache (read+creation).
     // This matches the billing structure and avoids underreporting when a large
     // fraction of input is served from cache at lower cost.
     document.getElementById('kpi-tokens').textContent = hasUsageTokens(s) ? fmtTok(totalUsageTokens(s)) : '—';
-    document.getElementById('kpi-tokens-note').textContent = t('analytics.knownRecords').replace('{n}', Number(s.known_requests || 0).toLocaleString());
+    document.getElementById('kpi-tokens-note').textContent = t('analytics.knownRecords').replace('{n}', Number(s.known_requests || 0).toLocaleString('en-US'));
     document.getElementById('kpi-input').textContent = tokenValue(s.input_tokens);
     document.getElementById('kpi-output').textContent = tokenValue(s.output_tokens);
 
@@ -6456,7 +6452,7 @@ const AnalyticsModule = {
     // arrived as prompt (fresh input + cache read + cache creation). Dividing by
     // total tokens instead would fold output in and drift with response length.
     const promptTok = (s.input_tokens||0) + (s.cache_read_tokens||0) + (s.cache_creation_tokens||0);
-    document.getElementById('kpi-cost').textContent = fmtAggregateCost(s, data.provider);
+    document.getElementById('kpi-cost').textContent = fmtAggregateCost(s);
     document.getElementById('kpi-cost-note').textContent = costCoverageNote(s);
     document.getElementById('kpi-cache-read').textContent = tokenValue(s.cache_read_tokens);
     document.getElementById('kpi-cache-rate').textContent = hasUsageTokens(s) && promptTok > 0
@@ -6504,7 +6500,7 @@ const AnalyticsModule = {
       const cost = costs[index];
       const pct = max > 0 ? Math.max(cost > 0 ? 3 : 0, cost / max * 100) : 0;
       const label = String(point.date || '').slice(5);
-      return `<div class="daily-bar${cost > 0 ? '' : ' is-empty'}" title="${this.escapeHtml(this.trendLabel(point.date))}: ${this.escapeHtml(fmtAggregateCost(point))}">
+      return `<div class="daily-bar${cost > 0 ? '' : ' is-empty'}" title="${this.escapeHtml(this.trendLabel(point.date))}: ${this.escapeHtml(fmtAggregateCost(point))} · ${this.escapeHtml(costCoverageNote(point))}">
         <span class="daily-bar-value">${cost > 0 ? this.escapeHtml(fmtCost(cost)) : ''}</span>
         <span class="daily-bar-fill" style="height:${pct.toFixed(1)}%"></span>
         <span class="daily-bar-label">${this.escapeHtml(label)}</span>
@@ -6582,7 +6578,7 @@ const AnalyticsModule = {
       const meta = [];
       if (latency > 0) meta.push(`${t('analytics.avgLatency')} ${fmtDuration(latency)}`);
       meta.push(fmtGenerationThroughput(item.generation_tokens_per_second));
-      meta.push(`${Number(item.requests || 0).toLocaleString()} ${t('analytics.requests')}`);
+      meta.push(`${Number(item.requests || 0).toLocaleString('en-US')} ${t('analytics.requests')}`);
       // Fallback rate is the share of answered requests the primary model did
       // not serve. It is computed and stored server-side; showing it here is
       // what makes a rising number visible as a platform degrading rather than
@@ -6621,7 +6617,7 @@ const AnalyticsModule = {
     const total = normalized.reduce((sum, item) => sum + Number(item[valueKey] || 0), 0) || 1;
     const incompleteCost = valueKey === 'cost_usd' && normalized.some(item => Number(item.unknown_cost_requests || 0) > 0);
     const formatValue = value => valueKey === 'cost_usd' ? fmtCost(value)
-      : valueKey === 'requests' ? Number(value || 0).toLocaleString() : fmtTok(value);
+      : valueKey === 'requests' ? Number(value || 0).toLocaleString('en-US') : fmtTok(value);
     // Models are capped at the same depth the history tab's breakdown uses, so
     // the same figure is ranked the same way in both places. The cap is what
     // bounds this panel: a scrollbar would be pointless here, since the rows it
@@ -6643,7 +6639,7 @@ const AnalyticsModule = {
         : item.provider ? `${name} (${providerLabel(item.provider)})` : name;
       const value = Number(item[valueKey] || 0);
       const share = value / total * 100;
-      const meta = `${Number(item.requests || 0).toLocaleString()} ${t('analytics.requests')} · ${fmtTok(item.total_tokens)} Token · ${fmtAggregateCost(item)}`;
+      const meta = `${Number(item.requests || 0).toLocaleString('en-US')} ${t('analytics.requests')} · ${fmtTok(item.total_tokens)} Token · ${fmtAggregateCost(item)}`;
       return `<div class="analytics-distribution-row" data-provider="${this.escapeHtml(item.provider || '')}">
         <div class="analytics-distribution-label"><span title="${this.escapeHtml(label)}">${this.escapeHtml(label)}</span><strong>${valueKey === 'cost_usd' ? fmtAggregateCost(item) : formatValue(value)}</strong></div>
         <div class="analytics-distribution-track"><span style="width:${Math.max(value > 0 ? 2 : 0, value / max * 100).toFixed(1)}%;--distribution-color:${providerColor(item.provider)}"></span></div>
@@ -6797,9 +6793,10 @@ const AnalyticsModule = {
       // count can run past what a tooltip should list.
       const shaped = tooltipSeries(
         visible.map(item => ({label:item.label, n:Number(point[item.key]||0), color:item.color})),
-        {otherLabel: t('analytics.otherSeries'), totalLabel: t('analytics.seriesTotal'), format: v => v.toLocaleString()});
-      return chartTooltipMarkup(this.trendLabel(point.date), shaped.rows,
-        shaped.footer.concat([{label:t('analytics.cost'),value:fmtAggregateCost(point)}]));
+        {otherLabel: t('analytics.otherSeries'), totalLabel: t('analytics.seriesTotal'), format: v => v.toLocaleString('en-US')});
+      const footer = shaped.footer.concat([{label:t('analytics.cost'),value:fmtAggregateCost(point)}]);
+      if (point.unknown_cost_requests > 0) footer.push({label:costCoverageNote(point),value:''});
+      return chartTooltipMarkup(this.trendLabel(point.date), shaped.rows, footer);
       },
     });
   },
@@ -6848,16 +6845,17 @@ const AnalyticsModule = {
       contentForIndex: index => {
       const point=points[index];
       const footer = [
-        {label:t('analytics.requests'),value:Number(point.requests||0).toLocaleString()},
+        {label:t('analytics.requests'),value:Number(point.requests||0).toLocaleString('en-US')},
         {label:t('analytics.cost'),value:fmtAggregateCost(point)},
       ];
+      if (point.unknown_cost_requests > 0) footer.push({label:costCoverageNote(point),value:''});
       if (showRate) footer.unshift({label:t('analytics.cacheHitShort'),value:`${rate(point).toFixed(1)}%`});
       // Sorted and totalled for the same reason as the requests chart. Only
       // four token classes exist, so nothing collapses here - the cap is far
       // above the series count on purpose.
       const shaped = tooltipSeries(
         visibleTokens.map(item=>({label:item.label,n:Number(point[item.key]||0),color:item.color})),
-        {otherLabel: t('analytics.otherSeries'), totalLabel: t('analytics.seriesTotal'), format: v => v.toLocaleString()});
+        {otherLabel: t('analytics.otherSeries'), totalLabel: t('analytics.seriesTotal'), format: v => v.toLocaleString('en-US')});
       return chartTooltipMarkup(this.trendLabel(point.date), shaped.rows, shaped.footer.concat(footer));
       },
     });
@@ -6866,7 +6864,7 @@ const AnalyticsModule = {
   renderPeriodTable(points) {
     const body=document.getElementById('analytics-period-tbody');
     if (!body) return;
-    body.innerHTML=points.map(point=>`<tr><td>${this.escapeHtml(this.trendLabel(point.date))}</td><td>${Number(point.requests||0).toLocaleString()}</td><td>${Number(point.known_requests||0)>0?Number(point.error_requests||0).toLocaleString():'—'}</td><td>${Number(point.input_tokens||0).toLocaleString()}</td><td>${Number(point.output_tokens||0).toLocaleString()}</td><td>${Number(point.cache_read_tokens||0).toLocaleString()}</td><td>${Number(point.cache_creation_tokens||0).toLocaleString()}</td><td><strong>${totalUsageTokens(point).toLocaleString()}</strong></td><td title="${this.escapeHtml(costCoverageNote(point))}">${fmtAggregateCost(point)}</td></tr>`).join('');
+    body.innerHTML=points.map(point=>`<tr><td>${this.escapeHtml(this.trendLabel(point.date))}</td><td>${Number(point.requests||0).toLocaleString('en-US')}</td><td>${Number(point.known_requests||0)>0?Number(point.error_requests||0).toLocaleString('en-US'):'—'}</td><td>${Number(point.input_tokens||0).toLocaleString('en-US')}</td><td>${Number(point.output_tokens||0).toLocaleString('en-US')}</td><td>${Number(point.cache_read_tokens||0).toLocaleString('en-US')}</td><td>${Number(point.cache_creation_tokens||0).toLocaleString('en-US')}</td><td><strong>${totalUsageTokens(point).toLocaleString('en-US')}</strong></td><td title="${this.escapeHtml(costCoverageNote(point))}">${fmtAggregateCost(point)}</td></tr>`).join('');
     const count=document.getElementById('analytics-period-count');
     if (count) count.textContent=`${points.length} ${this.granularity==='hour'?t('analytics.hour'):t('analytics.day')}`;
   },
@@ -6878,7 +6876,7 @@ const AnalyticsModule = {
       const prompt=Number(item.input_tokens||0)+Number(item.cache_read_tokens||0)+Number(item.cache_creation_tokens||0);
       const rate=prompt>0?Number(item.cache_read_tokens||0)/prompt*100:0;
       const tps=fmtGenerationThroughput(item.generation_tokens_per_second);
-      return `<tr data-provider="${this.escapeHtml(item.provider || '')}"><td><code title="${this.escapeHtml(item.model || '')}">${this.escapeHtml(item.model||t('detail.unknown'))}</code><br><small>${this.escapeHtml(providerLabel(item.provider))}</small></td><td>${Number(item.requests||0).toLocaleString()}</td><td>${prompt>0?rate.toFixed(1)+'%':'—'}</td><td>${totalUsageTokens(item).toLocaleString()}</td><td title="${this.escapeHtml(generationThroughputHint(item, item.tokens_per_second))}">${tps}</td><td title="${this.escapeHtml(costCoverageNote(item))}">${fmtAggregateCost(item)}</td></tr>`;
+      return `<tr data-provider="${this.escapeHtml(item.provider || '')}"><td><code title="${this.escapeHtml(item.model || '')}">${this.escapeHtml(item.model||t('detail.unknown'))}</code><br><small>${this.escapeHtml(providerLabel(item.provider))}</small></td><td>${Number(item.requests||0).toLocaleString('en-US')}</td><td>${prompt>0?rate.toFixed(1)+'%':'—'}</td><td>${totalUsageTokens(item).toLocaleString('en-US')}</td><td title="${this.escapeHtml(generationThroughputHint(item, item.tokens_per_second))}">${tps}</td><td title="${this.escapeHtml(costCoverageNote(item))}">${fmtAggregateCost(item)}</td></tr>`;
     }).join('') || `<tr><td colspan="6" class="empty-state">${t('analytics.noData')}</td></tr>`;
   },
 
@@ -6910,7 +6908,7 @@ const AnalyticsModule = {
       const hint = state.reference_only ? t('analytics.priceReferenceHint') : (live ? '' : t('analytics.priceSeedHint'));
       return `<tr data-provider="${this.escapeHtml(name)}">
         <td>${this.escapeHtml(label)}</td>
-        <td>${Number(state.rules || 0).toLocaleString()}</td>
+        <td>${Number(state.rules || 0).toLocaleString('en-US')}</td>
         <td><span class="${live ? 'price-live' : 'price-seed'}" title="${this.escapeHtml(hint)}">${this.escapeHtml(t('analytics.' + source))}</span></td>
         <td>${live ? this.escapeHtml(fmtAge(Math.max(0, (Date.now() - new Date(state.refreshed_at).getTime()) / 1000))) : '—'}</td>
       </tr>`;
@@ -7101,7 +7099,7 @@ const QuotaModule = {
     const s = data.summary;
     this.setText('quota-local-requests', fmt(s.total_requests));
     this.setText('quota-local-tokens', hasUsageTokens(s) ? fmtTok(totalUsageTokens(s)) : '—');
-    this.setText('quota-local-cost', fmtAggregateCost(s, data.provider));
+    this.setText('quota-local-cost', fmtAggregateCost(s));
     this.setText('quota-local-unknown', fmt(s.unknown_cost_requests));
     this.setText('quota-local-cost-note', costCoverageNote(s));
     AnalyticsModule.renderModelTable(data.models || [], 'quota-local-model-tbody');
@@ -7253,7 +7251,7 @@ const QuotaModule = {
       return;
     }
     const money = new Intl.NumberFormat(currentLang === 'zh' ? 'zh-CN' : 'en-US', {style:'currency',currency:data.currency,maximumFractionDigits:8});
-    const formatCost = value => Number.isFinite(value) ? escapeHtml(money.format(value)) : '—';
+    const formatCost = value => Number.isFinite(value) ? escapeHtml(data.currency === 'USD' ? fmtCost(value) : money.format(value)) : '—';
     const status = estimated => t(estimated ? 'aws.billingEstimated' : 'aws.billingReported');
     root.innerHTML = `<dl class="quota-figures">
       <div><dt>${t('aws.billingTotal')}</dt><dd>${formatCost(data.total_cost)}</dd></div>
@@ -7515,14 +7513,14 @@ const QuotaModule = {
     if (account.error || !data) return `<section class="quota-account analytics-section">${head}${error(account.error || t('data.invalid'))}</section>`;
     const table = (labels, rows) => `<div class="analytics-table-scroll"><table class="analytics-table workbuddy-table"><thead><tr>${labels.map(label => `<th scope="col">${t(label)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
     const facts = rows => `<dl class="quota-figures">${rows.map(([label, value]) => `<div><dt>${t(label)}</dt><dd>${value}</dd></div>`).join('')}</dl>`;
-    const credits = row => row?.credit_samples > 0 && Number.isFinite(row.credits) ? row.credits.toLocaleString(undefined, {maximumSignificantDigits: 10}) : '—';
+    const credits = row => row?.credit_samples > 0 ? fmtDecimal(row.credits) : '—';
     const overview = data.overview;
     let pool = error(data.overview_error || t('data.invalid'));
     if (overview) {
       const rows = (overview.accounts || []).map((entry, i) => {
         const unlimited = entry.credits_total === -1;
         const state = entry.disabled ? 'disabled' : entry.paused ? 'paused' : entry.cooling ? 'cooling' : entry.reserve_blocked ? 'reserve' : 'ready';
-        return `<tr><th scope="row">${t('workbuddy.account').replace('{n}', i + 1)}</th><td>${escapeHtml(entry.realm || '—')}</td><td>${t('workbuddy.' + state)}</td><td>${unlimited ? t('workbuddy.unlimited') : fmt(entry.credits)}</td><td>${unlimited ? t('workbuddy.unlimited') : entry.credits_total > 0 ? fmt(entry.credits_total) : '—'}</td></tr>`;
+        return `<tr><th scope="row">${t('workbuddy.account').replace('{n}', i + 1)}</th><td>${escapeHtml(entry.realm || '—')}</td><td>${t('workbuddy.' + state)}</td><td>${unlimited ? t('workbuddy.unlimited') : fmtDecimal(entry.credits)}</td><td>${unlimited ? t('workbuddy.unlimited') : entry.credits_total > 0 ? fmtDecimal(entry.credits_total) : '—'}</td></tr>`;
       }).join('');
       const stamp = overview.balance_refreshed_at;
       const refreshed = stamp && !stamp.startsWith('0001-') ? `${fmtDate(stamp)} ${fmtTime(stamp)}` : '—';
@@ -7537,7 +7535,7 @@ const QuotaModule = {
       const metrics = [['workbuddy.attempts', fmt(total.requests)], ['workbuddy.errors', fmt(total.errors)], ['analytics.totalTokens', fmt(total.total_tokens)], ['workbuddy.credits', credits(total)]];
       usageHTML = `<div class="metric-band metric-grid usage-metrics">${metrics.map(([label, value]) => `<div class="metric-cell"><div class="metric-label">${t(label)}</div><div class="metric-value">${value}</div></div>`).join('')}</div>`
         + `<p class="page-meta">${t('workbuddy.usageNote')}</p>`
-        + facts([['workbuddy.prompt', fmt(total.prompt_tokens)], ['workbuddy.output', fmt(total.completion_tokens)], ['workbuddy.cache', `${fmt(total.cache_hit_tokens)} / ${fmt(total.cache_miss_tokens)}`], ['workbuddy.creditSamples', fmt(total.credit_samples)], ['workbuddy.latency', total.avg_latency_ms > 0 ? fmt(total.avg_latency_ms) : '—'], ['workbuddy.tps', total.avg_tokens_per_second > 0 ? fmt(total.avg_tokens_per_second) : '—']])
+        + facts([['workbuddy.prompt', fmt(total.prompt_tokens)], ['workbuddy.output', fmt(total.completion_tokens)], ['workbuddy.cache', `${fmt(total.cache_hit_tokens)} / ${fmt(total.cache_miss_tokens)}`], ['workbuddy.creditSamples', fmt(total.credit_samples)], ['workbuddy.latency', total.avg_latency_ms > 0 ? fmt(total.avg_latency_ms) : '—'], ['workbuddy.tps', total.avg_tokens_per_second > 0 ? fmtGenerationThroughput(total.avg_tokens_per_second) : '—']])
         + `<p class="page-meta">${t('workbuddy.creditNote')}</p>`;
       if (total.requests === 0) usageHTML += `<p class="quota-notice">${t('workbuddy.noUsage')}</p>`;
       const modelRows = (usage.by_model || []).map(row => `<tr><th scope="row">${escapeHtml(row.key)}</th><td>${fmt(row.requests)}</td><td>${fmt(row.errors)}</td><td>${fmt(row.total_tokens)}</td><td>${credits(row)}</td><td>${fmt(row.credit_samples)}</td></tr>`).join('');
@@ -7701,7 +7699,7 @@ const QuotaModule = {
       </div>
       <div class="analytics-table-scroll quota-model-scroll">
         <table class="analytics-table quota-model-table">
-          <thead><tr><th>${t('quota.model')}</th><th>${t('quota.modelUsed')}</th><th>${t('quota.modelAllowance')}</th><th>${t('quota.percent')}</th></tr></thead>
+          <thead><tr><th>${t('quota.model')}</th><th class="quota-model-number">${t('quota.modelUsed')}</th><th class="quota-model-number">${t('quota.modelAllowance')}</th><th class="quota-model-number">${t('quota.percent')}</th></tr></thead>
           <tbody>${body}</tbody>
           <tfoot><tr>
             <td>${t('quota.total')}</td>

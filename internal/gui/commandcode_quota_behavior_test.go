@@ -13,7 +13,7 @@ async function checks() {
     currentLang = lang;
     for (const [ledger, expected] of [
       [{requests:1, known_requests:1, unknown_cost_requests:1, cost_usd:0}, '—'],
-      [{requests:2, known_requests:2, unknown_cost_requests:1, cost_usd:1.25}, t('analytics.knownSubtotal').replace('{value}', '$1.25')],
+      [{requests:2, known_requests:2, unknown_cost_requests:1, cost_usd:1.25}, '$1.25'],
       [{requests:1, known_requests:1, unknown_cost_requests:0, cost_usd:0}, '$0.00'],
     ]) {
       QuotaModule.provider = 'commandcode';

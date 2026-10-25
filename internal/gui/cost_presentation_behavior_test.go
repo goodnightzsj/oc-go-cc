@@ -2,15 +2,15 @@ package gui
 
 import "testing"
 
-func TestWorkBuddyCostPresentation(t *testing.T) {
+func TestAllPlatformCostPresentation(t *testing.T) {
 	runPlatformBehavior(t, platformBehaviorDOMScript+`
 async function checks() {
   const get = id => document.getElementById(id);
   for (const lang of ['en', 'zh']) {
     currentLang = lang;
-    for (const provider of ['workbuddy', 'commandcode', '']) {
+    for (const provider of [...allPlatforms, '']) {
       const partial = {provider,model:'synthetic',requests:2,total_requests:2,unknown_cost_requests:1,cost_usd:1.25,est_cost_usd:1.25};
-      const expected = provider === 'workbuddy' ? '$1.25' : t('analytics.knownSubtotal').replace('{value}', '$1.25');
+      const expected = '$1.25';
       assert.equal(fmtAggregateCost(partial), expected);
       assert.equal(fmtAggregateCost({...partial,unknown_cost_requests:2}), '—');
       assert.equal(fmtAggregateCost({...partial,unknown_cost_requests:0,cost_usd:0}), '$0.00');
@@ -69,7 +69,15 @@ async function checks() {
     renderHistorySummary({providers:[{name:'workbuddy',requests:2,unknown_cost_requests:1,cost_usd:1.25},{name:'commandcode',requests:2,unknown_cost_requests:1,cost_usd:2.5}]});
     const mixed = get('history-provider-breakdown').innerHTML;
     assert.ok(mixed.includes('<strong>$1.25</strong>'),'WorkBuddy row in all-platform view');
-    assert.ok(mixed.includes('<strong>' + t('analytics.knownSubtotal').replace('{value}','$2.50') + '</strong>'),'other provider retains prefix');
+    assert.ok(mixed.includes('<strong>$2.50</strong>'),'all providers use an amount-only value');
+    const ledger = {requests:2,unknown_cost_requests:1,cost_usd:1.25};
+    const command = QuotaModule.renderCommandCodeAccount({commandcode:{},ledger});
+    assert.ok(command.includes('<dd>$1.25</dd>'));
+    assert.ok(command.includes(costCoverageNote(ledger)));
+    QuotaModule.renderModelLimits({model_usage:[{...ledger,model:'synthetic',used_usd:1.25,allowance_usd:10,percent:12.5}]});
+    const go = get('quota-model-limits').innerHTML;
+    assert.equal((go.match(/>\$1\.25<\/td>/g) || []).length,2,'model cost and its total');
+    assert.ok(go.includes(costCoverageNote(ledger)));
   }
 }
 `+platformBehaviorRunScript)

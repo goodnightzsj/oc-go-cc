@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"testing"
 
 	"github.com/routatic/proxy/internal/config"
@@ -82,5 +83,56 @@ func TestNativeAnthropicPayloadIsByteIdenticalWithoutEffort(t *testing.T) {
 	}
 	if _, ok := got["output_config"]; ok {
 		t.Error("output_config appeared in a request that never had one")
+	}
+}
+
+// Anthropic checks one relation across two fields: thinking.budget_tokens must
+// be smaller than max_tokens. A caller that asks for a large budget under a
+// small output cap has stated two things that cannot both hold, and the answer
+// is a 400 that names neither field.
+//
+// The budget is what expresses intent, so it is kept and the cap is raised: a
+// cap is a ceiling, not a request.
+func TestRaiseMaxTokensAboveBudget(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "budget above the cap",
+			body: `{"max_tokens":4096,"thinking":{"type":"enabled","budget_tokens":64000}}`,
+			want: `68096`,
+		},
+		{
+			name: "budget below the cap is untouched",
+			body: `{"max_tokens":64000,"thinking":{"type":"enabled","budget_tokens":4096}}`,
+			want: `64000`,
+		},
+		{
+			name: "no thinking block is untouched",
+			body: `{"max_tokens":4096}`,
+			want: `4096`,
+		},
+		{
+			name: "disabled thinking carries no budget",
+			body: `{"max_tokens":4096,"thinking":{"type":"disabled"}}`,
+			want: `4096`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := raiseMaxTokensAboveBudget([]byte(tc.body))
+			var fields struct {
+				MaxTokens int `json:"max_tokens"`
+			}
+			if err := json.Unmarshal(out, &fields); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if got := strconv.Itoa(fields.MaxTokens); got != tc.want {
+				t.Fatalf("max_tokens = %s, want %s (body %s)", got, tc.want, out)
+			}
+		})
 	}
 }

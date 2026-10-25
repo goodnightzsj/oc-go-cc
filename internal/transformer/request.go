@@ -167,11 +167,21 @@ func (t *RequestTransformer) TransformRequest(
 		}
 		// MessageRequest also carries Responses input; OpenAI output preserves
 		// its effort level. Only native Anthropic output needs a mapping.
-		effort, ok := core.NormalizeEffort(output.Effort)
-		if !ok {
-			return nil, fmt.Errorf("unsupported output_config.effort %q", output.Effort)
+		//
+		// "adaptive" and "auto" are modes, not rungs: they say "let the model
+		// decide", which no reasoning_effort field can express. Treating them
+		// as an error rejected a request the caller had phrased legitimately;
+		// treating them as a level would invent one. They resolve to "no
+		// stated level" instead, so the model's own default applies.
+		if mode := strings.ToLower(strings.TrimSpace(output.Effort)); mode == "adaptive" || mode == "auto" {
+			statedEffort = ""
+		} else {
+			effort, ok := core.NormalizeEffort(output.Effort)
+			if !ok {
+				return nil, fmt.Errorf("unsupported output_config.effort %q", output.Effort)
+			}
+			statedEffort = effort
 		}
-		statedEffort = effort
 	}
 
 	// Determine thinking and reasoning_effort for the upstream request.
@@ -322,7 +332,7 @@ func resolveThinkingAndEffort(
 	// what was asked.
 	if requestThinkingDisabled {
 		if allowThinkingParam {
-			openaiReq.Thinking = anthropicReq.Thinking
+			openaiReq.Thinking = thinkingForUpstream(anthropicReq.Thinking, isDeepSeek)
 		}
 		return
 	}
@@ -340,7 +350,14 @@ func resolveThinkingAndEffort(
 	// deny-list once the families that accept a level are measured one by one.
 	if statedEffort != "" {
 		if !isMoonshotModel(model.ModelID) {
+			// A model whose ladder is known gets the nearest rung it actually
+			// has: every vendor that documents a ladder also documents that an
+			// unsupported value is an error. A model this proxy knows nothing
+			// about keeps the caller's own words.
 			effort := statedEffort
+			if clamped, ok := core.ReasoningSupport(model.ModelID).ClampLevel(statedEffort); ok {
+				effort = clamped
+			}
 			openaiReq.ReasoningEffort = &effort
 		}
 		return
@@ -365,7 +382,7 @@ func resolveThinkingAndEffort(
 		// Deriving a level also loses resolution - a 63999-token budget becomes
 		// one of five strings.
 		if allowThinkingParam {
-			openaiReq.Thinking = anthropicReq.Thinking
+			openaiReq.Thinking = thinkingForUpstream(anthropicReq.Thinking, isDeepSeek)
 		}
 		if allowEffortParam && !allowThinkingParam {
 			if budget := parseBudgetTokens(anthropicReq.Thinking); budget > 0 {
@@ -414,15 +431,56 @@ func resolveThinkingAndEffort(
 	}
 }
 
+// thinkingForUpstream rewrites a mode the target does not define into the one
+// it does.
+//
+// "adaptive" is an Anthropic mode meaning "the model decides how much to
+// think". The Chat Completions surface has no such value, and DeepSeek's
+// thinking object defines only enabled/disabled, so forwarding it verbatim
+// asks the upstream to interpret a word it has never seen. Everything else is
+// forwarded untouched - this is not a normaliser, just a translation of the one
+// mode that has no Chat Completions spelling.
+func thinkingForUpstream(raw json.RawMessage, isDeepSeek bool) json.RawMessage {
+	if !isDeepSeek || len(raw) == 0 {
+		return raw
+	}
+	var probe struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil || !strings.EqualFold(probe.Type, "adaptive") {
+		return raw
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return raw
+	}
+	fields["type"] = json.RawMessage(`"enabled"`)
+	converted, err := json.Marshal(fields)
+	if err != nil {
+		return raw
+	}
+	return converted
+}
+
 // setReasoningEffort sets reasoning_effort on the request, defaulting to
 // "high" when the config value is empty.
 func setReasoningEffort(openaiReq *types.ChatCompletionRequest, effort string) {
-	if effort != "" {
-		openaiReq.ReasoningEffort = &effort
-	} else {
+	if effort == "" {
 		defaultEffort := "high"
 		openaiReq.ReasoningEffort = &defaultEffort
+		return
 	}
+	// A configuration typo must not become an upstream field: the model would
+	// answer 400 and nothing in the request would point back at the config.
+	// Dropping it leaves the request at the model's own default, which is the
+	// same place an unset value lands.
+	if _, ok := core.NormalizeEffort(effort); !ok {
+		return
+	}
+	if clamped, ok := core.ReasoningSupport(openaiReq.Model).ClampLevel(effort); ok {
+		effort = clamped
+	}
+	openaiReq.ReasoningEffort = &effort
 }
 
 // hasAssistantMessages returns true when the conversation contains at least

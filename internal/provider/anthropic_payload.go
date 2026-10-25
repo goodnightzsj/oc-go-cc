@@ -28,7 +28,11 @@ func anthropicPayload(ctx context.Context, req *types.MessageRequest, model conf
 		if adjusted, ok := anthropicEffortField(out.OutputConfig); ok {
 			out.OutputConfig = adjusted
 		}
-		return json.Marshal(out)
+		encoded, err := json.Marshal(out)
+		if err != nil {
+			return nil, err
+		}
+		return raiseMaxTokensAboveBudget(encoded), nil
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
@@ -46,7 +50,46 @@ func anthropicPayload(ctx context.Context, req *types.MessageRequest, model conf
 	if adjusted, ok := anthropicEffortField(fields["output_config"]); ok {
 		fields["output_config"] = adjusted
 	}
-	return json.Marshal(fields)
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	return raiseMaxTokensAboveBudget(encoded), nil
+}
+
+// raiseMaxTokensAboveBudget enforces the one relation Anthropic checks across
+// two fields: thinking.budget_tokens must be smaller than max_tokens.
+//
+// A caller that asks for a 64000-token budget under a 4096-token output cap has
+// stated two things that cannot both hold, and Anthropic answers 400 without
+// saying which field to change. Raising the cap keeps the budget the caller
+// asked for, which is the part that expresses intent; the cap is a ceiling, not
+// a request.
+//
+// The payload is returned unchanged when there is no thinking block, no budget,
+// or the relation already holds, so an ordinary request is forwarded byte for
+// byte.
+func raiseMaxTokensAboveBudget(body []byte) []byte {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil || fields == nil {
+		return body
+	}
+	var thinking struct {
+		BudgetTokens int `json:"budget_tokens"`
+	}
+	if err := json.Unmarshal(fields["thinking"], &thinking); err != nil || thinking.BudgetTokens <= 0 {
+		return body
+	}
+	var maxTokens int
+	if err := json.Unmarshal(fields["max_tokens"], &maxTokens); err != nil || maxTokens > thinking.BudgetTokens {
+		return body
+	}
+	fields["max_tokens"], _ = json.Marshal(thinking.BudgetTokens + 4096)
+	raised, err := json.Marshal(fields)
+	if err != nil {
+		return body
+	}
+	return raised
 }
 
 // anthropicEffortField rewrites output_config.effort for the Anthropic ladder,

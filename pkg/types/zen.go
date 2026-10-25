@@ -122,6 +122,17 @@ type GeminiPart struct {
 type GeminiGenerationConfig struct {
 	Temperature     float64 `json:"temperature,omitempty"`
 	MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
+	// ThinkingConfig carries Gemini's own reasoning control. It was absent, so
+	// a request that asked for any thinking level reached Gemini with nothing
+	// in the body about reasoning and the model used its default.
+	ThinkingConfig *GeminiThinkingConfig `json:"thinkingConfig,omitempty"`
+}
+
+// GeminiThinkingConfig mirrors generationConfig.thinkingConfig. ThinkingBudget
+// is a token cap; Gemini treats 0 as "do not think" and -1 as "decide per
+// request", which is why it is a signed integer rather than a level.
+type GeminiThinkingConfig struct {
+	ThinkingBudget *int `json:"thinkingBudget,omitempty"`
 }
 
 // GeminiTool represents a tool definition.

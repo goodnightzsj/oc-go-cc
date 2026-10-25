@@ -128,6 +128,21 @@ func AnthropicToResponses(anthropicReq *types.MessageRequest, model config.Model
 	return responsesReq, nil
 }
 
+// geminiThinkingBudget resolves the budget to send to Gemini, or nil when the
+// request said nothing about reasoning.
+func geminiThinkingBudget(req *core.NormalizedRequest) *int {
+	if req.ThinkingBudget > 0 {
+		budget := req.ThinkingBudget
+		return &budget
+	}
+	if req.ReasoningEffort != "" {
+		if budget := core.BudgetForEffort(req.ReasoningEffort); budget > 0 {
+			return &budget
+		}
+	}
+	return nil
+}
+
 // AnthropicToGemini converts an Anthropic request to a GeminiRequest.
 func AnthropicToGemini(anthropicReq *types.MessageRequest, model config.ModelConfig) *types.GeminiRequest {
 	req := core.NormalizeRequest(anthropicReq)
@@ -139,6 +154,17 @@ func AnthropicToGemini(anthropicReq *types.MessageRequest, model config.ModelCon
 
 	if req.Temperature != nil {
 		geminiReq.GenerationConfig.Temperature = *req.Temperature
+	}
+
+	// Gemini expresses reasoning as a token budget, and it was the one target
+	// that received nothing at all: the normalised request already carried the
+	// budget and the derived level, but this function never read them, so the
+	// model silently used its default level. A budget the client stated is
+	// forwarded as-is; a level is converted, because a level-only client has no
+	// other way to say it. Neither present means the model decides, which is
+	// what an absent thinkingConfig already means.
+	if budget := geminiThinkingBudget(req); budget != nil {
+		geminiReq.GenerationConfig.ThinkingConfig = &types.GeminiThinkingConfig{ThinkingBudget: budget}
 	}
 
 	// System prompt is prepended as a user message (Gemini has no system role).

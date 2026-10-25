@@ -2121,3 +2121,78 @@ func TestStatedEffortReplacesTheBudget(t *testing.T) {
 		t.Error("budget-only request lost its thinking block")
 	}
 }
+
+// Three ways a reasoning field used to reach an upstream that could not read
+// it, or fail to reach one that could.
+func TestReasoningFieldsAreValidatedBeforeTheWire(t *testing.T) {
+	transform := func(modelID, thinking, outputConfig string, cfg config.ModelConfig) (map[string]any, error) {
+		t.Helper()
+		req := &types.MessageRequest{
+			Model:     "claude-x",
+			MaxTokens: 4096,
+			Messages:  []types.Message{{Role: "user", Content: json.RawMessage(`"go"`)}},
+		}
+		if thinking != "" {
+			req.Thinking = json.RawMessage(thinking)
+		}
+		if outputConfig != "" {
+			req.OutputConfig = json.RawMessage(outputConfig)
+		}
+		cfg.ModelID = modelID
+		out, err := NewRequestTransformer().TransformRequest(req, cfg)
+		if err != nil {
+			return nil, err
+		}
+		raw, err := json.Marshal(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		return fields, nil
+	}
+
+	// "adaptive" is an Anthropic mode. DeepSeek's thinking object defines only
+	// enabled/disabled, so forwarding the word verbatim asks it to interpret
+	// something it has never seen.
+	adaptive, err := transform("deepseek/deepseek-v4.1-flash", `{"type":"adaptive"}`, "", config.ModelConfig{})
+	if err != nil {
+		t.Fatalf("adaptive thinking: %v", err)
+	}
+	if got, want := mustJSON(t, adaptive["thinking"]), `{"type":"enabled"}`; got != want {
+		t.Errorf("deepseek received thinking %s, want %s", got, want)
+	}
+
+	// A caller may state "let the model decide" as an effort. That is a mode,
+	// not a rung: it must neither fail the request nor invent a level.
+	auto, err := transform("deepseek/deepseek-v4.1-flash", "", `{"effort":"adaptive"}`, config.ModelConfig{})
+	if err != nil {
+		t.Fatalf("adaptive effort was rejected: %v", err)
+	}
+	if auto["reasoning_effort"] != nil {
+		t.Errorf("adaptive effort produced a level: %v", auto["reasoning_effort"])
+	}
+
+	// A configuration typo must not become an upstream field: the upstream
+	// would answer 400 and nothing in the request would point back at config.
+	typo, err := transform("deepseek/deepseek-v4.1-flash", "", "",
+		config.ModelConfig{ReasoningEffort: "very high"})
+	if err != nil {
+		t.Fatalf("typo config: %v", err)
+	}
+	if typo["reasoning_effort"] != nil {
+		t.Errorf("an invalid configured effort reached the wire: %v", typo["reasoning_effort"])
+	}
+
+	// A valid configured effort still works.
+	ok, err := transform("deepseek/deepseek-v4.1-flash", "", "",
+		config.ModelConfig{ReasoningEffort: "low"})
+	if err != nil {
+		t.Fatalf("valid config: %v", err)
+	}
+	if got, want := ok["reasoning_effort"], "low"; got != want {
+		t.Errorf("reasoning_effort = %v, want %v", got, want)
+	}
+}

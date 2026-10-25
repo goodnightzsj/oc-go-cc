@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/pkg/types"
 )
 
@@ -95,5 +96,48 @@ func TestAnthropicToResponses_SystemPromptWithNewline(t *testing.T) {
 	}
 	if messageContent != "Hello\nWorld" {
 		t.Fatalf("message content mismatch: got %q", messageContent)
+	}
+}
+
+// Gemini was the one target that received nothing at all about reasoning: the
+// normalised request already carried the budget and the derived level, but the
+// bridge never read them, so a request that asked for deep thinking reached the
+// model with no thinkingConfig and the model used its default.
+func TestGeminiCarriesTheThinkingBudget(t *testing.T) {
+	firstTurn := []types.Message{{Role: "user", Content: json.RawMessage(`"go"`)}}
+
+	budget := &types.MessageRequest{
+		Model: "claude-x", MaxTokens: 4096,
+		Thinking: json.RawMessage(`{"type":"enabled","budget_tokens":8192}`),
+		Messages: firstTurn,
+	}
+	got := AnthropicToGemini(budget, config.ModelConfig{ModelID: "gemini-3.8-flash"})
+	if got.GenerationConfig.ThinkingConfig == nil || got.GenerationConfig.ThinkingConfig.ThinkingBudget == nil {
+		t.Fatal("gemini lost the budget the client stated")
+	}
+	if v := *got.GenerationConfig.ThinkingConfig.ThinkingBudget; v != 8192 {
+		t.Fatalf("thinkingBudget = %d, want the client's 8192", v)
+	}
+
+	// A level-only client has no other way to express intent, so the level is
+	// converted into the budget Gemini understands.
+	level := &types.MessageRequest{
+		Model: "claude-x", MaxTokens: 4096,
+		OutputConfig: json.RawMessage(`{"effort":"high"}`),
+		Messages:     firstTurn,
+	}
+	got = AnthropicToGemini(level, config.ModelConfig{ModelID: "gemini-3.8-flash"})
+	if got.GenerationConfig.ThinkingConfig == nil || got.GenerationConfig.ThinkingConfig.ThinkingBudget == nil {
+		t.Fatal("gemini lost the level the client stated")
+	}
+	if v, want := *got.GenerationConfig.ThinkingConfig.ThinkingBudget, core.BudgetForEffort("high"); v != want {
+		t.Fatalf("thinkingBudget = %d, want %d for level high", v, want)
+	}
+
+	// Saying nothing about reasoning must leave the field absent rather than
+	// inventing a budget.
+	plain := &types.MessageRequest{Model: "claude-x", MaxTokens: 4096, Messages: firstTurn}
+	if got := AnthropicToGemini(plain, config.ModelConfig{ModelID: "gemini-3.8-flash"}); got.GenerationConfig.ThinkingConfig != nil {
+		t.Fatalf("an unstated budget produced thinkingConfig: %+v", got.GenerationConfig.ThinkingConfig)
 	}
 }

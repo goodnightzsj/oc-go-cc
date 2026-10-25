@@ -146,7 +146,11 @@ func geminiThinking(req *core.NormalizedRequest, modelID string) *types.GeminiTh
 		if clamped, ok := support.ClampLevel(level); ok {
 			level = clamped
 		}
-		return &types.GeminiThinkingConfig{ThinkingLevel: &level}
+		// A level request implies the caller wants to see what the model did
+		// with it. Asking for thoughts costs nothing when the model has none
+		// and is the difference between "no reasoning" and "not requested".
+		include := true
+		return &types.GeminiThinkingConfig{ThinkingLevel: &level, IncludeThoughts: &include}
 	}
 	// A budget the client stated is clamped to what the model publishes: the
 	// 2.5 family documents different ranges per model, and forwarding a larger

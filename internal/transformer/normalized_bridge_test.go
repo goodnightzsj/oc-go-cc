@@ -121,6 +121,12 @@ func TestGeminiCarriesTheRightControlForItsGeneration(t *testing.T) {
 	if got.GenerationConfig.ThinkingConfig.ThinkingBudget != nil {
 		t.Fatal("gemini 3.x was sent a budget as well, which it rejects")
 	}
+	// A level request implies the caller wants to see the reasoning; without
+	// includeThoughts the model may think and report nothing, which reads
+	// downstream as "no reasoning" rather than "not requested".
+	if got.GenerationConfig.ThinkingConfig.IncludeThoughts == nil || !*got.GenerationConfig.ThinkingConfig.IncludeThoughts {
+		t.Error("gemini 3.x level request did not ask for thought summaries")
+	}
 
 	// 2.5-pro: budget-only, clamped to its published ceiling.
 	pro := &types.MessageRequest{

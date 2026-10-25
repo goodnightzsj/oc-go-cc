@@ -137,6 +137,11 @@ type GeminiThinkingConfig struct {
 	// ThinkingLevel is the discrete rung for models that take one (Gemini 3+).
 	// The two are mutually exclusive: Gemini answers 400 when both arrive.
 	ThinkingLevel *string `json:"thinkingLevel,omitempty"`
+	// IncludeThoughts asks Gemini to return the thought summaries. Without it
+	// the model may think and return nothing about the thinking, which reads
+	// downstream as "this model produced no reasoning" rather than "we did not
+	// ask for it".
+	IncludeThoughts *bool `json:"includeThoughts,omitempty"`
 }
 
 // GeminiTool represents a tool definition.

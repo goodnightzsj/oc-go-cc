@@ -337,6 +337,19 @@ func resolveThinkingAndEffort(
 		return
 	}
 
+	// DeepSeek validates reasoning_content on every assistant message in
+	// thinking mode, so a history without it must run with thinking off. This
+	// outranks a stated level: the guard exists because the upstream refuses
+	// the request otherwise, and honouring the level here produced a payload
+	// that only set reasoning_effort and left thinking on - the exact
+	// combination that 400s.
+	if isDeepSeek && hasAssistant && !hasThinking {
+		if allowThinkingParam {
+			openaiReq.Thinking = json.RawMessage(`{"type":"disabled"}`)
+		}
+		return
+	}
+
 	// A level the caller stated is the strongest signal this request carries,
 	// and it replaces the budget rather than joining it: one decision, one
 	// control. Sending both is what makes gateways such as OpenCode Go answer
@@ -359,13 +372,6 @@ func resolveThinkingAndEffort(
 				effort = clamped
 			}
 			openaiReq.ReasoningEffort = &effort
-		}
-		return
-	}
-
-	if isDeepSeek && hasAssistant && !hasThinking {
-		if allowThinkingParam {
-			openaiReq.Thinking = json.RawMessage(`{"type":"disabled"}`)
 		}
 		return
 	}

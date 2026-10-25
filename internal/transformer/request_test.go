@@ -2196,3 +2196,42 @@ func TestReasoningFieldsAreValidatedBeforeTheWire(t *testing.T) {
 		t.Errorf("reasoning_effort = %v, want %v", got, want)
 	}
 }
+
+// The DeepSeek history guard outranks a stated level.
+//
+// DeepSeek validates reasoning_content on every assistant message in thinking
+// mode, so a history without it must run with thinking off - it is a refusal,
+// not a preference. Ordering the stated level above the guard produced a
+// payload that set only reasoning_effort and left thinking on, which is exactly
+// the combination the guard exists to prevent.
+func TestHistoryGuardOutranksAStatedEffort(t *testing.T) {
+	history := []types.Message{
+		{Role: "user", Content: json.RawMessage(`"hi"`)},
+		{Role: "assistant", Content: json.RawMessage(`"hello"`)},
+		{Role: "user", Content: json.RawMessage(`"go on"`)},
+	}
+	req := &types.MessageRequest{
+		Model:        "claude-x",
+		MaxTokens:    4096,
+		Messages:     history,
+		OutputConfig: json.RawMessage(`{"effort":"high"}`),
+	}
+	out, err := NewRequestTransformer().TransformRequest(req, config.ModelConfig{ModelID: "deepseek/deepseek-v4.1-flash"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := mustJSON(t, fields["thinking"]), `{"type":"disabled"}`; got != want {
+		t.Errorf("thinking = %s, want %s (guard must win)", got, want)
+	}
+	if fields["reasoning_effort"] != nil {
+		t.Errorf("a guarded request still carried effort %v", fields["reasoning_effort"])
+	}
+}

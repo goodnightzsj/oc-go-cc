@@ -2047,3 +2047,77 @@ func TestTransformRequestDoesNotStripAnUnknownPrefix(t *testing.T) {
 		t.Fatalf("Thinking = %s, want nothing for a model whose family is unknown", openaiReq.Thinking)
 	}
 }
+
+// One decision, one control. `output_config.effort` used to be written after
+// resolveThinkingAndEffort had already set `thinking`, so a request carrying
+// both produced a body with both - two answers to one question, which gateways
+// such as OpenCode Go reject with 400, and which let the two disagree (a 8192
+// budget reads "medium" by this proxy's ladder while the stated level says
+// "high").
+//
+// The stated level wins because it is the caller's own words; the budget is
+// this proxy's arithmetic. Disabling thinking outranks both.
+func TestStatedEffortReplacesTheBudget(t *testing.T) {
+	transform := func(modelID, thinking, outputConfig string) map[string]any {
+		t.Helper()
+		req := &types.MessageRequest{
+			Model:     "claude-x",
+			MaxTokens: 4096,
+			Messages:  []types.Message{{Role: "user", Content: json.RawMessage(`"go"`)}},
+		}
+		if thinking != "" {
+			req.Thinking = json.RawMessage(thinking)
+		}
+		if outputConfig != "" {
+			req.OutputConfig = json.RawMessage(outputConfig)
+		}
+		out, err := NewRequestTransformer().TransformRequest(req, config.ModelConfig{ModelID: modelID})
+		if err != nil {
+			t.Fatalf("%s: %v", modelID, err)
+		}
+		raw, err := json.Marshal(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		return fields
+	}
+
+	budget := `{"type":"enabled","budget_tokens":8192}`
+	high := `{"effort":"high"}`
+
+	// Budget plus a stated level: the level survives, the budget does not.
+	both := transform("deepseek/deepseek-v4.1-flash", budget, high)
+	if both["thinking"] != nil {
+		t.Errorf("thinking was forwarded alongside a stated effort: %v", both["thinking"])
+	}
+	if got, want := both["reasoning_effort"], "high"; got != want {
+		t.Errorf("reasoning_effort = %v, want %v", got, want)
+	}
+
+	// Disabled plus a stated level: the disable wins, no level is sent.
+	off := transform("deepseek/deepseek-v4.1-flash", `{"type":"disabled"}`, high)
+	if off["reasoning_effort"] != nil {
+		t.Errorf("a disabled request still carried effort %v", off["reasoning_effort"])
+	}
+	if got, want := mustJSON(t, off["thinking"]), `{"type":"disabled"}`; got != want {
+		t.Errorf("thinking = %s, want %s", got, want)
+	}
+
+	// A stated level must not reach a family measured to reject the field.
+	if kimi := transform("moonshotai/Kimi-K2.6", "", high); kimi["reasoning_effort"] != nil {
+		t.Errorf("kimi was sent effort it rejects: %v", kimi["reasoning_effort"])
+	}
+
+	// The budget-only path is unchanged: DeepSeek keeps its budget.
+	only := transform("deepseek/deepseek-v4.1-flash", budget, "")
+	if only["reasoning_effort"] != nil {
+		t.Errorf("budget-only request gained an effort: %v", only["reasoning_effort"])
+	}
+	if only["thinking"] == nil {
+		t.Error("budget-only request lost its thinking block")
+	}
+}

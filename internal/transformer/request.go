@@ -142,6 +142,38 @@ func (t *RequestTransformer) TransformRequest(
 		openaiReq.MaxTokens = &maxTokens
 	}
 
+	// Parse output_config once, before the thinking decision. Both fields it
+	// carries feed decisions that used to be made in two places: the effort is
+	// the caller's own words about strength, and it must be resolved together
+	// with `thinking` rather than written over it afterwards. Writing it
+	// afterwards is what let one payload carry `thinking` and
+	// `reasoning_effort` at the same time - two controls for one decision,
+	// which gateways such as OpenCode Go reject outright.
+	var statedEffort string
+	if len(anthropicReq.OutputConfig) > 0 {
+		var output struct {
+			Effort string          `json:"effort"`
+			Format json.RawMessage `json:"format"`
+		}
+		if err := json.Unmarshal(anthropicReq.OutputConfig, &output); err != nil {
+			return nil, fmt.Errorf("invalid output_config: %w", err)
+		}
+		if len(output.Format) > 0 && string(output.Format) != "null" {
+			responseFormat, err := openAIResponseFormat(output.Format)
+			if err != nil {
+				return nil, err
+			}
+			openaiReq.ResponseFormat = responseFormat
+		}
+		// MessageRequest also carries Responses input; OpenAI output preserves
+		// its effort level. Only native Anthropic output needs a mapping.
+		effort, ok := core.NormalizeEffort(output.Effort)
+		if !ok {
+			return nil, fmt.Errorf("unsupported output_config.effort %q", output.Effort)
+		}
+		statedEffort = effort
+	}
+
 	// Determine thinking and reasoning_effort for the upstream request.
 	// Priority: explicit config → history continuity → safety guard.
 	//
@@ -151,7 +183,7 @@ func (t *RequestTransformer) TransformRequest(
 	// mode and will 400 if any are missing.  On a first turn (no assistant
 	// messages) or when the user explicitly opts in via config, we send
 	// thinking: enabled so the model can produce reasoning.
-	resolveThinkingAndEffort(anthropicReq, model, openaiReq)
+	resolveThinkingAndEffort(anthropicReq, model, openaiReq, statedEffort)
 
 	// Transform tools if present
 	if len(anthropicReq.Tools) > 0 {
@@ -182,31 +214,6 @@ func (t *RequestTransformer) TransformRequest(
 		if choice.DisableParallel != nil {
 			parallel := !*choice.DisableParallel
 			openaiReq.ParallelToolCalls = &parallel
-		}
-	}
-	if len(anthropicReq.OutputConfig) > 0 {
-		var output struct {
-			Effort string          `json:"effort"`
-			Format json.RawMessage `json:"format"`
-		}
-		if err := json.Unmarshal(anthropicReq.OutputConfig, &output); err != nil {
-			return nil, fmt.Errorf("invalid output_config: %w", err)
-		}
-		if len(output.Format) > 0 && string(output.Format) != "null" {
-			responseFormat, err := openAIResponseFormat(output.Format)
-			if err != nil {
-				return nil, err
-			}
-			openaiReq.ResponseFormat = responseFormat
-		}
-		// MessageRequest also carries Responses input; OpenAI output preserves
-		// its effort level. Only native Anthropic output needs a mapping.
-		effort, ok := core.NormalizeEffort(output.Effort)
-		if !ok {
-			return nil, fmt.Errorf("unsupported output_config.effort %q", output.Effort)
-		}
-		if effort != "" {
-			openaiReq.ReasoningEffort = &effort
 		}
 	}
 
@@ -295,6 +302,7 @@ func resolveThinkingAndEffort(
 	anthropicReq *types.MessageRequest,
 	model config.ModelConfig,
 	openaiReq *types.ChatCompletionRequest,
+	statedEffort string,
 ) {
 	hasThinking := HasThinkingBlocks(anthropicReq.Messages)
 	hasAssistant := hasAssistantMessages(anthropicReq.Messages)
@@ -308,9 +316,32 @@ func resolveThinkingAndEffort(
 	allowThinkingParam := isDeepSeek || explicitThinking
 	allowEffortParam := isOpenAIReasoning || isDeepSeek || explicitEffort
 
+	// A caller who turns thinking off gets nothing else. The effort that used
+	// to be written after this function could resurrect a level here, so the
+	// request said "disabled" and the payload said "high" - the opposite of
+	// what was asked.
 	if requestThinkingDisabled {
 		if allowThinkingParam {
 			openaiReq.Thinking = anthropicReq.Thinking
+		}
+		return
+	}
+
+	// A level the caller stated is the strongest signal this request carries,
+	// and it replaces the budget rather than joining it: one decision, one
+	// control. Sending both is what makes gateways such as OpenCode Go answer
+	// 400, and it lets the two disagree - a 8192 budget is "medium" by this
+	// proxy's own ladder while the stated level may say "high".
+	//
+	// The gate is a deny-list, not an allow-list: a model this proxy has never
+	// heard of still gets the level the caller asked for (unknown is not
+	// "no"), while the one family measured to reject the field outright
+	// (Moonshot) never receives it. A per-model capability table replaces this
+	// deny-list once the families that accept a level are measured one by one.
+	if statedEffort != "" {
+		if !isMoonshotModel(model.ModelID) {
+			effort := statedEffort
+			openaiReq.ReasoningEffort = &effort
 		}
 		return
 	}

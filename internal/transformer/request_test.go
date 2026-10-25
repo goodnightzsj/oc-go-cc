@@ -2117,9 +2117,16 @@ func TestStatedEffortReplacesTheBudget(t *testing.T) {
 		t.Errorf("thinking = %s, want %s", got, want)
 	}
 
-	// A stated level must not reach a family measured to reject the field.
-	if kimi := transform("moonshotai/Kimi-K2.6", "", high); kimi["reasoning_effort"] != nil {
-		t.Errorf("kimi was sent effort it rejects: %v", kimi["reasoning_effort"])
+	// Only a bare kimi id means api.moonshot.ai, which rejects the field. A
+	// prefixed one reaches the model through a gateway - cline-pass, opencode,
+	// openrouter - and those accept it, so denying them would silently drop the
+	// caller's choice. Measured 2026-10-26: cline-pass/kimi-k3 was being sent
+	// nothing at all before this distinction existed.
+	if kimi := transform("kimi-k2.6", "", high); kimi["reasoning_effort"] != nil {
+		t.Errorf("bare Moonshot was sent effort it rejects: %v", kimi["reasoning_effort"])
+	}
+	if gw := transform("cline-pass/kimi-k3", "", high); gw["reasoning_effort"] != "high" {
+		t.Errorf("gateway kimi lost the level: %v", gw["reasoning_effort"])
 	}
 
 	// The budget-only path is unchanged: DeepSeek keeps its budget.
@@ -2343,8 +2350,12 @@ func TestRealmDecidesTheLadderAndTheDenyList(t *testing.T) {
 	if got := transform("global:kimi-k3", "high")["reasoning_effort"]; got != "high" {
 		t.Errorf("gateway kimi-k3 = %v, want the level forwarded", got)
 	}
-	if got := transform("moonshotai/Kimi-K2.6", "high")["reasoning_effort"]; got != nil {
+	if got := transform("kimi-k2.6", "high")["reasoning_effort"]; got != nil {
 		t.Errorf("bare Moonshot got effort %v, want none", got)
+	}
+	// A pool-prefixed id reaches the model through a gateway, which accepts it.
+	if got := transform("cline-pass/kimi-k3", "high")["reasoning_effort"]; got != "high" {
+		t.Errorf("gateway kimi-k3 = %v, want the level forwarded", got)
 	}
 }
 

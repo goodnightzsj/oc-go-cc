@@ -507,12 +507,16 @@ func isOffEffort(level string) bool {
 // endpoint that accepts it - which is why this asks about the model *and* the
 // realm rather than about the family alone.
 func rejectsEffort(modelID string) bool {
-	if isMoonshotModel(modelID) {
-		// A realm-prefixed id reaches the model through WorkBuddy's gateway,
-		// which accepts levels; the bare id means the Moonshot API itself.
-		return models.BareModelID(modelID) == modelID
+	if !isMoonshotModel(modelID) {
+		return false
 	}
-	return false
+	// Only the bare id means api.moonshot.ai, which rejects the field. A prefix
+	// of either kind - a pool ("cline-pass/") or a realm ("global:") - means the
+	// request reaches the model through a gateway, and those gateways accept it.
+	// Testing only the colon form is what left cline-pass/kimi-k3 with no
+	// reasoning control at all: nothing was sent, so the caller's choice was
+	// silently dropped by a deny-list written for a different endpoint.
+	return !strings.ContainsAny(modelID, "/:")
 }
 
 // thinkingForUpstream rewrites a mode the target does not define into the one

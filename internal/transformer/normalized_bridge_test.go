@@ -141,3 +141,31 @@ func TestGeminiCarriesTheThinkingBudget(t *testing.T) {
 		t.Fatalf("an unstated budget produced thinkingConfig: %+v", got.GenerationConfig.ThinkingConfig)
 	}
 }
+
+// Gemini publishes a budget range, and a request outside it asks for something
+// the model cannot honour. The budget is clamped rather than forwarded.
+func TestGeminiBudgetIsClampedToThePublishedRange(t *testing.T) {
+	req := &types.MessageRequest{
+		Model: "claude-x", MaxTokens: 4096,
+		Thinking: json.RawMessage(`{"type":"enabled","budget_tokens":100000}`),
+		Messages: []types.Message{{Role: "user", Content: json.RawMessage(`"go"`)}},
+	}
+	got := AnthropicToGemini(req, config.ModelConfig{ModelID: "gemini-3.8-flash"})
+	if got.GenerationConfig.ThinkingConfig == nil || got.GenerationConfig.ThinkingConfig.ThinkingBudget == nil {
+		t.Fatal("gemini lost the budget")
+	}
+	if v := *got.GenerationConfig.ThinkingConfig.ThinkingBudget; v != 32768 {
+		t.Fatalf("thinkingBudget = %d, want the published ceiling 32768", v)
+	}
+
+	// A level converts to a budget inside the range rather than above it.
+	level := &types.MessageRequest{
+		Model: "claude-x", MaxTokens: 4096,
+		OutputConfig: json.RawMessage(`{"effort":"high"}`),
+		Messages:     []types.Message{{Role: "user", Content: json.RawMessage(`"go"`)}},
+	}
+	got = AnthropicToGemini(level, config.ModelConfig{ModelID: "gemini-3.8-flash"})
+	if v := *got.GenerationConfig.ThinkingConfig.ThinkingBudget; v != 32768 {
+		t.Fatalf("thinkingBudget = %d, want 32768 for level high", v)
+	}
+}

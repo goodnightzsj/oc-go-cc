@@ -362,6 +362,16 @@ func resolveThinkingAndEffort(
 	// (Moonshot) never receives it. A per-model capability table replaces this
 	// deny-list once the families that accept a level are measured one by one.
 	if statedEffort != "" {
+		// "off" is not a rung. A model whose ladder has no "none" must be told
+		// through the switch, because the closest level would say "think a
+		// little" where the caller said "stop" - the opposite instruction.
+		if isOffEffort(statedEffort) && allowThinkingParam {
+			openaiReq.Thinking = json.RawMessage(`{"type":"disabled"}`)
+			return
+		}
+		// A model with no switch at all (the GPT family) cannot be told to
+		// stop through either control. Its lowest rung is the closest honest
+		// answer, and the clamp below produces it.
 		if !isMoonshotModel(model.ModelID) {
 			// A model whose ladder is known gets the nearest rung it actually
 			// has: every vendor that documents a ladder also documents that an
@@ -434,6 +444,18 @@ func resolveThinkingAndEffort(
 
 	default:
 		// No config, no history: leave both unset.
+	}
+}
+
+// isOffEffort reports whether a level means "do not think". "minimal" is not
+// one of them: it asks for the weakest real effort, which is a different
+// instruction with a different outcome.
+func isOffEffort(level string) bool {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "none", "off", "disabled":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -59,6 +59,29 @@ type ThinkingSupport struct {
 	// NoOffLevel marks a model whose ladder has no "off" rung: asking for none
 	// or minimal must become the lowest real level (GPT-6 family).
 	NoOffLevel bool
+	// MinBudget and MaxBudget bound thinking.budget_tokens. Zero means the
+	// bound is unknown. Gemini publishes 1..32768 for the models that take a
+	// budget, and forwarding a larger number is a request the model cannot
+	// honour.
+	MinBudget int
+	MaxBudget int
+}
+
+// ClampBudget fits a token budget inside the model's documented range. A
+// non-positive budget is returned unchanged: 0 and -1 mean "off" and "decide
+// per request" in the protocols that use them, and are not out-of-range
+// values.
+func (s ThinkingSupport) ClampBudget(budget int) int {
+	if budget <= 0 {
+		return budget
+	}
+	if s.MinBudget > 0 && budget < s.MinBudget {
+		budget = s.MinBudget
+	}
+	if s.MaxBudget > 0 && budget > s.MaxBudget {
+		budget = s.MaxBudget
+	}
+	return budget
 }
 
 // ReasoningSupport returns what the model is known to accept. An unknown model
@@ -102,9 +125,9 @@ func ReasoningSupport(modelID string) ThinkingSupport {
 	case strings.HasPrefix(family, "gpt-5"), strings.HasPrefix(family, "o1"), strings.HasPrefix(family, "o3"):
 		return ThinkingSupport{Levels: []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}}
 	case strings.HasPrefix(family, "gemini-4"), strings.HasPrefix(family, "gemini-3"):
-		return ThinkingSupport{Levels: []string{"minimal", "low", "medium", "high"}, CannotDisable: true, Budget: true}
+		return ThinkingSupport{Levels: []string{"minimal", "low", "medium", "high"}, CannotDisable: true, Budget: true, MinBudget: 1, MaxBudget: 32768}
 	case strings.HasPrefix(family, "gemini-2.5"):
-		return ThinkingSupport{Budget: true}
+		return ThinkingSupport{Budget: true, MinBudget: 1, MaxBudget: 32768}
 	case strings.HasPrefix(family, "grok-4.6"):
 		return ThinkingSupport{Levels: []string{"low", "medium", "high", "xhigh"}}
 	case strings.HasPrefix(family, "grok-4.5"):
@@ -142,16 +165,26 @@ func (s ThinkingSupport) ClampLevel(requested string) (string, bool) {
 	if level == "" {
 		return "", false
 	}
-	// "off" is a request to stop, not a rung. A model that always thinks turns
-	// it into its lowest real level; a model with an off rung keeps it.
-	if level == "none" || level == "minimal" || level == "off" || level == "disabled" {
-		if s.CannotDisable || s.NoOffLevel {
-			return lowestPositive(s.Levels), true
-		}
+	// "off" is a request to stop, not a rung - and "minimal" is not the same
+	// request: it asks for the weakest real effort, which is why it falls
+	// through to the nearest-rung path below.
+	//
+	// Three outcomes, and they are not interchangeable:
+	//   - the ladder has "none": say none;
+	//   - the model cannot stop thinking at all (GLM-5.3, GPT-6): the lowest
+	//     real rung is the closest honest answer;
+	//   - the model can stop, but not through a level (DeepSeek's low/high/max):
+	//     a level cannot express this, so report "no level" and let the caller
+	//     send the switch instead. Returning "low" here would turn "stop
+	//     thinking" into "think a little", which is the opposite instruction.
+	if level == "off" || level == "disabled" || level == "none" {
 		if s.has("none") {
 			return "none", true
 		}
-		return lowestPositive(s.Levels), true
+		if s.CannotDisable || s.NoOffLevel {
+			return lowestPositive(s.Levels), true
+		}
+		return "", false
 	}
 	if s.has(level) {
 		return level, true

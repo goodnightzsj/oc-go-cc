@@ -130,13 +130,18 @@ func AnthropicToResponses(anthropicReq *types.MessageRequest, model config.Model
 
 // geminiThinkingBudget resolves the budget to send to Gemini, or nil when the
 // request said nothing about reasoning.
-func geminiThinkingBudget(req *core.NormalizedRequest) *int {
+func geminiThinkingBudget(req *core.NormalizedRequest, modelID string) *int {
+	support := core.ReasoningSupport(modelID)
+	// A budget the client stated is clamped to what the model publishes: Gemini
+	// documents 1..32768 for the models that take a budget, and forwarding a
+	// larger number asks for something the model cannot honour.
 	if req.ThinkingBudget > 0 {
-		budget := req.ThinkingBudget
+		budget := support.ClampBudget(req.ThinkingBudget)
 		return &budget
 	}
 	if req.ReasoningEffort != "" {
 		if budget := core.BudgetForEffort(req.ReasoningEffort); budget > 0 {
+			budget = support.ClampBudget(budget)
 			return &budget
 		}
 	}
@@ -163,7 +168,7 @@ func AnthropicToGemini(anthropicReq *types.MessageRequest, model config.ModelCon
 	// forwarded as-is; a level is converted, because a level-only client has no
 	// other way to say it. Neither present means the model decides, which is
 	// what an absent thinkingConfig already means.
-	if budget := geminiThinkingBudget(req); budget != nil {
+	if budget := geminiThinkingBudget(req, model.ModelID); budget != nil {
 		geminiReq.GenerationConfig.ThinkingConfig = &types.GeminiThinkingConfig{ThinkingBudget: budget}
 	}
 

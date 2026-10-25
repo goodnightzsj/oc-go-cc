@@ -2235,3 +2235,55 @@ func TestHistoryGuardOutranksAStatedEffort(t *testing.T) {
 		t.Errorf("a guarded request still carried effort %v", fields["reasoning_effort"])
 	}
 }
+
+// "Stop thinking" and "think as little as possible" are different requests.
+//
+// A model whose ladder has no "none" cannot be told to stop through a level:
+// returning its lowest rung would answer "think a little" where the caller said
+// "stop". Such a model is told through the switch instead. A model with no
+// switch at all (the GPT family) has only its ladder, so the lowest rung is the
+// closest honest answer there.
+func TestOffIsExpressedThroughTheSwitchNotALevel(t *testing.T) {
+	firstTurn := []types.Message{{Role: "user", Content: json.RawMessage(`"go"`)}}
+	transform := func(modelID, effort string) map[string]any {
+		t.Helper()
+		req := &types.MessageRequest{
+			Model: "claude-x", MaxTokens: 4096, Messages: firstTurn,
+			OutputConfig: json.RawMessage(`{"effort":"` + effort + `"}`),
+		}
+		out, err := NewRequestTransformer().TransformRequest(req, config.ModelConfig{ModelID: modelID})
+		if err != nil {
+			t.Fatalf("%s/%s: %v", modelID, effort, err)
+		}
+		raw, err := json.Marshal(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		return fields
+	}
+
+	// DeepSeek has a switch, so "none" uses it and no level is invented.
+	off := transform("deepseek/deepseek-v4.1-flash", "none")
+	if got, want := mustJSON(t, off["thinking"]), `{"type":"disabled"}`; got != want {
+		t.Errorf("deepseek none: thinking = %s, want %s", got, want)
+	}
+	if off["reasoning_effort"] != nil {
+		t.Errorf("deepseek none produced a level: %v", off["reasoning_effort"])
+	}
+
+	// "minimal" is not "off": it still resolves to the weakest real rung.
+	minimal := transform("deepseek/deepseek-v4.1-flash", "minimal")
+	if got, want := minimal["reasoning_effort"], "low"; got != want {
+		t.Errorf("deepseek minimal = %v, want %v", got, want)
+	}
+
+	// No switch anywhere: the lowest rung is the only answer available.
+	noSwitch := transform("gpt-6-astra", "none")
+	if got, want := noSwitch["reasoning_effort"], "low"; got != want {
+		t.Errorf("gpt-6 none = %v, want the lowest rung %v", got, want)
+	}
+}

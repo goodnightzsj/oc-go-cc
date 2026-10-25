@@ -73,6 +73,13 @@ type ThinkingSupport struct {
 	// request is an error rather than a preference (GLM-5.3 and the Gemini 4
 	// family both reject it).
 	CannotDisable bool
+	// EffortDriven marks a model whose gateway reads the level and ignores the
+	// budget. Measured 2026-10-26 against workbuddy2api-panel: a request with
+	// thinking.budget_tokens 8192 and one with 64000 produced the same
+	// reasoning-token count (18 vs 17), while reasoning_effort low vs high did
+	// move it. The budget is accepted and then discarded, so sending it is a
+	// no-op that looks like control.
+	EffortDriven bool
 	// NoOffLevel marks a model whose ladder has no "off" rung: asking for none
 	// or minimal must become the lowest real level (GPT-6 family).
 	NoOffLevel bool
@@ -120,7 +127,10 @@ func ReasoningSupport(modelID string) ThinkingSupport {
 		// medium to low on the international side, which is what it did before
 		// this split.
 		if realm == "global" {
-			return ThinkingSupport{Levels: []string{"low", "medium", "high", "xhigh", "max"}, Budget: true}
+			return ThinkingSupport{Levels: []string{"low", "medium", "high", "xhigh", "max"}, Budget: true, EffortDriven: true}
+		}
+		if realm == "cn" {
+			return ThinkingSupport{Levels: []string{"low", "high", "max"}, Budget: true, EffortDriven: true}
 		}
 		return ThinkingSupport{Levels: []string{"low", "high", "max"}, Budget: true}
 	case strings.HasPrefix(family, "glm-5.3"), strings.HasPrefix(family, "glm-5.3-flash"):

@@ -1895,8 +1895,18 @@ func TestModelFamilyRulesStillDiscriminate(t *testing.T) {
 			if got, want := string(deepseek["thinking"]), `{"type":"enabled","budget_tokens":4096}`; got != want {
 				t.Fatalf("deepseek first turn lost thinking mode: thinking=%s", got)
 			}
-			if deepseek["reasoning_effort"] != nil {
-				t.Fatalf("deepseek was sent both a budget and a derived effort: effort=%s", deepseek["reasoning_effort"])
+			// A realm prefix means the request reaches the model through the
+			// WorkBuddy gateway, which accepts a budget and then ignores it -
+			// measured 2026-10-26, 8192 and 64000 gave the same reasoning-token
+			// count while the level moved it. There the level must ride along
+			// or the caller has no way to steer. A bare or vendor-prefixed id
+			// reaches the vendor directly, where the budget is the control.
+			if strings.Contains(spelling.deepseek, ":") {
+				if deepseek["reasoning_effort"] == nil {
+					t.Fatalf("gateway-reached deepseek lost the level that actually steers it: %s", deepseek["thinking"])
+				}
+			} else if deepseek["reasoning_effort"] != nil {
+				t.Fatalf("direct deepseek was sent both a budget and a derived effort: effort=%s", deepseek["reasoning_effort"])
 			}
 			if !bytes.Contains(deepseek["messages"], []byte("cache_control")) {
 				t.Fatalf("deepseek lost cache_control, so the prefix cache cannot be anchored: %s", deepseek["messages"])
@@ -2336,4 +2346,73 @@ func TestRealmDecidesTheLadderAndTheDenyList(t *testing.T) {
 	if got := transform("moonshotai/Kimi-K2.6", "high")["reasoning_effort"]; got != nil {
 		t.Errorf("bare Moonshot got effort %v, want none", got)
 	}
+}
+
+// The WorkBuddy gateway accepts thinking.budget_tokens and then ignores it.
+//
+// Measured 2026-10-26 against workbuddy2api-panel: budgets of 8192 and 64000
+// produced the same reasoning-token count (18 vs 17), while reasoning_effort
+// low vs high moved it. So a budget sent to a realm-prefixed id is a no-op that
+// looks like control - the level is what steers those models. The thinking
+// block still rides along because it carries the on/off switch: the same
+// request with thinking disabled produced zero reasoning tokens.
+//
+// A bare id is not behind that gateway, so nothing changes for it.
+func TestEffortDrivenGatewayGetsALevelFromTheBudget(t *testing.T) {
+	firstTurn := []types.Message{{Role: "user", Content: json.RawMessage(`"go"`)}}
+	transform := func(modelID string, budget int) map[string]any {
+		t.Helper()
+		req := &types.MessageRequest{
+			Model: "claude-x", MaxTokens: 4096, Messages: firstTurn,
+			Thinking: json.RawMessage(`{"type":"enabled","budget_tokens":` + itoa(budget) + `}`),
+		}
+		out, err := NewRequestTransformer().TransformRequest(req, config.ModelConfig{ModelID: modelID})
+		if err != nil {
+			t.Fatalf("%s: %v", modelID, err)
+		}
+		raw, err := json.Marshal(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		return fields
+	}
+
+	small := transform("global:deepseek-v4.1-flash", 8192)
+	if got, want := small["reasoning_effort"], "medium"; got != want {
+		t.Errorf("8192 budget produced effort %v, want %v", got, want)
+	}
+	large := transform("global:deepseek-v4.1-flash", 64000)
+	if got, want := large["reasoning_effort"], "max"; got != want {
+		t.Errorf("64000 budget produced effort %v, want %v", got, want)
+	}
+	if small["reasoning_effort"] == large["reasoning_effort"] {
+		t.Error("two very different budgets produced the same level, so the budget is still being ignored")
+	}
+	// The switch still rides along: it is the only thing that turns thinking off.
+	if small["thinking"] == nil {
+		t.Error("the thinking block was dropped, so the caller can no longer turn thinking off")
+	}
+
+	// A bare id is not behind the gateway, so the budget stays the control.
+	if got := transform("deepseek-v4-pro", 8192)["reasoning_effort"]; got != nil {
+		t.Errorf("bare deepseek gained a level %v, want the budget alone", got)
+	}
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[i:])
 }

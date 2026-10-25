@@ -217,6 +217,36 @@ type ModelConfig struct {
 	// "vision_not_supported" before the platform was ever asked.
 	Vision                 *bool `json:"vision,omitempty"`
 	AnthropicToolsDisabled bool  `json:"anthropic_tools_disabled"`
+	// Reasoning declares what this model accepts for thinking control, for the
+	// models the built-in table does not know or gets wrong. Without it, adding
+	// a model whose ladder differs means editing Go and rebuilding - which is
+	// the wrong shape for a gateway whose model list is config-driven.
+	//
+	// Unset means "use the built-in table"; a partial object overrides only the
+	// fields it names, so listing a ladder does not silently drop the budget
+	// bounds the table already had.
+	Reasoning *ReasoningConfig `json:"reasoning,omitempty"`
+}
+
+// ReasoningConfig is the operator's statement about one model's thinking
+// control. Every field is optional and additive over the built-in table.
+type ReasoningConfig struct {
+	// Levels the model accepts, low to high. Empty keeps the table's list.
+	Levels []string `json:"levels,omitempty"`
+	// Budget says the model takes thinking.budget_tokens.
+	Budget *bool `json:"budget,omitempty"`
+	// CannotDisable marks a model that always thinks; a disable request is an
+	// error rather than a preference.
+	CannotDisable *bool `json:"cannot_disable,omitempty"`
+	// NoOffLevel marks a ladder with no "off" rung, so "none" becomes the
+	// lowest real level.
+	NoOffLevel *bool `json:"no_off_level,omitempty"`
+	// EffortDriven marks a model whose budget saturates below the top rung, so
+	// the level has to be sent alongside it.
+	EffortDriven *bool `json:"effort_driven,omitempty"`
+	// MinBudget and MaxBudget bound thinking.budget_tokens.
+	MinBudget *int `json:"min_budget,omitempty"`
+	MaxBudget *int `json:"max_budget,omitempty"`
 }
 
 // Key scheduling strategies. Only fill-first is implemented: the earliest

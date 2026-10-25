@@ -1,6 +1,10 @@
 package core
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/routatic/proxy/internal/config"
+)
 
 // Reasoning control vocabulary.
 //
@@ -124,6 +128,46 @@ func (s ThinkingSupport) ClampBudget(budget int) int {
 // because a missing entry forwards the client's own words while a wrong entry
 // overrides them.
 func ReasoningSupport(modelID string) ThinkingSupport {
+	return ReasoningSupportFor(modelID, config.ModelConfig{ModelID: modelID})
+}
+
+// ReasoningSupportFor answers the same question, letting an operator's
+// declaration in the model config override the built-in table.
+//
+// Overrides are additive per field, not whole-object replacements: an operator
+// who lists a ladder has not said anything about the budget bounds, and
+// dropping them because the field was omitted would turn a correction into a
+// regression. The config is the more specific statement, so it wins wherever it
+// speaks.
+func ReasoningSupportFor(modelID string, model config.ModelConfig) ThinkingSupport {
+	support := builtinReasoningSupport(modelID)
+	if override := model.Reasoning; override != nil {
+		if len(override.Levels) > 0 {
+			support.Levels = override.Levels
+		}
+		if override.Budget != nil {
+			support.Budget = *override.Budget
+		}
+		if override.CannotDisable != nil {
+			support.CannotDisable = *override.CannotDisable
+		}
+		if override.NoOffLevel != nil {
+			support.NoOffLevel = *override.NoOffLevel
+		}
+		if override.EffortDriven != nil {
+			support.EffortDriven = *override.EffortDriven
+		}
+		if override.MinBudget != nil {
+			support.MinBudget = *override.MinBudget
+		}
+		if override.MaxBudget != nil {
+			support.MaxBudget = *override.MaxBudget
+		}
+	}
+	return support
+}
+
+func builtinReasoningSupport(modelID string) ThinkingSupport {
 	family, realm := splitRealm(modelID)
 
 	switch {

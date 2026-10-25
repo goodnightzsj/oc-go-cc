@@ -7,6 +7,8 @@ package transformer
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"strconv"
 	"strings"
 
 	"github.com/routatic/proxy/internal/config"
@@ -378,9 +380,15 @@ func resolveThinkingAndEffort(
 			// unsupported value is an error. A model this proxy knows nothing
 			// about keeps the caller's own words.
 			effort := statedEffort
-			if clamped, ok := core.ReasoningSupport(model.ModelID).ClampLevel(statedEffort); ok {
+			support := core.ReasoningSupportFor(model.ModelID, model)
+			if clamped, ok := support.ClampLevel(statedEffort); ok {
 				effort = clamped
 			}
+			// A level the caller stated and did not get is the single most
+			// confusing thing this proxy can do quietly: they asked for max,
+			// the model ran at high, and nothing said so. One line makes it
+			// answerable.
+			logEffectiveEffort(model.ModelID, statedEffort, effort, support)
 			openaiReq.ReasoningEffort = &effort
 		}
 		return
@@ -408,13 +416,15 @@ func resolveThinkingAndEffort(
 		// max. The thinking block rides along because it carries the on/off
 		// switch - the same request with thinking disabled produced zero
 		// reasoning tokens.
-		effortDriven := core.ReasoningSupport(model.ModelID).EffortDriven
-		if allowEffortParam && (!allowThinkingParam || effortDriven) {
+		support := core.ReasoningSupportFor(model.ModelID, model)
+		if allowEffortParam && (!allowThinkingParam || support.EffortDriven) {
 			if budget := parseBudgetTokens(anthropicReq.Thinking); budget > 0 {
-				effort := core.EffortFromBudget(budget)
-				if clamped, ok := core.ReasoningSupport(model.ModelID).ClampLevel(effort); ok {
+				derived := core.EffortFromBudget(budget)
+				effort := derived
+				if clamped, ok := support.ClampLevel(derived); ok {
 					effort = clamped
 				}
+				logEffectiveEffort(model.ModelID, "budget:"+strconv.Itoa(budget)+"->"+derived, effort, support)
 				openaiReq.ReasoningEffort = &effort
 			}
 		}
@@ -457,6 +467,24 @@ func resolveThinkingAndEffort(
 	default:
 		// No config, no history: leave both unset.
 	}
+}
+
+// logEffectiveEffort records a level the proxy actually sent when it differs
+// from what the request asked for, or when the model needed the level at all.
+//
+// It logs only on a change. A line per request would bury the signal; a line
+// per rewrite answers the question people actually ask - "I set max, why does
+// this look like high" - without adding noise to the common case.
+func logEffectiveEffort(modelID, requested, effective string, support core.ThinkingSupport) {
+	if requested == effective {
+		return
+	}
+	slog.Info("reasoning level adjusted",
+		"model", modelID,
+		"requested", requested,
+		"effective", effective,
+		"supported", strings.Join(support.Levels, ","),
+	)
 }
 
 // isOffEffort reports whether a level means "do not think". "minimal" is not

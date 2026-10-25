@@ -73,12 +73,19 @@ type ThinkingSupport struct {
 	// request is an error rather than a preference (GLM-5.3 and the Gemini 4
 	// family both reject it).
 	CannotDisable bool
-	// EffortDriven marks a model whose gateway reads the level and ignores the
-	// budget. Measured 2026-10-26 against workbuddy2api-panel: a request with
-	// thinking.budget_tokens 8192 and one with 64000 produced the same
-	// reasoning-token count (18 vs 17), while reasoning_effort low vs high did
-	// move it. The budget is accepted and then discarded, so sending it is a
-	// no-op that looks like control.
+	// EffortDriven marks a model whose budget saturates below the top rung, so
+	// the level is the only way to reach it.
+	//
+	// Measured 2026-10-26 against workbuddy2api-panel, same reasoning-heavy
+	// prompt, three samples per cell: budget 8192 averaged 216 reasoning
+	// tokens, 32000 averaged 306, and 64000 averaged 295 - the budget does
+	// move the needle, then saturates. reasoning_effort=high averaged 305 and
+	// reasoning_effort=max averaged 462. No budget value reached max, so a
+	// caller who states a large budget still needs the level to get there.
+	//
+	// The gateway itself never reads budget_tokens on the chat path (grep in
+	// workbuddy2api-panel finds it only in the /v1/messages handler); the
+	// field is forwarded and interpreted upstream.
 	EffortDriven bool
 	// NoOffLevel marks a model whose ladder has no "off" rung: asking for none
 	// or minimal must become the lowest real level (GPT-6 family).

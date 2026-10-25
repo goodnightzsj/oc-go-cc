@@ -400,11 +400,12 @@ func resolveThinkingAndEffort(
 		if allowThinkingParam {
 			openaiReq.Thinking = thinkingForUpstream(anthropicReq.Thinking, isDeepSeek)
 		}
-		// An effort-driven gateway accepts thinking.budget_tokens and then
-		// ignores it: measured 2026-10-26, budgets of 8192 and 64000 produced
-		// the same reasoning-token count while the level moved it. So the
-		// budget is translated into the level that actually steers it, and the
-		// thinking block still rides along because it carries the on/off
+		// On an effort-driven gateway a budget saturates below the top rung:
+		// measured 2026-10-26, budgets of 8192 / 32000 / 64000 averaged 216 /
+		// 306 / 295 reasoning tokens while reasoning_effort low / high / max
+		// averaged 250 / 305 / 462. The budget is honoured and then flattens,
+		// so a caller who states a large one still needs the level to reach
+		// max. The thinking block rides along because it carries the on/off
 		// switch - the same request with thinking disabled produced zero
 		// reasoning tokens.
 		effortDriven := core.ReasoningSupport(model.ModelID).EffortDriven

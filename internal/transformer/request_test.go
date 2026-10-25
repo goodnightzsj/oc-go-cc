@@ -2348,14 +2348,17 @@ func TestRealmDecidesTheLadderAndTheDenyList(t *testing.T) {
 	}
 }
 
-// The WorkBuddy gateway accepts thinking.budget_tokens and then ignores it.
+// On the WorkBuddy gateway a budget saturates below the top rung, so the level
+// has to ride along.
 //
-// Measured 2026-10-26 against workbuddy2api-panel: budgets of 8192 and 64000
-// produced the same reasoning-token count (18 vs 17), while reasoning_effort
-// low vs high moved it. So a budget sent to a realm-prefixed id is a no-op that
-// looks like control - the level is what steers those models. The thinking
-// block still rides along because it carries the on/off switch: the same
-// request with thinking disabled produced zero reasoning tokens.
+// Measured 2026-10-26 against workbuddy2api-panel, same reasoning-heavy prompt,
+// three samples per cell: budget 8192 / 32000 / 64000 averaged 216 / 306 / 295
+// reasoning tokens, while reasoning_effort low / high / max averaged 250 / 305
+// / 462. The budget is honoured and then flattens - no budget value reached
+// max, so a caller who states a large budget still needs the level.
+//
+// The thinking block rides along because it carries the on/off switch: the
+// same request with thinking disabled produced zero reasoning tokens.
 //
 // A bare id is not behind that gateway, so nothing changes for it.
 func TestEffortDrivenGatewayGetsALevelFromTheBudget(t *testing.T) {

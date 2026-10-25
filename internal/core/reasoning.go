@@ -16,6 +16,23 @@ import "strings"
 // family absent from it is "unknown": callers forward what the client sent
 // rather than guessing, because unknown is not the same as "no".
 
+// splitRealm separates a realm prefix from the model name. WorkBuddy names its
+// models "global:..." and "cn:...", and the two realms do not publish the same
+// effort ladder for the same model, so the realm is part of the capability
+// lookup rather than decoration on the id.
+func splitRealm(modelID string) (family, realm string) {
+	name := strings.ToLower(strings.TrimSpace(modelID))
+	if idx := strings.LastIndex(name, "/"); idx >= 0 {
+		name = name[idx+1:]
+	}
+	if prefix, rest, found := strings.Cut(name, ":"); found && rest != "" {
+		if prefix == "global" || prefix == "cn" {
+			return rest, prefix
+		}
+	}
+	return name, ""
+}
+
 // BudgetForEffort is the inverse of EffortFromBudget: the token budget that
 // represents a level. It exists because a level-only client talking to a
 // budget-only upstream has no other way to express its intent - without this
@@ -93,29 +110,35 @@ func (s ThinkingSupport) ClampBudget(budget int) int {
 // because a missing entry forwards the client's own words while a wrong entry
 // overrides them.
 func ReasoningSupport(modelID string) ThinkingSupport {
-	family := strings.ToLower(modelID)
-	if idx := strings.LastIndex(family, "/"); idx >= 0 {
-		family = family[idx+1:]
-	}
-	if idx := strings.IndexByte(family, ':'); idx >= 0 {
-		family = family[idx+1:]
-	}
+	family, realm := splitRealm(modelID)
 
 	switch {
 	case strings.HasPrefix(family, "deepseek"):
-		// DeepSeek's documented surface is thinking.type plus a level; the
-		// budget is this proxy's own arithmetic, so the level is what it takes.
+		// The same model id carries a different ladder per realm: WorkBuddy's
+		// international gateway advertises five rungs where the domestic one
+		// advertises three. A realm-blind table collapses xhigh to high and
+		// medium to low on the international side, which is what it did before
+		// this split.
+		if realm == "global" {
+			return ThinkingSupport{Levels: []string{"low", "medium", "high", "xhigh", "max"}, Budget: true}
+		}
 		return ThinkingSupport{Levels: []string{"low", "high", "max"}, Budget: true}
 	case strings.HasPrefix(family, "glm-5.3"), strings.HasPrefix(family, "glm-5.3-flash"):
 		// GLM-5.3 rejects thinking.type "disabled" outright.
 		return ThinkingSupport{Levels: []string{"low", "high", "max"}, CannotDisable: true}
 	case strings.HasPrefix(family, "glm-5.2"):
-		return ThinkingSupport{Levels: []string{"low", "high", "max"}}
+		// Zhipu documents high/xhigh for 5.2, and the WorkBuddy roster copies
+		// that in both realms. The previous entry listed the 5.3 ladder here.
+		return ThinkingSupport{Levels: []string{"high", "xhigh"}}
 	case strings.HasPrefix(family, "glm-"):
 		// Older GLM: an on/off switch, no level.
 		return ThinkingSupport{}
 	case strings.HasPrefix(family, "kimi-k3"):
-		// K3 removed the thinking object; the level is the whole control.
+		// K3 removed the thinking object; the level is the whole control. The
+		// international gateway advertises five rungs.
+		if realm == "global" {
+			return ThinkingSupport{Levels: []string{"low", "medium", "high", "xhigh", "max"}, CannotDisable: true}
+		}
 		return ThinkingSupport{Levels: []string{"low", "high", "max"}, CannotDisable: true}
 	case strings.HasPrefix(family, "kimi"):
 		// K2.x and the code variants take a switch, never a level.

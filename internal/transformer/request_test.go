@@ -2287,3 +2287,53 @@ func TestOffIsExpressedThroughTheSwitchNotALevel(t *testing.T) {
 		t.Errorf("gpt-6 none = %v, want the lowest rung %v", got, want)
 	}
 }
+
+// WorkBuddy publishes a different effort ladder per realm for the same model
+// id, and a kimi reached through its gateway is a different endpoint from
+// api.moonshot.ai. Both facts live in the id's prefix, so the capability
+// lookup reads it.
+func TestRealmDecidesTheLadderAndTheDenyList(t *testing.T) {
+	firstTurn := []types.Message{{Role: "user", Content: json.RawMessage(`"go"`)}}
+	transform := func(modelID, effort string) map[string]any {
+		t.Helper()
+		req := &types.MessageRequest{
+			Model: "claude-x", MaxTokens: 4096, Messages: firstTurn,
+			OutputConfig: json.RawMessage(`{"effort":"` + effort + `"}`),
+		}
+		out, err := NewRequestTransformer().TransformRequest(req, config.ModelConfig{ModelID: modelID})
+		if err != nil {
+			t.Fatalf("%s/%s: %v", modelID, effort, err)
+		}
+		raw, err := json.Marshal(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		return fields
+	}
+
+	// The international gateway advertises five rungs; xhigh survives there.
+	if got := transform("global:deepseek-v4.1-flash", "xhigh")["reasoning_effort"]; got != "xhigh" {
+		t.Errorf("global deepseek xhigh = %v, want the level to survive", got)
+	}
+	// The domestic gateway advertises three, so xhigh folds to high.
+	if got := transform("cn:deepseek-v4.1-flash", "xhigh")["reasoning_effort"]; got != "high" {
+		t.Errorf("cn deepseek xhigh = %v, want the nearest rung high", got)
+	}
+	// GLM-5.2 documents high/xhigh; a low request snaps up, not down to max.
+	if got := transform("global:glm-5.2", "low")["reasoning_effort"]; got != "high" {
+		t.Errorf("glm-5.2 low = %v, want the nearest rung high", got)
+	}
+
+	// A kimi through the gateway accepts a level; the bare id is the Moonshot
+	// API, which rejects the field outright.
+	if got := transform("global:kimi-k3", "high")["reasoning_effort"]; got != "high" {
+		t.Errorf("gateway kimi-k3 = %v, want the level forwarded", got)
+	}
+	if got := transform("moonshotai/Kimi-K2.6", "high")["reasoning_effort"]; got != nil {
+		t.Errorf("bare Moonshot got effort %v, want none", got)
+	}
+}

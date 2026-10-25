@@ -372,7 +372,7 @@ func resolveThinkingAndEffort(
 		// A model with no switch at all (the GPT family) cannot be told to
 		// stop through either control. Its lowest rung is the closest honest
 		// answer, and the clamp below produces it.
-		if !isMoonshotModel(model.ModelID) {
+		if !rejectsEffort(model.ModelID) {
 			// A model whose ladder is known gets the nearest rung it actually
 			// has: every vendor that documents a ladder also documents that an
 			// unsupported value is an error. A model this proxy knows nothing
@@ -457,6 +457,22 @@ func isOffEffort(level string) bool {
 	default:
 		return false
 	}
+}
+
+// rejectsEffort reports whether the model is one that answers 400 for the
+// reasoning_effort field itself.
+//
+// The list is deliberately short and endpoint-specific. Moonshot's own API
+// rejects the field, but a kimi model reached through a gateway is a different
+// endpoint that accepts it - which is why this asks about the model *and* the
+// realm rather than about the family alone.
+func rejectsEffort(modelID string) bool {
+	if isMoonshotModel(modelID) {
+		// A realm-prefixed id reaches the model through WorkBuddy's gateway,
+		// which accepts levels; the bare id means the Moonshot API itself.
+		return models.BareModelID(modelID) == modelID
+	}
+	return false
 }
 
 // thinkingForUpstream rewrites a mode the target does not define into the one

@@ -1823,126 +1823,16 @@ func TestTransformTools_PreservesAdditionalPropertiesWhenSet(t *testing.T) {
 }
 
 // The family rules in request.go are written against model names, but upstreams
-// namespace their ids differently: OpenCode ships them flat and lowercase
-// ("deepseek-v4-pro", "kimi-k2.6"), CommandCode ships them vendor-prefixed and
-// mixed-case ("deepseek/deepseek-v4.1-flash", "moonshotai/Kimi-K2.6"). A prefix
-// or a case difference must not silently switch a family rule off, so the same
-// conversation has to produce the same upstream payload either way.
+// namespace their ids differently: OpenCode ships them flat ("deepseek-v4-pro"),
+// CommandCode ships them vendor-prefixed ("deepseek/deepseek-v4.1-flash") and
+// WorkBuddy ships them realm-prefixed ("global:deepseek-v4.1-flash"). A prefix
+// must not switch a family rule off, so every spelling has to produce the same
+// family-specific payload.
 //
-// Each case transforms one request twice - once per naming convention - and
-// compares the fields any family rule can touch. The compared values are read
-// back from the marshalled payload, so a field the rule forgets to set fails
-// here even if the struct field alone would have looked right.
-func TestModelFamilySurvivesVendorPrefixedNames(t *testing.T) {
-	transformer := NewRequestTransformer()
-
-	midConversationSystem := []types.Message{
-		{Role: "user", Content: json.RawMessage(`"hello"`)},
-		{Role: "assistant", Content: json.RawMessage(`"hi"`)},
-		// Claude Code injects these mid-conversation; DeepSeek reorders every
-		// system message to the front, which would shift the whole history and
-		// invalidate the prefix cache.
-		{Role: "system", Content: json.RawMessage(`"task tools haven't been used recently"`)},
-		{Role: "user", Content: json.RawMessage(`"continue"`)},
-	}
-	plainAssistantHistory := []types.Message{
-		{Role: "user", Content: json.RawMessage(`"hello"`)},
-		{Role: "assistant", Content: json.RawMessage(`"hi"`)},
-		{Role: "user", Content: json.RawMessage(`"again"`)},
-	}
-	thinkingHistory := []types.Message{
-		{Role: "user", Content: json.RawMessage(`"hello"`)},
-		{
-			Role: "assistant",
-			Content: json.RawMessage(`[
-				{"type":"thinking","thinking":"weighing options"},
-				{"type":"text","text":"hi"}
-			]`),
-		},
-		{Role: "user", Content: json.RawMessage(`"again"`)},
-	}
-
-	// Vendor and known realm prefixes do not change family-specific behavior.
-	pairs := []struct{ bare, prefixed string }{
-		{"deepseek-v4-pro", "deepseek/deepseek-v4-pro"},
-		{"kimi-k2.6", "moonshotai/Kimi-K2.6"},
-		{"kimi-k2.7-code", "moonshotai/Kimi-K2.7-Code"},
-		{"deepseek-v4-pro", "global:deepseek-v4-pro"},
-		{"deepseek-v4-pro", "cn:deepseek-v4-pro"},
-		{"kimi-k2.6", "global:kimi-k2.6"},
-		{"kimi-k2.6", "cn:kimi-k2.6"},
-		{"kimi-k2.7-code", "global:kimi-k2.7-code"},
-		{"kimi-k2.7-code", "cn:kimi-k2.7-code"},
-	}
-	scenarios := []struct {
-		name     string
-		messages []types.Message
-		thinking json.RawMessage
-	}{
-		{"first turn opts into thinking", []types.Message{{Role: "user", Content: json.RawMessage(`"explain"`)}}, json.RawMessage(`{"type":"enabled","budget_tokens":4096}`)},
-		{"assistant history without thinking", plainAssistantHistory, json.RawMessage(`{"type":"enabled","budget_tokens":4096}`)},
-		{"assistant history with thinking", thinkingHistory, json.RawMessage(`{"type":"enabled","budget_tokens":4096}`)},
-		{"midturn system reminder", midConversationSystem, nil},
-		{"explicitly disabled", plainAssistantHistory, json.RawMessage(`{"type":"disabled"}`)},
-		{"tool history", []types.Message{
-			{Role: "assistant", Content: json.RawMessage(`[{"type":"tool_use","id":"call1","name":"read","input":{}}]`)},
-			{Role: "user", Content: json.RawMessage(`[{"type":"tool_result","tool_use_id":"call1","content":"ok"}]`)},
-		}, nil},
-	}
-
-	for _, pair := range pairs {
-		for _, scenario := range scenarios {
-			t.Run(pair.prefixed+"/"+scenario.name, func(t *testing.T) {
-				transform := func(modelID string) map[string]json.RawMessage {
-					t.Helper()
-					temperature := 0.5
-					req := &types.MessageRequest{
-						Model:       "alias",
-						MaxTokens:   256,
-						Temperature: &temperature,
-						Thinking:    scenario.thinking,
-						System: json.RawMessage(`[
-							{"type":"text","text":"system prompt","cache_control":{"type":"ephemeral"}}
-						]`),
-						Messages: scenario.messages,
-					}
-					out, err := transformer.TransformRequest(req, config.ModelConfig{ModelID: modelID})
-					if err != nil {
-						t.Fatalf("TransformRequest(%q) error = %v", modelID, err)
-					}
-					if out.Model != modelID {
-						t.Fatalf("wire model changed from %s to %s", modelID, out.Model)
-					}
-					encoded, err := json.Marshal(out)
-					if err != nil {
-						t.Fatalf("marshal payload: %v", err)
-					}
-					var fields map[string]json.RawMessage
-					if err := json.Unmarshal(encoded, &fields); err != nil {
-						t.Fatalf("unmarshal payload: %v", err)
-					}
-					delete(fields, "model") // the only field that is meant to differ
-					return fields
-				}
-
-				flat := transform(pair.bare)
-				prefixed := transform(pair.prefixed)
-				for field, want := range flat {
-					if got := prefixed[field]; string(got) != string(want) {
-						t.Fatalf("vendor-prefixed id changed %s:\n flat     %s\n prefixed %s", field, want, got)
-					}
-				}
-				if len(prefixed) != len(flat) {
-					t.Fatalf("vendor-prefixed id changed the payload shape: %d vs %d fields", len(prefixed), len(flat))
-				}
-			})
-		}
-	}
-}
-
-// The parity test above only proves the two spellings agree. On its own that
-// would also pass if every family rule were switched off symmetrically, so pin
-// the behaviour each family is supposed to get, under the CommandCode spelling.
+// Each spelling is pinned to the behaviour it should get rather than compared
+// with the others: a parity check also passes when every family rule is
+// switched off symmetrically, and it cannot tell an intended difference from an
+// accidental one.
 func TestModelFamilyRulesStillDiscriminate(t *testing.T) {
 	transformer := NewRequestTransformer()
 	payload := func(modelID string, messages []types.Message) map[string]json.RawMessage {
@@ -1979,36 +1869,69 @@ func TestModelFamilyRulesStillDiscriminate(t *testing.T) {
 		{Role: "assistant", Content: json.RawMessage(`"hi"`)},
 		{Role: "user", Content: json.RawMessage(`"again"`)},
 	}
-
-	// DeepSeek keeps thinking mode and the cache_control the prefix cache needs;
-	// on a turn whose assistant messages carry no thinking it must send the
-	// explicit "disabled" form instead, or upstream rejects the history.
-	deepseek := payload("deepseek/deepseek-v4.1-flash", firstTurn)
-	// The budget is the control DeepSeek honours; a derived effort alongside it
-	// would be a second, contradicting answer to the same question.
-	if string(deepseek["thinking"]) != `{"type":"enabled","budget_tokens":4096}` {
-		t.Fatalf("deepseek first turn lost thinking mode: thinking=%s", deepseek["thinking"])
-	}
-	if deepseek["reasoning_effort"] != nil {
-		t.Fatalf("deepseek was sent both a budget and a derived effort: effort=%s", deepseek["reasoning_effort"])
-	}
-	if !bytes.Contains(deepseek["messages"], []byte("cache_control")) {
-		t.Fatalf("deepseek lost cache_control, so the prefix cache cannot be anchored: %s", deepseek["messages"])
-	}
-	if got := string(payload("deepseek/deepseek-v4.1-flash", plainHistory)["thinking"]); got != `{"type":"disabled"}` {
-		t.Fatalf("deepseek history guard did not engage: thinking=%s", got)
+	// Claude Code injects system reminders mid-conversation; DeepSeek reorders
+	// every system message to the front, which would otherwise shift the whole
+	// history and invalidate the prefix cache.
+	midturnSystem := []types.Message{
+		{Role: "user", Content: json.RawMessage(`"hello"`)},
+		{Role: "assistant", Content: json.RawMessage(`"hi"`)},
+		{Role: "system", Content: json.RawMessage(`"task tools haven't been used recently"`)},
+		{Role: "user", Content: json.RawMessage(`"continue"`)},
 	}
 
-	// Moonshot accepts neither the thinking field nor cache_control.
-	kimi := payload("moonshotai/Kimi-K2.6", firstTurn)
-	if kimi["thinking"] != nil || kimi["reasoning_effort"] != nil {
-		t.Fatalf("kimi was sent thinking/effort it rejects: thinking=%s effort=%s", kimi["thinking"], kimi["reasoning_effort"])
+	spellings := []struct{ deepseek, kimi, kimiCode string }{
+		{"deepseek/deepseek-v4.1-flash", "moonshotai/Kimi-K2.6", "moonshotai/Kimi-K2.7-Code"},
+		{"deepseek-v4.1-flash", "kimi-k2.6", "kimi-k2.7-code"},
+		{"global:deepseek-v4.1-flash", "global:kimi-k2.6", "global:kimi-k2.7-code"},
+		{"cn:deepseek-v4.1-flash", "cn:kimi-k2.6", "cn:kimi-k2.7-code"},
 	}
-	if bytes.Contains(kimi["messages"], []byte("cache_control")) {
-		t.Fatalf("kimi was sent cache_control it rejects: %s", kimi["messages"])
-	}
-	if got := string(payload("moonshotai/Kimi-K2.7-Code", firstTurn)["temperature"]); got != "1" {
-		t.Fatalf("kimi-k2.7-code temperature = %s, want 1", got)
+
+	for _, spelling := range spellings {
+		t.Run(spelling.deepseek, func(t *testing.T) {
+			// DeepSeek keeps thinking mode and the cache_control the prefix cache
+			// needs. The budget is the control it honours, so no derived effort
+			// may ride along: that would be a second, contradicting answer.
+			deepseek := payload(spelling.deepseek, firstTurn)
+			if got, want := string(deepseek["thinking"]), `{"type":"enabled","budget_tokens":4096}`; got != want {
+				t.Fatalf("deepseek first turn lost thinking mode: thinking=%s", got)
+			}
+			if deepseek["reasoning_effort"] != nil {
+				t.Fatalf("deepseek was sent both a budget and a derived effort: effort=%s", deepseek["reasoning_effort"])
+			}
+			if !bytes.Contains(deepseek["messages"], []byte("cache_control")) {
+				t.Fatalf("deepseek lost cache_control, so the prefix cache cannot be anchored: %s", deepseek["messages"])
+			}
+			// On a turn whose assistant messages carry no thinking it must send the
+			// explicit "disabled" form instead, or upstream rejects the history.
+			if got, want := string(payload(spelling.deepseek, plainHistory)["thinking"]), `{"type":"disabled"}`; got != want {
+				t.Fatalf("deepseek history guard did not engage: thinking=%s", got)
+			}
+			// A mid-conversation system message must be lifted to the front.
+			var reordered []struct {
+				Role string `json:"role"`
+			}
+			mid := payload(spelling.deepseek, midturnSystem)["messages"]
+			if err := json.Unmarshal(mid, &reordered); err != nil {
+				t.Fatalf("unmarshal messages: %v", err)
+			}
+			if len(reordered) == 0 || reordered[0].Role != "system" {
+				t.Fatalf("deepseek did not lift the system reminder to the front: %s", mid)
+			}
+		})
+
+		t.Run(spelling.kimi, func(t *testing.T) {
+			// Moonshot accepts neither the thinking field nor cache_control.
+			kimi := payload(spelling.kimi, firstTurn)
+			if kimi["thinking"] != nil || kimi["reasoning_effort"] != nil {
+				t.Fatalf("kimi was sent thinking/effort it rejects: thinking=%s effort=%s", kimi["thinking"], kimi["reasoning_effort"])
+			}
+			if bytes.Contains(kimi["messages"], []byte("cache_control")) {
+				t.Fatalf("kimi was sent cache_control it rejects: %s", kimi["messages"])
+			}
+			if got, want := string(payload(spelling.kimiCode, firstTurn)["temperature"]), "1"; got != want {
+				t.Fatalf("kimi-k2.7-code temperature = %s, want 1", got)
+			}
+		})
 	}
 }
 

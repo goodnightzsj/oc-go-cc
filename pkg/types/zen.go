@@ -132,7 +132,11 @@ type GeminiGenerationConfig struct {
 // is a token cap; Gemini treats 0 as "do not think" and -1 as "decide per
 // request", which is why it is a signed integer rather than a level.
 type GeminiThinkingConfig struct {
+	// ThinkingBudget is the token cap for models that take one (Gemini 2.5).
 	ThinkingBudget *int `json:"thinkingBudget,omitempty"`
+	// ThinkingLevel is the discrete rung for models that take one (Gemini 3+).
+	// The two are mutually exclusive: Gemini answers 400 when both arrive.
+	ThinkingLevel *string `json:"thinkingLevel,omitempty"`
 }
 
 // GeminiTool represents a tool definition.

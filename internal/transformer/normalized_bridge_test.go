@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/routatic/proxy/internal/config"
-	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/pkg/types"
 )
 
@@ -99,73 +98,61 @@ func TestAnthropicToResponses_SystemPromptWithNewline(t *testing.T) {
 	}
 }
 
-// Gemini was the one target that received nothing at all about reasoning: the
-// normalised request already carried the budget and the derived level, but the
-// bridge never read them, so a request that asked for deep thinking reached the
-// model with no thinkingConfig and the model used its default.
-func TestGeminiCarriesTheThinkingBudget(t *testing.T) {
+// Gemini splits by generation: 3.x takes a discrete level, 2.5 takes a token
+// budget. Sending the wrong one, or both, is the conflict Gemini documents as a
+// 400 - so the capability decides which field this target gets, and a stated
+// budget is clamped to the range the specific model publishes.
+func TestGeminiCarriesTheRightControlForItsGeneration(t *testing.T) {
 	firstTurn := []types.Message{{Role: "user", Content: json.RawMessage(`"go"`)}}
 
-	budget := &types.MessageRequest{
-		Model: "claude-x", MaxTokens: 4096,
-		Thinking: json.RawMessage(`{"type":"enabled","budget_tokens":8192}`),
-		Messages: firstTurn,
-	}
-	got := AnthropicToGemini(budget, config.ModelConfig{ModelID: "gemini-3.8-flash"})
-	if got.GenerationConfig.ThinkingConfig == nil || got.GenerationConfig.ThinkingConfig.ThinkingBudget == nil {
-		t.Fatal("gemini lost the budget the client stated")
-	}
-	if v := *got.GenerationConfig.ThinkingConfig.ThinkingBudget; v != 8192 {
-		t.Fatalf("thinkingBudget = %d, want the client's 8192", v)
-	}
-
-	// A level-only client has no other way to express intent, so the level is
-	// converted into the budget Gemini understands.
+	// 3.x: level-only. A stated level is clamped to the published rungs.
 	level := &types.MessageRequest{
 		Model: "claude-x", MaxTokens: 4096,
-		OutputConfig: json.RawMessage(`{"effort":"high"}`),
+		OutputConfig: json.RawMessage(`{"effort":"xhigh"}`),
 		Messages:     firstTurn,
 	}
-	got = AnthropicToGemini(level, config.ModelConfig{ModelID: "gemini-3.8-flash"})
-	if got.GenerationConfig.ThinkingConfig == nil || got.GenerationConfig.ThinkingConfig.ThinkingBudget == nil {
-		t.Fatal("gemini lost the level the client stated")
+	got := AnthropicToGemini(level, config.ModelConfig{ModelID: "gemini-3.8-flash"})
+	if got.GenerationConfig.ThinkingConfig == nil || got.GenerationConfig.ThinkingConfig.ThinkingLevel == nil {
+		t.Fatal("gemini 3.x lost the level")
 	}
-	if v, want := *got.GenerationConfig.ThinkingConfig.ThinkingBudget, core.BudgetForEffort("high"); v != want {
-		t.Fatalf("thinkingBudget = %d, want %d for level high", v, want)
+	if v := *got.GenerationConfig.ThinkingConfig.ThinkingLevel; v != "high" {
+		t.Fatalf("thinkingLevel = %q, want the nearest rung high", v)
+	}
+	if got.GenerationConfig.ThinkingConfig.ThinkingBudget != nil {
+		t.Fatal("gemini 3.x was sent a budget as well, which it rejects")
 	}
 
-	// Saying nothing about reasoning must leave the field absent rather than
-	// inventing a budget.
-	plain := &types.MessageRequest{Model: "claude-x", MaxTokens: 4096, Messages: firstTurn}
-	if got := AnthropicToGemini(plain, config.ModelConfig{ModelID: "gemini-3.8-flash"}); got.GenerationConfig.ThinkingConfig != nil {
-		t.Fatalf("an unstated budget produced thinkingConfig: %+v", got.GenerationConfig.ThinkingConfig)
-	}
-}
-
-// Gemini publishes a budget range, and a request outside it asks for something
-// the model cannot honour. The budget is clamped rather than forwarded.
-func TestGeminiBudgetIsClampedToThePublishedRange(t *testing.T) {
-	req := &types.MessageRequest{
+	// 2.5-pro: budget-only, clamped to its published ceiling.
+	pro := &types.MessageRequest{
 		Model: "claude-x", MaxTokens: 4096,
 		Thinking: json.RawMessage(`{"type":"enabled","budget_tokens":100000}`),
-		Messages: []types.Message{{Role: "user", Content: json.RawMessage(`"go"`)}},
+		Messages: firstTurn,
 	}
-	got := AnthropicToGemini(req, config.ModelConfig{ModelID: "gemini-3.8-flash"})
+	got = AnthropicToGemini(pro, config.ModelConfig{ModelID: "gemini-2.5-pro"})
 	if got.GenerationConfig.ThinkingConfig == nil || got.GenerationConfig.ThinkingConfig.ThinkingBudget == nil {
-		t.Fatal("gemini lost the budget")
+		t.Fatal("gemini 2.5 lost the budget")
 	}
 	if v := *got.GenerationConfig.ThinkingConfig.ThinkingBudget; v != 32768 {
-		t.Fatalf("thinkingBudget = %d, want the published ceiling 32768", v)
+		t.Fatalf("thinkingBudget = %d, want the 2.5-pro ceiling 32768", v)
+	}
+	if got.GenerationConfig.ThinkingConfig.ThinkingLevel != nil {
+		t.Fatal("gemini 2.5 was sent a level as well, which it rejects")
 	}
 
-	// A level converts to a budget inside the range rather than above it.
-	level := &types.MessageRequest{
+	// flash-lite publishes a different floor, and the floor applies.
+	small := &types.MessageRequest{
 		Model: "claude-x", MaxTokens: 4096,
-		OutputConfig: json.RawMessage(`{"effort":"high"}`),
-		Messages:     []types.Message{{Role: "user", Content: json.RawMessage(`"go"`)}},
+		Thinking: json.RawMessage(`{"type":"enabled","budget_tokens":100}`),
+		Messages: firstTurn,
 	}
-	got = AnthropicToGemini(level, config.ModelConfig{ModelID: "gemini-3.8-flash"})
-	if v := *got.GenerationConfig.ThinkingConfig.ThinkingBudget; v != 32768 {
-		t.Fatalf("thinkingBudget = %d, want 32768 for level high", v)
+	got = AnthropicToGemini(small, config.ModelConfig{ModelID: "gemini-2.5-flash-lite"})
+	if v := *got.GenerationConfig.ThinkingConfig.ThinkingBudget; v != 512 {
+		t.Fatalf("thinkingBudget = %d, want the flash-lite floor 512", v)
+	}
+
+	// Saying nothing leaves the field absent rather than inventing one.
+	plain := &types.MessageRequest{Model: "claude-x", MaxTokens: 4096, Messages: firstTurn}
+	if got := AnthropicToGemini(plain, config.ModelConfig{ModelID: "gemini-2.5-pro"}); got.GenerationConfig.ThinkingConfig != nil {
+		t.Fatalf("an unstated budget produced thinkingConfig: %+v", got.GenerationConfig.ThinkingConfig)
 	}
 }

@@ -130,19 +130,35 @@ func AnthropicToResponses(anthropicReq *types.MessageRequest, model config.Model
 
 // geminiThinkingBudget resolves the budget to send to Gemini, or nil when the
 // request said nothing about reasoning.
-func geminiThinkingBudget(req *core.NormalizedRequest, modelID string) *int {
+func geminiThinking(req *core.NormalizedRequest, modelID string) *types.GeminiThinkingConfig {
 	support := core.ReasoningSupport(modelID)
-	// A budget the client stated is clamped to what the model publishes: Gemini
-	// documents 1..32768 for the models that take a budget, and forwarding a
-	// larger number asks for something the model cannot honour.
+	// Gemini 3 and later take a discrete level; 2.5 and earlier take a token
+	// budget. Sending both is the conflict Gemini documents as a 400, so the
+	// capability decides which one this target gets.
+	if len(support.Levels) > 0 && !support.Budget {
+		level := req.ReasoningEffort
+		if level == "" && req.ThinkingBudget > 0 {
+			level = core.EffortFromBudget(req.ThinkingBudget)
+		}
+		if level == "" {
+			return nil
+		}
+		if clamped, ok := support.ClampLevel(level); ok {
+			level = clamped
+		}
+		return &types.GeminiThinkingConfig{ThinkingLevel: &level}
+	}
+	// A budget the client stated is clamped to what the model publishes: the
+	// 2.5 family documents different ranges per model, and forwarding a larger
+	// number asks for something the model cannot honour.
 	if req.ThinkingBudget > 0 {
 		budget := support.ClampBudget(req.ThinkingBudget)
-		return &budget
+		return &types.GeminiThinkingConfig{ThinkingBudget: &budget}
 	}
 	if req.ReasoningEffort != "" {
 		if budget := core.BudgetForEffort(req.ReasoningEffort); budget > 0 {
 			budget = support.ClampBudget(budget)
-			return &budget
+			return &types.GeminiThinkingConfig{ThinkingBudget: &budget}
 		}
 	}
 	return nil
@@ -168,8 +184,8 @@ func AnthropicToGemini(anthropicReq *types.MessageRequest, model config.ModelCon
 	// forwarded as-is; a level is converted, because a level-only client has no
 	// other way to say it. Neither present means the model decides, which is
 	// what an absent thinkingConfig already means.
-	if budget := geminiThinkingBudget(req, model.ModelID); budget != nil {
-		geminiReq.GenerationConfig.ThinkingConfig = &types.GeminiThinkingConfig{ThinkingBudget: budget}
+	if thinking := geminiThinking(req, model.ModelID); thinking != nil {
+		geminiReq.GenerationConfig.ThinkingConfig = thinking
 	}
 
 	// System prompt is prepended as a user message (Gemini has no system role).

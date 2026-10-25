@@ -125,9 +125,15 @@ func ReasoningSupport(modelID string) ThinkingSupport {
 	case strings.HasPrefix(family, "gpt-5"), strings.HasPrefix(family, "o1"), strings.HasPrefix(family, "o3"):
 		return ThinkingSupport{Levels: []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}}
 	case strings.HasPrefix(family, "gemini-4"), strings.HasPrefix(family, "gemini-3"):
-		return ThinkingSupport{Levels: []string{"minimal", "low", "medium", "high"}, CannotDisable: true, Budget: true, MinBudget: 1, MaxBudget: 32768}
+		// Gemini 3 and later take a discrete level. Sending a budget to them is
+		// the conflict Gemini documents as a 400, so Budget stays false.
+		return ThinkingSupport{Levels: []string{"minimal", "low", "medium", "high"}, CannotDisable: true}
+	case strings.HasPrefix(family, "gemini-2.5-flash-lite"):
+		return ThinkingSupport{Budget: true, MinBudget: 512, MaxBudget: 24576}
+	case strings.HasPrefix(family, "gemini-2.5-pro"):
+		return ThinkingSupport{Budget: true, MinBudget: 128, MaxBudget: 32768}
 	case strings.HasPrefix(family, "gemini-2.5"):
-		return ThinkingSupport{Budget: true, MinBudget: 1, MaxBudget: 32768}
+		return ThinkingSupport{Budget: true, MaxBudget: 24576}
 	case strings.HasPrefix(family, "grok-4.6"):
 		return ThinkingSupport{Levels: []string{"low", "medium", "high", "xhigh"}}
 	case strings.HasPrefix(family, "grok-4.5"):

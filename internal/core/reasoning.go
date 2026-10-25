@@ -97,6 +97,13 @@ type ThinkingSupport struct {
 	// Budget means the model takes thinking.budget_tokens. When both Budget
 	// and Levels are set the model accepts either, not both at once.
 	Budget bool
+	// TakesThinking means the model accepts a `thinking` object on the Chat
+	// Completions wire at all - the switch that turns reasoning on or off.
+	// It is separate from Budget because a model can take the switch without
+	// taking a token budget: GLM reads thinking.type and nothing else, and
+	// conflating the two is what made the old gate forward thinking to
+	// DeepSeek only.
+	TakesThinking bool
 	// CannotDisable marks a model that always thinks: sending a disable
 	// request is an error rather than a preference (GLM-5.3 and the Gemini 4
 	// family both reject it).
@@ -213,22 +220,22 @@ func builtinReasoningSupport(provider, modelID string) ThinkingSupport {
 		// medium to low on the international side, which is what it did before
 		// this split.
 		if realm == "global" {
-			return ThinkingSupport{Levels: []string{"low", "medium", "high", "xhigh", "max"}, Budget: true, EffortDriven: true}
+			return ThinkingSupport{Levels: []string{"low", "medium", "high", "xhigh", "max"}, Budget: true, TakesThinking: true, EffortDriven: true}
 		}
 		if realm == "cn" {
-			return ThinkingSupport{Levels: []string{"low", "high", "max"}, Budget: true, EffortDriven: true}
+			return ThinkingSupport{Levels: []string{"low", "high", "max"}, Budget: true, TakesThinking: true, EffortDriven: true}
 		}
-		return ThinkingSupport{Levels: []string{"low", "high", "max"}, Budget: true}
+		return ThinkingSupport{Levels: []string{"low", "high", "max"}, Budget: true, TakesThinking: true}
 	case strings.HasPrefix(family, "glm-5.3"), strings.HasPrefix(family, "glm-5.3-flash"):
 		// GLM-5.3 rejects thinking.type "disabled" outright.
-		return ThinkingSupport{Levels: []string{"low", "high", "max"}, CannotDisable: true}
+		return ThinkingSupport{Levels: []string{"low", "high", "max"}, CannotDisable: true, TakesThinking: true}
 	case strings.HasPrefix(family, "glm-5.2"):
 		// Zhipu documents high/xhigh for 5.2, and the WorkBuddy roster copies
 		// that in both realms. The previous entry listed the 5.3 ladder here.
-		return ThinkingSupport{Levels: []string{"high", "xhigh"}}
+		return ThinkingSupport{Levels: []string{"high", "xhigh"}, TakesThinking: true}
 	case strings.HasPrefix(family, "glm-"):
 		// Older GLM: an on/off switch, no level.
-		return ThinkingSupport{}
+		return ThinkingSupport{TakesThinking: true}
 	case strings.HasPrefix(family, "kimi-k3"):
 		// K3 removed the thinking object; the level is the whole control. The
 		// international gateway advertises five rungs.
@@ -237,7 +244,10 @@ func builtinReasoningSupport(provider, modelID string) ThinkingSupport {
 		}
 		return ThinkingSupport{Levels: []string{"low", "high", "max"}, CannotDisable: true}
 	case strings.HasPrefix(family, "kimi"):
-		// K2.x and the code variants take a switch, never a level.
+		// K2.x and the code variants. The vendor documents a thinking object,
+		// but this proxy has no live measurement of it and the existing guards
+		// assert the opposite, so the field is not forwarded until someone
+		// measures it. A wrong guess here is a 400 on every kimi request.
 		return ThinkingSupport{}
 	case strings.HasPrefix(family, "gpt-6"), strings.HasPrefix(family, "gpt-6.1"):
 		return ThinkingSupport{Levels: []string{"low", "medium", "high", "xhigh", "max"}, NoOffLevel: true}
@@ -272,7 +282,7 @@ func builtinReasoningSupport(provider, modelID string) ThinkingSupport {
 	case strings.HasPrefix(family, "mimo"):
 		// Xiaomi documents only the switch; a level is accepted but its effect
 		// is unverified, so it is not listed.
-		return ThinkingSupport{}
+		return ThinkingSupport{TakesThinking: true}
 	default:
 		return ThinkingSupport{}
 	}

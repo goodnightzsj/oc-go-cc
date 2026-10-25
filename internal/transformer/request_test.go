@@ -2430,3 +2430,62 @@ func itoa(n int) string {
 	}
 	return string(buf[i:])
 }
+
+// The thinking switch follows the capability table, not the family name.
+//
+// Until this existed the gate read `isDeepSeek || explicitThinking`, so every
+// non-DeepSeek model silently lost the client's switch even where the vendor
+// documents it. GLM and MiMo take the switch and no budget, which is why
+// TakesThinking and Budget are separate bits rather than one.
+//
+// Kimi is deliberately still excluded: the vendor documents a thinking object,
+// but this proxy has no live measurement of it and the older guards assert the
+// opposite, so forwarding there would be a guess with a 400 as its failure
+// mode.
+func TestThinkingSwitchFollowsTheCapabilityTable(t *testing.T) {
+	firstTurn := []types.Message{{Role: "user", Content: json.RawMessage(`"go"`)}}
+	transform := func(modelID string) map[string]any {
+		t.Helper()
+		req := &types.MessageRequest{
+			Model: "claude-x", MaxTokens: 4096, Messages: firstTurn,
+			Thinking: json.RawMessage(`{"type":"enabled","budget_tokens":8192}`),
+		}
+		out, err := NewRequestTransformer().TransformRequest(req, config.ModelConfig{ModelID: modelID})
+		if err != nil {
+			t.Fatalf("%s: %v", modelID, err)
+		}
+		raw, err := json.Marshal(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		return fields
+	}
+
+	// GLM takes the switch but not the budget: the budget must be stripped.
+	glm := transform("global:glm-5.3")
+	if glm["thinking"] == nil {
+		t.Fatal("glm lost the switch the vendor documents")
+	}
+	if got, want := mustJSON(t, glm["thinking"]), `{"type":"enabled"}`; got != want {
+		t.Errorf("glm thinking = %s, want the switch without a budget", got)
+	}
+
+	// DeepSeek takes both, so the budget survives.
+	if got := mustJSON(t, transform("global:deepseek-v4.1-flash")["thinking"]); got == `{"type":"enabled"}` {
+		t.Error("deepseek lost the budget it accepts")
+	}
+
+	// Kimi: nothing, pending a measurement.
+	if transform("kimi-k2.6")["thinking"] != nil {
+		t.Error("kimi received a switch nobody measured it accepting")
+	}
+
+	// An unknown model gets nothing, which is the table's zero value.
+	if transform("vendor/brand-new")["thinking"] != nil {
+		t.Error("an unmeasured model received a switch")
+	}
+}

@@ -325,8 +325,18 @@ func resolveThinkingAndEffort(
 	requestThinkingDisabled := isThinkingDisabled(anthropicReq.Thinking)
 	requestThinking := !requestThinkingDisabled && len(anthropicReq.Thinking) > 0
 
-	allowThinkingParam := isDeepSeek || explicitThinking
-	allowEffortParam := isOpenAIReasoning || isDeepSeek || explicitEffort
+	// The capability table decides whether the `thinking` object may be sent,
+	// not the family name. Until 2026-10-26 this read `isDeepSeek ||
+	// explicitThinking`, so every non-DeepSeek model silently lost the client's
+	// switch - GLM, Qwen and MiMo all accept it, and the table says so.
+	//
+	// An unknown model keeps the old behaviour on purpose: the table's zero
+	// value has TakesThinking false, and forwarding a field to an upstream
+	// nobody has measured is the failure this table exists to prevent. The
+	// operator can declare it.
+	capability := core.ReasoningSupportFor(model)
+	allowThinkingParam := capability.TakesThinking || explicitThinking
+	allowEffortParam := isOpenAIReasoning || isDeepSeek || explicitEffort || len(capability.Levels) > 0
 
 	// A caller who turns thinking off gets nothing else. The effort that used
 	// to be written after this function could resurrect a level here, so the
@@ -334,7 +344,7 @@ func resolveThinkingAndEffort(
 	// what was asked.
 	if requestThinkingDisabled {
 		if allowThinkingParam {
-			openaiReq.Thinking = thinkingForUpstream(anthropicReq.Thinking, isDeepSeek)
+			openaiReq.Thinking = thinkingForCapability(anthropicReq.Thinking, capability, isDeepSeek)
 		}
 		return
 	}
@@ -406,7 +416,7 @@ func resolveThinkingAndEffort(
 		// Deriving a level also loses resolution - a 63999-token budget becomes
 		// one of five strings.
 		if allowThinkingParam {
-			openaiReq.Thinking = thinkingForUpstream(anthropicReq.Thinking, isDeepSeek)
+			openaiReq.Thinking = thinkingForCapability(anthropicReq.Thinking, capability, isDeepSeek)
 		}
 		// On an effort-driven gateway a budget saturates below the top rung:
 		// measured 2026-10-26, budgets of 8192 / 32000 / 64000 averaged 216 /
@@ -519,30 +529,44 @@ func rejectsEffort(modelID string) bool {
 	return !strings.ContainsAny(modelID, "/:")
 }
 
-// thinkingForUpstream rewrites a mode the target does not define into the one
-// it does.
+// thinkingForCapability adapts a thinking object to what the target defines.
 //
-// "adaptive" is an Anthropic mode meaning "the model decides how much to
-// think". The Chat Completions surface has no such value, and DeepSeek's
-// thinking object defines only enabled/disabled, so forwarding it verbatim
-// asks the upstream to interpret a word it has never seen. Everything else is
-// forwarded untouched - this is not a normaliser, just a translation of the one
-// mode that has no Chat Completions spelling.
-func thinkingForUpstream(raw json.RawMessage, isDeepSeek bool) json.RawMessage {
-	if !isDeepSeek || len(raw) == 0 {
-		return raw
-	}
-	var probe struct {
-		Type string `json:"type"`
-	}
-	if err := json.Unmarshal(raw, &probe); err != nil || !strings.EqualFold(probe.Type, "adaptive") {
+// Two edits, both because the client's object can carry more than the target
+// knows:
+//   - a token budget is dropped when the model takes the switch but not the
+//     budget. Kimi K2.6 is the case: its thinking object defines type and keep,
+//     and a budget_tokens riding along is a field it never declared.
+//   - "adaptive" becomes "enabled" for DeepSeek, whose thinking object defines
+//     only enabled/disabled.
+//
+// Everything else is forwarded untouched. This is not a normaliser.
+func thinkingForCapability(raw json.RawMessage, support core.ThinkingSupport, isDeepSeek bool) json.RawMessage {
+	if len(raw) == 0 {
 		return raw
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return raw
 	}
-	fields["type"] = json.RawMessage(`"enabled"`)
+	changed := false
+	if !support.Budget {
+		if _, ok := fields["budget_tokens"]; ok {
+			delete(fields, "budget_tokens")
+			changed = true
+		}
+	}
+	if isDeepSeek {
+		var probe struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(raw, &probe); err == nil && strings.EqualFold(probe.Type, "adaptive") {
+			fields["type"] = json.RawMessage(`"enabled"`)
+			changed = true
+		}
+	}
+	if !changed {
+		return raw
+	}
 	converted, err := json.Marshal(fields)
 	if err != nil {
 		return raw

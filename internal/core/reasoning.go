@@ -133,7 +133,11 @@ func ReasoningSupport(modelID string) ThinkingSupport {
 	case strings.HasPrefix(family, "gemini-2.5-pro"):
 		return ThinkingSupport{Budget: true, MinBudget: 128, MaxBudget: 32768}
 	case strings.HasPrefix(family, "gemini-2.5"):
-		return ThinkingSupport{Budget: true, MaxBudget: 24576}
+		// Flash and the leftover 2.5 variants: 1..24576. A floor of 1 rather
+		// than 0 because 0 means "do not think", which is a switch this proxy
+		// expresses elsewhere; a floor of 0 would silently accept "off" as a
+		// budget and send the model a number instead of the instruction.
+		return ThinkingSupport{Budget: true, MinBudget: 1, MaxBudget: 24576}
 	case strings.HasPrefix(family, "grok-4.6"):
 		return ThinkingSupport{Levels: []string{"low", "medium", "high", "xhigh"}}
 	case strings.HasPrefix(family, "grok-4.5"):

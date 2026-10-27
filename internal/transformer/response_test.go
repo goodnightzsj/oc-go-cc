@@ -27,7 +27,7 @@ func TestTransformResponsePreservesReasoningContent(t *testing.T) {
 				FinishReason: "stop",
 			},
 		},
-		Usage: types.UsageInfo{
+		Usage: &types.UsageInfo{
 			PromptTokens:     10,
 			CompletionTokens: 5,
 			TotalTokens:      15,
@@ -88,7 +88,7 @@ func TestTransformResponsePreservesReasoningContentWithToolCalls(t *testing.T) {
 				FinishReason: "tool_calls",
 			},
 		},
-		Usage: types.UsageInfo{
+		Usage: &types.UsageInfo{
 			PromptTokens:     20,
 			CompletionTokens: 15,
 			TotalTokens:      35,
@@ -143,7 +143,7 @@ func TestTransformResponseOmitsEmptyReasoningContent(t *testing.T) {
 				FinishReason: "stop",
 			},
 		},
-		Usage: types.UsageInfo{
+		Usage: &types.UsageInfo{
 			PromptTokens:     5,
 			CompletionTokens: 2,
 			TotalTokens:      7,
@@ -182,7 +182,7 @@ func TestTransformResponseNoReasoningContent(t *testing.T) {
 				FinishReason: "stop",
 			},
 		},
-		Usage: types.UsageInfo{
+		Usage: &types.UsageInfo{
 			PromptTokens:     3,
 			CompletionTokens: 4,
 			TotalTokens:      7,
@@ -221,7 +221,7 @@ func TestTransformResponseExtractsTextFromContentParts(t *testing.T) {
 				FinishReason: "stop",
 			},
 		},
-		Usage: types.UsageInfo{
+		Usage: &types.UsageInfo{
 			PromptTokens:     10,
 			CompletionTokens: 5,
 			TotalTokens:      15,
@@ -257,7 +257,7 @@ func TestTransformResponseWithCacheTokens(t *testing.T) {
 				FinishReason: "stop",
 			},
 		},
-		Usage: types.UsageInfo{
+		Usage: &types.UsageInfo{
 			PromptTokens:          100,
 			CompletionTokens:      50,
 			TotalTokens:           150,
@@ -309,7 +309,7 @@ func TestTransformResponseWithPartialCacheTokens(t *testing.T) {
 				FinishReason: "stop",
 			},
 		},
-		Usage: types.UsageInfo{
+		Usage: &types.UsageInfo{
 			PromptTokens:          100,
 			CompletionTokens:      5,
 			TotalTokens:           105,
@@ -355,7 +355,7 @@ func TestTransformResponseCacheExceedsPromptTokens(t *testing.T) {
 				FinishReason: "stop",
 			},
 		},
-		Usage: types.UsageInfo{
+		Usage: &types.UsageInfo{
 			PromptTokens:          50,
 			CompletionTokens:      5,
 			TotalTokens:           55,
@@ -399,7 +399,7 @@ func TestTransformResponseWithoutCacheTokens(t *testing.T) {
 				FinishReason: "stop",
 			},
 		},
-		Usage: types.UsageInfo{
+		Usage: &types.UsageInfo{
 			PromptTokens:     10,
 			CompletionTokens: 5,
 			TotalTokens:      15,

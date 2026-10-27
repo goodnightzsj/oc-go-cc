@@ -96,8 +96,14 @@ func (t *RequestTransformer) TransformRequest(
 	anthropicReq *types.MessageRequest,
 	model config.ModelConfig,
 ) (*types.ChatCompletionRequest, error) {
+	openaiReq, err := t.transformParameters(anthropicReq, model)
+	if err != nil {
+		return nil, err
+	}
 	// Transform messages
-	messages, err := t.transformMessages(anthropicReq, model.ModelID, imageHandlingFor(model))
+	family := modelFamily(model.ModelID)
+	cacheBreakpoints := model.Provider == "openrouter" && (strings.HasPrefix(family, "claude") || strings.HasPrefix(family, "gemini"))
+	messages, err := t.transformMessages(anthropicReq, model.ModelID, imageHandlingFor(model), cacheBreakpoints)
 	if err != nil {
 		return nil, fmt.Errorf("failed to transform messages: %w", err)
 	}
@@ -106,12 +112,18 @@ func (t *RequestTransformer) TransformRequest(
 	if !isDeepSeekModel(model.ModelID) {
 		stripCacheControl(messages)
 	}
+	openaiReq.Messages = messages
+	return openaiReq, nil
+}
 
-	// Build OpenAI request
+// transformParameters shares controls without imposing Chat's content limits.
+func (t *RequestTransformer) transformParameters(anthropicReq *types.MessageRequest, model config.ModelConfig) (*types.ChatCompletionRequest, error) {
 	openaiReq := &types.ChatCompletionRequest{
-		Model:    model.ModelID,
-		Messages: messages,
-		Stream:   anthropicReq.Stream,
+		Model:  model.ModelID,
+		Stream: anthropicReq.Stream,
+	}
+	if len(anthropicReq.StopSequences) > 0 {
+		openaiReq.Stop = anthropicReq.StopSequences
 	}
 	if anthropicReq.Stream != nil && *anthropicReq.Stream {
 		openaiReq.StreamOptions = &types.StreamOptions{IncludeUsage: true}
@@ -195,7 +207,9 @@ func (t *RequestTransformer) TransformRequest(
 	// mode and will 400 if any are missing.  On a first turn (no assistant
 	// messages) or when the user explicitly opts in via config, we send
 	// thinking: enabled so the model can produce reasoning.
-	resolveThinkingAndEffort(anthropicReq, model, openaiReq, statedEffort)
+	if err := resolveThinkingAndEffort(anthropicReq, model, openaiReq, statedEffort); err != nil {
+		return nil, err
+	}
 
 	// Transform tools if present
 	if len(anthropicReq.Tools) > 0 {
@@ -315,7 +329,7 @@ func resolveThinkingAndEffort(
 	model config.ModelConfig,
 	openaiReq *types.ChatCompletionRequest,
 	statedEffort string,
-) {
+) error {
 	hasThinking := HasThinkingBlocks(anthropicReq.Messages)
 	hasAssistant := hasAssistantMessages(anthropicReq.Messages)
 	explicitThinking := len(model.Thinking) > 0
@@ -338,17 +352,6 @@ func resolveThinkingAndEffort(
 	allowThinkingParam := capability.TakesThinking || explicitThinking
 	allowEffortParam := isOpenAIReasoning || isDeepSeek || explicitEffort || len(capability.Levels) > 0
 
-	// A caller who turns thinking off gets nothing else. The effort that used
-	// to be written after this function could resurrect a level here, so the
-	// request said "disabled" and the payload said "high" - the opposite of
-	// what was asked.
-	if requestThinkingDisabled {
-		if allowThinkingParam {
-			openaiReq.Thinking = thinkingForCapability(anthropicReq.Thinking, capability, isDeepSeek)
-		}
-		return
-	}
-
 	// DeepSeek validates reasoning_content on every assistant message in
 	// thinking mode, so a history without it must run with thinking off. This
 	// outranks a stated level: the guard exists because the upstream refuses
@@ -356,10 +359,18 @@ func resolveThinkingAndEffort(
 	// that only set reasoning_effort and left thinking on - the exact
 	// combination that 400s.
 	if isDeepSeek && hasAssistant && !hasThinking {
+		if capability.CannotDisable {
+			return fmt.Errorf("model %q cannot disable thinking but assistant history has no reasoning content", model.ModelID)
+		}
 		if allowThinkingParam {
 			openaiReq.Thinking = json.RawMessage(`{"type":"disabled"}`)
 		}
-		return
+		return nil
+	}
+
+	if requestThinkingDisabled {
+		applyThinkingOff(openaiReq, model, capability, allowThinkingParam)
+		return nil
 	}
 
 	// A level the caller stated is the strongest signal this request carries,
@@ -378,8 +389,8 @@ func resolveThinkingAndEffort(
 		// through the switch, because the closest level would say "think a
 		// little" where the caller said "stop" - the opposite instruction.
 		if isOffEffort(statedEffort) && allowThinkingParam {
-			openaiReq.Thinking = json.RawMessage(`{"type":"disabled"}`)
-			return
+			applyThinkingOff(openaiReq, model, capability, allowThinkingParam)
+			return nil
 		}
 		// A model with no switch at all (the GPT family) cannot be told to
 		// stop through either control. Its lowest rung is the closest honest
@@ -401,7 +412,7 @@ func resolveThinkingAndEffort(
 			logEffectiveEffort(model.ModelID, statedEffort, effort, support)
 			openaiReq.ReasoningEffort = &effort
 		}
-		return
+		return nil
 	}
 
 	switch {
@@ -441,9 +452,13 @@ func resolveThinkingAndEffort(
 
 	case hasThinking:
 		// History has thinking blocks — maintain continuity.
+		if explicitThinking && isThinkingDisabled(model.Thinking) {
+			applyThinkingOff(openaiReq, model, capability, allowThinkingParam)
+			return nil
+		}
 		if allowThinkingParam {
 			if explicitThinking {
-				openaiReq.Thinking = model.Thinking
+				openaiReq.Thinking = thinkingForCapability(model.Thinking, capability, isDeepSeek)
 			} else {
 				openaiReq.Thinking = json.RawMessage(`{"type":"enabled"}`)
 			}
@@ -456,8 +471,12 @@ func resolveThinkingAndEffort(
 
 	case explicitThinking:
 		// Config explicitly sets thinking — respect it.
+		if isThinkingDisabled(model.Thinking) {
+			applyThinkingOff(openaiReq, model, capability, allowThinkingParam)
+			return nil
+		}
 		if allowThinkingParam {
-			openaiReq.Thinking = model.Thinking
+			openaiReq.Thinking = thinkingForCapability(model.Thinking, capability, isDeepSeek)
 		}
 		if allowEffortParam {
 			if !isThinkingDisabled(openaiReq.Thinking) || !isDeepSeek {
@@ -476,6 +495,27 @@ func resolveThinkingAndEffort(
 
 	default:
 		// No config, no history: leave both unset.
+	}
+	return nil
+}
+
+// All off sources share the same rule; an always-on model uses its lowest rung.
+func applyThinkingOff(req *types.ChatCompletionRequest, model config.ModelConfig, support core.ThinkingSupport, allowThinking bool) {
+	req.Thinking = nil
+	req.ReasoningEffort = nil
+	if support.CannotDisable || support.NoOffLevel {
+		if level, ok := support.ClampLevel("none"); ok && !rejectsEffort(model.ModelID) {
+			req.ReasoningEffort = &level
+			logEffectiveEffort(model.ModelID, "none", level, support)
+		} else if allowThinking {
+			req.Thinking = json.RawMessage(`{"type":"enabled"}`)
+		}
+		return
+	}
+	if allowThinking {
+		req.Thinking = json.RawMessage(`{"type":"disabled"}`)
+	} else if level, ok := support.ClampLevel("none"); ok && !rejectsEffort(model.ModelID) {
+		req.ReasoningEffort = &level
 	}
 }
 
@@ -554,6 +594,11 @@ func thinkingForCapability(raw json.RawMessage, support core.ThinkingSupport, is
 			delete(fields, "budget_tokens")
 			changed = true
 		}
+	} else if budget := parseBudgetTokens(raw); budget > 0 {
+		if clamped := support.ClampBudget(budget); clamped != budget {
+			fields["budget_tokens"] = json.RawMessage(strconv.Itoa(clamped))
+			changed = true
+		}
 	}
 	if isDeepSeek {
 		var probe struct {
@@ -579,9 +624,7 @@ func thinkingForCapability(raw json.RawMessage, support core.ThinkingSupport, is
 func setReasoningEffort(openaiReq *types.ChatCompletionRequest, model config.ModelConfig) {
 	effort := model.ReasoningEffort
 	if effort == "" {
-		defaultEffort := "high"
-		openaiReq.ReasoningEffort = &defaultEffort
-		return
+		effort = "high"
 	}
 	// A configuration typo must not become an upstream field: the model would
 	// answer 400 and nothing in the request would point back at the config.
@@ -590,7 +633,12 @@ func setReasoningEffort(openaiReq *types.ChatCompletionRequest, model config.Mod
 	if _, ok := core.NormalizeEffort(effort); !ok {
 		return
 	}
-	if clamped, ok := core.ReasoningSupportFor(model).ClampLevel(effort); ok {
+	support := core.ReasoningSupportFor(model)
+	if isOffEffort(effort) {
+		applyThinkingOff(openaiReq, model, support, support.TakesThinking || len(model.Thinking) > 0)
+		return
+	}
+	if clamped, ok := support.ClampLevel(effort); ok {
 		effort = clamped
 	}
 	openaiReq.ReasoningEffort = &effort
@@ -635,7 +683,7 @@ func imageHandlingFor(model config.ModelConfig) imagePolicy {
 }
 
 // transformMessages converts Anthropic messages to OpenAI format.
-func (t *RequestTransformer) transformMessages(anthropicReq *types.MessageRequest, modelID string, images imagePolicy) ([]types.ChatMessage, error) {
+func (t *RequestTransformer) transformMessages(anthropicReq *types.MessageRequest, modelID string, images imagePolicy, cacheBreakpoints bool) ([]types.ChatMessage, error) {
 	hasThinking := HasThinkingBlocks(anthropicReq.Messages)
 
 	var result []types.ChatMessage
@@ -654,11 +702,25 @@ func (t *RequestTransformer) transformMessages(anthropicReq *types.MessageReques
 		if !isMoonshotModel(modelID) && len(anthropicReq.System) > 0 {
 			var blocks []types.SystemContentBlock
 			if err := json.Unmarshal(anthropicReq.System, &blocks); err == nil {
+				var parts []types.ChatContentPart
+				hasCache := false
 				for _, b := range blocks {
+					if cacheBreakpoints && b.Type == "text" {
+						parts = append(parts, types.ChatContentPart{Type: "text", Text: b.Text, CacheControl: b.CacheControl})
+						hasCache = hasCache || b.CacheControl != nil
+						continue
+					}
 					if b.Type == "text" && b.CacheControl != nil {
 						systemMsg.CacheControl = b.CacheControl
 						break
 					}
+				}
+				if hasCache {
+					encoded, err := json.Marshal(parts)
+					if err != nil {
+						return nil, err
+					}
+					systemMsg.Content = encoded
 				}
 			}
 		}
@@ -706,7 +768,7 @@ func (t *RequestTransformer) transformMessages(anthropicReq *types.MessageReques
 			})
 			continue
 		}
-		openaiMsgs, err := t.transformMessage(msg, modelID, hasThinking, images)
+		openaiMsgs, err := t.transformMessage(msg, modelID, hasThinking, images, cacheBreakpoints)
 		if err != nil {
 			return nil, err
 		}
@@ -718,23 +780,41 @@ func (t *RequestTransformer) transformMessages(anthropicReq *types.MessageReques
 
 // transformMessage converts a single Anthropic message to one or more OpenAI messages.
 // Tool_use and tool_result require special handling to map to OpenAI's function calling format.
-func (t *RequestTransformer) transformMessage(msg types.Message, modelID string, hasThinkingInHistory bool, images imagePolicy) ([]types.ChatMessage, error) {
+func (t *RequestTransformer) transformMessage(msg types.Message, modelID string, hasThinkingInHistory bool, images imagePolicy, cacheBreakpoints bool) ([]types.ChatMessage, error) {
 	blocks := msg.ContentBlocks()
+	for i := range blocks {
+		if !cacheBreakpoints {
+			blocks[i].CacheControl = nil
+		} else if blocks[i].CacheControl != nil && blocks[i].Type != "text" && blocks[i].Type != "image" {
+			return nil, fmt.Errorf("OpenRouter cache breakpoint on %q has no supported Chat mapping", blocks[i].Type)
+		}
+	}
 
 	switch msg.Role {
 	case "user":
-		return t.transformUserMessage(blocks, images)
+		return t.transformUserMessage(blocks, images, cacheBreakpoints)
 	case "assistant":
 		return t.transformAssistantMessage(blocks, modelID, hasThinkingInHistory)
 	default:
-		// Fallback: concatenate all text
 		var text string
+		var parts []types.ChatContentPart
+		hasCache := false
 		for _, b := range blocks {
 			if b.Type == "text" {
 				text += b.Text
+				parts = append(parts, types.ChatContentPart{Type: "text", Text: b.Text, CacheControl: b.CacheControl})
+				hasCache = hasCache || b.CacheControl != nil
 			}
 		}
-		return []types.ChatMessage{{Role: msg.Role, Content: contentText(text)}}, nil
+		content := contentText(text)
+		if hasCache {
+			var err error
+			content, err = json.Marshal(parts)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return []types.ChatMessage{{Role: msg.Role, Content: content}}, nil
 	}
 }
 
@@ -743,35 +823,48 @@ func (t *RequestTransformer) transformMessage(msg types.Message, modelID string,
 // with image_url parts) so that vision-capable models receive the actual image data.
 // For models without vision support, image blocks are replaced with a "[Image]" text
 // placeholder to prevent upstream 400 errors from unsupported image_url parts.
-func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, images imagePolicy) ([]types.ChatMessage, error) {
+func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, images imagePolicy, cacheBreakpoints bool) ([]types.ChatMessage, error) {
 	var result []types.ChatMessage
 	var textParts []string
 	var parts []types.ChatContentPart
 	visionImage := false
 	hasImage := false
+	hasCache := false
 
 	for _, block := range blocks {
 		switch block.Type {
 		case "text":
 			textParts = append(textParts, block.Text)
-			parts = append(parts, types.ChatContentPart{Type: "text", Text: block.Text})
+			parts = append(parts, types.ChatContentPart{Type: "text", Text: block.Text, CacheControl: block.CacheControl})
+			hasCache = hasCache || block.CacheControl != nil
 		case "tool_result":
-			// Only the text parts of a tool result can be sent over Chat
-			// Completions. Anything else has no representation, so it is dropped
-			// the same way every other unmapped block type is: TextContent
-			// concatenates the text parts, and a result carrying only
-			// unrepresentable parts (Claude Code's ToolSearch returns a
-			// tool_reference block) becomes an empty tool message rather than
-			// failing the request.
-			//
-			// This mirrors the reference CommandCode proxy, which maps the same
-			// block to "". The trade is deliberate: the request succeeds and the
-			// model proceeds without the tool's content, rather than the whole
-			// chain failing on a block that cannot be expressed.
-			toolContent := block.TextContent()
+			inner, err := toolResultBlocks(block)
+			if err != nil {
+				return nil, err
+			}
+			var toolContent strings.Builder
+			var toolParts []types.ChatContentPart
+			toolCache := false
+			for _, part := range inner {
+				if part.Type != "text" {
+					return nil, fmt.Errorf("Chat Completions cannot represent tool_result content %q", part.Type)
+				}
+				toolContent.WriteString(part.Text)
+				if cacheBreakpoints {
+					toolParts = append(toolParts, types.ChatContentPart{Type: "text", Text: part.Text, CacheControl: part.CacheControl})
+					toolCache = toolCache || part.CacheControl != nil
+				}
+			}
+			content := contentText(toolContent.String())
+			if toolCache {
+				content, err = json.Marshal(toolParts)
+				if err != nil {
+					return nil, err
+				}
+			}
 			result = append(result, types.ChatMessage{
 				Role:       "tool",
-				Content:    contentText(toolContent),
+				Content:    content,
 				ToolCallID: block.GetToolID(),
 			})
 		case "image":
@@ -786,12 +879,16 @@ func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, i
 				}
 				visionImage = true
 				parts = append(parts, types.ChatContentPart{
-					Type: "image_url",
+					Type:         "image_url",
+					CacheControl: block.CacheControl,
 					ImageURL: &types.ImageURL{
 						URL: imageURL,
 					},
 				})
 			default:
+				if block.CacheControl != nil {
+					return nil, fmt.Errorf("image cache breakpoint requires a vision-capable model")
+				}
 				hasImage = true
 			}
 		}
@@ -803,7 +900,10 @@ func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, i
 	// If the Anthropic user turn also includes free-form text and/or images,
 	// emit it as a subsequent user message after all tool results.
 	if len(textParts) > 0 || visionImage || hasImage {
-		if visionImage {
+		if visionImage || hasCache {
+			if hasImage {
+				parts = append(parts, types.ChatContentPart{Type: "text", Text: "\n\n[Image]"})
+			}
 			// Keep image/text interleaving, which determines what each caption describes.
 			contentJSON, err := json.Marshal(parts)
 			if err != nil {
@@ -828,6 +928,24 @@ func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, i
 	}
 
 	return result, nil
+}
+
+func toolResultBlocks(block types.ContentBlock) ([]types.ContentBlock, error) {
+	if block.GetToolID() == "" {
+		return nil, fmt.Errorf("tool_result requires tool_use_id")
+	}
+	if len(block.Content) == 0 {
+		return []types.ContentBlock{{Type: "text", Text: block.TextContent()}}, nil
+	}
+	var text string
+	if err := json.Unmarshal(block.Content, &text); err == nil && string(block.Content) != "null" {
+		return []types.ContentBlock{{Type: "text", Text: text}}, nil
+	}
+	var parts []types.ContentBlock
+	if err := json.Unmarshal(block.Content, &parts); err != nil || parts == nil {
+		return nil, fmt.Errorf("tool_result content must be a string or content array")
+	}
+	return parts, nil
 }
 
 func imageSourceURL(source *types.ImageSource) (string, error) {
@@ -855,11 +973,15 @@ func (t *RequestTransformer) transformAssistantMessage(blocks []types.ContentBlo
 	var textParts []string
 	var thinkingParts []string
 	var toolCalls []types.ToolCall
+	var parts []types.ChatContentPart
+	hasCache := false
 
 	for _, block := range blocks {
 		switch block.Type {
 		case "text":
 			textParts = append(textParts, block.Text)
+			parts = append(parts, types.ChatContentPart{Type: "text", Text: block.Text, CacheControl: block.CacheControl})
+			hasCache = hasCache || block.CacheControl != nil
 		case "thinking":
 			// Preserve chain-of-thought so it can be forwarded back to providers
 			// that require reasoning_content to be preserved across turns.
@@ -930,6 +1052,13 @@ func (t *RequestTransformer) transformAssistantMessage(blocks []types.ContentBlo
 		Content:          contentText(content),
 		ReasoningContent: reasoningContentPtr,
 		ToolCalls:        toolCalls,
+	}
+	if hasCache {
+		encoded, err := json.Marshal(parts)
+		if err != nil {
+			return nil, err
+		}
+		msg.Content = encoded
 	}
 
 	return []types.ChatMessage{msg}, nil

@@ -83,17 +83,35 @@ func extractTokenTextFromBlocks(blocks []types.ContentBlock) string {
 // on image dimensions after resize.
 func imageTokenEstimate(blocks []types.ContentBlock) int {
 	total := 0
-	for _, block := range blocks {
-		if block.Type != "image" || block.Source == nil {
-			continue
-		}
-		if len(block.Source.Data) > 0 {
-			total += imageTokenEstimateFromBase64(len(block.Source.Data))
+	for _, source := range imageSourcesFromBlocks(blocks) {
+		if len(source.Data) > 0 {
+			total += imageTokenEstimateFromBase64(len(source.Data))
 		} else {
 			total += 1500
 		}
 	}
 	return total
+}
+
+// Routing and estimates inspect the same image positions; wire conversion
+// remains responsible for validating malformed tool-result content.
+func imageSourcesFromBlocks(blocks []types.ContentBlock) []*types.ImageSource {
+	var sources []*types.ImageSource
+	for _, block := range blocks {
+		if block.Type == "image" && block.Source != nil {
+			sources = append(sources, block.Source)
+		} else if block.Type == "tool_result" {
+			var parts []types.ContentBlock
+			if json.Unmarshal(block.Content, &parts) == nil {
+				for _, part := range parts {
+					if part.Type == "image" && part.Source != nil {
+						sources = append(sources, part.Source)
+					}
+				}
+			}
+		}
+	}
+	return sources
 }
 
 // imageTokenEstimateFromBase64 estimates token count from base64 image data length.

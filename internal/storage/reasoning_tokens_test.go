@@ -19,7 +19,7 @@ func TestReasoningTokensRoundTrip(t *testing.T) {
 		OutputTokens: 36, ReasoningTokens: 26, Success: true,
 	})
 
-	rows, _, err := NewRequests(db).Query(RequestQuery{Page: 1, PageSize: 10})
+	rows, _, err := NewRequests(db).Query(t.Context(), RequestQuery{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestReasoningTokensAbsentIsZero(t *testing.T) {
 		ID: "no-reasoning", Model: "m", Provider: "p",
 		StartTime: time.Now().Add(-time.Minute), OutputTokens: 10, Success: true,
 	})
-	rows, _, err := NewRequests(db).Query(RequestQuery{Page: 1, PageSize: 10})
+	rows, _, err := NewRequests(db).Query(t.Context(), RequestQuery{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatal(err)
 	}

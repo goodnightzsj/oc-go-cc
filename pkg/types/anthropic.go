@@ -11,18 +11,20 @@ import (
 
 // MessageRequest represents a request to the Anthropic Messages API.
 type MessageRequest struct {
-	Model        string          `json:"model"`
-	MaxTokens    int             `json:"max_tokens"`
-	System       json.RawMessage `json:"system,omitempty"`
-	Messages     []Message       `json:"messages"`
-	Stream       *bool           `json:"stream,omitempty"`
-	Tools        []Tool          `json:"tools,omitempty"`
-	ToolChoice   json.RawMessage `json:"tool_choice,omitempty"`
-	OutputConfig json.RawMessage `json:"output_config,omitempty"`
-	Temperature  *float64        `json:"temperature,omitempty"`
-	TopP         *float64        `json:"top_p,omitempty"`
-	Metadata     *Metadata       `json:"metadata,omitempty"`
-	Thinking     json.RawMessage `json:"thinking,omitempty"`
+	Model          string          `json:"model"`
+	MaxTokens      int             `json:"max_tokens"`
+	System         json.RawMessage `json:"system,omitempty"`
+	Messages       []Message       `json:"messages"`
+	Stream         *bool           `json:"stream,omitempty"`
+	Tools          []Tool          `json:"tools,omitempty"`
+	ToolChoice     json.RawMessage `json:"tool_choice,omitempty"`
+	OutputConfig   json.RawMessage `json:"output_config,omitempty"`
+	Temperature    *float64        `json:"temperature,omitempty"`
+	TopP           *float64        `json:"top_p,omitempty"`
+	StopSequences  []string        `json:"stop_sequences,omitempty"`
+	Metadata       *Metadata       `json:"metadata,omitempty"`
+	Thinking       json.RawMessage `json:"thinking,omitempty"`
+	PromptCacheKey string          `json:"-"` // Responses affinity, not Anthropic conversation state.
 }
 
 // SystemText extracts the system prompt text from the raw system field.
@@ -63,6 +65,7 @@ type SystemContentBlock struct {
 // CacheControl represents cache control directives.
 type CacheControl struct {
 	Type string `json:"type"`
+	TTL  string `json:"ttl,omitempty"`
 }
 
 // Metadata contains optional metadata for the request.
@@ -110,18 +113,19 @@ func (m *Message) ContentBlocks() []ContentBlock {
 //   - "thinking": Thinking, Signature are populated
 //   - "image": Source is populated
 type ContentBlock struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text"`
-	ID        string          `json:"id,omitempty"`          // For tool_use (the tool call ID)
-	ToolUseID string          `json:"tool_use_id,omitempty"` // For tool_result (references the tool_use ID)
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	Output    json.RawMessage `json:"output,omitempty"`    // Deprecated: use Content
-	Content   json.RawMessage `json:"content,omitempty"`   // For tool_result inner content
-	IsError   *bool           `json:"is_error,omitempty"`  // For tool_result
-	Thinking  string          `json:"thinking"`            // For thinking blocks
-	Signature string          `json:"signature,omitempty"` // For thinking blocks
-	Source    *ImageSource    `json:"source,omitempty"`    // For image blocks
+	Type         string          `json:"type"`
+	Text         string          `json:"text"`
+	ID           string          `json:"id,omitempty"`          // For tool_use (the tool call ID)
+	ToolUseID    string          `json:"tool_use_id,omitempty"` // For tool_result (references the tool_use ID)
+	Name         string          `json:"name,omitempty"`
+	Input        json.RawMessage `json:"input,omitempty"`
+	Output       json.RawMessage `json:"output,omitempty"`    // Deprecated: use Content
+	Content      json.RawMessage `json:"content,omitempty"`   // For tool_result inner content
+	IsError      *bool           `json:"is_error,omitempty"`  // For tool_result
+	Thinking     string          `json:"thinking"`            // For thinking blocks
+	Signature    string          `json:"signature,omitempty"` // For thinking blocks
+	Source       *ImageSource    `json:"source,omitempty"`    // For image blocks
+	CacheControl *CacheControl   `json:"cache_control,omitempty"`
 }
 
 // GetToolID returns the appropriate tool ID for this block type.
@@ -170,12 +174,14 @@ func (b ContentBlock) MarshalJSON() ([]byte, error) {
 	switch b.Type {
 	case "text":
 		type TextBlock struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type         string        `json:"type"`
+			Text         string        `json:"text"`
+			CacheControl *CacheControl `json:"cache_control,omitempty"`
 		}
 		return json.Marshal(TextBlock{
-			Type: b.Type,
-			Text: b.Text,
+			Type:         b.Type,
+			Text:         b.Text,
+			CacheControl: b.CacheControl,
 		})
 	case "tool_use":
 		type ToolUseBlock struct {
@@ -220,12 +226,14 @@ func (b ContentBlock) MarshalJSON() ([]byte, error) {
 		})
 	case "image":
 		type ImageBlock struct {
-			Type   string       `json:"type"`
-			Source *ImageSource `json:"source"`
+			Type         string        `json:"type"`
+			Source       *ImageSource  `json:"source"`
+			CacheControl *CacheControl `json:"cache_control,omitempty"`
 		}
 		return json.Marshal(ImageBlock{
-			Type:   b.Type,
-			Source: b.Source,
+			Type:         b.Type,
+			Source:       b.Source,
+			CacheControl: b.CacheControl,
 		})
 	default:
 		type Alias ContentBlock
@@ -257,7 +265,7 @@ type MessageResponse struct {
 	Model        string         `json:"model"`
 	StopReason   string         `json:"stop_reason,omitempty"`
 	StopSequence string         `json:"stop_sequence,omitempty"`
-	Usage        Usage          `json:"usage"`
+	Usage        *Usage         `json:"usage"`
 }
 
 // Usage represents token usage information.

@@ -19,7 +19,7 @@ func TestGenerationStorageRoundTrip(t *testing.T) {
 		if err := repo.Insert(rec); err != nil {
 			t.Fatal(err)
 		}
-		rows, _, err := repo.Query(RequestQuery{})
+		rows, _, err := repo.Query(t.Context(), RequestQuery{})
 		if err != nil || len(rows) != 1 {
 			t.Fatal(rows, err)
 		}
@@ -80,7 +80,7 @@ func TestGenerationRejectsInvalidSamplesWithoutReplacingRecord(t *testing.T) {
 			t.Fatalf("accepted invalid sample: %+v", rec)
 		}
 	}
-	rows, _, err := repo.Query(RequestQuery{})
+	rows, _, err := repo.Query(t.Context(), RequestQuery{})
 	if err != nil || len(rows) != 1 || rows[0].OutputTokens != 10 || rows[0].GenerationSample != nil {
 		t.Fatal("invalid input replaced record", rows, err)
 	}
@@ -167,7 +167,7 @@ func TestGenerationPopulationAndSortMatchHistory(t *testing.T) {
 		insertCostRecord(t, db, rec)
 	}
 	for _, order := range []string{"asc", "desc"} {
-		rows, _, err := NewRequests(db).Query(RequestQuery{SortBy: "generation_tokens_per_second", SortOrder: order})
+		rows, _, err := NewRequests(db).Query(t.Context(), RequestQuery{SortBy: "generation_tokens_per_second", SortOrder: order})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -190,7 +190,7 @@ func TestGenerationPopulationAndSortMatchHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows, _, err := NewRequests(db).Query(RequestQuery{})
+	rows, _, err := NewRequests(db).Query(t.Context(), RequestQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}

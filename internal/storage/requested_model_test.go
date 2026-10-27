@@ -73,7 +73,7 @@ func TestRequestedModelSurvivesReadBack(t *testing.T) {
 		Provider: "opencode-go", InputTokens: 10, OutputTokens: 5, Success: true, StartTime: at,
 	})
 
-	records, _, err := NewRequests(db).Query(RequestQuery{Page: 1, PageSize: 10})
+	records, _, err := NewRequests(db).Query(t.Context(), RequestQuery{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestRequestedModelIsSearchable(t *testing.T) {
 	})
 
 	q := NewRequests(db)
-	found, total, err := q.Query(RequestQuery{Page: 1, PageSize: 10, Search: "opus"})
+	found, total, err := q.Query(t.Context(), RequestQuery{Page: 1, PageSize: 10, Search: "opus"})
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestRequestedModelIsSearchable(t *testing.T) {
 		t.Errorf("search for the requested model returned %d rows (total %d), want just r1", len(found), total)
 	}
 	// Searching the served model must still work.
-	found, total, err = q.Query(RequestQuery{Page: 1, PageSize: 10, Search: "kimi"})
+	found, total, err = q.Query(t.Context(), RequestQuery{Page: 1, PageSize: 10, Search: "kimi"})
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestRequestedModelIsSearchable(t *testing.T) {
 	}
 	// And a term matching neither finds nothing, so the new clause did not
 	// widen the search into a match-everything.
-	_, total, err = q.Query(RequestQuery{Page: 1, PageSize: 10, Search: "no-such-model"})
+	_, total, err = q.Query(t.Context(), RequestQuery{Page: 1, PageSize: 10, Search: "no-such-model"})
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}

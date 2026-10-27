@@ -60,7 +60,7 @@ func TestFailureWithoutUsageAtEntry(t *testing.T) {
 			// exists so the dashboard can see a truncation the caller actually
 			// received, and carries no cost or measured details because the
 			// upstream reported no usage to bill or average.
-			rows, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+			rows, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
 			if err != nil || total != 1 {
 				t.Fatalf("an observable failure must be recorded once: rows=%d err=%v", total, err)
 			}

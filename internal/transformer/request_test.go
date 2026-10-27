@@ -31,7 +31,7 @@ func TestTransformRequestRoundTripReasoning(t *testing.T) {
 			},
 			FinishReason: "stop",
 		}},
-		Usage: types.UsageInfo{
+		Usage: &types.UsageInfo{
 			PromptTokens:     10,
 			CompletionTokens: 20,
 		},

@@ -111,7 +111,7 @@ func TestGeminiCarriesTheRightControlForItsGeneration(t *testing.T) {
 		OutputConfig: json.RawMessage(`{"effort":"xhigh"}`),
 		Messages:     firstTurn,
 	}
-	got := AnthropicToGemini(level, config.ModelConfig{ModelID: "gemini-3.8-flash"})
+	got := mustGeminiRequest(t, level, config.ModelConfig{ModelID: "gemini-3.8-flash"})
 	if got.GenerationConfig.ThinkingConfig == nil || got.GenerationConfig.ThinkingConfig.ThinkingLevel == nil {
 		t.Fatal("gemini 3.x lost the level")
 	}
@@ -134,7 +134,7 @@ func TestGeminiCarriesTheRightControlForItsGeneration(t *testing.T) {
 		Thinking: json.RawMessage(`{"type":"enabled","budget_tokens":100000}`),
 		Messages: firstTurn,
 	}
-	got = AnthropicToGemini(pro, config.ModelConfig{ModelID: "gemini-2.5-pro"})
+	got = mustGeminiRequest(t, pro, config.ModelConfig{ModelID: "gemini-2.5-pro"})
 	if got.GenerationConfig.ThinkingConfig == nil || got.GenerationConfig.ThinkingConfig.ThinkingBudget == nil {
 		t.Fatal("gemini 2.5 lost the budget")
 	}
@@ -151,14 +151,14 @@ func TestGeminiCarriesTheRightControlForItsGeneration(t *testing.T) {
 		Thinking: json.RawMessage(`{"type":"enabled","budget_tokens":100}`),
 		Messages: firstTurn,
 	}
-	got = AnthropicToGemini(small, config.ModelConfig{ModelID: "gemini-2.5-flash-lite"})
+	got = mustGeminiRequest(t, small, config.ModelConfig{ModelID: "gemini-2.5-flash-lite"})
 	if v := *got.GenerationConfig.ThinkingConfig.ThinkingBudget; v != 512 {
 		t.Fatalf("thinkingBudget = %d, want the flash-lite floor 512", v)
 	}
 
 	// Saying nothing leaves the field absent rather than inventing one.
 	plain := &types.MessageRequest{Model: "claude-x", MaxTokens: 4096, Messages: firstTurn}
-	if got := AnthropicToGemini(plain, config.ModelConfig{ModelID: "gemini-2.5-pro"}); got.GenerationConfig.ThinkingConfig != nil {
+	if got := mustGeminiRequest(t, plain, config.ModelConfig{ModelID: "gemini-2.5-pro"}); got.GenerationConfig.ThinkingConfig != nil {
 		t.Fatalf("an unstated budget produced thinkingConfig: %+v", got.GenerationConfig.ThinkingConfig)
 	}
 }

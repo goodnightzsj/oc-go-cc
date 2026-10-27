@@ -70,7 +70,7 @@ func TestAWSBedrockProvider_Execute(t *testing.T) {
 					FinishReason: "stop",
 				},
 			},
-			Usage: types.UsageInfo{
+			Usage: &types.UsageInfo{
 				PromptTokens:     10,
 				CompletionTokens: 5,
 				TotalTokens:      15,
@@ -289,7 +289,10 @@ func TestAWSBedrockProvider_BedrockEndpoint(t *testing.T) {
 					BaseURL: tt.baseURL,
 				},
 			}
-			got := p.bedrockEndpoint(cfg, tt.modelID)
+			got, err := p.bedrockEndpoint(cfg, tt.modelID, core.WireFormatOpenAIChat)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if got != tt.wantPath {
 				t.Errorf("bedrockEndpoint(%q) = %q, want %q", tt.modelID, got, tt.wantPath)
 			}

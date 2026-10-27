@@ -23,7 +23,8 @@ func TestCommandCodeConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(data["commandcode"]), "https://api.commandcode.ai/provider/v1/chat/completions") ||
-		!strings.Contains(string(data["commandcode"]), "https://api.commandcode.ai/provider/v1/messages") {
+		!strings.Contains(string(data["commandcode"]), "https://api.commandcode.ai/provider/v1/messages") ||
+		!strings.Contains(string(data["commandcode"]), "https://api.commandcode.ai/provider/v1/responses") {
 		t.Fatal("missing official default endpoints")
 	}
 	global := &Config{APIKey: "other-platform"}
@@ -37,9 +38,13 @@ func TestCommandCodeEnvironment(t *testing.T) {
 	t.Setenv("ROUTATIC_PROXY_COMMANDCODE_API_KEYS", "first-env, second-env")
 	t.Setenv("ROUTATIC_PROXY_COMMANDCODE_URL", "http://localhost:1234/chat/completions")
 	t.Setenv("ROUTATIC_PROXY_COMMANDCODE_ANTHROPIC_URL", "http://localhost:1234/messages")
+	t.Setenv("ROUTATIC_PROXY_COMMANDCODE_RESPONSES_URL", "http://localhost:1234/custom/responses")
 	cfg, err := LoadJSON([]byte(`{"commandcode":{"api_key":"file-key"}}`))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if cfg.CommandCode.ResponsesBaseURL != "http://localhost:1234/custom/responses" {
+		t.Fatal("Responses endpoint environment override lost")
 	}
 	// Both environment variables pool, single first, and the file's key is not
 	// discarded either: three credentials, not two. The old rule dropped the
@@ -61,8 +66,9 @@ func TestCommandCodeRejectsInvalidConfiguration(t *testing.T) {
 		`{"commandcode":{"api_key":"${UNSET_COMMANDCODE_TEST_KEY}"}}`,
 		`{"commandcode":{"api_key":"key","base_url":"ftp://example.test/chat"}}`,
 		`{"commandcode":{"api_key":"key","anthropic_base_url":"/messages"}}`,
+		`{"commandcode":{"api_key":"key","responses_base_url":"https://user:password@example.test/responses"}}`,
+		`{"commandcode":{"api_key":"key","responses_base_url":"/responses"}}`,
 		`{"commandcode":{"api_key":"key","timeout_ms":-1}}`,
-		`{"commandcode":{"api_key":"key"},"models":{"default":{"provider":"commandcode","model_id":"test","wire_format":"responses"}}}`,
 		`{"commandcode":{"api_key":"key"},"models":{"default":{"provider":"commandcode","model_id":"test","wire_format":"gemini"}}}`,
 	} {
 		if _, err := LoadJSON([]byte(input)); err == nil {

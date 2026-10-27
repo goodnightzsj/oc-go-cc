@@ -486,11 +486,10 @@ type historyEntry struct {
 	// which is why the UI shows the badge for that platform only rather than
 	// rendering an empty marker on every row.
 	UpstreamChannel string `json:"upstream_channel,omitempty"`
-	// UpstreamModel is the model the gateway said it ran, when that is not the
-	// id that was requested. A gateway can answer one id by running a virtual
-	// model behind its own fallback chain, so the model column stops describing
-	// what produced the response; this is the field that does.
+	// Canonical gateway model or the existing differing-model observation.
 	UpstreamModel string `json:"upstream_model,omitempty"`
+	// Source response declaration, independent of canonical and billing models.
+	ResponseModel string `json:"response_model,omitempty"`
 	// FirstByteMs is how long the upstream took to send its first byte. Omitted
 	// when it was not measured, which is a different answer from zero.
 	FirstByteMs               int64                     `json:"first_byte_ms,omitempty"`
@@ -521,6 +520,7 @@ type historyEntry struct {
 	CostSource          string   `json:"cost_source,omitempty"`
 	PeakMultiplier      float64  `json:"peak_multiplier"`
 	DetailsKnown        bool     `json:"details_known"`
+	OutcomeKnown        bool     `json:"outcome_known"`
 	Streaming           bool     `json:"streaming"`
 	Attempt             int      `json:"attempt"`
 	Success             bool     `json:"success"`
@@ -555,7 +555,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	repo := storage.NewRequests(s.storage)
-	records, total, err := repo.Query(query)
+	records, total, err := repo.Query(r.Context(), query)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -606,7 +606,7 @@ func (s *Server) handleHistoryChannels(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "history storage is unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	channels, err := storage.NewRequests(s.storage).ObservedChannels(r.URL.Query().Get("provider"))
+	channels, err := storage.NewRequests(s.storage).ObservedChannels(r.Context(), r.URL.Query().Get("provider"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -694,6 +694,7 @@ func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 			Provider:                  rec.Provider,
 			UpstreamChannel:           rec.UpstreamChannel,
 			UpstreamModel:             rec.UpstreamModel,
+			ResponseModel:             rec.ResponseModel,
 			FirstByteMs:               rec.FirstByte.Milliseconds(),
 			FirstEventMs:              rec.FirstEventMs,
 			FirstContentMs:            rec.FirstContentMs,
@@ -714,6 +715,7 @@ func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 			CacheReadTokens:           rec.CacheReadTokens,
 			CacheCreationTokens:       rec.CacheCreationTokens,
 			DetailsKnown:              rec.DetailsKnown,
+			OutcomeKnown:              rec.OutcomeKnown,
 			Streaming:                 rec.Streaming,
 			Attempt:                   rec.Attempt,
 			Success:                   rec.Success,

@@ -2,7 +2,6 @@ package transformer
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,9 +10,11 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/routatic/proxy/internal/sse"
 	"github.com/routatic/proxy/pkg/types"
 )
 
@@ -73,8 +74,7 @@ func NewStreamHandler() *StreamHandler {
 // The streamCtx is the per-model attempt context (carries streaming_timeout_ms); the caller
 // should wrap openaiResp with NewCtxReadCloser so the body read also respects the deadline.
 //
-// CRITICAL: This function reads directly from resp.Body without buffering to minimize latency.
-// Per deep research: "Don't use bufio.Scanner or bufio.Reader on the response body - it adds buffering"
+// Reads are incremental; only the current SSE event is buffered for decoding.
 //
 // idleTimeout is the maximum gap between bytes on the upstream stream. The
 // stream lives as long as data keeps flowing; only an idle period longer than
@@ -113,17 +113,13 @@ func (h *StreamHandler) ProxyStream(
 	}
 	flusher.Flush()
 
-	// Read directly from response body without buffering.
-	// Use a tight loop with a line buffer - no bufio.Reader.
 	contentIndex := 0
-	var lineBuf []byte
+	var decoder sse.Decoder
 	contentStarted := false
 	reasoningStarted := false
 	terminalStopReason := ""
 	var terminalUsage *types.UsageInfo
-	toolUseCount := 0
-	startedToolCalls := make(map[int]int) // maps OpenAI tool call index → Anthropic content block index
-	decodeErrors := 0                     // consecutive SSE decode failures
+	startedToolCalls := make(map[int]*chatToolState)
 
 	// Get a buffer from the pool; return it when done.
 	readBuf := readBufPool.Get().(*[]byte)
@@ -149,27 +145,16 @@ func (h *StreamHandler) ProxyStream(
 			// Data is flowing — reset the idle watchdog so the stream
 			// lives as long as data keeps arriving.
 			ping()
-			// Process bytes immediately
-			for i := 0; i < n; i++ {
-				b := (*readBuf)[i]
-				if b == '\n' {
-					// Process complete line
-					if err := h.processSSELine(w, flusher, lineBuf, &contentIndex, &contentStarted, &reasoningStarted, &terminalStopReason, &terminalUsage, &toolUseCount, startedToolCalls, originalModel, &decodeErrors); err != nil {
-						return err
-					}
-					lineBuf = lineBuf[:0]
-				} else {
-					lineBuf = append(lineBuf, b)
-				}
+			if err := decoder.Feed((*readBuf)[:n], func(event string, data []byte) error {
+				return h.processChatEvent(w, flusher, event, data, &contentIndex, &contentStarted, &reasoningStarted, &terminalStopReason, &terminalUsage, startedToolCalls)
+			}); err != nil {
+				return err
 			}
 		}
 
 		if err == io.EOF {
-			// Process any remaining data in buffer
-			if len(lineBuf) > 0 {
-				if err := h.processSSELine(w, flusher, lineBuf, &contentIndex, &contentStarted, &reasoningStarted, &terminalStopReason, &terminalUsage, &toolUseCount, startedToolCalls, originalModel, &decodeErrors); err != nil {
-					return err
-				}
+			if err := decoder.Finish(); err != nil {
+				return err
 			}
 			break
 		}
@@ -187,55 +172,19 @@ func (h *StreamHandler) ProxyStream(
 		}
 	}
 
-	// Close any open content block (text or reasoning).
-	if reasoningStarted {
-		if err := writeThinkingBlockStop(w, contentIndex); err != nil {
-			return ErrClientDisconnected
-		}
-		reasoningStarted = false
-	} else if contentStarted {
-		if err := writeContentBlockStop(w, contentIndex); err != nil {
-			return ErrClientDisconnected
-		}
-		contentStarted = false
-	}
-
-	// Send stop events for any tool blocks not yet closed (e.g. upstream
-	// disconnected without sending a finish_reason chunk).
-	if len(startedToolCalls) > 0 {
-		type toolBlockEntry struct {
-			oi       int
-			blockIdx int
-		}
-		entries := make([]toolBlockEntry, 0, len(startedToolCalls))
-		for oi, blockIdx := range startedToolCalls {
-			entries = append(entries, toolBlockEntry{oi, blockIdx})
-		}
-		slices.SortFunc(entries, func(a, b toolBlockEntry) int {
-			return cmp.Compare(a.blockIdx, b.blockIdx)
-		})
-		for _, e := range entries {
-			if err := writeContentBlockStop(w, e.blockIdx); err != nil {
-				return ErrClientDisconnected
-			}
-		}
+	if terminalStopReason == "" {
+		return fmt.Errorf("chat stream has no finish reason: %w", io.ErrUnexpectedEOF)
 	}
 
 	// Anthropic expects one terminal message_delta containing both stop_reason
 	// and usage. OpenAI-compatible providers commonly send those in separate
 	// chunks, so both are retained until the upstream stream ends.
-	if terminalStopReason == "" {
-		terminalStopReason = "end_turn"
-		if len(startedToolCalls) > 0 {
-			terminalStopReason = "tool_use"
-		}
-	}
 	msgDelta := types.MessageEvent{
 		Type: "message_delta",
 		Delta: &types.Delta{
 			StopReason: terminalStopReason,
 		},
-		Usage: usageInfoToAnthropic(terminalUsage),
+		Usage: ChatUsageToAnthropic(terminalUsage),
 	}
 	if err := writeSSEEvent(w, msgDelta); err != nil {
 		return ErrClientDisconnected
@@ -253,35 +202,20 @@ func (h *StreamHandler) ProxyStream(
 	return nil
 }
 
-// processSSELine processes a single SSE line from upstream.
-// Per deep research: "Treat SSE primarily as a text protocol" - minimize JSON parsing.
-func (h *StreamHandler) processSSELine(
+// processChatEvent processes the joined data of one complete upstream SSE event.
+func (h *StreamHandler) processChatEvent(
 	w http.ResponseWriter,
 	flusher http.Flusher,
-	line []byte,
+	eventType string,
+	data []byte,
 	contentIndex *int,
 	contentStarted *bool,
 	reasoningStarted *bool,
 	terminalStopReason *string,
 	terminalUsage **types.UsageInfo,
-	toolUseCount *int,
-	startedToolCalls map[int]int,
-	originalModel string,
-	decodeErrors *int,
+	startedToolCalls map[int]*chatToolState,
 ) error {
-	line = bytes.TrimSpace(line)
-
-	// Skip empty lines
-	if len(line) == 0 {
-		return nil
-	}
-
-	// Skip non-data lines (event: lines, id: lines, etc.)
-	if !bytes.HasPrefix(line, []byte("data: ")) {
-		return nil
-	}
-
-	data := line[6:]
+	data = bytes.TrimSpace(data)
 	if len(data) == 0 {
 		return nil
 	}
@@ -291,127 +225,51 @@ func (h *StreamHandler) processSSELine(
 		return nil
 	}
 
-	// Fast path: check if this is a content chunk without full JSON parsing.
-	// Skip the fast path when reasoning_content is also present in the same
-	// chunk — falling through to JSON parsing ensures both fields are handled
-	// correctly. Otherwise reasoning_content gets silently dropped, and on the
-	// next turn DeepSeek rejects the request with:
-	//   "The reasoning_content in the thinking mode must be passed back to the API."
-	if !bytes.Contains(data, []byte(`"reasoning_content"`)) &&
-		!bytes.Contains(data, []byte(`"finish_reason"`)) &&
-		!bytes.Contains(data, []byte(`"tool_calls"`)) &&
-		!bytes.Contains(data, []byte(`"usage"`)) {
-		if idx := bytes.Index(data, []byte(`"delta":{"content":"`)); idx != -1 {
-			// Walk past JSON escape sequences to find the real closing
-			// quote. A naive strings.Index would stop at an escaped
-			// \" inside the content.
-			start := idx + len(`"delta":{"content":"`)
-			suffix := data[start:]
-			end := -1
-			for i := 0; i < len(suffix); i++ {
-				if suffix[i] == '\\' {
-					i++ // skip the escaped character
-					continue
-				}
-				if suffix[i] == '"' {
-					end = i
-					break
-				}
-			}
-			if end != -1 {
-				// Decode the JSON string escapes before forwarding. The bytes
-				// between the quotes are raw JSON (e.g. `line1\nline2` is a
-				// literal backslash-n), so they must be unmarshaled or the
-				// escaped newline reaches the client as literal "\n". Wrapping
-				// in quotes makes the slice a standalone JSON string.
-				raw := data[start : start+end]
-				var content string
-				if err := json.Unmarshal(append([]byte(`"`), append(raw, '"')...), &content); err != nil {
-					// Not valid JSON inside the quotes; forward the raw bytes
-					// rather than dropping the chunk.
-					content = string(raw)
-				}
-				if len(content) > 0 {
-					if !*contentStarted {
-						// If reasoning was already started, close it first
-						if *reasoningStarted {
-							if err := writeThinkingBlockStop(w, *contentIndex); err != nil {
-								return ErrClientDisconnected
-							}
-							*contentIndex++
-							*reasoningStarted = false
-						}
-						*contentStarted = true
-						// Send content_block_start
-						startEvent := types.MessageEvent{
-							Type:         "content_block_start",
-							Index:        contentIndex,
-							ContentBlock: &types.ContentBlock{Type: "text", Text: ""},
-						}
-						if err := writeSSEEvent(w, startEvent); err != nil {
-							return ErrClientDisconnected
-						}
-					}
-
-					// Send content_block_delta
-					delta := types.Delta{
-						Type: "text_delta",
-						Text: string(content),
-					}
-					event := types.MessageEvent{
-						Type:  "content_block_delta",
-						Index: contentIndex,
-						Delta: &delta,
-					}
-					if err := writeSSEEvent(w, event); err != nil {
-						return ErrClientDisconnected
-					}
-					flusher.Flush()
-				}
-				// Valid SSE line accepted via fast path — reset the
-				// consecutive decode failure counter so interleaved valid
-				// chunks don't accumulate spurious "too many failures".
-				*decodeErrors = 0
-				return nil
-			}
-		}
-	}
-
-	// For tool calls and other complex cases, fall back to full JSON parsing
+	// Unmarshal updates reported fields only; a later partial usage must not
+	// erase earlier totals or breakdowns. Explicit zero still overwrites.
+	previousReasoning := reasoningTokensOf(*terminalUsage)
 	var chunk types.ChatCompletionChunk
-	if err := json.Unmarshal(data, &chunk); err != nil {
-		// Track consecutive decode failures. A transient glitch is tolerated,
-		// but persistent corruption terminates the stream rather than silently
-		// dropping content.
-		*decodeErrors++
-		if *decodeErrors > 3 {
-			return fmt.Errorf("too many consecutive SSE decode failures (%d)", *decodeErrors)
-		}
-		return nil
+	if *terminalUsage != nil {
+		next := **terminalUsage
+		// Decode aliases together for this event: a fresh alias must outrank
+		// an older canonical split, but not a canonical split in the same event.
+		next.CompletionTokensDetails, next.CompletionThinkingTokens = nil, 0
+		chunk.Usage = &next
 	}
-	*decodeErrors = 0
+	if err := json.Unmarshal(data, &chunk); err != nil {
+		return fmt.Errorf("invalid Chat Completions SSE: %w", err)
+	}
+	observeSourceModel(w, chunk.Model)
 	if chunk.Usage != nil {
-		// Like request accounting, retain an observed split when later totals omit it.
 		if reasoningTokensOf(chunk.Usage) == 0 {
-			chunk.Usage.CompletionThinkingTokens = reasoningTokensOf(*terminalUsage)
+			chunk.Usage.CompletionThinkingTokens = previousReasoning
 		}
 		*terminalUsage = chunk.Usage
 		// Preserve reported usage even when the terminal event never arrives.
 		if uw, ok := w.(interface {
 			SetPartialUsage(*types.Usage)
 		}); ok {
-			uw.SetPartialUsage(usageInfoToAnthropic(chunk.Usage))
+			uw.SetPartialUsage(ChatUsageToAnthropic(chunk.Usage))
 		}
 	}
 
+	if err := upstreamJSONError("Chat Completions", chunk.Error); err != nil {
+		return err
+	}
+	if eventType == "error" {
+		return upstreamJSONError("Chat Completions", data)
+	}
 	if len(chunk.Choices) == 0 {
 		return nil
 	}
 
 	choice := chunk.Choices[0]
+	if *terminalStopReason != "" && (choice.Delta.ContentText() != "" || choice.Delta.ReasoningText() != "") {
+		return fmt.Errorf("chat content arrived after finish_reason")
+	}
 
 	// Handle reasoning content deltas
-	if choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
+	if reasoning := choice.Delta.ReasoningText(); reasoning != "" {
 		if !*reasoningStarted {
 			// If text was already started, close it first
 			if *contentStarted {
@@ -438,7 +296,7 @@ func (h *StreamHandler) processSSELine(
 
 		delta := types.Delta{
 			Type:     "thinking_delta",
-			Thinking: *choice.Delta.ReasoningContent,
+			Thinking: reasoning,
 		}
 		event := types.MessageEvent{
 			Type:  "content_block_delta",
@@ -497,13 +355,16 @@ func (h *StreamHandler) processSSELine(
 		for _, tc := range choice.Delta.ToolCalls {
 			oi := tc.Index // OpenAI tool_calls array index
 
-			blockIdx, exists := startedToolCalls[oi]
+			tool, exists := startedToolCalls[oi]
 			if !exists {
 				if tc.Function.Name == "" {
 					// Ghost chunk: this index was closed and recycled, but
 					// has no name/id. Ignore — the real tool call was
 					// already fully processed.
 					continue
+				}
+				if *terminalStopReason != "" {
+					return fmt.Errorf("chat tool arrived after finish_reason")
 				}
 				// Close any existing content/reasoning block before opening the
 				// tool block.  Capture the state first so we know whether to
@@ -532,9 +393,8 @@ func (h *StreamHandler) processSSELine(
 				if hadStartedBlock || len(startedToolCalls) > 0 {
 					*contentIndex++
 				}
-				*toolUseCount++
-				blockIdx = *contentIndex
-				startedToolCalls[oi] = blockIdx
+				tool = &chatToolState{index: *contentIndex}
+				startedToolCalls[oi] = tool
 
 				toolID := tc.ID
 				if toolID == "" {
@@ -542,7 +402,7 @@ func (h *StreamHandler) processSSELine(
 				}
 				startEvent := types.MessageEvent{
 					Type:  "content_block_start",
-					Index: &blockIdx,
+					Index: &tool.index,
 					ContentBlock: &types.ContentBlock{
 						Type:  "tool_use",
 						ID:    toolID,
@@ -557,13 +417,17 @@ func (h *StreamHandler) processSSELine(
 
 			// Send argument delta (if any) — whether new or continuation.
 			if tc.Function.Arguments != "" {
+				if len(tool.arguments)+len(tc.Function.Arguments) > 1<<20 {
+					return fmt.Errorf("chat tool arguments exceed 1 MiB")
+				}
+				tool.arguments += tc.Function.Arguments
 				delta := types.Delta{
 					Type:        "input_json_delta",
 					PartialJSON: tc.Function.Arguments,
 				}
 				event := types.MessageEvent{
 					Type:  "content_block_delta",
-					Index: &blockIdx,
+					Index: &tool.index,
 					Delta: &delta,
 				}
 				if err := writeSSEEvent(w, event); err != nil {
@@ -576,6 +440,11 @@ func (h *StreamHandler) processSSELine(
 
 	// Handle finish reason
 	if choice.FinishReason != "" {
+		for _, tool := range startedToolCalls {
+			if choice.FinishReason != "length" && tool.arguments != "" && !json.Valid([]byte(tool.arguments)) {
+				return fmt.Errorf("incomplete Chat Completions function arguments")
+			}
+		}
 		// Close any open content block (reasoning or text)
 		if *reasoningStarted {
 			if err := writeThinkingBlockStop(w, *contentIndex); err != nil {
@@ -591,19 +460,12 @@ func (h *StreamHandler) processSSELine(
 
 		// Close any open tool_use blocks in ascending index order.
 		if len(startedToolCalls) > 0 {
-			type toolBlockEntry struct {
-				oi       int
-				blockIdx int
+			indices := make([]int, 0, len(startedToolCalls))
+			for _, tool := range startedToolCalls {
+				indices = append(indices, tool.index)
 			}
-			entries := make([]toolBlockEntry, 0, len(startedToolCalls))
-			for oi, blockIdx := range startedToolCalls {
-				entries = append(entries, toolBlockEntry{oi, blockIdx})
-			}
-			slices.SortFunc(entries, func(a, b toolBlockEntry) int {
-				return cmp.Compare(a.blockIdx, b.blockIdx)
-			})
-			for _, e := range entries {
-				idx := e.blockIdx
+			slices.Sort(indices)
+			for _, idx := range indices {
 				stopEvent := types.MessageEvent{
 					Type:  "content_block_stop",
 					Index: &idx,
@@ -612,26 +474,29 @@ func (h *StreamHandler) processSSELine(
 					return ErrClientDisconnected
 				}
 			}
-			// Clear so EOF cleanup won't emit duplicate stops
-			for oi := range startedToolCalls {
-				delete(startedToolCalls, oi)
-			}
+			clear(startedToolCalls)
 		}
-		*toolUseCount = 0
 
-		*terminalStopReason = h.responseTransformer.mapFinishReason(choice.FinishReason)
+		stopReason, err := h.responseTransformer.mapFinishReason(choice.FinishReason)
+		if err != nil {
+			return err
+		}
+		*terminalStopReason = stopReason
 		flusher.Flush()
 	}
 
 	return nil
 }
 
-func usageInfoToAnthropic(usage *types.UsageInfo) *types.Usage {
+type chatToolState struct {
+	index     int
+	arguments string
+}
+
+// ChatUsageToAnthropic preserves absence and maps cache/reasoning counts once.
+func ChatUsageToAnthropic(usage *types.UsageInfo) *types.Usage {
 	if usage == nil {
-		return &types.Usage{
-			InputTokens:  0,
-			OutputTokens: 0,
-		}
+		return nil
 	}
 	in, cacheRead, cacheCreate := splitPromptTokens(usage)
 	return &types.Usage{
@@ -661,13 +526,33 @@ func reasoningTokensOf(usage *types.UsageInfo) int {
 	return usage.CompletionThinkingTokens
 }
 
-func responsesUsageToAnthropic(usage *types.ResponsesUsage) *types.Usage {
+func ResponsesUsageToAnthropic(usage *types.ResponsesUsage) *types.Usage {
 	if usage == nil {
-		return usageInfoToAnthropic(nil)
+		return ChatUsageToAnthropic(nil)
 	}
-	return usageInfoToAnthropic(&types.UsageInfo{
+	return ChatUsageToAnthropic(&types.UsageInfo{
 		PromptTokens: usage.InputTokens, CompletionTokens: usage.OutputTokens,
 		PromptTokensDetails: usage.InputTokensDetails, CompletionTokensDetails: usage.OutputTokensDetails,
+	})
+}
+
+func geminiUsageToAnthropic(usage *types.GeminiUsage) *types.Usage {
+	if usage == nil {
+		return nil
+	}
+	count := func(value *int) int {
+		if value == nil {
+			return 0
+		}
+		return nonNegative(*value)
+	}
+	// Gemini counts thoughts outside candidates, unlike Chat/Responses output.
+	thinking := count(usage.ThoughtsTokenCount)
+	return ChatUsageToAnthropic(&types.UsageInfo{
+		PromptTokens:            count(usage.PromptTokenCount) + count(usage.ToolUsePromptTokenCount),
+		CompletionTokens:        count(usage.CandidatesTokenCount) + thinking,
+		PromptTokensDetails:     &types.PromptTokensDetails{CachedTokens: count(usage.CachedContentTokenCount)},
+		CompletionTokensDetails: &types.CompletionTokensDetails{ReasoningTokens: thinking},
 	})
 }
 
@@ -778,7 +663,7 @@ func (h *StreamHandler) ProxyResponsesStream(
 	}
 	flusher.Flush()
 
-	var lineBuf []byte
+	var decoder sse.Decoder
 	state := responsesStreamState{tools: make(map[string]*responsesToolState)}
 	readBuf := readBufPool.Get().(*[]byte)
 	defer readBufPool.Put(readBuf)
@@ -795,24 +680,16 @@ func (h *StreamHandler) ProxyResponsesStream(
 		n, err := responsesResp.Read(*readBuf)
 		if n > 0 {
 			ping()
-			for i := 0; i < n; i++ {
-				b := (*readBuf)[i]
-				if b == '\n' {
-					if err := h.processResponsesSSELine(w, flusher, lineBuf, &state); err != nil {
-						return err
-					}
-					lineBuf = lineBuf[:0]
-				} else {
-					lineBuf = append(lineBuf, b)
-				}
+			if err := decoder.Feed((*readBuf)[:n], func(event string, data []byte) error {
+				return h.processResponsesSSELine(w, flusher, event, data, &state)
+			}); err != nil {
+				return err
 			}
 		}
 
 		if err == io.EOF {
-			if len(lineBuf) > 0 {
-				if err := h.processResponsesSSELine(w, flusher, lineBuf, &state); err != nil {
-					return err
-				}
+			if err := decoder.Finish(); err != nil {
+				return err
 			}
 			break
 		}
@@ -835,10 +712,10 @@ func (h *StreamHandler) ProxyResponsesStream(
 	}
 	indices := make([]int, 0, len(state.tools))
 	for _, tool := range state.tools {
+		if state.stopReason != "max_tokens" && !json.Valid([]byte(tool.arguments)) {
+			return fmt.Errorf("incomplete Responses function arguments")
+		}
 		if !tool.closed {
-			if !json.Valid([]byte(tool.arguments)) {
-				return fmt.Errorf("incomplete Responses function arguments")
-			}
 			indices = append(indices, tool.index)
 		}
 	}
@@ -852,10 +729,12 @@ func (h *StreamHandler) ProxyResponsesStream(
 	if len(state.tools) > 0 {
 		stopReason = "tool_use"
 	}
-	if state.incomplete {
-		stopReason = "max_tokens"
+	if state.stopReason != "end_turn" {
+		stopReason = state.stopReason
+	} else if state.refused {
+		stopReason = "refusal"
 	}
-	if err := writeSSEEvent(w, types.MessageEvent{Type: "message_delta", Delta: &types.Delta{StopReason: stopReason}, Usage: responsesUsageToAnthropic(state.usage)}); err != nil {
+	if err := writeSSEEvent(w, types.MessageEvent{Type: "message_delta", Delta: &types.Delta{StopReason: stopReason}, Usage: ResponsesUsageToAnthropic(state.usage)}); err != nil {
 		return ErrClientDisconnected
 	}
 
@@ -873,56 +752,67 @@ func (h *StreamHandler) ProxyResponsesStream(
 func (h *StreamHandler) processResponsesSSELine(
 	w http.ResponseWriter,
 	flusher http.Flusher,
-	line []byte,
+	eventType string,
+	data []byte,
 	state *responsesStreamState,
 ) error {
-	line = bytes.TrimSpace(line)
-	if !bytes.HasPrefix(line, []byte("data:")) {
-		return nil
-	}
-
-	data := bytes.TrimSpace(line[5:])
+	data = bytes.TrimSpace(data)
 	if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
 		return nil
 	}
 
-	var chunk types.ResponsesChunk
-	if err := json.Unmarshal(data, &chunk); err != nil {
-		return fmt.Errorf("invalid Responses SSE: %w", err)
+	chunk, err := state.ReadEvent(eventType, data)
+	observeSourceModel(w, state.Model)
+	if recorder, ok := w.(interface{ SetPartialUsage(*types.Usage) }); ok && state.usage != nil {
+		recorder.SetPartialUsage(state.ReportedUsage())
 	}
-	usage := chunk.Usage
-	if usage == nil && chunk.Response != nil {
-		usage = chunk.Response.Usage
+	if err != nil {
+		return err
 	}
-	if usage != nil {
-		// Later totals may omit the split; retain an already observed count.
-		if state.usage != nil && (usage.OutputTokensDetails == nil || usage.OutputTokensDetails.ReasoningTokens <= 0) {
-			usage.OutputTokensDetails = state.usage.OutputTokensDetails
-		}
-		state.usage = usage
-		if recorder, ok := w.(interface{ SetPartialUsage(*types.Usage) }); ok {
-			recorder.SetPartialUsage(responsesUsageToAnthropic(usage))
-		}
-	}
-	if chunk.Type == "response.failed" || chunk.Type == "error" {
-		return fmt.Errorf("upstream Responses event %s", chunk.Type)
+	if chunk == nil {
+		return nil
 	}
 	if chunk.Type == "response.completed" || chunk.Type == "response.done" || chunk.Type == "response.incomplete" {
-		state.terminal = true
-		if chunk.Response != nil && (chunk.Response.Status == "failed" || chunk.Response.Status == "cancelled") {
-			return fmt.Errorf("upstream Responses status %s", chunk.Response.Status)
-		}
-		if chunk.Type == "response.incomplete" {
-			if chunk.Response == nil || chunk.Response.IncompleteDetails == nil || chunk.Response.IncompleteDetails.Reason != "max_output_tokens" {
-				return fmt.Errorf("upstream Responses is incomplete")
+		if chunk.Response != nil {
+			for _, item := range chunk.Response.Output {
+				if item.Type == "reasoning" || item.Type == "message" {
+					if err := state.visibleItem(w, item, true); err != nil {
+						return err
+					}
+				}
 			}
-			state.incomplete = true
 		}
 		return nil
 	}
-
+	if chunk.Type == "response.refusal.delta" || chunk.Type == "response.refusal.done" {
+		text, done := chunk.Delta, chunk.Type == "response.refusal.done"
+		if done {
+			text = chunk.Refusal
+		}
+		return state.visibleText(w, flusher, responsesVisibleKey{itemID: chunk.ItemID, index: chunk.ContentIndex, refusal: true}, text, done, done)
+	}
+	if (chunk.Type == "response.content_part.added" || chunk.Type == "response.content_part.done") && chunk.Part != nil && chunk.Part.Type == "refusal" {
+		return state.visibleText(w, flusher, responsesVisibleKey{itemID: chunk.ItemID, index: chunk.ContentIndex, refusal: true}, chunk.Part.Refusal, true, chunk.Type == "response.content_part.done")
+	}
+	if strings.HasPrefix(chunk.Type, "response.reasoning_summary_") {
+		key := responsesVisibleKey{itemID: chunk.ItemID, index: chunk.SummaryIndex}
+		switch chunk.Type {
+		case "response.reasoning_summary_text.delta":
+			return state.visibleText(w, flusher, key, chunk.Delta, false, false)
+		case "response.reasoning_summary_text.done":
+			return state.visibleText(w, flusher, key, chunk.Text, true, true)
+		case "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
+			if chunk.Part == nil || chunk.Part.Type != "summary_text" {
+				return fmt.Errorf("invalid Responses reasoning summary part")
+			}
+			return state.visibleText(w, flusher, key, chunk.Part.Text, true, chunk.Type == "response.reasoning_summary_part.done")
+		}
+	}
 	if chunk.Type == "response.output_text.delta" && chunk.Delta != "" {
 		if !state.textOpen {
+			if err := state.closeText(w); err != nil {
+				return err
+			}
 			state.textOpen = true
 			state.textIndex = state.nextIndex
 			state.nextIndex++
@@ -959,7 +849,13 @@ func (h *StreamHandler) processResponsesSSELine(
 		if item == nil {
 			return fmt.Errorf("responses output item is missing")
 		}
+		if item.Type == "reasoning" {
+			return state.visibleItem(w, *item, chunk.Type == "response.output_item.done")
+		}
 		if item.Type == "message" && chunk.Type == "response.output_item.done" {
+			if err := state.visibleItem(w, *item, true); err != nil {
+				return err
+			}
 			return state.closeText(w)
 		}
 		if item.Type != "function_call" {
@@ -989,7 +885,7 @@ func (h *StreamHandler) processResponsesSSELine(
 			}
 		}
 		if chunk.Type == "response.output_item.done" && !tool.closed {
-			if !json.Valid([]byte(tool.arguments)) {
+			if item.Status != "incomplete" && !json.Valid([]byte(tool.arguments)) {
 				return fmt.Errorf("invalid completed Responses function arguments")
 			}
 			if err := writeContentBlockStop(w, tool.index); err != nil {
@@ -1023,6 +919,9 @@ func (t *responsesToolState) appendArguments(w http.ResponseWriter, delta string
 	if delta == "" {
 		return nil
 	}
+	if len(t.arguments)+len(delta) > 1<<20 {
+		return fmt.Errorf("Responses function arguments exceed 1 MiB")
+	}
 	if err := writeSSEEvent(w, types.MessageEvent{Type: "content_block_delta", Index: &t.index, Delta: &types.Delta{Type: "input_json_delta", PartialJSON: delta}}); err != nil {
 		return ErrClientDisconnected
 	}
@@ -1031,13 +930,14 @@ func (t *responsesToolState) appendArguments(w http.ResponseWriter, delta string
 }
 
 type responsesStreamState struct {
-	nextIndex  int
-	textIndex  int
-	textOpen   bool
-	tools      map[string]*responsesToolState
-	terminal   bool
-	incomplete bool
-	usage      *types.ResponsesUsage
+	ResponsesObservation
+	nextIndex     int
+	textIndex     int
+	textOpen      bool
+	tools         map[string]*responsesToolState
+	visibleParts  map[responsesVisibleKey]*responsesVisibleState
+	activeVisible *responsesVisibleState
+	refused       bool
 }
 
 func (s *responsesStreamState) closeText(w http.ResponseWriter) error {
@@ -1047,6 +947,106 @@ func (s *responsesStreamState) closeText(w http.ResponseWriter) error {
 		}
 		s.textOpen = false
 	}
+	if s.activeVisible != nil {
+		if err := writeContentBlockStop(w, s.activeVisible.index); err != nil {
+			return ErrClientDisconnected
+		}
+		s.activeVisible.closed = true
+		s.activeVisible = nil
+	}
+	return nil
+}
+
+type responsesVisibleKey struct {
+	itemID  string
+	index   int
+	refusal bool
+}
+
+type responsesVisibleState struct {
+	index  int
+	text   strings.Builder
+	closed bool
+}
+
+func (s *responsesStreamState) visibleItem(w http.ResponseWriter, item types.ResponsesOutput, done bool) error {
+	if item.Type == "message" {
+		for i, content := range item.Content {
+			if content.Type == "refusal" {
+				if err := s.visibleText(w, w.(http.Flusher), responsesVisibleKey{itemID: item.ID, index: i, refusal: true}, content.Refusal, true, done); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if item.EncryptedContent != "" {
+		return fmt.Errorf("encrypted Responses reasoning requires a native Responses target")
+	}
+	for i, summary := range item.Summary {
+		if summary.Type != "summary_text" {
+			return fmt.Errorf("unsupported Responses reasoning summary %q", summary.Type)
+		}
+		if err := s.visibleText(w, w.(http.Flusher), responsesVisibleKey{itemID: item.ID, index: i}, summary.Text, true, done); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *responsesStreamState) visibleText(w http.ResponseWriter, flusher http.Flusher, key responsesVisibleKey, text string, full, done bool) error {
+	blockType := "thinking"
+	delta := &types.Delta{Type: "thinking_delta"}
+	if key.refusal {
+		blockType = "text"
+		delta.Type = "text_delta"
+		s.refused = true
+	}
+	if s.visibleParts == nil {
+		s.visibleParts = make(map[responsesVisibleKey]*responsesVisibleState)
+	}
+	part := s.visibleParts[key]
+	if part == nil {
+		if err := s.closeText(w); err != nil {
+			return err
+		}
+		part = &responsesVisibleState{index: s.nextIndex}
+		s.nextIndex++
+		s.visibleParts[key] = part
+		s.activeVisible = part
+		if err := writeSSEEvent(w, types.MessageEvent{Type: "content_block_start", Index: &part.index, ContentBlock: &types.ContentBlock{Type: blockType}}); err != nil {
+			return ErrClientDisconnected
+		}
+	}
+	if full {
+		if !strings.HasPrefix(text, part.text.String()) {
+			return fmt.Errorf("Responses visible content changed after streaming")
+		}
+		text = text[part.text.Len():]
+	}
+	if part.closed && text != "" {
+		return fmt.Errorf("Responses visible content changed after closing")
+	}
+	if text != "" {
+		if part.text.Len()+len(text) > 1<<20 {
+			return fmt.Errorf("Responses visible content exceeds 1 MiB")
+		}
+		if key.refusal {
+			delta.Text = text
+		} else {
+			delta.Thinking = text
+		}
+		if err := writeSSEEvent(w, types.MessageEvent{Type: "content_block_delta", Index: &part.index, Delta: delta}); err != nil {
+			return ErrClientDisconnected
+		}
+		part.text.WriteString(text)
+	}
+	if done && !part.closed {
+		if err := s.closeText(w); err != nil {
+			return err
+		}
+	}
+	flusher.Flush()
 	return nil
 }
 
@@ -1083,10 +1083,8 @@ func (h *StreamHandler) ProxyGeminiStream(
 	}
 	flusher.Flush()
 
-	contentIndex := 0
-	var lineBuf []byte
-	contentStarted := false
-	stopSent := false
+	state := geminiStreamState{}
+	var decoder sse.Decoder
 	readBuf := readBufPool.Get().(*[]byte)
 	defer readBufPool.Put(readBuf)
 
@@ -1102,24 +1100,16 @@ func (h *StreamHandler) ProxyGeminiStream(
 		n, err := geminiResp.Read(*readBuf)
 		if n > 0 {
 			ping()
-			for i := 0; i < n; i++ {
-				b := (*readBuf)[i]
-				if b == '\n' {
-					if err := h.processGeminiSSELine(w, flusher, lineBuf, &contentIndex, &contentStarted, &stopSent, originalModel); err != nil {
-						return err
-					}
-					lineBuf = lineBuf[:0]
-				} else {
-					lineBuf = append(lineBuf, b)
-				}
+			if err := decoder.Feed((*readBuf)[:n], func(event string, data []byte) error {
+				return h.processGeminiSSELine(w, flusher, event, data, &state)
+			}); err != nil {
+				return err
 			}
 		}
 
 		if err == io.EOF {
-			if len(lineBuf) > 0 {
-				if err := h.processGeminiSSELine(w, flusher, lineBuf, &contentIndex, &contentStarted, &stopSent, originalModel); err != nil {
-					return err
-				}
+			if err := decoder.Finish(); err != nil {
+				return err
 			}
 			break
 		}
@@ -1134,28 +1124,19 @@ func (h *StreamHandler) ProxyGeminiStream(
 		}
 	}
 
-	if contentStarted {
-		stopEvent := types.MessageEvent{
-			Type:  "content_block_stop",
-			Index: &contentIndex,
-		}
-		if err := writeSSEEvent(w, stopEvent); err != nil {
-			return ErrClientDisconnected
-		}
+	if state.stopReason == "" {
+		return fmt.Errorf("gemini stream has no finish reason: %w", io.ErrUnexpectedEOF)
+	}
+	if err := state.closeBlock(w); err != nil {
+		return ErrClientDisconnected
 	}
 
-	if !stopSent {
-		msgDelta := types.MessageEvent{
-			Type: "message_delta",
-			Delta: &types.Delta{
-				StopReason: "end_turn",
-			},
-			Usage: &types.Usage{InputTokens: 0, OutputTokens: 0},
-		}
-		if err := writeSSEEvent(w, msgDelta); err != nil {
-			return ErrClientDisconnected
-		}
-		stopSent = true
+	// Usage can arrive after the candidate's finish reason.
+	if err := writeSSEEvent(w, types.MessageEvent{
+		Type: "message_delta", Delta: &types.Delta{StopReason: state.stopReason},
+		Usage: geminiUsageToAnthropic(state.usage),
+	}); err != nil {
+		return ErrClientDisconnected
 	}
 
 	stopEvent := types.MessageEvent{
@@ -1169,53 +1150,147 @@ func (h *StreamHandler) ProxyGeminiStream(
 	return nil
 }
 
+type geminiStreamState struct {
+	contentIndex int
+	blockType    string
+	stopReason   string
+	usage        *types.GeminiUsage
+	hasTools     bool
+}
+
+func (s *geminiStreamState) observeUsage(next *types.GeminiUsage) {
+	if s.usage == nil {
+		s.usage = &types.GeminiUsage{}
+	}
+	if next.PromptTokenCount != nil {
+		s.usage.PromptTokenCount = next.PromptTokenCount
+	}
+	if next.CandidatesTokenCount != nil {
+		s.usage.CandidatesTokenCount = next.CandidatesTokenCount
+	}
+	if next.ThoughtsTokenCount != nil && (*next.ThoughtsTokenCount > 0 || s.usage.ThoughtsTokenCount == nil) {
+		s.usage.ThoughtsTokenCount = next.ThoughtsTokenCount
+	}
+	if next.CachedContentTokenCount != nil {
+		s.usage.CachedContentTokenCount = next.CachedContentTokenCount
+	}
+	if next.ToolUsePromptTokenCount != nil {
+		s.usage.ToolUsePromptTokenCount = next.ToolUsePromptTokenCount
+	}
+}
+
+func (s *geminiStreamState) closeBlock(w http.ResponseWriter) error {
+	if s.blockType == "" {
+		return nil
+	}
+	if err := writeContentBlockStop(w, s.contentIndex); err != nil {
+		return err
+	}
+	s.contentIndex++
+	s.blockType = ""
+	return nil
+}
+
 func (h *StreamHandler) processGeminiSSELine(
 	w http.ResponseWriter,
 	flusher http.Flusher,
-	line []byte,
-	contentIndex *int,
-	contentStarted *bool,
-	stopSent *bool,
-	originalModel string,
+	eventType string,
+	data []byte,
+	state *geminiStreamState,
 ) error {
-	line = bytes.TrimSpace(line)
-	if len(line) == 0 || !bytes.HasPrefix(line, []byte("data: ")) {
-		return nil
-	}
-
-	data := line[6:]
+	data = bytes.TrimSpace(data)
 	if len(data) == 0 {
 		return nil
 	}
 
 	var chunk types.GeminiStreamChunk
 	if err := json.Unmarshal(data, &chunk); err != nil {
-		return nil
+		return fmt.Errorf("decode gemini stream: %w", err)
+	}
+	observeSourceModel(w, chunk.ModelVersion)
+	if chunk.UsageMetadata != nil {
+		state.observeUsage(chunk.UsageMetadata)
+		if recorder, ok := w.(interface{ SetPartialUsage(*types.Usage) }); ok {
+			recorder.SetPartialUsage(geminiUsageToAnthropic(state.usage))
+		}
+	}
+	if err := upstreamJSONError("Gemini", chunk.Error); err != nil {
+		return err
+	}
+	if eventType == "error" {
+		return upstreamJSONError("Gemini", data)
+	}
+	if chunk.PromptFeedback != nil && chunk.PromptFeedback.BlockReason != "" {
+		stop, err := geminiFinishReason(chunk.PromptFeedback.BlockReason)
+		if err != nil {
+			return err
+		}
+		state.stopReason = stop
 	}
 
 	if len(chunk.Candidates) > 0 {
 		candidate := chunk.Candidates[0]
 		for _, part := range candidate.Content.Parts {
+			if err := validateGeminiOutputPart(part); err != nil {
+				return err
+			}
+			if state.stopReason != "" && (part.Text != "" || part.FunctionCall != nil) {
+				return fmt.Errorf("Gemini content arrived after finish reason")
+			}
+			if part.FunctionCall != nil {
+				call, err := geminiToolCall(part.FunctionCall)
+				if err != nil {
+					return err
+				}
+				if err := state.closeBlock(w); err != nil {
+					return ErrClientDisconnected
+				}
+				if err := writeSSEEvent(w, types.MessageEvent{
+					Type: "content_block_start", Index: &state.contentIndex,
+					ContentBlock: &types.ContentBlock{Type: "tool_use", ID: call.ID, Name: call.Name},
+				}); err != nil {
+					return ErrClientDisconnected
+				}
+				state.blockType = "tool_use"
+				if err := writeSSEEvent(w, types.MessageEvent{
+					Type: "content_block_delta", Index: &state.contentIndex,
+					Delta: &types.Delta{Type: "input_json_delta", PartialJSON: call.Arguments},
+				}); err != nil {
+					return ErrClientDisconnected
+				}
+				if err := state.closeBlock(w); err != nil {
+					return ErrClientDisconnected
+				}
+				state.hasTools = true
+				flusher.Flush()
+			}
 			if part.Text != "" {
-				if !*contentStarted {
-					*contentStarted = true
+				blockType := "text"
+				delta := types.Delta{Type: "text_delta", Text: part.Text}
+				block := &types.ContentBlock{Type: blockType}
+				if part.Thought {
+					blockType = "thinking"
+					block.Type = blockType
+					delta = types.Delta{Type: "thinking_delta", Thinking: part.Text}
+				}
+				if state.blockType != blockType {
+					if err := state.closeBlock(w); err != nil {
+						return ErrClientDisconnected
+					}
 					startEvent := types.MessageEvent{
 						Type:         "content_block_start",
-						Index:        contentIndex,
-						ContentBlock: &types.ContentBlock{Type: "text", Text: ""},
+						Index:        &state.contentIndex,
+						ContentBlock: block,
 					}
 					if err := writeSSEEvent(w, startEvent); err != nil {
 						return ErrClientDisconnected
 					}
+					state.blockType = blockType
 				}
 
-				delta := types.Delta{
-					Type: "text_delta",
-					Text: part.Text,
-				}
 				event := types.MessageEvent{
 					Type:  "content_block_delta",
-					Index: contentIndex,
+					Index: &state.contentIndex,
 					Delta: &delta,
 				}
 				if err := writeSSEEvent(w, event); err != nil {
@@ -1225,34 +1300,19 @@ func (h *StreamHandler) processGeminiSSELine(
 			}
 		}
 
-		if candidate.FinishReason != "" && !*stopSent {
-			if *contentStarted {
-				stopEvent := types.MessageEvent{
-					Type:  "content_block_stop",
-					Index: contentIndex,
-				}
-				if err := writeSSEEvent(w, stopEvent); err != nil {
-					return ErrClientDisconnected
-				}
-				*contentStarted = false
-			}
-
-			stopReason := "end_turn"
-			if candidate.FinishReason == "MAX_TOKENS" {
-				stopReason = "max_tokens"
-			}
-
-			msgDelta := types.MessageEvent{
-				Type: "message_delta",
-				Delta: &types.Delta{
-					StopReason: stopReason,
-				},
-				Usage: usageInfoToAnthropic(nil),
-			}
-			if err := writeSSEEvent(w, msgDelta); err != nil {
+		if candidate.FinishReason != "" && state.stopReason == "" {
+			if err := state.closeBlock(w); err != nil {
 				return ErrClientDisconnected
 			}
-			*stopSent = true
+
+			stop, err := geminiFinishReason(candidate.FinishReason)
+			if err != nil {
+				return err
+			}
+			state.stopReason = stop
+			if state.hasTools && state.stopReason == "end_turn" {
+				state.stopReason = "tool_use"
+			}
 			flusher.Flush()
 		}
 	}

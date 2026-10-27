@@ -253,6 +253,12 @@ func builtinReasoningSupport(provider, modelID string) ThinkingSupport {
 		return ThinkingSupport{Levels: []string{"low", "medium", "high", "xhigh", "max"}, NoOffLevel: true}
 	case strings.HasPrefix(family, "gpt-5"), strings.HasPrefix(family, "o1"), strings.HasPrefix(family, "o3"):
 		return ThinkingSupport{Levels: []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}}
+	case strings.HasPrefix(family, "gemini-4-argon"), strings.HasPrefix(family, "gemini-3.8-flash"):
+		// Unlike earlier Flash models, these reject minimal.
+		// https://ai.google.dev/gemini-api/docs/generate-content/thinking#thinking-levels
+		return ThinkingSupport{Levels: []string{"low", "medium", "high"}, CannotDisable: true}
+	case strings.HasPrefix(family, "gemini-3.1-flash-lite-image"):
+		return ThinkingSupport{Levels: []string{"minimal", "high"}, CannotDisable: true}
 	case strings.HasPrefix(family, "gemini-4"), strings.HasPrefix(family, "gemini-3"):
 		// Gemini 3 and later take a discrete level. Sending a budget to them is
 		// the conflict Gemini documents as a 400, so Budget stays false.
@@ -260,7 +266,7 @@ func builtinReasoningSupport(provider, modelID string) ThinkingSupport {
 	case strings.HasPrefix(family, "gemini-2.5-flash-lite"):
 		return ThinkingSupport{Budget: true, MinBudget: 512, MaxBudget: 24576}
 	case strings.HasPrefix(family, "gemini-2.5-pro"):
-		return ThinkingSupport{Budget: true, MinBudget: 128, MaxBudget: 32768}
+		return ThinkingSupport{Budget: true, CannotDisable: true, MinBudget: 128, MaxBudget: 32768}
 	case strings.HasPrefix(family, "gemini-2.5"):
 		// Flash and the leftover 2.5 variants: 1..24576. A floor of 1 rather
 		// than 0 because 0 means "do not think", which is a switch this proxy

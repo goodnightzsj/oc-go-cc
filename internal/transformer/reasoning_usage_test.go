@@ -64,7 +64,13 @@ func TestReasoningTokensFromEitherSpelling(t *testing.T) {
 		{"neither", &types.UsageInfo{CompletionTokens: 36}, 0},
 		{"nil usage", nil, 0},
 	} {
-		got := usageInfoToAnthropic(tc.usage)
+		got := ChatUsageToAnthropic(tc.usage)
+		if tc.usage == nil {
+			if got != nil {
+				t.Error("absent usage became observed zero")
+			}
+			continue
+		}
 		if got.ReasoningTokens != tc.want {
 			t.Errorf("%s: ReasoningTokens = %d, want %d", tc.name, got.ReasoningTokens, tc.want)
 		}
@@ -74,7 +80,7 @@ func TestReasoningTokensFromEitherSpelling(t *testing.T) {
 // The split is part of the completion, not additional to it. Adding it would
 // double-count every reasoning token in the billing path.
 func TestReasoningTokensDoNotInflateOutput(t *testing.T) {
-	got := usageInfoToAnthropic(&types.UsageInfo{
+	got := ChatUsageToAnthropic(&types.UsageInfo{
 		PromptTokens: 56, CompletionTokens: 36,
 		CompletionTokensDetails: &types.CompletionTokensDetails{ReasoningTokens: 26},
 	})

@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/routatic/proxy/pkg/types"
 )
@@ -10,7 +11,7 @@ import (
 // decode it without coupling to a specific json.RawMessage layout.
 type thinkingConfig struct {
 	Type         string `json:"type"`
-	BudgetTokens int    `json:"budget_tokens,omitempty"`
+	BudgetTokens *int   `json:"budget_tokens,omitempty"`
 }
 
 // NormalizeRequest converts an Anthropic MessageRequest to a NormalizedRequest.
@@ -57,9 +58,10 @@ func NormalizeRequest(anthropicReq *types.MessageRequest) *NormalizedRequest {
 	if len(anthropicReq.Thinking) > 0 {
 		var tc thinkingConfig
 		if err := json.Unmarshal(anthropicReq.Thinking, &tc); err == nil {
+			nr.ThinkingMode = tc.Type
 			nr.ThinkingBudget = tc.BudgetTokens
-			if tc.Type == "enabled" && tc.BudgetTokens > 0 {
-				nr.ReasoningEffort = EffortFromBudget(tc.BudgetTokens)
+			if tc.Type == "enabled" && tc.BudgetTokens != nil && *tc.BudgetTokens > 0 {
+				nr.ReasoningEffort = EffortFromBudget(*tc.BudgetTokens)
 			}
 		}
 	}
@@ -73,7 +75,14 @@ func NormalizeRequest(anthropicReq *types.MessageRequest) *NormalizedRequest {
 			Effort string `json:"effort"`
 		}
 		if err := json.Unmarshal(anthropicReq.OutputConfig, &oc); err == nil && oc.Effort != "" {
-			nr.ReasoningEffort = oc.Effort
+			switch strings.ToLower(strings.TrimSpace(oc.Effort)) {
+			case "auto", "adaptive":
+				if nr.ThinkingMode == "" {
+					nr.ThinkingMode = "adaptive"
+				}
+			default:
+				nr.ReasoningEffort = oc.Effort
+			}
 		}
 	}
 
@@ -135,16 +144,21 @@ func NormalizeRequest(anthropicReq *types.MessageRequest) *NormalizedRequest {
 // DenormalizeResponse converts a NormalizedResponse to an Anthropic MessageResponse.
 func DenormalizeResponse(nr *NormalizedResponse) *types.MessageResponse {
 	resp := &types.MessageResponse{
-		ID:    nr.ID,
-		Type:  "message",
-		Model: nr.Model,
-		Usage: types.Usage{
+		ID:         nr.ID,
+		Type:       "message",
+		Model:      nr.Model,
+		Role:       "assistant",
+		Content:    []types.ContentBlock{},
+		StopReason: nr.StopReason,
+	}
+	if nr.Usage != nil {
+		resp.Usage = &types.Usage{
 			InputTokens:              nr.Usage.InputTokens,
 			OutputTokens:             nr.Usage.OutputTokens,
 			CacheCreationInputTokens: nr.Usage.CacheCreationTokens,
 			CacheReadInputTokens:     nr.Usage.CacheReadTokens,
 			ReasoningTokens:          nr.Usage.ReasoningTokens,
-		},
+		}
 	}
 
 	// Build content blocks from messages.
@@ -178,18 +192,6 @@ func DenormalizeResponse(nr *NormalizedResponse) *types.MessageResponse {
 					Input: []byte(tc.Arguments),
 				})
 			}
-		}
-
-		// Determine stop reason.
-		switch nr.StopReason {
-		case "end_turn":
-			resp.StopReason = "end_turn"
-		case "max_tokens":
-			resp.StopReason = "max_tokens"
-		case "tool_use":
-			resp.StopReason = "tool_use"
-		default:
-			resp.StopReason = "end_turn"
 		}
 	}
 

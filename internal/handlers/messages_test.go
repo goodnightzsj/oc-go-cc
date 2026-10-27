@@ -1776,7 +1776,7 @@ func TestHandleStreaming_FailedStreamWithUsage_RecordsFailure(t *testing.T) {
 		"",
 	)
 
-	rows, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+	rows, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatalf("query requests: %v", err)
 	}
@@ -1831,7 +1831,7 @@ func TestHandleStreaming_FailedBeforeUsage_DoesNotRecord(t *testing.T) {
 		router.ScenarioDefault,
 		"",
 	)
-	_, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+	_, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatalf("query requests: %v", err)
 	}

@@ -57,7 +57,7 @@ func TestNativeAnthropicStreamPreservesInitialAndTerminalUsage(t *testing.T) {
 	if got := w.Body.String(); got != body {
 		t.Fatalf("native SSE changed: %q", got)
 	}
-	rows, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+	rows, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
 	if err != nil || total != 1 {
 		t.Fatalf("stored rows=%d err=%v", total, err)
 	}
@@ -170,7 +170,7 @@ func TestNonStreamingDeliveryFailurePreservesUsageOnce(t *testing.T) {
 				output = failedDeliveryWriter{w}
 			}
 			h.HandleResponses(output, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"m","input":"hi"}`)))
-			rows, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+			rows, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
 			if err != nil || total != 1 || rows[0].Success || rows[0].InputTokens != 11 || rows[0].OutputTokens != 7 || rows[0].CacheReadTokens != 90 {
 				t.Fatalf("delivery failure accounting=%+v total=%d err=%v", rows, total, err)
 			}

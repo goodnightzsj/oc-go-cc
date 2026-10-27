@@ -8,12 +8,31 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/routatic/proxy/internal/site"
 )
+
+func TestRefreshPricesCancellationReportsEveryPlatform(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	before := PriceTables()
+	fetched, errs := RefreshPrices(ctx, PriceRefreshConfig{
+		CatalogPath:    writeTempCatalog(t, `{"providers":{"opencode-go":{"models":{"synthetic":{"cost":{"input":1,"output":2}}}}}}`),
+		CommandCodeURL: "http://127.0.0.1:1/commandcode", ClinePassURL: "http://127.0.0.1:1/cline", OpenRouterURL: "http://127.0.0.1:1/models",
+	}, &http.Client{Timeout: time.Second})
+	if len(fetched) != 0 || len(errs) != 4 || !reflect.DeepEqual(before, PriceTables()) {
+		t.Fatalf("cancellation changed tables or omitted outcome: fetched=%v errors=%v", fetched, errs)
+	}
+	for _, platform := range []string{site.OpenCodeGo, site.CommandCode, site.ClinePass, site.OpenRouter} {
+		if !errors.Is(errs[platform], context.Canceled) {
+			t.Errorf("%s cancellation lost: %v", platform, errs[platform])
+		}
+	}
+}
 
 // Prices are refreshed from the platforms' pages, so a page that changes shape
 // must fail loudly rather than install an empty or partial table: a wrong table
@@ -50,7 +69,8 @@ func TestRefreshPricesInstallsBothTables(t *testing.T) {
 		CatalogPath:    catalog,
 		CommandCodeURL: page.URL,
 		ClinePassURL:   page.URL + "/cline",
-	}, page.Client())
+		OpenRouterURL:  page.URL + "/models",
+	}, localPriceClient(t, page))
 
 	if len(errs) != 0 {
 		t.Fatalf("refresh reported errors: %v", errs)
@@ -117,6 +137,7 @@ func TestRefreshKeepsGoodTablesWhenOnePlatformFails(t *testing.T) {
 		CatalogPath:    bad,
 		CommandCodeURL: "http://127.0.0.1:1/nope",
 		ClinePassURL:   "http://127.0.0.1:1/nope-too",
+		OpenRouterURL:  "http://127.0.0.1:1/nope-three",
 	}, &http.Client{Timeout: 2 * time.Second})
 	if errs2[site.OpenCodeGo] == nil {
 		t.Error("a catalog without the provider must be an error, not an empty table")
@@ -179,6 +200,7 @@ func TestRefreshPricesSyncsCatalogAndIsolatesSyncFailure(t *testing.T) {
 	var syncErr error
 	cfg := PriceRefreshConfig{
 		CatalogPath: path, CommandCodeURL: page.URL, ClinePassURL: page.URL + "/cline",
+		OpenRouterURL: page.URL + "/models",
 		RefreshCatalog: func(ctx context.Context) error {
 			if syncErr != nil {
 				return syncErr
@@ -186,7 +208,8 @@ func TestRefreshPricesSyncsCatalogAndIsolatesSyncFailure(t *testing.T) {
 			return os.WriteFile(path, []byte(`{"providers":{"opencode-go":{"models":{"fresh-model":{"cost":{"input":0.15,"output":0.6}}}}}}`), 0600)
 		},
 	}
-	if _, errs := RefreshPrices(context.Background(), cfg, page.Client()); len(errs) != 0 {
+	client := localPriceClient(t, page)
+	if _, errs := RefreshPrices(context.Background(), cfg, client); len(errs) != 0 {
 		t.Fatal(errs)
 	}
 	assertGoPrice := func() {
@@ -202,7 +225,7 @@ func TestRefreshPricesSyncsCatalogAndIsolatesSyncFailure(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"providers":{"opencode-go":{"models":{"fresh-model":{"cost":{"input":9,"output":9}}}}}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	fetched, errs := RefreshPrices(context.Background(), cfg, page.Client())
+	fetched, errs := RefreshPrices(context.Background(), cfg, client)
 	if !errors.Is(errs[site.OpenCodeGo], syncErr) || len(fetched[site.OpenCodeGo]) != 0 || len(fetched[site.CommandCode]) != 1 {
 		t.Fatalf("per-platform refresh outcome = %v / %v", fetched, errs)
 	}
@@ -269,6 +292,27 @@ func TestTierBoundUsesTheCeilingLabel(t *testing.T) {
 }
 
 // — helpers —
+
+type localPriceTransport struct {
+	t    *testing.T
+	host string
+	next http.RoundTripper
+}
+
+func (p localPriceTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.Host != p.host {
+		p.t.Errorf("price test attempted external host %q", r.URL.Host)
+		return nil, errors.New("price tests must use the local fixture")
+	}
+	return p.next.RoundTrip(r)
+}
+
+func localPriceClient(t *testing.T, server *httptest.Server) *http.Client {
+	t.Helper()
+	client := server.Client()
+	client.Transport = localPriceTransport{t: t, host: server.Listener.Addr().String(), next: client.Transport}
+	return client
+}
 
 // resetPrices clears installed overrides so tests do not leak into each other.
 func resetPrices(t *testing.T) {

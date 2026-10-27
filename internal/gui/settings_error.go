@@ -32,7 +32,7 @@ var settingsErrorMessages = map[string]string{
 	"model_required":          "请填写模型 ID。",
 	"unknown_provider":        "平台名称不受支持，请从已有平台中选择。",
 	"wire_format":             "模型协议不正确，请选择 auto、openai、anthropic、responses 或 gemini。",
-	"commandcode_wire_format": "CommandCode 只支持 OpenAI 或 Anthropic 协议，请修改模型协议。",
+	"commandcode_wire_format": "CommandCode 只支持 OpenAI、Anthropic 或 Responses 协议，请修改模型协议。",
 	"cline_wire_format":       "ClinePass 只支持 OpenAI 协议，请修改模型协议。",
 	"empty_family":            "模型系列名称不能为空，请填写后再保存。",
 	"vision_required":         "视觉场景需要支持图片的模型，请更换模型或调整视觉设置。",

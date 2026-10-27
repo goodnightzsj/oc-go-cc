@@ -17,6 +17,8 @@ type ResponsesRequest struct {
 	TopP              *float64            `json:"top_p,omitempty"`
 	ToolChoice        json.RawMessage     `json:"tool_choice,omitempty"`
 	ParallelToolCalls *bool               `json:"parallel_tool_calls,omitempty"`
+	Text              json.RawMessage     `json:"text,omitempty"`
+	PromptCacheKey    string              `json:"prompt_cache_key,omitempty"`
 }
 
 // ResponsesInput represents a single input item in the Responses request.
@@ -45,6 +47,7 @@ type ResponsesReasoning struct {
 
 // ResponsesResponse represents a response from the OpenAI Responses API.
 type ResponsesResponse struct {
+	Error             json.RawMessage             `json:"error,omitempty"`
 	ID                string                      `json:"id"`
 	Object            string                      `json:"object"`
 	Created           int64                       `json:"created"`
@@ -61,19 +64,23 @@ type ResponsesIncompleteDetails struct {
 
 // ResponsesOutput represents a single output item.
 type ResponsesOutput struct {
-	Type      string             `json:"type"`
-	ID        string             `json:"id,omitempty"`
-	Role      string             `json:"role,omitempty"`
-	Content   []ResponsesContent `json:"content,omitempty"`
-	CallID    string             `json:"call_id,omitempty"`
-	Name      string             `json:"name,omitempty"`
-	Arguments string             `json:"arguments,omitempty"`
+	Type             string             `json:"type"`
+	Status           string             `json:"status,omitempty"`
+	ID               string             `json:"id,omitempty"`
+	Role             string             `json:"role,omitempty"`
+	Content          []ResponsesContent `json:"content,omitempty"`
+	CallID           string             `json:"call_id,omitempty"`
+	Name             string             `json:"name,omitempty"`
+	Arguments        string             `json:"arguments,omitempty"`
+	Summary          []ResponsesContent `json:"summary,omitempty"`
+	EncryptedContent string             `json:"encrypted_content,omitempty"`
 }
 
 // ResponsesContent represents content within an output item.
 type ResponsesContent struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type    string `json:"type"`
+	Text    string `json:"text,omitempty"`
+	Refusal string `json:"refusal,omitempty"`
 }
 
 // ResponsesUsage represents token usage in a Responses response.
@@ -86,14 +93,20 @@ type ResponsesUsage struct {
 
 // ResponsesChunk represents a streaming chunk from the Responses API.
 type ResponsesChunk struct {
-	Type     string             `json:"type"`
-	ID       string             `json:"id,omitempty"`
-	Delta    string             `json:"delta,omitempty"`
-	Output   []ResponsesOutput  `json:"output,omitempty"`
-	Usage    *ResponsesUsage    `json:"usage,omitempty"`
-	ItemID   string             `json:"item_id,omitempty"`
-	Item     *ResponsesOutput   `json:"item,omitempty"`
-	Response *ResponsesResponse `json:"response,omitempty"`
+	Error        json.RawMessage    `json:"error,omitempty"`
+	Type         string             `json:"type"`
+	ID           string             `json:"id,omitempty"`
+	Delta        string             `json:"delta,omitempty"`
+	Text         string             `json:"text,omitempty"`
+	SummaryIndex int                `json:"summary_index,omitempty"`
+	ContentIndex int                `json:"content_index,omitempty"`
+	Refusal      string             `json:"refusal,omitempty"`
+	Part         *ResponsesContent  `json:"part,omitempty"`
+	Output       []ResponsesOutput  `json:"output,omitempty"`
+	Usage        *ResponsesUsage    `json:"usage,omitempty"`
+	ItemID       string             `json:"item_id,omitempty"`
+	Item         *ResponsesOutput   `json:"item,omitempty"`
+	Response     *ResponsesResponse `json:"response,omitempty"`
 }
 
 // Google Gemini API types.
@@ -101,27 +114,70 @@ type ResponsesChunk struct {
 
 // GeminiRequest represents a request to the Gemini API.
 type GeminiRequest struct {
-	Contents         []GeminiContent         `json:"contents"`
-	GenerationConfig *GeminiGenerationConfig `json:"generationConfig,omitempty"`
-	Tools            []GeminiTool            `json:"tools,omitempty"`
-	Stream           bool                    `json:"stream,omitempty"`
+	Contents          []GeminiContent         `json:"contents"`
+	SystemInstruction *GeminiContent          `json:"systemInstruction,omitempty"`
+	GenerationConfig  *GeminiGenerationConfig `json:"generationConfig,omitempty"`
+	Tools             []GeminiTool            `json:"tools,omitempty"`
+	ToolConfig        *GeminiToolConfig       `json:"toolConfig,omitempty"`
+	Stream            bool                    `json:"stream,omitempty"`
 }
 
 // GeminiContent represents a single content item.
 type GeminiContent struct {
-	Role  string       `json:"role"`
+	Role  string       `json:"role,omitempty"`
 	Parts []GeminiPart `json:"parts"`
 }
 
 // GeminiPart represents a part of a content item.
 type GeminiPart struct {
-	Text string `json:"text,omitempty"`
+	Text             string                  `json:"text,omitempty"`
+	Thought          bool                    `json:"thought,omitempty"`
+	ThoughtSignature string                  `json:"thoughtSignature,omitempty"`
+	InlineData       *GeminiBlob             `json:"inlineData,omitempty"`
+	FileData         *GeminiFileData         `json:"fileData,omitempty"`
+	FunctionCall     *GeminiFunctionCall     `json:"functionCall,omitempty"`
+	FunctionResponse *GeminiFunctionResponse `json:"functionResponse,omitempty"`
+}
+
+type GeminiBlob struct {
+	MIMEType string `json:"mimeType"`
+	Data     string `json:"data"`
+}
+
+type GeminiFileData struct {
+	MIMEType string `json:"mimeType,omitempty"`
+	FileURI  string `json:"fileUri"`
+}
+
+type GeminiFunctionCall struct {
+	ID   string          `json:"id,omitempty"`
+	Name string          `json:"name"`
+	Args json.RawMessage `json:"args,omitempty"`
+}
+
+type GeminiFunctionResponse struct {
+	ID       string          `json:"id,omitempty"`
+	Name     string          `json:"name"`
+	Response json.RawMessage `json:"response"`
+}
+
+type GeminiToolConfig struct {
+	FunctionCallingConfig GeminiFunctionCallingConfig `json:"functionCallingConfig"`
+}
+
+type GeminiFunctionCallingConfig struct {
+	Mode                 string   `json:"mode"`
+	AllowedFunctionNames []string `json:"allowedFunctionNames,omitempty"`
 }
 
 // GeminiGenerationConfig controls generation parameters.
 type GeminiGenerationConfig struct {
-	Temperature     float64 `json:"temperature,omitempty"`
-	MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
+	Temperature        *float64        `json:"temperature,omitempty"`
+	TopP               *float64        `json:"topP,omitempty"`
+	StopSequences      []string        `json:"stopSequences,omitempty"`
+	ResponseMIMEType   string          `json:"responseMimeType,omitempty"`
+	ResponseJSONSchema json.RawMessage `json:"responseJsonSchema,omitempty"`
+	MaxOutputTokens    int             `json:"maxOutputTokens,omitempty"`
 	// ThinkingConfig carries Gemini's own reasoning control. It was absent, so
 	// a request that asked for any thinking level reached Gemini with nothing
 	// in the body about reasoning and the model used its default.
@@ -158,8 +214,11 @@ type GeminiFunctionDeclaration struct {
 
 // GeminiResponse represents a response from the Gemini API.
 type GeminiResponse struct {
-	Candidates    []GeminiCandidate `json:"candidates"`
-	UsageMetadata *GeminiUsage      `json:"usageMetadata,omitempty"`
+	ModelVersion   string                `json:"modelVersion,omitempty"`
+	Error          json.RawMessage       `json:"error,omitempty"`
+	PromptFeedback *GeminiPromptFeedback `json:"promptFeedback,omitempty"`
+	Candidates     []GeminiCandidate     `json:"candidates"`
+	UsageMetadata  *GeminiUsage          `json:"usageMetadata,omitempty"`
 }
 
 // GeminiCandidate represents a response candidate.
@@ -168,15 +227,25 @@ type GeminiCandidate struct {
 	FinishReason string        `json:"finishReason,omitempty"`
 }
 
+type GeminiPromptFeedback struct {
+	BlockReason string `json:"blockReason,omitempty"`
+}
+
 // GeminiUsage represents token usage in a Gemini response.
 type GeminiUsage struct {
-	PromptTokenCount     int `json:"promptTokenCount"`
-	CandidatesTokenCount int `json:"candidatesTokenCount"`
-	TotalTokenCount      int `json:"totalTokenCount"`
+	PromptTokenCount        *int `json:"promptTokenCount,omitempty"`
+	CandidatesTokenCount    *int `json:"candidatesTokenCount,omitempty"`
+	ThoughtsTokenCount      *int `json:"thoughtsTokenCount,omitempty"`
+	CachedContentTokenCount *int `json:"cachedContentTokenCount,omitempty"`
+	ToolUsePromptTokenCount *int `json:"toolUsePromptTokenCount,omitempty"`
+	TotalTokenCount         int  `json:"totalTokenCount"`
 }
 
 // GeminiStreamChunk represents a streaming chunk from the Gemini API.
 type GeminiStreamChunk struct {
-	Candidates    []GeminiCandidate `json:"candidates"`
-	UsageMetadata *GeminiUsage      `json:"usageMetadata,omitempty"`
+	ModelVersion   string                `json:"modelVersion,omitempty"`
+	Error          json.RawMessage       `json:"error,omitempty"`
+	PromptFeedback *GeminiPromptFeedback `json:"promptFeedback,omitempty"`
+	Candidates     []GeminiCandidate     `json:"candidates"`
+	UsageMetadata  *GeminiUsage          `json:"usageMetadata,omitempty"`
 }

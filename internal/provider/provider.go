@@ -5,7 +5,9 @@ package provider
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +22,13 @@ type baseProvider struct {
 	atomic     *config.AtomicConfig
 	httpClient *http.Client
 	keys       *keyPool
+}
+
+func differingResponseModel(reported, requested string) string {
+	if strings.TrimSpace(reported) == "" || strings.EqualFold(strings.TrimSpace(reported), strings.TrimSpace(requested)) {
+		return ""
+	}
+	return reported
 }
 
 // newBaseProvider creates a baseProvider with a shared HTTP transport tuned
@@ -69,6 +78,7 @@ func (b *baseProvider) withKeyHint(body io.ReadCloser, sel *selection) io.ReadCl
 // construction failures never reach here; the caller's deferred Release leaves
 // those neutral. Bodies remain owned by the protocol-specific caller.
 func (b *baseProvider) doSelected(req *http.Request, sel *selection) (*http.Response, error) {
+	logRequestControls(req, slog.Default())
 	resp, err := b.httpClient.Do(req)
 	outcome := err
 	if err == nil && resp.StatusCode >= http.StatusBadRequest {

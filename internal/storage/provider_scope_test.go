@@ -23,7 +23,7 @@ func TestProviderCostReconciliationScopesPlatform(t *testing.T) {
 	if err != nil || report.TargetProvider != "opencode-go" || report.Exact != 1 || report.Updated != 1 || report.Ambiguous != 0 {
 		t.Fatalf("scoped reconciliation: report=%+v error=%v", report, err)
 	}
-	records, _, err := NewRequests(db).Query(RequestQuery{})
+	records, _, err := NewRequests(db).Query(t.Context(), RequestQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestSyncProviderUsageRequestsSkipsTokenAndTimeConflicts(t *testing.T) {
 			if err != nil || report.Conflicting != 1 || report.Updated != 0 || len(report.IssueExamples) != 1 || report.IssueExamples[0].Kind != conflict {
 				t.Fatalf("conflict report=%+v error=%v", report, err)
 			}
-			matched, count, err := NewRequests(db).Query(RequestQuery{Model: "review-model"})
+			matched, count, err := NewRequests(db).Query(t.Context(), RequestQuery{Model: "review-model"})
 			if err != nil || count != 1 || matched[0].CostUSD != 1 || matched[0].CostSource != CostSourceEstimated {
 				t.Fatalf("conflicting request overwritten or duplicated: rows=%+v count=%d error=%v", matched, count, err)
 			}
@@ -127,7 +127,7 @@ func TestSyncProviderUsageRequestsPreservesOtherPlatformsAndPartialHistory(t *te
 	if err != nil || report.TargetProvider != "opencode-go" || report.Removed != 0 || report.PreservedUnmatched != 2 || report.Updated != 1 || report.Inserted != 1 {
 		t.Fatalf("partial snapshot sync: report=%+v error=%v", report, err)
 	}
-	records, count, err := NewRequests(db).Query(RequestQuery{})
+	records, count, err := NewRequests(db).Query(t.Context(), RequestQuery{})
 	if err != nil || count != 6 {
 		t.Fatalf("history count=%d error=%v", count, err)
 	}
@@ -209,7 +209,7 @@ func TestProviderSyncAndReconciliationPreserveConflictingOfficialCost(t *testing
 			if err != nil || reconciled.Conflicting != 1 || reconciled.Updated != 0 {
 				t.Fatalf("conflicting reconciliation: report=%+v error=%v", reconciled, err)
 			}
-			records, count, err := NewRequests(db).Query(RequestQuery{})
+			records, count, err := NewRequests(db).Query(t.Context(), RequestQuery{})
 			if err != nil || count != 1 || records[0].CostUSD != 2 {
 				t.Fatalf("official cost overwritten or duplicated: records=%+v count=%d error=%v", records, count, err)
 			}
@@ -255,7 +255,7 @@ func TestSyncProviderUsageRequestsRollbackReportsNoWrites(t *testing.T) {
 		t.Fatalf("rollback report=%+v error=%v", report, err)
 	}
 	assertRequestCostSource(t, db, "exact", CostSourceEstimated)
-	_, count, err := NewRequests(db).Query(RequestQuery{})
+	_, count, err := NewRequests(db).Query(t.Context(), RequestQuery{})
 	if err != nil || count != 1 {
 		t.Fatalf("rollback count=%d error=%v", count, err)
 	}

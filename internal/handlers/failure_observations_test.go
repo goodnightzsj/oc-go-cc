@@ -47,6 +47,20 @@ func (b *observedFailureBody) FirstByteAt() time.Time  { return b.fb }
 
 type failingObservedProvider struct{ body *observedFailureBody }
 
+func TestRecordedUpstreamModelPrefersGatewayDeclaration(t *testing.T) {
+	rw := &responseWriter{}
+	rw.SetSourceModel("response-label")
+	if got := rw.recordedUpstreamModel(&observedFailureBody{model: "gateway-canonical"}, "requested"); got != "gateway-canonical" {
+		t.Fatalf("gateway priority changed: %s", got)
+	}
+	if got := rw.recordedUpstreamModel(nil, "requested"); got != "response-label" {
+		t.Fatalf("wire model lost: %s", got)
+	}
+	if got := rw.recordedUpstreamModel(nil, "response-label"); got != "" {
+		t.Fatalf("identical model duplicated: %s", got)
+	}
+}
+
 func (p *failingObservedProvider) Name() string { return "opencode-zen" }
 func (p *failingObservedProvider) WireFormat(string) core.WireFormat {
 	return core.WireFormatAnthropic
@@ -110,7 +124,7 @@ func TestInterruptedStreamRecordsTheSameObservationsAsSuccess(t *testing.T) {
 		[]config.ModelConfig{{Provider: "opencode-zen", ModelID: "synthetic"}},
 		nil, router.ScenarioDefault, "failure-observed")
 
-	rows, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+	rows, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,6 +137,9 @@ func TestInterruptedStreamRecordsTheSameObservationsAsSuccess(t *testing.T) {
 	}
 	if rec.UpstreamModel != "deepseek/real-model" {
 		t.Errorf("UpstreamModel = %q, want the model the body reported", rec.UpstreamModel)
+	}
+	if rec.ResponseModel != "synthetic" {
+		t.Errorf("ResponseModel = %q, want the source message model, not canonical", rec.ResponseModel)
 	}
 	if rec.FirstByte <= 0 {
 		t.Errorf("FirstByte = %v, want the measured first byte", rec.FirstByte)

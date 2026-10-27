@@ -37,8 +37,8 @@ func TestNormalizeRequestNeverStoresAModeAsEffort(t *testing.T) {
 			if nr.ReasoningEffort != tc.wantEffort {
 				t.Errorf("ReasoningEffort = %q, want %q", nr.ReasoningEffort, tc.wantEffort)
 			}
-			if nr.ThinkingBudget != tc.wantBudget {
-				t.Errorf("ThinkingBudget = %d, want %d", nr.ThinkingBudget, tc.wantBudget)
+			if tc.wantBudget == 0 && nr.ThinkingBudget != nil || tc.wantBudget != 0 && (nr.ThinkingBudget == nil || *nr.ThinkingBudget != tc.wantBudget) {
+				t.Errorf("ThinkingBudget = %v, want %d (nil when unspecified)", nr.ThinkingBudget, tc.wantBudget)
 			}
 			// An effort that is not in the published set would be rejected or
 			// silently ignored upstream, which is the failure this guards.

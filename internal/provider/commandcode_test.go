@@ -15,7 +15,7 @@ import (
 	"github.com/routatic/proxy/pkg/types"
 )
 
-// commandCodeTestProvider wires both upstream endpoints at one test server and
+// commandCodeTestProvider wires upstream endpoints at one test server and
 // returns the provider plus the model ids the caller should ask for.
 func commandCodeTestProvider(t *testing.T, handler http.HandlerFunc) (*CommandCodeProvider, *httptest.Server) {
 	t.Helper()
@@ -25,6 +25,7 @@ func commandCodeTestProvider(t *testing.T, handler http.HandlerFunc) (*CommandCo
 		APIKey:           "dedicated-key",
 		BaseURL:          upstream.URL + "/provider/v1/chat/completions",
 		AnthropicBaseURL: upstream.URL + "/provider/v1/messages",
+		ResponsesBaseURL: upstream.URL + "/provider/v1/responses",
 	}}
 	return NewCommandCodeProvider(config.NewAtomicConfig(cfg, ""), nil), upstream
 }
@@ -59,6 +60,7 @@ func TestCommandCodeWireFormatSelection(t *testing.T) {
 		// model can still be pinned to the endpoint it actually speaks.
 		{config.ModelConfig{ModelID: "claude-sonnet-4-6", WireFormat: "openai"}, "openai"},
 		{config.ModelConfig{ModelID: "vendor/claude-proxy", WireFormat: "anthropic"}, "anthropic"},
+		{config.ModelConfig{ModelID: "synthetic", WireFormat: "responses"}, "responses"},
 	} {
 		if got := core.ModelWireFormat(p, tc.model).String(); got != tc.want {
 			t.Errorf("%s (wire_format=%q) = %s, want %s", tc.model.ModelID, tc.model.WireFormat, got, tc.want)

@@ -109,8 +109,9 @@ func (p *OpenCodeGoProvider) executeOpenAI(ctx context.Context, req *types.Messa
 	}
 
 	return &core.ExecuteResult{
-		Body:    resultBody,
-		KeyHint: sel.KeyHint(),
+		Body:          resultBody,
+		KeyHint:       sel.KeyHint(),
+		ResponseModel: chatResp.Model,
 	}, nil
 }
 
@@ -148,16 +149,7 @@ func (p *OpenCodeGoProvider) executeResponses(ctx context.Context, req *types.Me
 	if err != nil {
 		return nil, fmt.Errorf("read Responses response: %w", err)
 	}
-	var response types.ResponsesResponse
-	if err := json.Unmarshal(raw, &response); err != nil {
-		return nil, fmt.Errorf("decode Responses response: %w", err)
-	}
-	normalized, err := transformer.ResponsesToNormalized(&response, model.ModelID)
-	if err != nil {
-		return nil, err
-	}
-	encoded, err := json.Marshal(core.DenormalizeResponse(normalized))
-	return &core.ExecuteResult{Body: encoded, KeyHint: client.KeyHintOf(body)}, err
+	return responsesResult(ctx, raw, model, client.KeyHintOf(body))
 }
 
 func (p *OpenCodeGoProvider) streamResponses(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
@@ -165,12 +157,11 @@ func (p *OpenCodeGoProvider) streamResponses(ctx context.Context, req *types.Mes
 }
 
 func (p *OpenCodeGoProvider) responsesRequest(ctx context.Context, req *types.MessageRequest, model config.ModelConfig, stream bool) (io.ReadCloser, error) {
-	cfg := p.atomic.Get()
-	payload, err := transformer.AnthropicToResponses(req, model)
+	cfg := responsesConfig(ctx, p.atomic.Get())
+	payload, err := responsesPayload(ctx, req, model, stream)
 	if err != nil {
 		return nil, err
 	}
-	payload.Stream = stream
 	sel, rerr := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
 	if rerr != nil {
 		return nil, rerr

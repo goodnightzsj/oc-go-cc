@@ -363,6 +363,12 @@ func (h *FallbackHandler) ExecuteWithFallback(
 			)
 			return nil, nil, errCtx
 		}
+		// A complete native response (including a failed one) is the result,
+		// not a transport failure eligible for another execution.
+		var final interface{ FinalResponse() []byte }
+		if errors.As(err, &final) && len(final.FinalResponse()) > 0 {
+			return &FallbackResult{ModelID: model.ModelID, Provider: provider, Attempted: i + 1}, final.FinalResponse(), err
+		}
 
 		// The request itself is unacceptable. Every model in the chain would
 		// reject it the same way, so trying them spends quota on an answer that

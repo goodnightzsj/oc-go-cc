@@ -1,12 +1,14 @@
 package provider
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 
+	"github.com/routatic/proxy/internal/core"
+	"github.com/routatic/proxy/internal/sse"
+	"github.com/routatic/proxy/internal/transformer"
 	"github.com/routatic/proxy/pkg/types"
 )
 
@@ -28,12 +30,17 @@ const maxAggregatedStreamBytes = 64 << 20
 // upstream sends one choice split across many chunks: content arrives in
 // pieces, tool arguments arrive as fragments that only form JSON once
 // concatenated, and usage arrives in the final chunk (usually with no choices).
-func aggregateChatStream(r io.Reader, modelID string) (*types.ChatCompletionResponse, error) {
+func aggregateChatStream(r io.Reader, modelID string) (_ *types.ChatCompletionResponse, err error) {
 	out := &types.ChatCompletionResponse{
 		Object:  "chat.completion",
 		Model:   modelID,
 		Choices: []types.Choice{{Index: 0}},
 	}
+	defer func() {
+		if err != nil {
+			err = &core.ResponseError{Err: err, Usage: transformer.ChatUsageToAnthropic(out.Usage)}
+		}
+	}()
 	var content strings.Builder
 	var reasoning strings.Builder
 	toolCalls := map[int]*types.ToolCall{}
@@ -42,31 +49,35 @@ func aggregateChatStream(r io.Reader, modelID string) (*types.ChatCompletionResp
 	complete := false
 
 	limited := &io.LimitedReader{R: r, N: maxAggregatedStreamBytes + 1}
-	scanner := bufio.NewScanner(limited)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, ":") {
-			continue
+	var decoder sse.Decoder
+	consume := func(event string, data []byte) error {
+		payload := strings.TrimSpace(string(data))
+		if payload == "" {
+			return nil
 		}
-		payload, ok := strings.CutPrefix(line, "data:")
-		if !ok {
-			continue
-		}
-		payload = strings.TrimSpace(payload)
 		if payload == "[DONE]" {
 			complete = true
-			break
+			return nil
 		}
-		var chunk struct {
-			types.ChatCompletionChunk
-			Error json.RawMessage `json:"error"`
+		var chunk types.ChatCompletionChunk
+		previousReasoning := 0
+		if out.Usage != nil {
+			previousReasoning = transformer.ChatUsageToAnthropic(out.Usage).ReasoningTokens
+			next := *out.Usage
+			next.CompletionTokensDetails, next.CompletionThinkingTokens = nil, 0
+			chunk.Usage = &next
 		}
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			return nil, fmt.Errorf("decode cline-pass stream chunk: %w", err)
+			return fmt.Errorf("decode cline-pass stream chunk: %w", err)
 		}
-		if len(chunk.Error) != 0 && string(chunk.Error) != "null" {
-			return nil, fmt.Errorf("cline-pass stream reported an upstream error")
+		if chunk.Usage != nil {
+			if transformer.ChatUsageToAnthropic(chunk.Usage).ReasoningTokens == 0 {
+				chunk.Usage.CompletionThinkingTokens = previousReasoning
+			}
+			out.Usage = chunk.Usage
+		}
+		if event == "error" || len(chunk.Error) != 0 && string(chunk.Error) != "null" {
+			return fmt.Errorf("cline-pass stream reported an upstream error")
 		}
 		seen = seen || len(chunk.Choices) > 0
 		if chunk.ID != "" {
@@ -77,9 +88,6 @@ func aggregateChatStream(r io.Reader, modelID string) (*types.ChatCompletionResp
 		}
 		if chunk.Model != "" {
 			out.Model = chunk.Model
-		}
-		if chunk.Usage != nil {
-			out.Usage = *chunk.Usage
 		}
 		for _, choice := range chunk.Choices {
 			if choice.FinishReason != "" {
@@ -92,9 +100,7 @@ func aggregateChatStream(r io.Reader, modelID string) (*types.ChatCompletionResp
 					content.WriteString(piece)
 				}
 			}
-			if delta.ReasoningContent != nil {
-				reasoning.WriteString(*delta.ReasoningContent)
-			}
+			reasoning.WriteString(delta.ReasoningText())
 			for _, tc := range delta.ToolCalls {
 				// Argument fragments are concatenated per index; the index is
 				// what identifies one call across chunks, so a chunk that omits
@@ -117,9 +123,23 @@ func aggregateChatStream(r io.Reader, modelID string) (*types.ChatCompletionResp
 				merged.Function.Arguments += tc.Function.Arguments
 			}
 		}
+		return nil
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read cline-pass stream: %w", err)
+	buf := make([]byte, 4096)
+	for !complete {
+		n, err := limited.Read(buf)
+		if parseErr := decoder.Feed(buf[:n], consume); parseErr != nil {
+			return nil, parseErr
+		}
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("read cline-pass stream: %w", err)
+		}
+		if err == io.EOF {
+			break
+		}
+	}
+	if err := decoder.Finish(); err != nil {
+		return nil, err
 	}
 	if limited.N == 0 {
 		return nil, fmt.Errorf("cline-pass stream exceeds %d bytes", maxAggregatedStreamBytes)

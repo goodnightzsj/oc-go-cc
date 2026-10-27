@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/routatic/proxy/internal/client"
@@ -21,13 +22,11 @@ import (
 // the Claude ones is served over Chat Completions, so this arrives on the
 // ordinary path.
 //
-// The block is dropped rather than failing the request, matching the reference
-// CommandCode proxy, which maps the same block to an empty string. The trade is
-// deliberate: the request succeeds and the model proceeds without the tool's
-// content. This test pins that the request is NOT rejected - if that changes
-// back to a 4xx, this fails and the reason should be reconsidered on purpose.
-func TestHandleMessages_ToolReferenceIsDroppedNotRejected(t *testing.T) {
+// Unsupported tool content must fail before sending a lossy request upstream.
+func TestHandleMessages_ToolReferenceIsNotSilentlyDropped(t *testing.T) {
+	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"c1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6}}`))
 	}))
@@ -71,10 +70,7 @@ func TestHandleMessages_ToolReferenceIsDroppedNotRejected(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	handler.HandleMessages(recorder, req)
 
-	if recorder.Code == http.StatusBadRequest {
-		t.Fatalf("a tool_reference block must not fail the request; got 400: %s", recorder.Body.String())
-	}
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	if recorder.Code != http.StatusBadGateway || calls.Load() != 0 || !strings.Contains(recorder.Body.String(), `"type":"error"`) {
+		t.Fatalf("unsupported tool content was sent or became success: status=%d calls=%d body=%s", recorder.Code, calls.Load(), recorder.Body.String())
 	}
 }

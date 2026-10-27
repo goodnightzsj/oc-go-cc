@@ -25,7 +25,7 @@ func TestGoExplicitResponsesEndpoint(t *testing.T) {
 		if string(payload["stream"]) == "true" {
 			_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":4,\"output_tokens\":2}}}\n\n")
 		} else {
-			_, _ = io.WriteString(w, `{"id":"resp-test","object":"response","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":4,"output_tokens":2}}`)
+			_, _ = io.WriteString(w, `{"id":"resp-test","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":4,"output_tokens":2}}`)
 		}
 	}))
 	defer upstream.Close()

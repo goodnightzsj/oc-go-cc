@@ -64,7 +64,7 @@ func TestOpenRouterRegisteredRoutingAccountingAndCapture(t *testing.T) {
 			}
 		}
 	}
-	rows, total, err := storage.NewRequests(srv.Storage()).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+	rows, total, err := storage.NewRequests(srv.Storage()).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
 	if err != nil || total != 4 {
 		t.Fatalf("accounting count=%d err=%v", total, err)
 	}

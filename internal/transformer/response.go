@@ -1,9 +1,11 @@
 package transformer
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 
+	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/pkg/types"
 )
 
@@ -20,6 +22,12 @@ func nonNegative(n int) int {
 	return n
 }
 
+func observeSourceModel(w interface{}, model string) {
+	if recorder, ok := w.(interface{ SetSourceModel(string) }); ok && model != "" {
+		recorder.SetSourceModel(model)
+	}
+}
+
 // NewResponseTransformer creates a new response transformer.
 func NewResponseTransformer() *ResponseTransformer {
 	return &ResponseTransformer{}
@@ -29,7 +37,15 @@ func NewResponseTransformer() *ResponseTransformer {
 func (t *ResponseTransformer) TransformResponse(
 	openaiResp *types.ChatCompletionResponse,
 	originalModel string,
-) (*types.MessageResponse, error) {
+) (_ *types.MessageResponse, err error) {
+	defer func() {
+		if err != nil {
+			err = &core.ResponseError{Err: err, Usage: ChatUsageToAnthropic(openaiResp.Usage)}
+		}
+	}()
+	if err := upstreamJSONError("Chat Completions", openaiResp.Error); err != nil {
+		return nil, err
+	}
 	if len(openaiResp.Choices) == 0 {
 		return nil, fmt.Errorf("no choices in response")
 	}
@@ -43,7 +59,10 @@ func (t *ResponseTransformer) TransformResponse(
 	}
 
 	// Map OpenAI finish reason to Anthropic stop reason.
-	stopReason := t.mapFinishReason(choice.FinishReason)
+	stopReason, err := t.mapFinishReason(choice.FinishReason)
+	if err != nil {
+		return nil, err
+	}
 
 	// Build Anthropic response.
 	anthropicResp := &types.MessageResponse{
@@ -54,25 +73,25 @@ func (t *ResponseTransformer) TransformResponse(
 		Model:        originalModel,
 		StopReason:   stopReason,
 		StopSequence: "",
-		Usage: func() types.Usage {
-			// See splitPromptTokens in stream.go: DeepSeek partitions the
-			// prompt into cache hit + miss, so the miss part is the real
-			// full-rate input rather than something to subtract away.
-			in, cacheRead, cacheCreate := splitPromptTokens(&openaiResp.Usage)
-			return types.Usage{
-				InputTokens:              in,
-				OutputTokens:             openaiResp.Usage.CompletionTokens,
-				CacheCreationInputTokens: cacheCreate,
-				CacheReadInputTokens:     cacheRead,
-				// Read through the same helper the streaming path uses, so a
-				// gateway reporting the split under either spelling reaches
-				// both paths identically.
-				ReasoningTokens: reasoningTokensOf(&openaiResp.Usage),
-			}
-		}(),
+		Usage:        ChatUsageToAnthropic(openaiResp.Usage),
 	}
 
 	return anthropicResp, nil
+}
+
+func upstreamJSONError(protocol string, raw json.RawMessage) error {
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil
+	}
+	var detail struct {
+		Type    string          `json:"type"`
+		Code    json.RawMessage `json:"code"`
+		Message string          `json:"message"`
+	}
+	if err := json.Unmarshal(raw, &detail); err != nil {
+		return fmt.Errorf("invalid %s error: %w", protocol, err)
+	}
+	return fmt.Errorf("upstream %s error (%s %s): %s", protocol, detail.Type, detail.Code, detail.Message)
 }
 
 // transformContent converts an OpenAI message to Anthropic content blocks.
@@ -81,10 +100,10 @@ func (t *ResponseTransformer) transformContent(msg types.ChatMessage) ([]types.C
 
 	// Preserve reasoning content as a thinking block so it round-trips correctly
 	// on multi-turn tool-calling conversations.
-	if msg.ReasoningContent != nil && *msg.ReasoningContent != "" {
+	if reasoning := msg.ReasoningText(); reasoning != "" {
 		blocks = append(blocks, types.ContentBlock{
 			Type:     "thinking",
-			Thinking: *msg.ReasoningContent,
+			Thinking: reasoning,
 		})
 	}
 
@@ -124,18 +143,18 @@ func (t *ResponseTransformer) transformContent(msg types.ChatMessage) ([]types.C
 }
 
 // mapFinishReason maps OpenAI finish reasons to Anthropic stop reasons.
-func (t *ResponseTransformer) mapFinishReason(reason string) string {
+func (t *ResponseTransformer) mapFinishReason(reason string) (string, error) {
 	switch reason {
 	case "stop":
-		return "end_turn"
+		return "end_turn", nil
 	case "length":
-		return "max_tokens"
+		return "max_tokens", nil
 	case "tool_calls", "tool_use":
-		return "tool_use"
+		return "tool_use", nil
 	case "content_filter":
-		return "end_turn"
+		return "refusal", nil
 	default:
-		return "end_turn"
+		return "", fmt.Errorf("unsupported or missing Chat Completions finish_reason %q", reason)
 	}
 }
 

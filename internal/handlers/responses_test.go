@@ -102,7 +102,7 @@ func TestHandleResponsesNonStreamingUsesSharedRoutingAndAccounting(t *testing.T)
 	if !strings.Contains(w.Body.String(), `"call_id":"call_new"`) || !strings.Contains(w.Body.String(), `"cached_tokens":90`) {
 		t.Fatalf("response lost function/usage: %s", w.Body.String())
 	}
-	rows, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+	rows, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
 	if err != nil || total != 1 || len(rows) != 1 {
 		t.Fatalf("accounting rows=%+v total=%d err=%v", rows, total, err)
 	}
@@ -156,7 +156,7 @@ func TestHandleResponsesStreamsBeforeUpstreamCompletion(t *testing.T) {
 	if scanner.Err() != nil || !sawDelta || !strings.Contains(body.String(), "response.completed") || !strings.Contains(body.String(), `"cached_tokens":90`) {
 		t.Fatalf("not a real complete stream: err=%v body=%s", scanner.Err(), body.String())
 	}
-	rows, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+	rows, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
 	if err != nil || total != 1 || rows[0].Provider != "commandcode" || rows[0].InputTokens != 11 || rows[0].CacheReadTokens != 90 || !rows[0].Streaming {
 		t.Fatalf("stream accounting rows=%+v total=%d err=%v", rows, total, err)
 	}
@@ -165,11 +165,9 @@ func TestHandleResponsesStreamsBeforeUpstreamCompletion(t *testing.T) {
 func TestHandleResponsesRejectsUnsupportedFeaturesBeforeRouting(t *testing.T) {
 	h := NewMessagesHandler(nil, nil, nil, nil, nil, metrics.New(), nil, nil)
 	for _, body := range []string{
-		`{"model":"m","input":"hi","tools":[{"type":"custom","name":"apply_patch"}]}`,
-		`{"model":"m","input":"hi","tools":[{"type":"namespace","name":"multi_agent_v1"}]}`,
 		`{"model":"m","input":"hi","previous_response_id":"resp_old"}`,
 		`{"model":"m","input":[],"store":true}`,
-		`{"model":"m","input":[{"type":"function_call_output","call_id":"c","output":[{"type":"input_image","image_url":"https://example.invalid/a.png"}]}]}`,
+		`{"model":"m","input":[{"type":"function_call_output","call_id":"c","output":[{"type":"input_image","file_id":"file_1"}]}]}`,
 		`{"model":"m","input":"hi"} {"model":"other"}`,
 	} {
 		w := httptest.NewRecorder()
@@ -243,7 +241,7 @@ func TestHandleResponsesTruncatedNativeStreamPreservesFailedUsage(t *testing.T) 
 	if !strings.Contains(w.Body.String(), "response.failed") || strings.Contains(w.Body.String(), "response.completed") {
 		t.Fatalf("truncated stream reported success: %s", w.Body.String())
 	}
-	rows, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+	rows, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
 	if err != nil || total != 1 || rows[0].Success || rows[0].InputTokens != 11 || rows[0].OutputTokens != 7 || rows[0].CacheReadTokens != 90 {
 		t.Fatalf("truncated stream accounting=%+v total=%d err=%v", rows, total, err)
 	}
@@ -270,7 +268,7 @@ func TestHandleResponsesUpstreamFailureNeverCompletes(t *testing.T) {
 			t.Fatalf("failed upstream looks complete: %s", w.Body.String())
 		}
 	}
-	_, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+	_, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
 	if err != nil || total != 0 {
 		t.Fatalf("failed unauthenticated request billed: total=%d err=%v", total, err)
 	}
@@ -414,7 +412,7 @@ func TestCodexResponsesCLIToolRoundTrip(t *testing.T) {
 	}
 	// Wait for the HTTP handler to finish its accounting after the terminal SSE.
 	downstream.Close()
-	rows, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+	rows, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
 	if err != nil || total != 2 || len(rows) != 2 {
 		t.Fatalf("CLI smoke accounting rows=%+v total=%d err=%v", rows, total, err)
 	}

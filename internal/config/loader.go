@@ -34,6 +34,7 @@ const (
 	defaultOpenRouterBaseURL           = "https://openrouter.ai/api/v1/chat/completions"
 	defaultCommandCodeBaseURL          = "https://api.commandcode.ai/provider/v1/chat/completions"
 	defaultCommandCodeAnthropicBaseURL = "https://api.commandcode.ai/provider/v1/messages"
+	defaultCommandCodeResponsesBaseURL = "https://api.commandcode.ai/provider/v1/responses"
 	defaultClinePassBaseURL            = "https://api.cline.bot/api/v1/chat/completions"
 	DefaultClinePassChannel            = "deepseek"
 )
@@ -202,6 +203,9 @@ func applyEnvOverrides(cfg *Config) error {
 	}
 	if v := envValue("ROUTATIC_PROXY_COMMANDCODE_ANTHROPIC_URL"); v != "" {
 		cfg.CommandCode.AnthropicBaseURL = v
+	}
+	if v := envValue("ROUTATIC_PROXY_COMMANDCODE_RESPONSES_URL"); v != "" {
+		cfg.CommandCode.ResponsesBaseURL = v
 	}
 
 	if v := envValue("ROUTATIC_PROXY_CLINE_PASS_URL"); v != "" {
@@ -373,6 +377,7 @@ func validate(cfg *Config) error {
 	for field, endpoint := range map[string]string{
 		"base_url":           cfg.CommandCode.BaseURL,
 		"anthropic_base_url": cfg.CommandCode.AnthropicBaseURL,
+		"responses_base_url": cfg.CommandCode.ResponsesBaseURL,
 	} {
 		if endpoint == "" { // validate is also used on configs before defaults.
 			continue
@@ -654,8 +659,8 @@ func validateModelConfig(label string, mc ModelConfig) error {
 	default:
 		return invalid(label+".wire_format", "wire_format", "%s has invalid wire_format %q", label, mc.WireFormat)
 	}
-	if NormalizeProvider(mc.Provider) == "commandcode" && mc.WireFormat != "" && mc.WireFormat != "auto" && mc.WireFormat != "openai" && mc.WireFormat != "anthropic" {
-		return invalid(label+".wire_format", "commandcode_wire_format", "%s: commandcode supports only openai or anthropic upstream wire formats", label)
+	if NormalizeProvider(mc.Provider) == "commandcode" && mc.WireFormat != "" && mc.WireFormat != "auto" && mc.WireFormat != "openai" && mc.WireFormat != "anthropic" && mc.WireFormat != "responses" {
+		return invalid(label+".wire_format", "commandcode_wire_format", "%s: commandcode supports only openai, anthropic or responses upstream wire formats", label)
 	}
 	// ClinePass publishes no Messages endpoint, so anthropic is not a choice
 	// here: accepting it would send a model to an endpoint that does not exist
@@ -688,6 +693,7 @@ func applySiteDefaults(cfg *Config) {
 		{&cfg.OpenRouter.BaseURL, defaultOpenRouterBaseURL},
 		{&cfg.CommandCode.BaseURL, defaultCommandCodeBaseURL},
 		{&cfg.CommandCode.AnthropicBaseURL, defaultCommandCodeAnthropicBaseURL},
+		{&cfg.CommandCode.ResponsesBaseURL, defaultCommandCodeResponsesBaseURL},
 		{&cfg.ClinePass.BaseURL, defaultClinePassBaseURL},
 	} {
 		if *row.target == "" {

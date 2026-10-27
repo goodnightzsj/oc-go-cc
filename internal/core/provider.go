@@ -47,12 +47,12 @@ type ExecuteResult struct {
 	// request, when that platform publishes one. Empty for every platform that
 	// does not, and empty when the gateway did not say.
 	UpstreamChannel string
-	// UpstreamModel is the model the gateway said it actually ran, when that
-	// differs from the id we sent. A gateway may answer a request for one id by
-	// running a virtual model behind its own fallback chain; the request id then
-	// no longer describes what produced the response. Empty when the platform
-	// does not publish it or reported the id we asked for.
+	// UpstreamModel preserves gateway canonical routing metadata when reported,
+	// otherwise the provider's existing differing-model observation.
 	UpstreamModel string
+	// ResponseModel is the source response's model declaration, never a fallback
+	// copied from the requested model. It may differ from the canonical model.
+	ResponseModel string
 	// KeyHint labels the credential that carried the request, masked to its last
 	// four characters. Empty when the platform does not use a key pool.
 	KeyHint string
@@ -67,6 +67,28 @@ type ResponsesStatusError struct {
 }
 
 func (e *ResponsesStatusError) Error() string { return "upstream Responses status: " + e.Status }
+
+func (e *ResponsesStatusError) ReportedUsage() *types.Usage { return e.Usage }
+
+// ResponseError retains a received response's usage without changing its error
+// identity. Nil usage is unreported, not an observed zero.
+type ResponseError struct {
+	Err   error
+	Usage *types.Usage
+}
+
+func (e *ResponseError) Error() string               { return e.Err.Error() }
+func (e *ResponseError) Unwrap() error               { return e.Err }
+func (e *ResponseError) ReportedUsage() *types.Usage { return e.Usage }
+
+// NativeResponseError carries a complete source response that must reach the
+// caller unchanged while still settling the attempt as failed.
+type NativeResponseError struct {
+	ResponseError
+	Response *ExecuteResult
+}
+
+func (e *NativeResponseError) FinalResponse() []byte { return e.Response.Body }
 
 // Provider is the abstraction for an upstream LLM provider.
 type Provider interface {

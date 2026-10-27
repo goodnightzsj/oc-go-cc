@@ -28,6 +28,7 @@ import (
 	"github.com/routatic/proxy/internal/metrics"
 	"github.com/routatic/proxy/internal/middleware"
 	"github.com/routatic/proxy/internal/router"
+	"github.com/routatic/proxy/internal/sse"
 	"github.com/routatic/proxy/internal/token"
 	"github.com/routatic/proxy/internal/transformer"
 	"github.com/routatic/proxy/pkg/types"
@@ -64,8 +65,13 @@ type responseWriter struct {
 	sseEvent          string
 	messageStopped    bool
 	streamErr         error
+	sourceModel       string
+	sourceAnthropic   bool
+	nativeResponses   *transformer.ResponsesObservation
+	nativeDecoder     sse.Decoder
 	timing            streamTiming
 	usage             struct {
+		observed                 bool
 		inputTokens              int
 		outputTokens             int
 		cacheReadInputTokens     int
@@ -94,7 +100,11 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 	if len(b) > 0 {
 		w.ssePayloadWritten = true
 		var err error
-		observed, err = w.observeSSE(b)
+		if w.nativeResponses != nil {
+			observed, err = w.observeNativeResponses(b)
+		} else {
+			observed, err = w.observeSSE(b)
+		}
 		if err != nil {
 			w.streamErr = err
 			return 0, err
@@ -154,10 +164,11 @@ func (w *responseWriter) observeSSEEvent(needContent bool) (streamMilestones, er
 		ReasoningTokens          *int `json:"reasoning_tokens"`
 	}
 	var event struct {
-		Type    string     `json:"type"`
-		Usage   tokenUsage `json:"usage"`
+		Type    string      `json:"type"`
+		Usage   *tokenUsage `json:"usage"`
 		Message struct {
-			Usage tokenUsage `json:"usage"`
+			Usage *tokenUsage `json:"usage"`
+			Model string      `json:"model"`
 		} `json:"message"`
 	}
 	data := w.sseData
@@ -180,6 +191,14 @@ func (w *responseWriter) observeSSEEvent(needContent bool) (streamMilestones, er
 	usage := event.Usage
 	if event.Type == "message_start" {
 		usage = event.Message.Usage
+		if w.sourceAnthropic && event.Message.Model != "" {
+			w.sourceModel = event.Message.Model
+		}
+	}
+	if usage != nil {
+		w.usage.observed = true
+	} else {
+		usage = &tokenUsage{}
 	}
 	if usage.InputTokens != nil {
 		w.usage.inputTokens = *usage.InputTokens
@@ -211,7 +230,14 @@ func (w *responseWriter) finish() error {
 	if w.streamErr != nil {
 		return w.streamErr
 	}
-	if !w.messageStopped || len(bytes.TrimSpace(w.sseBuffer)) > 0 || len(w.sseData) > 0 {
+	if w.nativeResponses != nil {
+		if err := w.nativeDecoder.Finish(); err != nil {
+			return err
+		}
+		if !w.nativeResponses.Done() {
+			return fmt.Errorf("Responses stream ended without a terminal event: %w", io.ErrUnexpectedEOF)
+		}
+	} else if !w.messageStopped || len(bytes.TrimSpace(w.sseBuffer)) > 0 || len(w.sseData) > 0 {
 		return fmt.Errorf("upstream stream ended before a complete message_stop: %w", io.ErrUnexpectedEOF)
 	}
 	if finisher, ok := w.ResponseWriter.(interface{ Finish() error }); ok {
@@ -224,6 +250,14 @@ func (w *responseWriter) finish() error {
 func (w *responseWriter) SetPartialUsage(usage *types.Usage) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.setUsage(usage)
+}
+
+func (w *responseWriter) setUsage(usage *types.Usage) {
+	if usage == nil {
+		return
+	}
+	w.usage.observed = true
 	w.usage.inputTokens = usage.InputTokens
 	w.usage.outputTokens = usage.OutputTokens
 	w.usage.cacheReadInputTokens = usage.CacheReadInputTokens
@@ -231,6 +265,37 @@ func (w *responseWriter) SetPartialUsage(usage *types.Usage) {
 	if usage.ReasoningTokens > 0 {
 		w.usage.reasoningTokens = usage.ReasoningTokens
 	}
+}
+
+// SetSourceModel records the wire's self-reported model without changing output.
+func (w *responseWriter) SetSourceModel(model string) {
+	if strings.TrimSpace(model) == "" {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.sourceModel = model
+}
+
+func (w *responseWriter) recordedUpstreamModel(body io.ReadCloser, requested string) string {
+	if model := client.UpstreamModelOf(body); model != "" {
+		return model // Gateway routing metadata outranks a raw response model label.
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if history.RequestedModelDiffers(w.sourceModel, requested) {
+		return w.sourceModel
+	}
+	return ""
+}
+
+func (w *responseWriter) recordedResponseModel(body io.ReadCloser) string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.sourceModel != "" {
+		return w.sourceModel
+	}
+	return client.ServedModelOf(body)
 }
 
 func (w *responseWriter) hasContent() bool {
@@ -455,6 +520,17 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 		h.sendError(w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
+	metadata := core.RequestMetadataFromContext(r.Context())
+	if len(metadata.ResponsesBody) > 0 {
+		var original struct {
+			PromptCacheKey string `json:"prompt_cache_key"`
+		}
+		if err := json.Unmarshal(metadata.ResponsesBody, &original); err != nil {
+			h.sendError(w, http.StatusBadRequest, "invalid original Responses request", err)
+			return
+		}
+		anthropicReq.PromptCacheKey = original.PromptCacheKey
+	}
 
 	// Validate request
 	if err := anthropicReq.Validate(); err != nil {
@@ -465,11 +541,10 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 	if sessionID == "" {
 		sessionID = uuid.NewString()
 	}
-	r = r.WithContext(core.WithRequestMetadata(r.Context(), core.RequestMetadata{
-		RequestID: requestID, SessionID: sessionID, Body: rawBody,
-		AnthropicVersion: r.Header.Get("anthropic-version"),
-		AnthropicBeta:    strings.Join(r.Header.Values("anthropic-beta"), ","),
-	}))
+	metadata.RequestID, metadata.SessionID, metadata.Body = requestID, sessionID, rawBody
+	metadata.AnthropicVersion = r.Header.Get("anthropic-version")
+	metadata.AnthropicBeta = strings.Join(r.Header.Values("anthropic-beta"), ",")
+	r = r.WithContext(core.WithRequestMetadata(r.Context(), metadata))
 
 	// Record metrics
 	isStreaming := anthropicReq.Stream != nil && *anthropicReq.Stream
@@ -492,12 +567,13 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 	for _, msg := range anthropicReq.Messages {
 		blocks := msg.ContentBlocks()
 		content := extractTextFromBlocks(blocks)
+		imageHashes := imageHashesFromBlocks(blocks)
 		mc := router.MessageContent{
 			Role:          msg.Role,
 			Content:       content,
-			HasImage:      blocksHaveImage(blocks),
+			HasImage:      len(imageHashes) > 0,
 			ToolsDeclared: needsTools,
-			ImageHashes:   imageHashesFromBlocks(blocks),
+			ImageHashes:   imageHashes,
 		}
 		routerMessages = append(routerMessages, mc)
 		tokenMessages = append(tokenMessages, token.MessageContent{
@@ -529,6 +605,15 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 		"provider", routeResult.Primary.Provider,
 		"tokens", tokenCount,
 	)
+	if metadata.ResponsesReplay {
+		metadata.ResponsesSource = h.modelRouter.Config()
+		r = r.WithContext(core.WithRequestMetadata(r.Context(), metadata))
+	}
+	modelChain, err = h.responsesChain(metadata, anthropicReq.Model, modelChain)
+	if err != nil {
+		h.sendError(w, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
 
 	// The normalized form exists only for the debug capture; providers consume
 	// the Anthropic request directly.
@@ -836,9 +921,11 @@ func (h *MessagesHandler) handleStreaming(
 				PeakMultiplier:      history.ProviderPeakMultiplier(providerName, model.ModelID, streamStart),
 				UpstreamChannel:     upstreamChannel,
 				UpstreamModel:       upstreamModel,
+				ResponseModel:       rw.recordedResponseModel(currentStream),
 				KeyHint:             keyHint,
 				FirstByte:           firstByteDuration(firstByte, streamStart),
 				ReasoningEffort:     clientEffort,
+				UsageUnobserved:     !rw.usage.observed,
 			}
 			rw.timing.applyTo(&rec)
 			rec.GenerationSample = generation.Sample()
@@ -857,8 +944,7 @@ func (h *MessagesHandler) handleStreaming(
 		recordStreamFailure := func(model config.ModelConfig, err error, action string, failed bool) {
 			cancelAttempt()
 			rw.mu.Lock()
-			hasUsage := rw.usage.inputTokens != 0 || rw.usage.outputTokens != 0 ||
-				rw.usage.cacheReadInputTokens != 0 || rw.usage.cacheCreationInputTokens != 0
+			hasUsage := rw.usage.observed
 			// A client may disconnect after receiving an upstream error frame.
 			// Preserve that observed failure even if cancellation wins the read loop.
 			failed = failed || rw.streamErr != nil
@@ -881,9 +967,8 @@ func (h *MessagesHandler) handleStreaming(
 			// reported no usage. Those are exactly the requests a reader most
 			// needs to find: the answer died before producing anything, so the
 			// success rate on the dashboard was reporting 100% while the journal
-			// carried the failure. The row is written with details_known = 0 so
-			// every average - success rate, latency, throughput - skips it; only
-			// the request count and the outcome mention it.
+			// carried the failure. Missing usage stays unpriced, while the
+			// observed failure and duration still enter outcome/latency statistics.
 			//
 			// A cancellation the client made before any payload is not a failure
 			// of anything: nothing broke, the caller simply stopped waiting.
@@ -916,18 +1001,16 @@ func (h *MessagesHandler) handleStreaming(
 				ReasoningTokens:     rw.usage.reasoningTokens,
 				Streaming:           true,
 				Success:             false,
+				ErrorMsg:            err.Error(),
 				Attempt:             attempt + 1,
 				PeakMultiplier:      history.ProviderPeakMultiplier(providerName, model.ModelID, streamStart),
 				UpstreamChannel:     client.UpstreamChannelOf(currentStream),
-				UpstreamModel:       client.UpstreamModelOf(currentStream),
+				UpstreamModel:       rw.recordedUpstreamModel(currentStream, model.ModelID),
+				ResponseModel:       rw.recordedResponseModel(currentStream),
 				KeyHint:             client.KeyHintOf(currentStream),
 				FirstByte:           firstByteDuration(firstByte, streamStart),
 				ReasoningEffort:     clientEffort,
-				// Usage was never reported, so the outcome is the only observed
-				// fact. Marking the row unobserved keeps it out of every average
-				// that assumes a measured request: a zero-token, zero-latency row
-				// counted as sampled would drag success rate and throughput down
-				// with a measurement nobody made.
+				// Missing usage excludes pricing and throughput, not the observed failure.
 				UsageUnobserved: !hasUsage,
 			}
 			rw.timing.applyTo(&rec)
@@ -997,7 +1080,7 @@ func (h *MessagesHandler) handleStreaming(
 			if err := rw.finish(); err != nil {
 				return handleStreamError(err, model, action)
 			}
-			recordStreamSuccess(model, client.UpstreamChannelOf(currentStream), client.UpstreamModelOf(currentStream), client.KeyHintOf(currentStream), client.FirstByteAtOf(currentStream))
+			recordStreamSuccess(model, client.UpstreamChannelOf(currentStream), rw.recordedUpstreamModel(currentStream, model.ModelID), client.KeyHintOf(currentStream), client.FirstByteAtOf(currentStream))
 			return false
 		}
 
@@ -1009,6 +1092,9 @@ func (h *MessagesHandler) handleStreaming(
 			continue
 		}
 		wireFormat := core.ModelWireFormat(prov, model)
+		metadata := core.RequestMetadataFromContext(attemptCtx)
+		metadata.TargetFormat = wireFormat
+		attemptCtx = core.WithRequestMetadata(attemptCtx, metadata)
 		attemptCtx, generation = metrics.WithGenerationObservation(attemptCtx, streamStart, wireFormat)
 		streamBody, err := prov.Stream(attemptCtx, anthropicReq, model)
 		if err != nil {
@@ -1045,7 +1131,14 @@ func (h *MessagesHandler) handleStreaming(
 		if servedModel == "" {
 			servedModel = model.ModelID
 		}
-		errProxy := h.streamProxy.ProxyStream(rw, streamReader, wireFormat, servedModel, attemptCtx, idleTimeout, cancelAttempt)
+		native := len(metadata.ResponsesBody) > 0 && wireFormat == core.WireFormatOpenAIResponses
+		rw.setSourceFormat(wireFormat, native)
+		var errProxy error
+		if native {
+			errProxy = h.streamProxy.proxyAnthropicPassthroughStream(rw, streamReader, idleTimeout, attemptCtx, cancelAttempt)
+		} else {
+			errProxy = h.streamProxy.ProxyStream(rw, streamReader, wireFormat, servedModel, attemptCtx, idleTimeout, cancelAttempt)
+		}
 		if wireFormat == core.WireFormatAnthropic {
 			atomic.StoreInt32(&heartbeatPaused, 0)
 		}
@@ -1072,7 +1165,7 @@ func (h *MessagesHandler) handleStreaming(
 
 		// OpenRouter's former Chat Completions path accepted completed empty
 		// replies. Moving its transport must not add this provider heuristic.
-		if providerName != client.ProviderOpenRouter && isLowValueResponse(scenario, rw.getOutputTokens(), rw.hasContent()) {
+		if !native && providerName != client.ProviderOpenRouter && isLowValueResponse(scenario, rw.getOutputTokens(), rw.hasContent()) {
 			h.logger.Warn("upstream returned low-value response, triggering fallback",
 				"model", model.ModelID, "provider", model.Provider,
 				"scenario", scenario, "output_tokens", rw.getOutputTokens())
@@ -1121,6 +1214,12 @@ func streamFailureMessage(err error) string {
 // sendStreamError sends an error event in the SSE stream.
 func (h *MessagesHandler) sendStreamError(w http.ResponseWriter, message string) {
 	h.logger.Error("sending stream error", "message", message)
+	if rw, ok := w.(*responseWriter); ok && rw.nativeResponses != nil {
+		if err := rw.writeNativeError(message); err != nil {
+			h.logger.Debug("failed to write native stream error event", "error", err)
+		}
+		return
+	}
 
 	errorEvent := map[string]interface{}{
 		"type": "error",
@@ -1141,10 +1240,10 @@ func (h *MessagesHandler) sendStreamError(w http.ResponseWriter, message string)
 }
 
 // handleNonStreaming handles a non-streaming request with fallback.
-func decodeMessageUsage(responseBody []byte) types.Usage {
+func decodeMessageUsage(responseBody []byte) *types.Usage {
 	var response types.MessageResponse
 	if err := json.Unmarshal(responseBody, &response); err != nil {
-		return types.Usage{}
+		return nil
 	}
 	return response.Usage
 }
@@ -1166,7 +1265,8 @@ func (h *MessagesHandler) handleNonStreaming(
 
 	// Set by the attempt that succeeds, then stored. Empty for every platform
 	// whose upstream does not name a channel.
-	var upstreamChannel, upstreamModel, keyHint string
+	var upstreamChannel, upstreamModel, responseModel, keyHint string
+	var native bool
 	clientEffort := history.RequestedEffort(anthropicReq)
 
 	result, responseBody, err := h.fallbackHandler.ExecuteWithFallback(
@@ -1182,13 +1282,27 @@ func (h *MessagesHandler) handleNonStreaming(
 			if !ok {
 				return nil, fmt.Errorf("provider %q is not registered", client.Provider(model))
 			}
+			metadata := core.RequestMetadataFromContext(attemptCtx)
+			metadata.TargetFormat = core.ModelWireFormat(prov, model)
+			attemptCtx = core.WithRequestMetadata(attemptCtx, metadata)
 			execResult, execErr := prov.Execute(attemptCtx, anthropicReq, model)
+			native = len(metadata.ResponsesBody) > 0 && metadata.TargetFormat == core.WireFormatOpenAIResponses
+			var final *core.NativeResponseError
+			if errors.As(execErr, &final) {
+				upstreamChannel, upstreamModel, keyHint = final.Response.UpstreamChannel, final.Response.UpstreamModel, final.Response.KeyHint
+				responseModel = final.Response.ResponseModel
+				return final.Response.Body, execErr
+			}
 			if execErr != nil {
 				// Record each reported failure before fallback can replace it with
 				// another execution. Missing usage is not an observed zero.
-				var failure *core.ResponsesStatusError
-				if errors.As(execErr, &failure) && failure.Usage != nil && h.storage != nil {
-					usage := failure.Usage
+				var failure interface{ ReportedUsage() *types.Usage }
+				if errors.As(execErr, &failure) && h.storage != nil {
+					reported := failure.ReportedUsage()
+					var usage types.Usage
+					if reported != nil {
+						usage = *reported
+					}
 					rec := history.RequestRecord{
 						ID: uuid.NewString(), Model: model.ModelID, RequestedModel: requestedModel,
 						Provider: client.Provider(model), Scenario: string(scenario),
@@ -1196,6 +1310,7 @@ func (h *MessagesHandler) handleNonStreaming(
 						InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 						CacheReadTokens: usage.CacheReadInputTokens, CacheCreationTokens: usage.CacheCreationInputTokens,
 						ReasoningTokens: usage.ReasoningTokens,
+						UsageUnobserved: reported == nil,
 						Success:         false, ErrorMsg: execErr.Error(), Attempt: attempt,
 					}
 					if err := h.storage.InsertRequest(rec); err != nil {
@@ -1208,12 +1323,19 @@ func (h *MessagesHandler) handleNonStreaming(
 			// gateway named in its last frame is available now.
 			upstreamChannel = execResult.UpstreamChannel
 			upstreamModel = execResult.UpstreamModel
+			responseModel = execResult.ResponseModel
+			if metadata.TargetFormat == core.WireFormatAnthropic {
+				var response types.MessageResponse
+				if json.Unmarshal(execResult.Body, &response) == nil {
+					responseModel = response.Model
+				}
+			}
 			keyHint = execResult.KeyHint
 			return execResult.Body, nil
 		},
 	)
 
-	if err != nil {
+	if err != nil && len(responseBody) == 0 {
 		// An attempt's deadline can expire while the client is still waiting.
 		// Only the parent request decides whether there is no response to send.
 		if ctx.Err() != nil {
@@ -1225,7 +1347,17 @@ func (h *MessagesHandler) handleNonStreaming(
 		return
 	}
 
-	usage := decodeMessageUsage(responseBody)
+	reported := decodeMessageUsage(responseBody)
+	if native {
+		reported = nativeResponseUsage(responseBody)
+		if target, ok := w.(interface{ SetNativeResponses(bool) }); ok {
+			target.SetNativeResponses(true)
+		}
+	}
+	var usage types.Usage
+	if reported != nil {
+		usage = *reported
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	n, writeErr := w.Write(responseBody)
@@ -1238,6 +1370,9 @@ func (h *MessagesHandler) handleNonStreaming(
 		}
 	}
 	latency := time.Since(startTime)
+	if err != nil && writeErr == nil {
+		writeErr = err
+	}
 	if writeErr != nil {
 		h.metrics.RecordFailureForModel(result.ModelID)
 		h.logger.Warn("response delivery failed", "model", result.ModelID, "request_id", requestID, "record_id", recordID, "error", writeErr)
@@ -1265,8 +1400,13 @@ func (h *MessagesHandler) handleNonStreaming(
 		PeakMultiplier:      history.ProviderPeakMultiplier(result.Provider, result.ModelID, startTime),
 		UpstreamChannel:     upstreamChannel,
 		UpstreamModel:       upstreamModel,
+		ResponseModel:       responseModel,
 		KeyHint:             keyHint,
 		ReasoningEffort:     clientEffort,
+		UsageUnobserved:     reported == nil,
+	}
+	if writeErr != nil {
+		rec.ErrorMsg = writeErr.Error()
 	}
 	if h.storage != nil {
 		if err := h.storage.InsertRequest(rec); err != nil {
@@ -1306,22 +1446,10 @@ func extractTextFromBlocks(blocks []types.ContentBlock) string {
 	return content
 }
 
-func blocksHaveImage(blocks []types.ContentBlock) bool {
-	for _, block := range blocks {
-		if block.Type == "image" && block.Source != nil {
-			return true
-		}
-	}
-	return false
-}
-
 func imageHashesFromBlocks(blocks []types.ContentBlock) []string {
 	var hashes []string
-	for _, block := range blocks {
-		if block.Type != "image" || block.Source == nil {
-			continue
-		}
-		source := block.Source.Type + "\x00" + block.Source.MediaType + "\x00" + block.Source.Data + "\x00" + block.Source.URL
+	for _, image := range imageSourcesFromBlocks(blocks) {
+		source := image.Type + "\x00" + image.MediaType + "\x00" + image.Data + "\x00" + image.URL
 		sum := sha256.Sum256([]byte(source))
 		hashes = append(hashes, hex.EncodeToString(sum[:]))
 	}

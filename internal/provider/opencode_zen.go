@@ -120,8 +120,9 @@ func (p *OpenCodeZenProvider) executeOpenAI(ctx context.Context, req *types.Mess
 	}
 
 	return &core.ExecuteResult{
-		Body:    resultBody,
-		KeyHint: sel.KeyHint(),
+		Body:          resultBody,
+		KeyHint:       sel.KeyHint(),
+		ResponseModel: chatResp.Model,
 	}, nil
 }
 
@@ -236,7 +237,7 @@ func (p *OpenCodeZenProvider) streamAnthropic(ctx context.Context, req *types.Me
 // ── OpenAI Responses ──────────────────────────────────────────────────
 
 func (p *OpenCodeZenProvider) executeResponses(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
-	cfg := p.atomic.Get()
+	cfg := responsesConfig(ctx, p.atomic.Get())
 	endpoint := cfg.OpenCodeZen.ResponsesBaseURL
 	sel, rerr := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
 	if rerr != nil {
@@ -244,11 +245,10 @@ func (p *OpenCodeZenProvider) executeResponses(ctx context.Context, req *types.M
 	}
 	defer sel.Release()
 
-	responsesReq, err := transformer.AnthropicToResponses(req, model)
+	responsesReq, err := responsesPayload(ctx, req, model, false)
 	if err != nil {
 		return nil, err
 	}
-	responsesReq.Stream = false
 
 	resp, err := p.doJSONRequest(ctx, endpoint, sel, responsesReq)
 	if err != nil {
@@ -261,29 +261,11 @@ func (p *OpenCodeZenProvider) executeResponses(ctx context.Context, req *types.M
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	var responsesResp types.ResponsesResponse
-	if err := json.Unmarshal(body, &responsesResp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	normResp, err := transformer.ResponsesToNormalized(&responsesResp, model.ModelID)
-	if err != nil {
-		return nil, err
-	}
-	anthropicResp := core.DenormalizeResponse(normResp)
-	resultBody, err := json.Marshal(anthropicResp)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal response: %w", err)
-	}
-
-	return &core.ExecuteResult{
-		Body:    resultBody,
-		KeyHint: sel.KeyHint(),
-	}, nil
+	return responsesResult(ctx, body, model, sel.KeyHint())
 }
 
 func (p *OpenCodeZenProvider) streamResponses(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
-	cfg := p.atomic.Get()
+	cfg := responsesConfig(ctx, p.atomic.Get())
 	endpoint := cfg.OpenCodeZen.ResponsesBaseURL
 	sel, rerr := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
 	if rerr != nil {
@@ -291,13 +273,11 @@ func (p *OpenCodeZenProvider) streamResponses(ctx context.Context, req *types.Me
 	}
 	defer sel.Release()
 
-	responsesReq, err := transformer.AnthropicToResponses(req, model)
+	responsesReq, err := responsesPayload(ctx, req, model, true)
 	if err != nil {
 		return nil, err
 	}
-	responsesReq.Stream = true
-
-	resp, err := p.doJSONRequest(ctx, endpoint, sel, responsesReq)
+	resp, err := p.doRequest(ctx, endpoint, sel, responsesReq, true)
 	if err != nil {
 		return nil, err
 	}
@@ -316,7 +296,10 @@ func (p *OpenCodeZenProvider) executeGemini(ctx context.Context, req *types.Mess
 	}
 	defer sel.Release()
 
-	geminiReq := transformer.AnthropicToGemini(req, model)
+	geminiReq, err := transformer.AnthropicToGemini(req, model)
+	if err != nil {
+		return nil, err
+	}
 	geminiReq.Stream = false
 
 	resp, err := p.doJSONRequest(ctx, endpoint, sel, geminiReq)
@@ -335,7 +318,10 @@ func (p *OpenCodeZenProvider) executeGemini(ctx context.Context, req *types.Mess
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	normResp := transformer.GeminiToNormalized(&geminiResp, model.ModelID)
+	normResp, err := transformer.GeminiToNormalized(&geminiResp, model.ModelID)
+	if err != nil {
+		return nil, err
+	}
 	anthropicResp := core.DenormalizeResponse(normResp)
 	resultBody, err := json.Marshal(anthropicResp)
 	if err != nil {
@@ -343,8 +329,10 @@ func (p *OpenCodeZenProvider) executeGemini(ctx context.Context, req *types.Mess
 	}
 
 	return &core.ExecuteResult{
-		Body:    resultBody,
-		KeyHint: sel.KeyHint(),
+		Body:          resultBody,
+		KeyHint:       sel.KeyHint(),
+		UpstreamModel: differingResponseModel(geminiResp.ModelVersion, model.ModelID),
+		ResponseModel: geminiResp.ModelVersion,
 	}, nil
 }
 
@@ -357,7 +345,10 @@ func (p *OpenCodeZenProvider) streamGemini(ctx context.Context, req *types.Messa
 	}
 	defer sel.Release()
 
-	geminiReq := transformer.AnthropicToGemini(req, model)
+	geminiReq, err := transformer.AnthropicToGemini(req, model)
+	if err != nil {
+		return nil, err
+	}
 	geminiReq.Stream = true
 
 	resp, err := p.doJSONRequest(ctx, endpoint, sel, geminiReq)

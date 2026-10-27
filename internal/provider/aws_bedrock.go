@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/routatic/proxy/internal/client"
@@ -80,12 +81,15 @@ func (p *AWSBedrockProvider) Stream(ctx context.Context, req *types.MessageReque
 
 func (p *AWSBedrockProvider) executeOpenAI(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
 	cfg := p.atomic.Get()
-	endpoint := p.bedrockEndpoint(cfg, model.ModelID)
 	sel, rerr := p.bedrockKey(cfg)
 	if rerr != nil {
 		return nil, rerr
 	}
 	defer sel.Release()
+	endpoint, err := p.bedrockEndpoint(cfg, model.ModelID, core.WireFormatOpenAIChat)
+	if err != nil {
+		return nil, err
+	}
 
 	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
 	if err != nil {
@@ -120,19 +124,23 @@ func (p *AWSBedrockProvider) executeOpenAI(ctx context.Context, req *types.Messa
 	}
 
 	return &core.ExecuteResult{
-		Body:    resultBody,
-		KeyHint: sel.KeyHint(),
+		Body:          resultBody,
+		KeyHint:       sel.KeyHint(),
+		ResponseModel: chatResp.Model,
 	}, nil
 }
 
 func (p *AWSBedrockProvider) streamOpenAI(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
-	endpoint := p.bedrockEndpoint(cfg, model.ModelID)
 	sel, rerr := p.bedrockKey(cfg)
 	if rerr != nil {
 		return nil, rerr
 	}
 	defer sel.Release()
+	endpoint, err := p.bedrockEndpoint(cfg, model.ModelID, core.WireFormatOpenAIChat)
+	if err != nil {
+		return nil, err
+	}
 
 	openaiReq, err := transformer.AnthropicToChatCompletion(req, model)
 	if err != nil {
@@ -152,15 +160,18 @@ func (p *AWSBedrockProvider) streamOpenAI(ctx context.Context, req *types.Messag
 // ── OpenAI Responses API ──────────────────────────────────────────────
 
 func (p *AWSBedrockProvider) executeResponses(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
-	cfg := p.atomic.Get()
-	endpoint := p.responsesEndpoint(cfg)
+	cfg := responsesConfig(ctx, p.atomic.Get())
 	sel, rerr := p.bedrockKey(cfg)
 	if rerr != nil {
 		return nil, rerr
 	}
 	defer sel.Release()
+	endpoint, err := p.bedrockEndpoint(cfg, model.ModelID, core.WireFormatOpenAIResponses)
+	if err != nil {
+		return nil, err
+	}
 
-	responsesReq, err := transformer.AnthropicToResponses(req, model)
+	responsesReq, err := responsesPayload(ctx, req, model, false)
 	if err != nil {
 		return nil, err
 	}
@@ -176,41 +187,25 @@ func (p *AWSBedrockProvider) executeResponses(ctx context.Context, req *types.Me
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	var responsesResp types.ResponsesResponse
-	if err := json.Unmarshal(body, &responsesResp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	normResp, err := transformer.ResponsesToNormalized(&responsesResp, model.ModelID)
-	if err != nil {
-		return nil, err
-	}
-	anthropicResp := core.DenormalizeResponse(normResp)
-	resultBody, err := json.Marshal(anthropicResp)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal response: %w", err)
-	}
-
-	return &core.ExecuteResult{
-		Body:    resultBody,
-		KeyHint: sel.KeyHint(),
-	}, nil
+	return responsesResult(ctx, body, model, sel.KeyHint())
 }
 
 func (p *AWSBedrockProvider) streamResponses(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
-	cfg := p.atomic.Get()
-	endpoint := p.responsesEndpoint(cfg)
+	cfg := responsesConfig(ctx, p.atomic.Get())
 	sel, rerr := p.bedrockKey(cfg)
 	if rerr != nil {
 		return nil, rerr
 	}
 	defer sel.Release()
-
-	responsesReq, err := transformer.AnthropicToResponses(req, model)
+	endpoint, err := p.bedrockEndpoint(cfg, model.ModelID, core.WireFormatOpenAIResponses)
 	if err != nil {
 		return nil, err
 	}
-	responsesReq.Stream = true
+
+	responsesReq, err := responsesPayload(ctx, req, model, true)
+	if err != nil {
+		return nil, err
+	}
 
 	resp, err := p.doBedrockRequest(ctx, endpoint, sel, cfg.AWSBedrock.ProjectID, responsesReq, true)
 	if err != nil {
@@ -335,27 +330,28 @@ func (p *AWSBedrockProvider) needsOpenaiPath(modelID string) bool {
 
 // bedrockEndpoint returns the appropriate endpoint for a given model.
 // Some models (e.g., xai.grok) require the /openai path prefix.
-func (p *AWSBedrockProvider) bedrockEndpoint(cfg *config.Config, modelID string) string {
-	baseURL := cfg.AWSBedrock.BaseURL
-	if p.needsOpenaiPath(modelID) && !strings.Contains(baseURL, "/openai/") {
-		return strings.Replace(baseURL, "/v1/", "/openai/v1/", 1)
+func (p *AWSBedrockProvider) bedrockEndpoint(cfg *config.Config, modelID string, format core.WireFormat) (string, error) {
+	endpoint, err := url.Parse(cfg.AWSBedrock.BaseURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid Bedrock base URL: %w", err)
 	}
-	return baseURL
-}
-
-// responsesEndpoint returns the Responses API endpoint for models like openai.gpt-*.
-func (p *AWSBedrockProvider) responsesEndpoint(cfg *config.Config) string {
-	baseURL := cfg.AWSBedrock.BaseURL
-	if strings.Contains(baseURL, "/chat/completions") {
-		return strings.Replace(baseURL, "/chat/completions", "/responses", 1)
+	path := endpoint.Path
+	if p.needsOpenaiPath(modelID) && !strings.Contains(path, "/openai/") {
+		if strings.HasSuffix(path, "/v1") {
+			path = strings.TrimSuffix(path, "/v1") + "/openai/v1"
+		} else {
+			path = strings.Replace(path, "/v1/", "/openai/v1/", 1)
+		}
 	}
-	if strings.HasSuffix(baseURL, "/v1/") {
-		return strings.TrimSuffix(baseURL, "/") + "/responses"
+	if format == core.WireFormatOpenAIResponses {
+		path = strings.TrimSuffix(path, "/")
+		path = strings.TrimSuffix(path, "/chat/completions")
+		if !strings.HasSuffix(path, "/responses") {
+			path += "/responses"
+		}
 	}
-	if strings.HasSuffix(baseURL, "/v1") {
-		return baseURL + "/responses"
-	}
-	return baseURL + "/responses"
+	endpoint.Path = path
+	return endpoint.String(), nil
 }
 
 // doBedrockRequest sends an HTTP request to the Bedrock Mantle endpoint with

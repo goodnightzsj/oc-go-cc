@@ -63,7 +63,7 @@ func TestPlatformDataCostsRespectProviderAndMissingRates(t *testing.T) {
 			if err := NewRequests(db).Insert(rec); err != nil {
 				t.Fatal(err)
 			}
-			rows, _, err := NewRequests(db).Query(RequestQuery{Search: tt.name})
+			rows, _, err := NewRequests(db).Query(t.Context(), RequestQuery{Search: tt.name})
 			if err != nil || len(rows) != 1 {
 				t.Fatalf("Query = %v, %v", rows, err)
 			}
@@ -276,7 +276,7 @@ func TestPlatformDataHistorySortsInstants(t *testing.T) {
 		{"", "asc", []string{"a", "c", "b"}},
 		{"model", "asc", []string{"b", "c", "a"}},
 	} {
-		rows, _, err := NewRequests(db).Query(RequestQuery{SortBy: tt.field, SortOrder: tt.order})
+		rows, _, err := NewRequests(db).Query(t.Context(), RequestQuery{SortBy: tt.field, SortOrder: tt.order})
 		if err != nil {
 			t.Fatal(err)
 		}

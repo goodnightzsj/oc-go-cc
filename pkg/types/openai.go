@@ -8,9 +8,10 @@ import "encoding/json"
 
 // ChatContentPart represents a single part in a multimodal message content array.
 type ChatContentPart struct {
-	Type     string    `json:"type"`
-	Text     string    `json:"text,omitempty"`
-	ImageURL *ImageURL `json:"image_url,omitempty"`
+	Type         string        `json:"type"`
+	Text         string        `json:"text,omitempty"`
+	ImageURL     *ImageURL     `json:"image_url,omitempty"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
 
 // ImageURL represents the URL source for an image in a multimodal message.
@@ -55,10 +56,22 @@ type ChatMessage struct {
 	Role             string          `json:"role"`
 	Content          json.RawMessage `json:"content"`
 	ReasoningContent *string         `json:"reasoning_content,omitempty"`
+	Reasoning        *string         `json:"reasoning,omitempty"`
 	ToolCalls        []ToolCall      `json:"tool_calls,omitempty"`
 	Name             string          `json:"name,omitempty"`
 	ToolCallID       string          `json:"tool_call_id,omitempty"`
 	CacheControl     *CacheControl   `json:"cache_control,omitempty"`
+}
+
+// ReasoningText treats the gateway spellings as aliases, never concatenating both.
+func (m ChatMessage) ReasoningText() string {
+	if m.ReasoningContent != nil && *m.ReasoningContent != "" {
+		return *m.ReasoningContent
+	}
+	if m.Reasoning != nil {
+		return *m.Reasoning
+	}
+	return ""
 }
 
 // ContentText extracts the text content from the message, handling both
@@ -118,12 +131,13 @@ type FunctionDef struct {
 
 // ChatCompletionResponse represents a response from the OpenAI Chat Completions API.
 type ChatCompletionResponse struct {
-	ID      string    `json:"id"`
-	Object  string    `json:"object"`
-	Created int64     `json:"created"`
-	Model   string    `json:"model"`
-	Choices []Choice  `json:"choices"`
-	Usage   UsageInfo `json:"usage"`
+	Error   json.RawMessage `json:"error,omitempty"`
+	ID      string          `json:"id"`
+	Object  string          `json:"object"`
+	Created int64           `json:"created"`
+	Model   string          `json:"model"`
+	Choices []Choice        `json:"choices"`
+	Usage   *UsageInfo      `json:"usage"`
 }
 
 // Choice represents a single choice in the response.
@@ -169,10 +183,11 @@ type PromptTokensDetails struct {
 
 // ChatCompletionChunk represents a streaming chunk from the Chat Completions API.
 type ChatCompletionChunk struct {
-	ID      string     `json:"id"`
-	Object  string     `json:"object"`
-	Created int64      `json:"created"`
-	Model   string     `json:"model"`
-	Choices []Choice   `json:"choices"`
-	Usage   *UsageInfo `json:"usage,omitempty"`
+	Error   json.RawMessage `json:"error,omitempty"`
+	ID      string          `json:"id"`
+	Object  string          `json:"object"`
+	Created int64           `json:"created"`
+	Model   string          `json:"model"`
+	Choices []Choice        `json:"choices"`
+	Usage   *UsageInfo      `json:"usage,omitempty"`
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/internal/transformer"
 	"github.com/routatic/proxy/pkg/types"
 )
@@ -38,17 +39,28 @@ func (h *MessagesHandler) HandleResponses(w http.ResponseWriter, r *http.Request
 		writeResponsesError(w, status, "invalid or oversized request body")
 		return
 	}
-	message, err := transformer.ResponsesToMessageRequest(body)
+	message, bridgeErr := transformer.ResponsesToMessageRequest(body)
+	// Always validate the stateless/source boundary; only a failed conversion
+	// needs a routing-only projection. Compatible cross-protocol inputs keep
+	// their existing representation.
+	projection, replay, err := transformer.ResponsesRoutingRequest(body)
 	if err != nil {
 		writeResponsesError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if bridgeErr != nil {
+		message = projection
 	}
 	encoded, err := json.Marshal(message)
 	if err != nil {
 		writeResponsesError(w, http.StatusInternalServerError, "failed to encode adapted request")
 		return
 	}
-	adapted := r.Clone(r.Context())
+	metadata := core.RequestMetadataFromContext(r.Context())
+	metadata.ResponsesBody = body
+	metadata.ResponsesBridgeError = bridgeErr
+	metadata.ResponsesReplay = replay
+	adapted := r.Clone(core.WithRequestMetadata(r.Context(), metadata))
 	adapted.URL.Path = "/v1/messages"
 	adapted.Body = io.NopCloser(bytes.NewReader(encoded))
 	adapted.ContentLength = int64(len(encoded))
@@ -79,11 +91,18 @@ type responsesHTTPWriter struct {
 	stream    *transformer.ResponsesStreamWriter
 	finished  bool
 	finishErr error
+	native    bool
 }
 
 func (w *responsesHTTPWriter) Header() http.Header { return w.headers }
 
 func (w *responsesHTTPWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *responsesHTTPWriter) SetNativeResponses(native bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.native = native
+}
 
 func (w *responsesHTTPWriter) WriteHeader(status int) {
 	w.mu.Lock()
@@ -125,6 +144,10 @@ func (w *responsesHTTPWriter) Write(p []byte) (int, error) {
 		w.status = http.StatusOK
 	}
 	if w.isSSE() {
+		if w.native {
+			w.commit(http.StatusOK, "text/event-stream")
+			return w.ResponseWriter.Write(p)
+		}
 		w.startStream()
 		return w.stream.Write(p)
 	}
@@ -139,7 +162,11 @@ func (w *responsesHTTPWriter) Flush() {
 
 func (w *responsesHTTPWriter) flush() {
 	if w.isSSE() {
-		w.startStream()
+		if w.native {
+			w.commit(http.StatusOK, "text/event-stream")
+		} else {
+			w.startStream()
+		}
 		if f, ok := w.ResponseWriter.(http.Flusher); ok {
 			f.Flush()
 		}
@@ -159,6 +186,14 @@ func (w *responsesHTTPWriter) Finish() error {
 }
 
 func (w *responsesHTTPWriter) finish() error {
+	if w.native && w.status < 400 {
+		if w.isSSE() {
+			return nil
+		}
+		w.commit(http.StatusOK, "application/json")
+		_, err := w.ResponseWriter.Write(w.body.Bytes())
+		return err
+	}
 	if w.stream != nil {
 		err := w.stream.Finish()
 		w.flush()

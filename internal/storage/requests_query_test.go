@@ -45,7 +45,7 @@ func TestHistoryTokensColumnSortsByTheTotalItDisplays(t *testing.T) {
 	}
 	ordered := func(sortBy string) string {
 		t.Helper()
-		rows, _, err := repo.Query(RequestQuery{Page: 1, PageSize: 10, SortBy: sortBy, SortOrder: "asc"})
+		rows, _, err := repo.Query(t.Context(), RequestQuery{Page: 1, PageSize: 10, SortBy: sortBy, SortOrder: "asc"})
 		if err != nil {
 			t.Fatalf("sort by %s: %v", sortBy, err)
 		}
@@ -114,7 +114,7 @@ func TestHistoryThroughputColumnSortsByTheRateItShows(t *testing.T) {
 	}
 	ordered := func(sortBy, dir string) string {
 		t.Helper()
-		rows, _, err := repo.Query(RequestQuery{Page: 1, PageSize: 10, SortBy: sortBy, SortOrder: dir})
+		rows, _, err := repo.Query(t.Context(), RequestQuery{Page: 1, PageSize: 10, SortBy: sortBy, SortOrder: dir})
 		if err != nil {
 			t.Fatalf("sort by %s: %v", sortBy, err)
 		}
@@ -181,7 +181,7 @@ func TestRequestsQueryFiltersAndSortsFullDataset(t *testing.T) {
 	}
 
 	failed := false
-	rows, total, err := repo.Query(RequestQuery{
+	rows, total, err := repo.Query(t.Context(), RequestQuery{
 		Page: 1, PageSize: 50, Search: "quota", Success: &failed,
 		Start: &base, End: timePtr(base.Add(24 * time.Hour)),
 	})
@@ -193,7 +193,7 @@ func TestRequestsQueryFiltersAndSortsFullDataset(t *testing.T) {
 	}
 
 	streaming := true
-	rows, total, err = repo.Query(RequestQuery{
+	rows, total, err = repo.Query(t.Context(), RequestQuery{
 		Page: 1, PageSize: 2, Start: &base, End: timePtr(base.Add(24 * time.Hour)),
 		Streaming: &streaming, SortBy: "prompt_tokens", SortOrder: "asc",
 	})
@@ -204,7 +204,7 @@ func TestRequestsQueryFiltersAndSortsFullDataset(t *testing.T) {
 		t.Fatalf("sorted IDs = [%s %s], total = %d; want [r2 r3], 2", rows[0].ID, rows[1].ID, total)
 	}
 
-	rows, total, err = repo.Query(RequestQuery{Page: 1, PageSize: 50, Provider: "provider-b", Scenario: "complex"})
+	rows, total, err = repo.Query(t.Context(), RequestQuery{Page: 1, PageSize: 50, Provider: "provider-b", Scenario: "complex"})
 	if err != nil {
 		t.Fatalf("exact filters: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestRequestsQueryFiltersAndSortsFullDataset(t *testing.T) {
 		t.Fatalf("exact-filter rows = %+v, total = %d; want only r3", rows, total)
 	}
 
-	rows, total, err = repo.Query(RequestQuery{Page: 1, PageSize: 50, CostSource: CostSourceProvider})
+	rows, total, err = repo.Query(t.Context(), RequestQuery{Page: 1, PageSize: 50, CostSource: CostSourceProvider})
 	if err != nil {
 		t.Fatalf("cost-source filter: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestRequestsQueryFiltersAndSortsFullDataset(t *testing.T) {
 		t.Fatalf("filtered summary = %+v; want r3 aggregates", summary)
 	}
 
-	rows, total, err = repo.Query(RequestQuery{Page: 1, PageSize: 50, SortBy: "cost_usd", SortOrder: "desc"})
+	rows, total, err = repo.Query(t.Context(), RequestQuery{Page: 1, PageSize: 50, SortBy: "cost_usd", SortOrder: "desc"})
 	if err != nil {
 		t.Fatalf("cost sort: %v", err)
 	}
@@ -280,7 +280,7 @@ func TestBackfillRequestCostsMigratesExistingRows(t *testing.T) {
 	if oldCost.Valid || !newCost.Valid || newCost.Float64 <= 0 {
 		t.Fatalf("costs = old:%v new:%v; want old NULL and new positive", oldCost, newCost)
 	}
-	rows, _, err := repo.Query(RequestQuery{Page: 1, PageSize: 1, SortBy: "cost_usd"})
+	rows, _, err := repo.Query(t.Context(), RequestQuery{Page: 1, PageSize: 1, SortBy: "cost_usd"})
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -318,16 +318,20 @@ func TestRequestsQueryPreservesUnknownOutcomesAndUsage(t *testing.T) {
 			if err := repo.Insert(original); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := db.DB().Exec(`UPDATE requests SET details_known = ?, success = ? WHERE id = ?`, tt.detailsKnown, tt.success, tt.id); err != nil {
+			// Local Insert observes the outcome; imports must explicitly clear it.
+			if _, err := db.DB().Exec(`UPDATE requests SET details_known = ?, outcome_known = ?, success = ? WHERE id = ?`, tt.detailsKnown, tt.detailsKnown, tt.success, tt.id); err != nil {
 				t.Fatal(err)
 			}
-			rows, count, err := repo.Query(RequestQuery{Search: tt.id})
+			rows, count, err := repo.Query(t.Context(), RequestQuery{Search: tt.id})
 			if err != nil || count != 1 || len(rows) != 1 {
 				t.Fatalf("Query = %+v, %d, %v", rows, count, err)
 			}
 			got := rows[0]
 			if got.DetailsKnown != tt.wantKnown || got.Success != tt.wantSuccess {
 				t.Errorf("outcome = known:%v success:%v, want known:%v success:%v", got.DetailsKnown, got.Success, tt.wantKnown, tt.wantSuccess)
+			}
+			if got.OutcomeKnown != tt.wantKnown {
+				t.Errorf("outcome_known=%v, want %v", got.OutcomeKnown, tt.wantKnown)
 			}
 			if got.InputTokens != original.InputTokens || got.OutputTokens != original.OutputTokens ||
 				got.CacheReadTokens != original.CacheReadTokens || got.CacheCreationTokens != original.CacheCreationTokens ||
@@ -340,7 +344,7 @@ func TestRequestsQueryPreservesUnknownOutcomesAndUsage(t *testing.T) {
 		})
 	}
 	for _, success := range []bool{false, true} {
-		rows, count, err := repo.Query(RequestQuery{Success: &success})
+		rows, count, err := repo.Query(t.Context(), RequestQuery{Success: &success})
 		if err != nil || count != 1 || len(rows) != 1 {
 			t.Fatalf("filter success=%v: rows=%+v count=%d error=%v", success, rows, count, err)
 		}

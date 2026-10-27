@@ -327,7 +327,7 @@ const TRANSLATIONS = {
     'history.nonStreaming': 'Non-streaming',
     'history.peakWindow': 'Billed at this platform\'s peak rate for the hour of the request; the badge shows the multiplier',
     'history.upstreamChannelHint': 'The upstream channel the gateway actually served this request on, as the gateway reported it. It is chosen by the gateway, not by us.',
-    'history.upstreamModelHint': 'The model the gateway says it actually ran. A gateway can answer one id by running a virtual model behind its own fallback chain, which is what this names.',
+    'history.upstreamModelHint': 'Source response model; falls back to the recorded upstream or routing model when unavailable. A virtual model prefix is not an upstream channel.',
     'history.requestedModelHint': 'The model id this request asked for. It is what routing and billing key on, so it stays visible when the gateway ran something else.',
     'filter.dateRange': 'Date range',
     'filter.today': 'Today',
@@ -350,6 +350,9 @@ const TRANSLATIONS = {
     'detail.provider': 'Provider',
     'detail.upstreamChannel': 'Upstream channel',
     'detail.upstreamModel': 'Upstream model',
+    'detail.canonicalModel': 'Canonical model',
+    'detail.responseModel': 'Response model',
+    'detail.routingModel': 'Routing / billing model',
     'detail.effort': 'Reasoning effort',
     'detail.firstByte': 'Time to first byte',
     'detail.generationFirstOutput': 'Wait for source output',
@@ -960,7 +963,7 @@ const TRANSLATIONS = {
     'history.nonStreaming': '非流式',
     'history.peakWindow': '按请求时刻所在平台的峰时费率计费，倍率见徽标',
     'history.upstreamChannelHint': '网关实际服务本次请求的上游渠道，取自网关自己的回报；渠道由网关选择，不由我们决定。',
-    'history.upstreamModelHint': '网关自报实际执行的模型。网关可能用一个虚拟模型（带自己的降级链）来应答某个 id，这个字段就是那个真实模型。',
+    'history.upstreamModelHint': '上游响应声明的模型；缺失时显示已记录的上游模型或路由模型。虚拟模型前缀不是上游渠道。',
     'history.requestedModelHint': '本次请求请求的模型 id。路由和计费都以它为准，所以当网关实际跑了别的模型时，仍然把它显示出来。',
     'filter.dateRange': '日期范围',
     'filter.today': '今天',
@@ -983,6 +986,9 @@ const TRANSLATIONS = {
     'detail.provider': '供应商',
     'detail.upstreamChannel': '上游渠道',
     'detail.upstreamModel': '上游模型',
+    'detail.canonicalModel': '规范模型',
+    'detail.responseModel': '响应模型',
+    'detail.routingModel': '路由 / 计费模型',
     'detail.effort': '思考强度',
     'detail.firstByte': '首字节时间',
     'detail.generationFirstOutput': '源流首输出等待',
@@ -1733,6 +1739,7 @@ function successLevel(pct) {
 const PerfModule = {
   data: null,
   loadSeq: 0,
+  request: null,
   query: '',
   error: '',
   sortField: 'count',
@@ -1771,10 +1778,13 @@ const PerfModule = {
   },
 
   async refresh() {
-    const seq = ++this.loadSeq;
     const params = new URLSearchParams({range: this.timeRange});
     const provider = document.getElementById('perf-provider')?.value;
     if (provider) params.set('provider', provider);
+    if (this.request && this.query === params.toString()) return;
+    const seq = ++this.loadSeq;
+    this.request?.abort();
+    const controller = this.request = new AbortController();
     if (this.query !== params.toString() || !this.data) {
       this.query = params.toString();
       this.data = null;
@@ -1784,7 +1794,7 @@ const PerfModule = {
     const errorEl = document.getElementById('perf-error');
     if (errorEl) errorEl.hidden = true;
     try {
-      const data = await fetchJSON(`/api/perf/models?${params}`);
+      const data = await fetchJSON(`/api/perf/models?${params}`, {signal: controller.signal});
       if (seq !== this.loadSeq) return;
       if (data !== null && !Array.isArray(data)) throw new Error(t('data.invalid'));
       this.data = data || [];
@@ -1800,6 +1810,9 @@ const PerfModule = {
         errorEl.hidden = false;
       }
       console.error('PerfModule refresh failed:', e);
+    } finally {
+      controller.abort();
+      if (seq === this.loadSeq) this.request = null;
     }
   },
 
@@ -2173,6 +2186,7 @@ let overviewDays = 7;
 let overviewBreakdownMetric = 'requests';
 let lastOverviewView = null;
 let overviewLoadSeq = 0;
+let overviewRequest = null;
 let overviewQuery = '';
 // Upper bound on how many history rows are rendered into the DOM at once.
 // Keeps long-session history tables fast while the count reflects all rows.
@@ -2295,7 +2309,6 @@ async function refreshServiceStatus() {
 }
 
 async function refreshOverviewUsage() {
-  const seq = ++overviewLoadSeq;
   const params = new URLSearchParams({days: String(overviewDays)});
   const latencyParams = new URLSearchParams({range: `${overviewDays}d`});
   const provider = document.getElementById('overview-provider')?.value;
@@ -2303,6 +2316,10 @@ async function refreshOverviewUsage() {
     params.set('provider', provider);
     latencyParams.set('provider', provider);
   }
+  if (overviewRequest && overviewQuery === params.toString()) return;
+  const seq = ++overviewLoadSeq;
+  overviewRequest?.abort();
+  const controller = overviewRequest = new AbortController();
   if (overviewQuery !== params.toString() || !lastOverviewView) {
     overviewQuery = params.toString();
     clearOverviewUsage(true);
@@ -2311,9 +2328,9 @@ async function refreshOverviewUsage() {
   if (errorEl) errorEl.hidden = true;
   try {
     const [usage, trend, latency] = await Promise.all([
-      fetchJSON(`/api/analytics/summary?${params}&compare=1`),
-      fetchJSON(`/api/analytics/tokens/trend?${params}`),
-      fetchJSON(`/api/perf/aggregate?${latencyParams}`),
+      fetchJSON(`/api/analytics/summary?${params}&compare=1`, {signal: controller.signal}),
+      fetchJSON(`/api/analytics/tokens/trend?${params}`, {signal: controller.signal}),
+      fetchJSON(`/api/perf/aggregate?${latencyParams}`, {signal: controller.signal}),
     ]);
     if (seq !== overviewLoadSeq) return;
     if (!usage?.summary || !trend || (trend.trend !== null && !Array.isArray(trend.trend)) || !latency) {
@@ -2327,6 +2344,9 @@ async function refreshOverviewUsage() {
       errorEl.textContent = t('data.loadFail') + e.message;
       errorEl.hidden = false;
     }
+  } finally {
+    controller.abort();
+    if (seq === overviewLoadSeq) overviewRequest = null;
   }
 }
 
@@ -2339,7 +2359,14 @@ function clearOverviewUsage(loading = false) {
     document.getElementById(id + '-note').textContent = '';
   });
   ['overview-generated', 'overview-latency'].forEach(id => { document.getElementById(id).textContent = ''; });
+  ['m-total-avg', 'm-tokens-avg', 'm-cost-avg', 'm-success-avg', 'overview-provider-distribution-count', 'overview-model-distribution-count'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = '';
+  });
+  AnalyticsModule.renderPlatformHealth([], null);
+  AnalyticsModule.renderDailySpend([]);
   ['overview-request-trend', 'overview-token-trend', 'overview-provider-distribution', 'overview-model-distribution'].forEach(id => {
+    delete AnalyticsModule.chartData[id];
     document.getElementById(id).innerHTML = `<div class="empty-state">${t(loading ? 'data.loading' : 'detail.unavailable')}</div>`;
   });
 }
@@ -2393,9 +2420,12 @@ function renderOverviewUsage(data, trend, latency) {
     ? `${currentLang === 'zh' ? '今日' : 'Today'} (UTC) ${compactTotal(today)} · ${t('data.retained')} ${compactTotal(retained)}`
     : '');
   set('m-cache-hit-note', summary.cache_read_tokens != null ? `${fmtTok(cacheRead)} ${currentLang === 'zh' ? '读取' : 'read'}` : '');
-  set('m-cost-note', Number(summary.unknown_cost_requests || 0) > 0 ? costCoverageNote(summary) : today.est_cost_usd != null
-    ? `${currentLang === 'zh' ? '今日' : 'Today'} (UTC) ${fmtAggregateCost(today)} · ${t('data.retained')} ${fmtAggregateCost(retained)}`
-    : t('analytics.currencyUSD'));
+  const windowCost = item => fmtAggregateCost(item) + (Number(item.unknown_cost_requests || 0) > 0 ? ` (${costCoverageNote(item)})` : '');
+  const costNotes = Number(summary.unknown_cost_requests || 0) > 0 ? [costCoverageNote(summary)] : [];
+  if (today.est_cost_usd != null) {
+    costNotes.push(`${currentLang === 'zh' ? '今日' : 'Today'} (UTC) ${windowCost(today)} · ${t('data.retained')} ${windowCost(retained)}`);
+  }
+  set('m-cost-note', costNotes.join(' · ') || t('analytics.currencyUSD'));
   set('m-throughput', lastMinute.total_requests != null ? `${fmt(lastMinute.total_requests)} RPM` : '—');
   set('m-throughput-note', hasUsageTokens(lastMinute) ? `${compactTotal(lastMinute)} TPM` : '');
   const known = Number(summary.known_requests || 0);
@@ -2452,6 +2482,7 @@ let historyPage = 1;
 let historySize = 50;
 let historyTotal = 0;
 let historyLoadSeq = 0;
+let historyRequest = null;
 let historyQuery = '';
 
 function dateInputValue(date) {
@@ -2554,12 +2585,16 @@ let renderedChannelOptions = '';
 // The platform can change while a lookup is in flight, and its answer then
 // describes the platform that was just left. Only the newest lookup may render.
 let channelSyncSeq = 0;
+let channelRequest = null;
 
 async function syncChannelFilter() {
   const select = document.getElementById('channel-filter');
   if (!select) return;
-  const seq = ++channelSyncSeq;
   const provider = document.getElementById('provider-filter')?.value.trim() || '';
+  if (channelRequest && provider === channelFilterProvider) return;
+  const seq = ++channelSyncSeq;
+  channelRequest?.abort();
+  channelRequest = null;
   if (provider !== channelFilterProvider) {
     // Withdrawn before the request: the platform has already changed, so a
     // channel left in place would be sent with the query that follows.
@@ -2575,8 +2610,9 @@ async function syncChannelFilter() {
   // belong to platforms that record no channel at all. The endpoint's own
   // answer decides the rest, so nothing here names a platform.
   if (!provider) return;
+  const controller = channelRequest = new AbortController();
   try {
-    const r = await fetch(`/api/history/channels?provider=${encodeURIComponent(provider)}`);
+    const r = await fetch(`/api/history/channels?provider=${encodeURIComponent(provider)}`, {signal: controller.signal});
     if (seq !== channelSyncSeq) return;
     if (!r.ok) return;
     const data = await r.json();
@@ -2614,6 +2650,9 @@ async function syncChannelFilter() {
     window.CustomSelect?.sync(select);
   } catch (_) {
     // Nothing to offer; the control stays hidden and no channel is sent.
+  } finally {
+    controller.abort();
+    if (seq === channelSyncSeq) channelRequest = null;
   }
 }
 
@@ -2655,17 +2694,20 @@ async function refreshHistory() {
   // poll is the first place to notice. Left out of the poll, a newly observed
   // channel stayed invisible until the page was reloaded.
   syncChannelFilter();
+  const params = historyQueryParams();
+  if (historyRequest && historyQuery === params.toString()) return;
   const seq = ++historyLoadSeq;
+  historyRequest?.abort();
+  const controller = historyRequest = new AbortController();
   const errorEl = document.getElementById('history-error');
   try {
-    const params = historyQueryParams();
     if (historyQuery !== params.toString()) {
       historyQuery = params.toString();
       clearHistoryView(true);
     }
     const [r, summaryResponse] = await Promise.all([
-      fetch(`/api/history?${params}`),
-      fetch(`/api/history/summary?${params}`),
+      fetch(`/api/history?${params}`, {signal: controller.signal}),
+      fetch(`/api/history/summary?${params}`, {signal: controller.signal}),
     ]);
     if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).trim()}`);
     if (!summaryResponse.ok) throw new Error(`Summary HTTP ${summaryResponse.status}: ${(await summaryResponse.text()).trim()}`);
@@ -2695,6 +2737,9 @@ async function refreshHistory() {
       errorEl.textContent = t('history.loadFail') + e.message;
       errorEl.hidden = false;
     }
+  } finally {
+    controller.abort();
+    if (seq === historyLoadSeq) historyRequest = null;
   }
 }
 
@@ -2828,6 +2873,10 @@ function billingWindowLabel(record) {
   return pm > 1 ? t('detail.peak') + ' \u00d7' + pm : t('detail.offPeak');
 }
 
+function historyDisplayModel(record) {
+  return record.response_model || record.upstream_model || record.model;
+}
+
 function renderHistory() {
   const tbody = document.getElementById('history-tbody');
   document.getElementById('history-count').textContent =
@@ -2851,7 +2900,8 @@ function renderHistory() {
     const rowId = h.id || `${h.start_time}_${h.model || 'unknown'}_${h.duration_ms || 0}`;
     const cost = h.cost_usd != null ? fmtCost(h.cost_usd) : '—';
     const detailsKnown = historyHasDetails(h);
-    const streamLabel = detailsKnown
+    const outcomeKnown = historyHasOutcome(h);
+    const streamLabel = outcomeKnown
       ? (h.streaming ? t('history.streaming') : t('history.nonStreaming'))
       : t('detail.unknown');
     const totalTokens = Number(h.input_tokens || 0) + Number(h.output_tokens || 0)
@@ -2881,25 +2931,19 @@ function renderHistory() {
     const channelMark = h.upstream_channel
       ? ' <span class="badge badge-channel" title="' + escapeHtml(h.upstream_channel + ' — ' + t('history.upstreamChannelHint')) + '">' + escapeHtml(h.upstream_channel) + '</span>'
       : '';
-    // Shown only when the gateway names a model that is not the one we sent:
-    // repeating the request id on every ordinary row would be noise, and the
-    // presence of the badge is itself the signal that a rewrite happened.
-    // The model column names what actually ran, and nothing else. The id we
-    // sent is a routing detail the gateway already resolved; repeating it under
-    // the real one doubles the height of every row to show a string the reader
-    // never acts on.
-    const servedModel = h.upstream_model || h.model;
+    // Keep routing and canonical identities in details without adding row height.
+    const servedModel = historyDisplayModel(h);
     return `
     <tr data-id="${escapeHtml(rowId)}" tabindex="0" aria-haspopup="dialog" data-provider="${escapeHtml(h.provider || '')}" style="cursor: pointer;">
       <td><time class="history-timestamp" datetime="${escapeHtml(h.start_time || '')}" title="${escapeHtml(h.start_time || '')}">${fmtRelativeTime(h.start_time)}<small>${fmtDate(h.start_time)}</small></time>${peakMark}</td>
-      <td><div class="history-status-stack">${detailsKnown ? `<span class="badge ${h.success ? 'badge-success' : 'badge-error'}" title="${h.success ? t('badge.success') : t('badge.fail')}">${h.success ? t('badge.success') : t('badge.fail')}</span>` : `<span class="badge badge-unknown" title="${t('detail.unknown')}">${t('detail.unknown')}</span>`}<small class="history-stream-state">${streamLabel}</small></div></td>
+      <td><div class="history-status-stack">${outcomeKnown ? `<span class="badge ${h.success ? 'badge-success' : 'badge-error'}" title="${h.success ? t('badge.success') : t('badge.fail')}">${h.success ? t('badge.success') : t('badge.fail')}</span>` : `<span class="badge badge-unknown" title="${t('detail.unknown')}">${t('detail.unknown')}</span>`}<small class="history-stream-state">${streamLabel}</small></div></td>
       <td><div class="history-model-cell"><strong title="${escapeHtml(servedModel)}">${escapeHtml(servedModel) || '—'}</strong><small>${escapeHtml(providerLabel(h.provider))}${channelMark}</small></div></td>
       <td>${h.reasoning_effort ? `<span class="badge badge-effort" title="${escapeHtml(t('th.effortHint'))}">${escapeHtml(h.reasoning_effort)}</span>` : '—'}</td>
       <td>${h.key_hint ? `<code class="history-key-hint" title="${escapeHtml(t('th.keyHintTooltip'))}">${escapeHtml(h.key_hint)}</code>` : '—'}</td>
       <td><button type="button" class="history-token-trigger" data-token-id="${escapeHtml(rowId)}" aria-label="${t('detail.title')}">${totalTokens.toLocaleString('en-US')}</button><br><small>${tokenSplit}</small></td>
       <td>${cost}<br><small>${costSourceLabel(h.cost_source)}</small></td>
       <td>${h.first_byte_ms ? fmtDuration(h.first_byte_ms) : '—'}</td>
-      <td>${detailsKnown ? gradeDuration(h, fmtDuration(h.duration_ms)) : '—'}</td>
+      <td>${outcomeKnown ? gradeDuration(h, fmtDuration(h.duration_ms)) : '—'}</td>
       <td title="${escapeHtml(generationThroughputHint(h, detailsKnown && h.success ? requestThroughput(h) : null))}">${fmtGenerationThroughput(h.generation_tokens_per_second)}</td>
     </tr>
   `}).join('');
@@ -3240,10 +3284,10 @@ const HISTORY_CSV_COLUMNS = [
   ['reasoning_effort', r => r.reasoning_effort || ''],
   ['key_hint', r => r.key_hint || ''],
   ['first_byte_ms', r => r.first_byte_ms || null],
-  ['duration_ms', r => historyHasDetails(r) ? r.duration_ms : null],
-  ['streaming', r => historyHasDetails(r) ? r.streaming : null],
-  ['attempt', r => historyHasDetails(r) ? r.attempt : null],
-  ['success', r => historyHasDetails(r) ? r.success : null],
+  ['duration_ms', r => historyHasOutcome(r) ? r.duration_ms : null],
+  ['streaming', r => historyHasOutcome(r) ? r.streaming : null],
+  ['attempt', r => historyHasOutcome(r) ? r.attempt : null],
+  ['success', r => historyHasOutcome(r) ? r.success : null],
   ['error_msg', r => r.error_msg || ''],
   ['first_event_ms', r => r.first_event_ms ?? null],
   ['first_content_ms', r => r.first_content_ms ?? null],
@@ -3254,6 +3298,11 @@ const HISTORY_CSV_COLUMNS = [
   ['generation_duration_ms', r => r.generation_sample?.duration_ms ?? null],
   ['generation_output_tokens', r => r.generation_sample?.output_tokens ?? null],
   ['generation_tokens_per_second', r => r.generation_tokens_per_second ?? null],
+  ['outcome_known', r => historyHasOutcome(r)],
+  ['requested_model', r => r.requested_model || ''],
+  ['response_model', r => r.response_model || ''],
+  ['upstream_model', r => r.upstream_model || ''],
+  ['upstream_channel', r => r.upstream_channel || ''],
 ];
 
 // Export walks the API rather than the rendered page so the file covers the
@@ -3451,6 +3500,10 @@ function emptyStateContent(titleKey, hintKey) {
 
 function historyHasDetails(record) {
   return record.details_known !== false && typeof record.success === 'boolean';
+}
+
+function historyHasOutcome(record) {
+  return record.outcome_known ?? historyHasDetails(record);
 }
 
 function costSourceLabel(source) {
@@ -4757,6 +4810,8 @@ let historyRefreshTimer = null;
 function scheduleHistoryRefresh(event) {
   syncAdvancedFilters(false);
   historyLoadSeq++;
+  historyRequest?.abort();
+  historyRequest = null;
   historyPage = 1;
   clearHistoryView(true);
   if (event?.type === 'input') syncViewState({replace: true});
@@ -4829,15 +4884,16 @@ function showHistoryDetail(record) {
   modal.querySelector('.modal-footer')?.remove();
   const tokenValue = value => value != null ? Number(value).toLocaleString('en-US') : '—';
   const detailsKnown = historyHasDetails(record);
+  const outcomeKnown = historyHasOutcome(record);
   // Keep the legacy whole-request rate for diagnosis, not as a source-rate fallback.
   const tpsOfRow = detailsKnown && record.success ? requestThroughput(record) : null;
-  const statusLabel = detailsKnown ? (record.success ? t('detail.success') : t('detail.failed')) : t('detail.unknown');
+  const statusLabel = outcomeKnown ? (record.success ? t('detail.success') : t('detail.failed')) : t('detail.unknown');
   modalBody.innerHTML = `
     <div class="detail-summary">
       <div>
-        <div class="detail-model">${escapeHtml(record.model || '—')}</div>
+        <div class="detail-model">${escapeHtml(historyDisplayModel(record) || '—')}</div>
         <div class="detail-context">
-          <span>${escapeHtml(record.provider || '—')}</span>
+          <span>${escapeHtml(providerLabel(record.provider))}</span>
           <span>${escapeHtml(record.scenario || '—')}</span>
           ${record.requested_model ? `<span class="detail-rerouted" title="${escapeHtml(t('detail.reroutedHint'))}">${escapeHtml(t('detail.requestedModel'))}: ${escapeHtml(record.requested_model)}</span>` : ''}
           <span>${fmtDate(record.start_time)} ${fmtTime(record.start_time)}</span>
@@ -4845,7 +4901,7 @@ function showHistoryDetail(record) {
       </div>
       <div class="detail-outcome">
         <strong class="detail-cost">${record.cost_usd != null ? fmtCost(record.cost_usd) : '—'}</strong>
-        <span class="detail-status ${detailsKnown ? (record.success ? 'success' : '') : 'unknown'}">${statusLabel}</span>
+        <span class="detail-status ${outcomeKnown ? (record.success ? 'success' : '') : 'unknown'}">${statusLabel}</span>
       </div>
     </div>
     <div class="detail-token-grid">
@@ -4859,14 +4915,16 @@ function showHistoryDetail(record) {
       <div class="detail-row"><span class="detail-label">${t('detail.requestId')}</span><span class="detail-value">${escapeHtml(record.id || '—')}</span></div>
       <div class="detail-row"><span class="detail-label">${t('history.costSource')}</span><span class="detail-value">${costSourceLabel(record.cost_source)}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.billingWindow')}</span><span class="detail-value">${billingWindowLabel(record)}</span></div>
-      <div class="detail-row"><span class="detail-label">${t('detail.requestType')}</span><span class="detail-value">${detailsKnown ? t(record.streaming ? 'detail.streaming' : 'detail.nonStreaming') : t('detail.unavailable')}</span></div>
+      <div class="detail-row"><span class="detail-label">${t('detail.requestType')}</span><span class="detail-value">${outcomeKnown ? t(record.streaming ? 'detail.streaming' : 'detail.nonStreaming') : t('detail.unavailable')}</span></div>
       ${record.upstream_channel ? `<div class="detail-row"><span class="detail-label">${t('detail.upstreamChannel')}</span><span class="detail-value">${escapeHtml(record.upstream_channel)}</span></div>` : ''}
-      ${record.upstream_model ? `<div class="detail-row"><span class="detail-label">${t('detail.upstreamModel')}</span><span class="detail-value">${escapeHtml(record.upstream_model)}</span></div>` : ''}
+      ${record.response_model ? `<div class="detail-row"><span class="detail-label">${t('detail.responseModel')}</span><span class="detail-value">${escapeHtml(record.response_model)}</span></div>` : ''}
+      ${record.upstream_model ? `<div class="detail-row"><span class="detail-label">${t(record.provider === 'cline-pass' ? 'detail.canonicalModel' : 'detail.upstreamModel')}</span><span class="detail-value">${escapeHtml(record.upstream_model)}</span></div>` : ''}
+      ${record.model && record.model !== historyDisplayModel(record) ? `<div class="detail-row"><span class="detail-label">${t('detail.routingModel')}</span><span class="detail-value">${escapeHtml(record.model)}</span></div>` : ''}
       ${record.reasoning_effort ? `<div class="detail-row"><span class="detail-label">${t('detail.effort')}</span><span class="detail-value" title="${escapeHtml(t('th.effortHint'))}">${escapeHtml(record.reasoning_effort)}</span></div>` : ''}
       ${record.key_hint ? `<div class="detail-row"><span class="detail-label">${t('detail.keyHint')}</span><span class="detail-value" title="${escapeHtml(t('th.keyHintTooltip'))}"><code>${escapeHtml(record.key_hint)}</code></span></div>` : ''}
       ${record.first_byte_ms ? `<div class="detail-row"><span class="detail-label">${t('detail.firstByte')}</span><span class="detail-value">${fmtDuration(record.first_byte_ms)}</span></div>` : ''}
-      <div class="detail-row"><span class="detail-label">${t('detail.attempt')}</span><span class="detail-value">${detailsKnown ? (record.attempt || 1) : t('detail.unavailable')}</span></div>
-      <div class="detail-row"><span class="detail-label">${t('detail.duration')}</span><span class="detail-value">${detailsKnown ? gradeDuration(record, fmtDuration(record.duration_ms)) : t('detail.unavailable')}</span></div>
+      <div class="detail-row"><span class="detail-label">${t('detail.attempt')}</span><span class="detail-value">${outcomeKnown ? (record.attempt || 1) : t('detail.unavailable')}</span></div>
+      <div class="detail-row"><span class="detail-label">${t('detail.duration')}</span><span class="detail-value">${outcomeKnown ? gradeDuration(record, fmtDuration(record.duration_ms)) : t('detail.unavailable')}</span></div>
       <div class="detail-row"><span class="detail-label">${t('analytics.generationThroughput')}</span><span class="detail-value" title="${escapeHtml(t('analytics.generationThroughputHint'))}">${fmtGenerationThroughput(record.generation_tokens_per_second)}</span></div>
       ${tpsOfRow == null ? '' : `<div class="detail-row"><span class="detail-label">${t('analytics.throughput')}</span><span class="detail-value" title="${escapeHtml(t('analytics.throughputHint'))}">${fmtGenerationThroughput(tpsOfRow)}</span></div>`}
       ${record.streaming ? [
@@ -5847,7 +5905,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 /* ── Boot ──────────────────────────────────────────────────────── */
 loadProxyConfig();
-startPolling();
 // Activate the tab from the URL hash (deep-link / refresh resume). Defaults
 // to overview when no hash is present. Deferred to a microtask so any
 // const modules (e.g. AnalyticsModule) defined later in this script have
@@ -6429,6 +6486,7 @@ const AnalyticsModule = {
     });
     const message = t(loading ? 'data.loading' : 'detail.unavailable');
     ['provider-distribution', 'analytics-request-trend', 'analytics-token-trend'].forEach(id => {
+      delete this.chartData[id];
       document.getElementById(id).innerHTML = `<div class="empty-state">${message}</div>`;
     });
     document.getElementById('analytics-period-tbody').innerHTML = `<tr><td colspan="9" class="empty-state">${message}</td></tr>`;
@@ -6601,6 +6659,8 @@ const AnalyticsModule = {
   renderDistribution(containerId, items, valueKey, dimension) {
     const root = document.getElementById(containerId);
     if (!root) return;
+    const count = document.getElementById(`${containerId}-count`);
+    if (count) count.textContent = '';
     const normalized = (items || []).map(item => ({
       ...item,
       total_tokens: item.total_tokens ?? totalUsageTokens(item),
@@ -6626,7 +6686,6 @@ const AnalyticsModule = {
     // A capped list that does not say it is capped reads as the whole set. The
     // heading states how many rows are shown out of how many exist, so a reader
     // can tell a complete picture from a truncated one.
-    const count = document.getElementById(`${containerId}-count`);
     if (count) {
       count.textContent = normalized.length > visible.length
         ? t('analytics.showingTop').replace('{n}', String(visible.length)).replace('{total}', String(normalized.length))
@@ -7792,3 +7851,5 @@ function fmtCountdown(ms) {
 }
 
 QuotaModule.init();
+// Clearing an initial view uses the same modules as later refreshes.
+startPolling();

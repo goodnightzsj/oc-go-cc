@@ -15,14 +15,23 @@ func TestHistoryEntriesExposeRawAndPromptTokens(t *testing.T) {
 		CostUSD:             0.000123,
 		CostSource:          "provider",
 		DetailsKnown:        true,
+		OutcomeKnown:        true,
 		OutputTokens:        40,
 		Attempt:             2,
 		ErrorMsg:            "upstream failed",
+		Model:               "cline-pass/route",
+		Provider:            "cline-pass",
+		ResponseModel:       "vmc/served",
+		UpstreamModel:       "deepseek/canonical",
+		UpstreamChannel:     "deepseek",
 	}, {ID: "unknown-cost"}})
 	if len(entries) != 2 {
 		t.Fatalf("entries = %d, want 2", len(entries))
 	}
 	got := entries[0]
+	if got.Model != "cline-pass/route" || got.Provider != "cline-pass" || got.ResponseModel != "vmc/served" || got.UpstreamModel != "deepseek/canonical" || got.UpstreamChannel != "deepseek" {
+		t.Fatalf("source identities lost: %+v", got)
+	}
 	if got.InputTokens != 10 {
 		t.Errorf("input_tokens = %d, want raw input 10", got.InputTokens)
 	}
@@ -46,5 +55,8 @@ func TestHistoryEntriesExposeRawAndPromptTokens(t *testing.T) {
 	}
 	if got.ID != "request-1" || got.Attempt != 2 || got.ErrorMsg != "upstream failed" {
 		t.Errorf("request detail fields = %+v, want id/attempt/error preserved", got)
+	}
+	if !got.OutcomeKnown || entries[1].OutcomeKnown {
+		t.Error("outcome knowledge was not preserved")
 	}
 }

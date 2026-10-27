@@ -38,7 +38,7 @@ func TestUpstreamChannelSurvivesTheRoundTrip(t *testing.T) {
 		t.Fatalf("insert without channel: %v", err)
 	}
 
-	records, _, err := repo.Query(RequestQuery{Page: 1, PageSize: 10})
+	records, _, err := repo.Query(t.Context(), RequestQuery{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestUpstreamChannelColumnIsMigratedOnAnOldDatabase(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("insert after migration: %v", err)
 	}
-	records, _, err := repo.Query(RequestQuery{Page: 1, PageSize: 10})
+	records, _, err := repo.Query(t.Context(), RequestQuery{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestUpstreamModelSurvivesTheRoundTrip(t *testing.T) {
 		t.Fatalf("insert: %v", err)
 	}
 
-	records, _, err := repo.Query(RequestQuery{Page: 1, PageSize: 10})
+	records, _, err := repo.Query(t.Context(), RequestQuery{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestReasoningEffortSurvivesTheRoundTrip(t *testing.T) {
 		}
 	}
 
-	records, _, err := repo.Query(RequestQuery{Page: 1, PageSize: 10})
+	records, _, err := repo.Query(t.Context(), RequestQuery{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}

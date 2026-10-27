@@ -1087,7 +1087,7 @@ func TestProxyStream_ToolCallAndFinishReasonInSameChunk(t *testing.T) {
 	}
 }
 
-func TestProxyStream_NoUsageFallback(t *testing.T) {
+func TestProxyStream_NoUsageRemainsUnobserved(t *testing.T) {
 	handler := NewStreamHandler()
 	w := newMockResponseWriter()
 	body := sseLines(
@@ -1116,80 +1116,26 @@ func TestProxyStream_NoUsageFallback(t *testing.T) {
 		return
 	}
 
-	if messageDeltaEvent.Usage == nil {
-		t.Fatal("expected message_delta event to have non-nil Usage, but it was nil")
-		return
-	}
-
-	if messageDeltaEvent.Usage.InputTokens != 0 || messageDeltaEvent.Usage.OutputTokens != 0 {
-		t.Errorf("Usage = %+v, want InputTokens: 0, OutputTokens: 0", messageDeltaEvent.Usage)
+	if messageDeltaEvent.Usage != nil {
+		t.Errorf("unreported usage became a synthetic zero: %+v", messageDeltaEvent.Usage)
 	}
 }
 
-func TestProxyStream_NoFinishReasonFallback(t *testing.T) {
-	handler := NewStreamHandler()
+func TestProxyStream_NoFinishReasonFails(t *testing.T) {
 	w := newMockResponseWriter()
-	body := sseLines(
-		`{"choices":[{"delta":{"content":"Hello"}}]}`,
-	)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if err := handler.ProxyStream(w, body, "qwen3.6-plus", ctx, 0, cancel); err != nil {
-		t.Fatalf("ProxyStream error: %v", err)
-	}
-
-	events := parseSSEEvents(t, w.buf.String())
-	// Expected events:
-	// 0: message_start
-	// 1: content_block_start
-	// 2: content_block_delta
-	// 3: content_block_stop
-	// 4: message_delta (fallback stop_reason: end_turn)
-	// 5: message_stop
-	if len(events) != 6 {
-		t.Fatalf("expected 6 events, got %d: %+v", len(events), events)
-	}
-
-	if events[4].Type != "message_delta" || events[4].Delta == nil || events[4].Delta.StopReason != "end_turn" {
-		t.Errorf("event[4] = %+v, want message_delta(end_turn)", events[4])
+	body := sseLines(`{"choices":[{"delta":{"content":"Hello"}}]}`)
+	if err := NewStreamHandler().ProxyStream(w, body, "synthetic", t.Context(), 0, func() {}); err == nil || strings.Contains(w.buf.String(), "message_stop") {
+		t.Fatalf("missing finish_reason became success: err=%v body=%s", err, w.buf.String())
 	}
 }
 
-// TestProxyStream_EOFFallbackStopReasonToolUse verifies that when the stream
-// ends mid-tool-call (no finish_reason), the EOF fallback sets stop_reason
-// to "tool_use" rather than "end_turn".
-func TestProxyStream_EOFFallbackStopReasonToolUse(t *testing.T) {
-	handler := NewStreamHandler()
+func TestProxyStream_EOFDuringToolUseFails(t *testing.T) {
 	w := newMockResponseWriter()
 	body := sseLines(
-		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"toolu_abc","type":"function","function":{"name":"read_file","arguments":""}}]}}]}`,
-		`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"/tmp/test\"}"}}]}}]}`,
+		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"toolu_abc","type":"function","function":{"name":"read_file","arguments":"{}"}}]}}]}`,
 	)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if err := handler.ProxyStream(w, body, "kimi-k2.6", ctx, 0, cancel); err != nil {
-		t.Fatalf("ProxyStream error: %v", err)
-	}
-
-	events := parseSSEEvents(t, w.buf.String())
-
-	var msgDelta *types.MessageEvent
-	for i := range events {
-		if events[i].Type == "message_delta" {
-			msgDelta = &events[i]
-			break
-		}
-	}
-	if msgDelta == nil {
-		t.Fatalf("expected message_delta event, got none: %+v", events)
-		return
-	}
-	if msgDelta.Delta == nil || msgDelta.Delta.StopReason != "tool_use" {
-		t.Errorf("stop_reason = %q, want tool_use (stream ended mid-tool-call)", msgDelta.Delta.StopReason)
+	if err := NewStreamHandler().ProxyStream(w, body, "synthetic", t.Context(), 0, func() {}); err == nil || strings.Contains(w.buf.String(), "message_stop") {
+		t.Fatalf("tool stream without finish became success: err=%v body=%s", err, w.buf.String())
 	}
 }
 

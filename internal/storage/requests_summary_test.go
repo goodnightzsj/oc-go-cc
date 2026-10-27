@@ -178,7 +178,7 @@ func TestHistorySummaryAndQueryAgreeOnTheChannelFilter(t *testing.T) {
 	summaryFixture(t, db)
 	repo := NewRequests(db)
 
-	rows, total, err := repo.Query(RequestQuery{Page: 1, PageSize: 50, Channel: "deepseek"})
+	rows, total, err := repo.Query(t.Context(), RequestQuery{Page: 1, PageSize: 50, Channel: "deepseek"})
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestObservedChannelsListsWhatServedTraffic(t *testing.T) {
 	summaryFixture(t, db)
 	repo := NewRequests(db)
 
-	channels, err := repo.ObservedChannels("cline-pass")
+	channels, err := repo.ObservedChannels(t.Context(), "cline-pass")
 	if err != nil {
 		t.Fatalf("observed channels: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestObservedChannelsListsWhatServedTraffic(t *testing.T) {
 	}
 	// Only ClinePass publishes a channel, so another platform honestly reports
 	// none and the panel shows no filter.
-	none, err := repo.ObservedChannels("opencode-go")
+	none, err := repo.ObservedChannels(t.Context(), "opencode-go")
 	if err != nil {
 		t.Fatalf("opencode-go channels: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestObservedChannelsListsWhatServedTraffic(t *testing.T) {
 		t.Errorf("opencode-go channels = %v, want none", none)
 	}
 	// Unscoped asks across every platform.
-	all, err := repo.ObservedChannels("")
+	all, err := repo.ObservedChannels(t.Context(), "")
 	if err != nil {
 		t.Fatalf("all channels: %v", err)
 	}

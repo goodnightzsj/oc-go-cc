@@ -104,7 +104,7 @@ function node(id) {
   return nodes.get(id);
 }
 const context = vm.createContext({
-  assert, page:input.page, URL, URLSearchParams,
+  assert, page:input.page, URL, URLSearchParams, AbortController,
   // checks() is stringified into the vm, so the registry lists have to be
   // context globals rather than outer-scope values.
   visiblePlatforms:input.visible, allPlatforms:input.all,

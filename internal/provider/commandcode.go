@@ -18,7 +18,8 @@ import (
 )
 
 // CommandCodeProvider speaks the public Provider API. Claude models use native
-// Messages; all other models use Chat Completions, not Responses or private CLI APIs.
+// Messages; other models default to Chat Completions, with explicit Responses
+// support for models whose public endpoint contract allows it.
 type CommandCodeProvider struct {
 	baseProvider
 	capture *debug.CaptureLogger
@@ -57,7 +58,10 @@ func (p *CommandCodeProvider) Execute(ctx context.Context, req *types.MessageReq
 		if err := json.Unmarshal(raw, &response); err != nil || response.Type != "message" {
 			return nil, fmt.Errorf("invalid commandcode Messages response")
 		}
-		return &core.ExecuteResult{Body: raw, KeyHint: client.KeyHintOf(body)}, nil
+		return &core.ExecuteResult{Body: raw, KeyHint: client.KeyHintOf(body), ResponseModel: response.Model}, nil
+	}
+	if core.ModelWireFormat(p, model) == core.WireFormatOpenAIResponses {
+		return responsesResult(ctx, raw, model, client.KeyHintOf(body))
 	}
 	var response types.ChatCompletionResponse
 	if err := json.Unmarshal(raw, &response); err != nil || len(response.Choices) == 0 {
@@ -68,7 +72,7 @@ func (p *CommandCodeProvider) Execute(ctx context.Context, req *types.MessageReq
 		return nil, fmt.Errorf("convert commandcode response: %w", err)
 	}
 	raw, err = json.Marshal(converted)
-	return &core.ExecuteResult{Body: raw, KeyHint: client.KeyHintOf(body)}, err
+	return &core.ExecuteResult{Body: raw, KeyHint: client.KeyHintOf(body), ResponseModel: response.Model}, err
 }
 
 func (p *CommandCodeProvider) Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
@@ -76,7 +80,7 @@ func (p *CommandCodeProvider) Stream(ctx context.Context, req *types.MessageRequ
 }
 
 func (p *CommandCodeProvider) request(ctx context.Context, req *types.MessageRequest, model config.ModelConfig, stream bool) (io.ReadCloser, error) {
-	cfg := p.atomic.Get()
+	cfg := responsesConfig(ctx, p.atomic.Get())
 	sel, err := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
 	if err != nil {
 		return nil, err
@@ -97,6 +101,9 @@ func (p *CommandCodeProvider) request(ctx context.Context, req *types.MessageReq
 			converted.Stream = &stream
 			payload, err = json.Marshal(converted)
 		}
+	case core.WireFormatOpenAIResponses:
+		endpoint = cfg.CommandCode.ResponsesBaseURL
+		payload, err = responsesPayload(ctx, req, model, stream)
 	default:
 		return nil, fmt.Errorf("commandcode does not provide %s upstream format", format)
 	}
@@ -136,7 +143,7 @@ func (p *CommandCodeProvider) request(ctx context.Context, req *types.MessageReq
 		return nil, apiErr
 	}
 	if p.capture != nil {
-		return client.CaptureBody(resp.Body, func(data []byte) {
+		return client.CaptureBody(p.withKeyHint(resp.Body, sel), func(data []byte) {
 			p.capture.CaptureUpstreamResponse(rid(ctx), p.Name(), data)
 		}), nil
 	}

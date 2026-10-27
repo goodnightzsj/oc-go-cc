@@ -70,7 +70,7 @@ func (p *WorkBuddyProvider) Execute(ctx context.Context, req *types.MessageReque
 		return nil, fmt.Errorf("response transform failed: %w", err)
 	}
 	raw, err = json.Marshal(converted)
-	return &core.ExecuteResult{Body: raw, KeyHint: client.KeyHintOf(body)}, err
+	return &core.ExecuteResult{Body: raw, KeyHint: client.KeyHintOf(body), UpstreamModel: differingResponseModel(response.Model, model.ModelID), ResponseModel: response.Model}, err
 }
 
 func (p *WorkBuddyProvider) Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {

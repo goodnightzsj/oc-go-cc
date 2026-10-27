@@ -203,7 +203,7 @@ func TestConfigConcurrentUpdatesPreserveAllFields(t *testing.T) {
 func TestCommandCodeConfigRoundTripPreservesIndependentSecrets(t *testing.T) {
 	t.Setenv("GUI_TEST_COMMANDCODE_KEY", "synthetic-commandcode-key")
 	t.Setenv("GUI_TEST_COMMANDCODE_POOL", "synthetic-commandcode-pool")
-	original := `{"api_key":"synthetic-global-key","host":"127.0.0.1","port":3456,"commandcode":{"base_url":"https://commandcode.invalid/v1/chat/completions","anthropic_base_url":"https://commandcode.invalid/v1/messages","api_key":"${GUI_TEST_COMMANDCODE_KEY}","api_keys":["${GUI_TEST_COMMANDCODE_POOL}"],"timeout_ms":5000,"stream_timeout_ms":6000,"streaming_timeout_ms":7000}}`
+	original := `{"api_key":"synthetic-global-key","host":"127.0.0.1","port":3456,"commandcode":{"base_url":"https://commandcode.invalid/v1/chat/completions","anthropic_base_url":"https://commandcode.invalid/v1/messages","responses_base_url":"https://commandcode.invalid/custom/responses?version=synthetic","api_key":"${GUI_TEST_COMMANDCODE_KEY}","api_keys":["${GUI_TEST_COMMANDCODE_POOL}"],"timeout_ms":5000,"stream_timeout_ms":6000,"streaming_timeout_ms":7000}}`
 	srv, path := configTestServer(t, original)
 	patch := `{"commandcode":{"timeout_ms":9000,"zero_data_retention":true,"api_key":"` + keyMask + `","api_keys":["` + keyMask + `"]}}`
 	rec := httptest.NewRecorder()
@@ -233,6 +233,9 @@ func TestCommandCodeConfigRoundTripPreservesIndependentSecrets(t *testing.T) {
 			}
 			if fields["base_url"] != "https://commandcode.invalid/v1/chat/completions" || fields["anthropic_base_url"] != "https://commandcode.invalid/v1/messages" || fields["timeout_ms"] != float64(9000) || fields["stream_timeout_ms"] != float64(6000) || fields["streaming_timeout_ms"] != float64(7000) || fields["zero_data_retention"] != true {
 				t.Fatal("partial save lost CommandCode endpoint, timeout or ZDR settings")
+			}
+			if fields["responses_base_url"] != "https://commandcode.invalid/custom/responses?version=synthetic" {
+				t.Fatal("partial save/export/import lost explicit Responses endpoint")
 			}
 			// The response carries one folded pool, so the credential appears
 			// in api_keys rather than in the now-empty single-key field.

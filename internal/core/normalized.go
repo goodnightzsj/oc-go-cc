@@ -42,7 +42,8 @@ type NormalizedRequest struct {
 	Stream          bool
 	Tools           []NormalizedToolDef
 	ReasoningEffort string // "low", "medium", "high"
-	ThinkingBudget  int    // budget_tokens for thinking mode
+	ThinkingMode    string // enabled, disabled or adaptive; separate from effort
+	ThinkingBudget  *int   // nil is unspecified; 0 disables, -1 requests dynamic thinking
 }
 
 // NormalizedToolDef is a tool definition in the internal format.
@@ -57,8 +58,8 @@ type NormalizedResponse struct {
 	ID         string
 	Model      string
 	Messages   []NormalizedMessage
-	StopReason string // "end_turn", "max_tokens", "tool_use"
-	Usage      NormalizedUsage
+	StopReason string           // "end_turn", "max_tokens", "tool_use"
+	Usage      *NormalizedUsage // nil means the upstream did not report usage.
 }
 
 // NormalizedUsage holds token counts in the internal format.

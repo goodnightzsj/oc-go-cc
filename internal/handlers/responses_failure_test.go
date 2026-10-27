@@ -91,17 +91,11 @@ func TestNonStreamingResponsesFailureRetainsEachAttemptUsage(t *testing.T) {
 						if fallbackSuccess && (snapshot.RequestsSuccess != 1 || snapshot.RequestsFailed != 0) || !fallbackSuccess && (snapshot.RequestsFailed != 1 || snapshot.RequestsSuccess != 0) {
 							t.Errorf("request metrics: %+v", snapshot)
 						}
-						rows, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+						rows, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
 						if err != nil {
 							t.Fatal(err)
 						}
 						wantRows := int64(2)
-						if usageMode == "missing" || usageMode == "null" {
-							wantRows = 0
-							if fallbackSuccess {
-								wantRows = 1
-							}
-						}
 						if total != wantRows {
 							t.Fatalf("attempt usage rows=%d want=%d: %+v", total, wantRows, rows)
 						}
@@ -131,6 +125,10 @@ func TestNonStreamingResponsesFailureRetainsEachAttemptUsage(t *testing.T) {
 							}
 							if !strings.Contains(row.ErrorMsg, status) {
 								t.Errorf("failure status lost: %+v", row)
+							}
+							observed := usageMode == "zero" || usageMode == "present"
+							if !row.OutcomeKnown || row.DetailsKnown != observed || !observed && row.CostKnown {
+								t.Errorf("usage presence/outcome lost: %+v", row)
 							}
 							wantIn, wantRead, wantOut, wantReasoning := 0, 0, 0, 0
 							if usageMode == "present" {

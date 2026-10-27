@@ -68,7 +68,8 @@ func (p *ClinePassProvider) Execute(ctx context.Context, req *types.MessageReque
 		return nil, err
 	}
 	defer func() { _ = body.Close() }()
-	response, err := aggregateChatStream(body, model.ModelID)
+	// Keep an unreported source model empty; downstream fallback is chosen below.
+	response, err := aggregateChatStream(body, "")
 	if err != nil {
 		return nil, fmt.Errorf("collect cline-pass response: %w", err)
 	}
@@ -91,8 +92,7 @@ func (p *ClinePassProvider) Execute(ctx context.Context, req *types.MessageReque
 	// when the routing block is absent - and it was being ignored: a response
 	// that named its model was overwritten with the requested id. Only when
 	// neither exists does the request id stand in, which is a guess and is why
-	// it goes last. ServedModel is not reachable here; the aggregate holds the
-	// last chunk's value rather than the first's.
+	// it goes last. The aggregate holds the last chunk's value, not the first's.
 	responseModel := model.ModelID
 	if response.Model != "" {
 		responseModel = response.Model
@@ -105,7 +105,7 @@ func (p *ClinePassProvider) Execute(ctx context.Context, req *types.MessageReque
 		return nil, fmt.Errorf("convert cline-pass response: %w", err)
 	}
 	raw, err := json.Marshal(converted)
-	return &core.ExecuteResult{Body: raw, UpstreamChannel: channel, UpstreamModel: upstreamModel, KeyHint: usedKey}, err
+	return &core.ExecuteResult{Body: raw, UpstreamChannel: channel, UpstreamModel: upstreamModel, ResponseModel: response.Model, KeyHint: usedKey}, err
 }
 
 func (p *ClinePassProvider) Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {

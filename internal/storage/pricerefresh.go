@@ -609,7 +609,7 @@ func RefreshPrices(ctx context.Context, cfg PriceRefreshConfig, client *http.Cli
 		fetched[site.OpenRouter] = orEntries
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, map[string]error{site.OpenCodeGo: err, site.CommandCode: err, site.ClinePass: err}
+		return nil, map[string]error{site.OpenCodeGo: err, site.CommandCode: err, site.ClinePass: err, site.OpenRouter: err}
 	}
 	InstallPrices(fetched)
 	return fetched, errs

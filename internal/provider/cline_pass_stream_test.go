@@ -10,7 +10,26 @@ import (
 	"testing/iotest"
 
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/pkg/types"
 )
+
+func TestClineAggregateFailureRetainsReportedUsage(t *testing.T) {
+	for _, usage := range []string{"null", `{"prompt_tokens":0,"completion_tokens":0}`, `{"prompt_tokens":11,"completion_tokens":7}`} {
+		body := "data:{\"choices\":[{\"delta\":{\"content\":\"partial\"}}],\"usage\":" + usage + "}\n\n"
+		_, err := aggregateChatStream(io.MultiReader(strings.NewReader(body), iotest.ErrReader(io.ErrUnexpectedEOF)), "synthetic")
+		var observed interface{ ReportedUsage() *types.Usage }
+		if !errors.Is(err, io.ErrUnexpectedEOF) || !errors.As(err, &observed) {
+			t.Fatalf("error identity/usage carrier lost: %v", err)
+		}
+		got := observed.ReportedUsage()
+		if (got == nil) != (usage == "null") {
+			t.Fatalf("usage presence changed: source=%s got=%+v", usage, got)
+		}
+		if got != nil && strings.Contains(usage, "11") && (got.InputTokens != 11 || got.OutputTokens != 7) {
+			t.Fatalf("partial billed usage lost: %+v", got)
+		}
+	}
+}
 
 func TestClinePassExecuteRequiresCompleteStream(t *testing.T) {
 	const content = "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"
@@ -21,6 +40,9 @@ func TestClinePassExecuteRequiresCompleteStream(t *testing.T) {
 		fail       bool
 	}{
 		{"complete", content + finish + done, false},
+		{"done without finish", content + done, true},
+		{"half terminal event", content + finish + "data:[DONE]\n", true},
+		{"multiline CRLF", "\xef\xbb\xbfdata:{\r\ndata: \"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\r\n\r\ndata:[DONE]\r\n\r\n", false},
 		{"content EOF", content, true},
 		{"finish without terminal", content + finish, true},
 		{"error after content", content + "data: {\"error\":{\"message\":\"synthetic failure\"}}\n\n" + done, true},

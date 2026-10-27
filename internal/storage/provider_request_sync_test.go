@@ -58,7 +58,7 @@ func TestSyncProviderUsageRequestsCorrectsHistoryAndIsIdempotent(t *testing.T) {
 	if dry.TargetProvider != "opencode-go" || dry.SnapshotRows != 2 || dry.MatchedDetails != 1 || dry.WouldRemove != 0 || dry.PreservedUnmatched != 1 || dry.WouldInsert != 1 || dry.ProjectedRequests != 4 {
 		t.Fatalf("unexpected dry-run report: %+v", dry)
 	}
-	if _, count, _ := repo.Query(RequestQuery{}); count != 3 {
+	if _, count, _ := repo.Query(t.Context(), RequestQuery{}); count != 3 {
 		t.Fatalf("dry run changed request count to %d", count)
 	}
 
@@ -73,7 +73,7 @@ func TestSyncProviderUsageRequestsCorrectsHistoryAndIsIdempotent(t *testing.T) {
 		t.Fatalf("projected cost = %.8f", applied.ProjectedCostUSD)
 	}
 
-	records, _, err := repo.Query(RequestQuery{PageSize: 10})
+	records, _, err := repo.Query(t.Context(), RequestQuery{PageSize: 10})
 	if err != nil {
 		t.Fatalf("read requests: %v", err)
 	}

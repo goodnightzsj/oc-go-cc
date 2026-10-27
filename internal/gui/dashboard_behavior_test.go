@@ -91,7 +91,7 @@ const context = vm.createContext({
   })(),
   fetch: async () => ({ok: false, text: async () => 'synthetic unavailable response'}),
   setTimeout(){}, setInterval(){}, clearTimeout(){}, queueMicrotask(){},
-  URLSearchParams, console: {error(){}},
+  URLSearchParams, AbortController, console: {error(){}},
 });
 vm.runInContext(input.app, context, {timeout: 3000});
 vm.runInContext(` + "`" + `
@@ -584,7 +584,7 @@ vm.runInContext(` + "`" + `
   AnalyticsModule.renderDistribution('provider-distribution', [{provider:'commandcode',requests:1,unknown_cost_requests:1,cost_usd:0},{provider:'opencode-go',requests:2,unknown_cost_requests:0,cost_usd:2}], 'cost_usd', 'provider');
   assert.ok(!document.getElementById('provider-distribution').innerHTML.includes(' · 100.0%</small>'), 'a known subtotal is not the complete cross-platform cost share');
 
-  const settings = {host:'127.0.0.1',port:3456,opencode_go:{responses_base_url:'https://synthetic-go.invalid/responses'},commandcode:{base_url:'https://synthetic.invalid/chat/completions',anthropic_base_url:'https://synthetic.invalid/messages',api_key:mask,api_keys:[mask],timeout_ms:1000,stream_timeout_ms:2000,streaming_timeout_ms:3000,zero_data_retention:false}};
+  const settings = {host:'127.0.0.1',port:3456,opencode_go:{responses_base_url:'https://synthetic-go.invalid/responses'},commandcode:{base_url:'https://synthetic.invalid/chat/completions',anthropic_base_url:'https://synthetic.invalid/messages',responses_base_url:'https://synthetic.invalid/custom/responses',api_key:mask,api_keys:[mask],timeout_ms:1000,stream_timeout_ms:2000,streaming_timeout_ms:3000,zero_data_retention:false}};
   let savedPatch;
   fetch = async (_, options) => {
     if (options?.method === 'POST') savedPatch = JSON.parse(options.body);

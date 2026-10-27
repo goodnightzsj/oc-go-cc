@@ -359,7 +359,7 @@ func (b analyticBucket) generationTokensPerSecond() *float64 {
 // once here because the latency panel and the throughput column must not drift
 // apart: a request whose duration was never observed contributes to neither.
 const (
-	measuredLatency = `r.details_known = 1 AND r.duration_ms > 0 ` +
+	measuredLatency = observedOutcome + ` AND r.duration_ms > 0 ` +
 		`AND julianday(r.start_time) >= julianday(?)`
 	measuredThroughput = `r.details_known = 1 AND r.success = 1 ` +
 		`AND r.duration_ms > 0 AND r.output_tokens > 0`
@@ -383,16 +383,16 @@ func (a *Analytics) snapshot(ctx context.Context, window Window) (*AnalyticsSnap
 		       `+scenarioDimension+`,
 		       DATE(r.start_time) AS day,
 		       COUNT(*),
-		       COUNT(CASE WHEN r.details_known = 1 AND r.success IN (0, 1) THEN 1 END),
-		       COALESCE(SUM(CASE WHEN r.details_known = 1 AND r.success = 0 THEN 1 ELSE 0 END), 0),
-		       COALESCE(SUM(CASE WHEN r.details_known = 1 AND r.success = 1 THEN 1 ELSE 0 END), 0),
+		       COUNT(CASE WHEN `+observedOutcome+` AND r.success IN (0, 1) THEN 1 END),
+		       COALESCE(SUM(CASE WHEN `+observedOutcome+` AND r.success = 0 THEN 1 ELSE 0 END), 0),
+		       COALESCE(SUM(CASE WHEN `+observedOutcome+` AND r.success = 1 THEN 1 ELSE 0 END), 0),
 		       COALESCE(SUM(r.input_tokens), 0),
 		       COALESCE(SUM(r.output_tokens), 0),
 		       COALESCE(SUM(r.cache_read_tokens), 0),
 		       COALESCE(SUM(r.cache_creation_tokens), 0),
 		       COALESCE(SUM(r.cost_usd), 0),
 		       COUNT(r.cost_usd),
-		       COALESCE(SUM(CASE WHEN r.details_known = 1 AND r.success IN (0, 1)
+		       COALESCE(SUM(CASE WHEN `+observedOutcome+` AND r.success IN (0, 1)
 		                         THEN COALESCE(r.attempt, 1) > 1 END), 0),
 		       COALESCE(SUM(CASE WHEN `+measuredLatency+` THEN r.duration_ms ELSE 0 END), 0),
 		       COUNT(CASE WHEN `+measuredLatency+` THEN 1 END),
@@ -674,8 +674,8 @@ func (a *Analytics) queryHourly(ctx context.Context, window Window) ([]DailyToke
 	rows, err := a.db.DB().QueryContext(ctx, `
 		SELECT strftime('%Y-%m-%dT%H:00:00Z', r.start_time) AS bucket,
 		       COUNT(*),
-		       COUNT(CASE WHEN r.details_known = 1 AND r.success IN (0, 1) THEN 1 END),
-		       COALESCE(SUM(CASE WHEN r.details_known = 1 AND r.success = 0 THEN 1 ELSE 0 END), 0),
+		       COUNT(CASE WHEN `+observedOutcome+` AND r.success IN (0, 1) THEN 1 END),
+		       COALESCE(SUM(CASE WHEN `+observedOutcome+` AND r.success = 0 THEN 1 ELSE 0 END), 0),
 		       COALESCE(SUM(r.input_tokens), 0),
 		       COALESCE(SUM(r.output_tokens), 0),
 		       COALESCE(SUM(r.cache_read_tokens), 0),

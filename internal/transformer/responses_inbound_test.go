@@ -110,7 +110,7 @@ func TestResponsesInboundRejectsUnsupportedOrInvalidInput(t *testing.T) {
 		{"store", `{"model":"m","input":"hi","store":true}`, "store"},
 		{"background", `{"model":"m","input":"hi","background":true}`, "background"},
 		{"encrypted reasoning", `{"model":"m","input":[{"type":"reasoning","encrypted_content":"opaque","summary":[]}]}`, "encrypted_content"},
-		{"image result", `{"model":"m","input":[{"type":"function_call_output","call_id":"c","output":[{"type":"input_image","image_url":"https://example.invalid/a.png"}]}]}`, "tool result"},
+		{"file result", `{"model":"m","input":[{"type":"function_call_output","call_id":"c","output":[{"type":"input_image","file_id":"file_1"}]}]}`, "tool result"},
 		{"reference", `{"model":"m","input":[{"type":"item_reference","id":"msg_old"}]}`, "item_reference"},
 		{"file", `{"model":"m","input":[{"role":"user","content":[{"type":"input_file","file_id":"file_1"}]}]}`, "input_file"},
 		{"arguments", `{"model":"m","input":[{"type":"function_call","call_id":"c","name":"f","arguments":"oops"}]}`, "arguments"},
@@ -226,7 +226,7 @@ func TestResponsesOutboundErrorsAreNotCompletions(t *testing.T) {
 }
 
 func TestResponsesOutboundNonStreamingAndIncomplete(t *testing.T) {
-	msg := types.MessageResponse{Type: "message", Model: "m", StopReason: "max_tokens", Content: []types.ContentBlock{{Type: "text", Text: "partial"}}, Usage: types.Usage{InputTokens: 11, CacheReadInputTokens: 90, OutputTokens: 7}}
+	msg := types.MessageResponse{Type: "message", Model: "m", StopReason: "max_tokens", Content: []types.ContentBlock{{Type: "text", Text: "partial"}}, Usage: &types.Usage{InputTokens: 11, CacheReadInputTokens: 90, OutputTokens: 7}}
 	body, _ := json.Marshal(msg)
 	response, err := AnthropicMessageToResponse(body, "requested")
 	if err != nil {

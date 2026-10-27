@@ -34,7 +34,7 @@ func TestResponsesInterruptedStreamRecordsReasoning(t *testing.T) {
 	h.handleStreaming(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/messages", nil),
 		&types.MessageRequest{Stream: boolPtr(true)}, []config.ModelConfig{{Provider: "opencode-zen", ModelID: "synthetic"}},
 		nil, router.ScenarioDefault, "interrupted-responses")
-	rows, total, err := storage.NewRequests(db).Query(storage.RequestQuery{})
+	rows, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{})
 	if err != nil || total != 1 || len(rows) != 1 {
 		t.Fatalf("rows=%+v total=%d err=%v", rows, total, err)
 	}
@@ -64,7 +64,7 @@ func TestStreamRecordsReasoningBeforeInterruption(t *testing.T) {
 			h.handleStreaming(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/messages", nil),
 				&types.MessageRequest{Stream: boolPtr(true)}, []config.ModelConfig{{Provider: "opencode-zen", ModelID: "synthetic"}},
 				nil, router.ScenarioDefault, name)
-			rows, total, err := storage.NewRequests(db).Query(storage.RequestQuery{})
+			rows, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{})
 			if err != nil || total != 1 || len(rows) != 1 {
 				t.Fatalf("rows=%+v total=%d err=%v", rows, total, err)
 			}

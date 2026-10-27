@@ -126,7 +126,8 @@ func decodeResponsesInput(raw []byte, dst any) error {
 }
 
 // ResponsesToMessageRequest preserves message/tool order and rejects unsupported
-// state, hosted tools and multimodal tool outputs instead of dropping them.
+// state and hosted tools instead of dropping them. Output-wire validation owns
+// whether the selected target can represent image-bearing tool results.
 func ResponsesToMessageRequest(raw []byte) (*types.MessageRequest, error) {
 	var in responsesInboundRequest
 	if err := decodeResponsesInput(raw, &in); err != nil {
@@ -154,7 +155,7 @@ func ResponsesToMessageRequest(raw []byte) (*types.MessageRequest, error) {
 			return nil, fmt.Errorf("text.format options are not supported; use plain text")
 		}
 	}
-	out := &types.MessageRequest{Model: in.Model, Stream: in.Stream, Temperature: in.Temperature, TopP: in.TopP}
+	out := &types.MessageRequest{Model: in.Model, Stream: in.Stream, Temperature: in.Temperature, TopP: in.TopP, PromptCacheKey: in.PromptCacheKey}
 	if in.MaxOutputTokens != nil {
 		if *in.MaxOutputTokens <= 0 {
 			return nil, fmt.Errorf("max_output_tokens must be positive")
@@ -299,9 +300,9 @@ func ResponsesToMessageRequest(raw []byte) (*types.MessageRequest, error) {
 			if item.CallID == "" {
 				return nil, fmt.Errorf("input[%d] function_call_output requires call_id", i)
 			}
-			content, err := responsesInputContent(item.Output, false)
+			content, err := responsesInputContent(item.Output, true)
 			if err != nil {
-				return nil, fmt.Errorf("input[%d] tool result supports text only: %w", i, err)
+				return nil, fmt.Errorf("input[%d] tool result: %w", i, err)
 			}
 			encoded, _ := json.Marshal(content)
 			role = "user"
@@ -324,13 +325,7 @@ func ResponsesToMessageRequest(raw []byte) (*types.MessageRequest, error) {
 		if len(blocks) == 0 {
 			continue
 		}
-		if last := len(out.Messages) - 1; last >= 0 && out.Messages[last].Role == role {
-			blocks = append(out.Messages[last].ContentBlocks(), blocks...)
-			out.Messages[last].Content, _ = json.Marshal(blocks)
-		} else {
-			content, _ := json.Marshal(blocks)
-			out.Messages = append(out.Messages, types.Message{Role: role, Content: content})
-		}
+		appendResponsesMessage(out, role, blocks)
 	}
 	if len(out.Messages) == 0 {
 		return nil, fmt.Errorf("input must contain conversation content")
@@ -341,7 +336,21 @@ func ResponsesToMessageRequest(raw []byte) (*types.MessageRequest, error) {
 	return out, nil
 }
 
+func appendResponsesMessage(out *types.MessageRequest, role string, blocks []types.ContentBlock) {
+	if last := len(out.Messages) - 1; last >= 0 && out.Messages[last].Role == role {
+		blocks = append(out.Messages[last].ContentBlocks(), blocks...)
+		out.Messages[last].Content, _ = json.Marshal(blocks)
+	} else {
+		content, _ := json.Marshal(blocks)
+		out.Messages = append(out.Messages, types.Message{Role: role, Content: content})
+	}
+}
+
 func responsesInputContent(raw json.RawMessage, allowImage bool) ([]types.ContentBlock, error) {
+	return responsesContent(raw, allowImage, false)
+}
+
+func responsesContent(raw json.RawMessage, allowImage, native bool) ([]types.ContentBlock, error) {
 	raw = bytes.TrimSpace(raw)
 	var text string
 	if len(raw) > 0 && raw[0] == '"' && json.Unmarshal(raw, &text) == nil {
@@ -350,13 +359,18 @@ func responsesInputContent(raw json.RawMessage, allowImage bool) ([]types.Conten
 	var parts []struct {
 		Type        string          `json:"type"`
 		Text        string          `json:"text"`
+		Refusal     string          `json:"refusal"`
 		ImageURL    string          `json:"image_url"`
 		FileID      string          `json:"file_id"`
 		Detail      string          `json:"detail"`
 		Annotations json.RawMessage `json:"annotations"`
 		Logprobs    json.RawMessage `json:"logprobs"`
 	}
-	if err := decodeResponsesInput(raw, &parts); err != nil || parts == nil {
+	decode := decodeResponsesInput
+	if native {
+		decode = json.Unmarshal
+	}
+	if err := decode(raw, &parts); err != nil || parts == nil {
 		return nil, fmt.Errorf("content must be text or a content array")
 	}
 	blocks := make([]types.ContentBlock, 0, len(parts))
@@ -365,8 +379,8 @@ func responsesInputContent(raw json.RawMessage, allowImage bool) ([]types.Conten
 		case "input_text", "output_text":
 			blocks = append(blocks, types.ContentBlock{Type: "text", Text: part.Text})
 		case "input_image":
-			if !allowImage || part.FileID != "" || part.Detail != "" && part.Detail != "auto" {
-				return nil, fmt.Errorf("input_image requires a user image_url with detail:auto; file_id and tool-result images are unsupported")
+			if !allowImage || part.FileID != "" || !native && part.Detail != "" && part.Detail != "auto" {
+				return nil, fmt.Errorf("input_image requires user content or a tool result with image_url and detail:auto; file_id is unsupported")
 			}
 			source := &types.ImageSource{Type: "url", URL: part.ImageURL}
 			if strings.HasPrefix(part.ImageURL, "data:") {
@@ -385,6 +399,11 @@ func responsesInputContent(raw json.RawMessage, allowImage bool) ([]types.Conten
 				}
 			}
 			blocks = append(blocks, types.ContentBlock{Type: "image", Source: source})
+		case "refusal":
+			if !native {
+				return nil, fmt.Errorf("refusal input requires a native Responses target")
+			}
+			blocks = append(blocks, types.ContentBlock{Type: "text", Text: part.Refusal})
 		default:
 			return nil, fmt.Errorf("content type %q is not supported", part.Type)
 		}
@@ -459,10 +478,7 @@ func inboundResponseItem(block types.ContentBlock) (map[string]any, error) {
 // AnthropicMessageToResponse converts non-streaming output without changing the
 // accounting path. Unknown reasoning-token breakdowns are intentionally omitted.
 func AnthropicMessageToResponse(body []byte, model string) (map[string]any, error) {
-	var msg struct {
-		types.MessageResponse
-		Usage *types.Usage `json:"usage"`
-	}
+	var msg types.MessageResponse
 	if err := json.Unmarshal(body, &msg); err != nil || msg.Type != "message" {
 		return nil, fmt.Errorf("invalid upstream Messages response")
 	}
@@ -745,6 +761,13 @@ func (w *ResponsesStreamWriter) event(data []byte) error {
 		if err := finishInboundResponse(w.response, w.stop); err != nil {
 			return err
 		}
+		for _, block := range w.blocks {
+			if block.item["status"] == "in_progress" {
+				if err := w.closeBlock(block); err != nil {
+					return err
+				}
+			}
+		}
 		w.response["output"] = w.output
 		if w.usageSeen {
 			w.response["usage"] = responsesUsage(w.usage)
@@ -773,16 +796,26 @@ func (w *ResponsesStreamWriter) textDelta(block *inboundResponseBlock, text stri
 
 func (w *ResponsesStreamWriter) closeBlock(block *inboundResponseBlock) error {
 	item := block.item
+	status := "completed"
 	if item["type"] == "function_call" {
 		arguments := block.arguments.String()
 		if arguments == "" {
 			arguments = block.initialJSON
 		}
 		var object map[string]json.RawMessage
-		if json.Unmarshal([]byte(arguments), &object) != nil || object == nil {
-			return fmt.Errorf("upstream tool arguments are not a JSON object")
-		}
 		item["arguments"] = arguments
+		if json.Unmarshal([]byte(arguments), &object) != nil || object == nil {
+			if w.stop == "" {
+				// The stop reason arrives after content_block_stop; only a
+				// budget terminal permits incomplete function arguments.
+				block.closed = true
+				return nil
+			}
+			if w.stop != "max_tokens" {
+				return fmt.Errorf("upstream tool arguments are not a JSON object")
+			}
+			status = "incomplete"
+		}
 		if err := w.emit("response.function_call_arguments.done", map[string]any{"item_id": item["id"], "output_index": block.outputIndex, "arguments": arguments}); err != nil {
 			return err
 		}
@@ -804,7 +837,7 @@ func (w *ResponsesStreamWriter) closeBlock(block *inboundResponseBlock) error {
 			return err
 		}
 	}
-	item["status"] = "completed"
+	item["status"] = status
 	block.closed = true
 	return w.emit("response.output_item.done", map[string]any{"output_index": block.outputIndex, "item": item})
 }

@@ -48,14 +48,14 @@ func TestWorkBuddyReasoningReachesBothProtocolsAndHistory(t *testing.T) {
 				}
 				usage := `"usage":{"prompt_tokens":101,"completion_tokens":36,"total_tokens":137,"prompt_tokens_details":{"cached_tokens":90}` + tc.fields + `}`
 				if request.Stream {
-					_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: {\"choices\":[],"+usage+"}\n\n")
+					_, _ = io.WriteString(w, "data: {\"model\":\"synthetic-reported\",\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: {\"choices\":[],"+usage+"}\n\n")
 					if tc.trailer != "" {
 						_, _ = fmt.Fprintf(w, "data: {\"choices\":[],\"usage\":{%s}}\n\n", tc.trailer)
 					}
 					_, _ = io.WriteString(w, "data: [DONE]\n\n")
 					return
 				}
-				_, _ = io.WriteString(w, `{"id":"synthetic","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],`+usage+`}`)
+				_, _ = io.WriteString(w, `{"id":"synthetic","model":"synthetic-reported","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],`+usage+`}`)
 			}))
 			t.Cleanup(upstream.Close)
 			dir := t.TempDir()
@@ -136,11 +136,14 @@ func TestWorkBuddyReasoningReachesBothProtocolsAndHistory(t *testing.T) {
 					}
 				}
 			}
-			rows, total, err := storage.NewRequests(srv.Storage()).Query(storage.RequestQuery{})
+			rows, total, err := storage.NewRequests(srv.Storage()).Query(t.Context(), storage.RequestQuery{})
 			if err != nil || total != 4 || len(rows) != 4 {
 				t.Fatalf("history rows=%d total=%d err=%v", len(rows), total, err)
 			}
 			for _, row := range rows {
+				if row.Model != "global:synthetic" || row.UpstreamModel != "synthetic-reported" {
+					t.Fatalf("reported model lost or changed billing identity: %+v", row)
+				}
 				if !row.Success || row.Provider != "workbuddy" || row.InputTokens != 11 || row.CacheReadTokens != 90 || row.OutputTokens != 36 || row.ReasoningTokens != tc.want {
 					t.Fatalf("WorkBuddy history lost usage: %+v", row)
 				}

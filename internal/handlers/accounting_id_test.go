@@ -53,7 +53,7 @@ func TestRepeatedCorrelationIDPreservesExecutions(t *testing.T) {
 						t.Fatalf("status=%d headers=%v body=%s", w.Code, w.Header(), w.Body.String())
 					}
 				}
-				rows, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+				rows, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
 				if err != nil || calls.Load() != 2 || total != 2 {
 					t.Fatalf("upstream executions=%d persisted=%d err=%v; want 2 and 2", calls.Load(), total, err)
 				}

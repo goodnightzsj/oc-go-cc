@@ -48,7 +48,7 @@ func TestSummarySeesReconciledCosts(t *testing.T) {
 	if report.Updated != 1 {
 		t.Fatalf("report=%+v", report)
 	}
-	recs, _, err := repo.Query(RequestQuery{})
+	recs, _, err := repo.Query(t.Context(), RequestQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}

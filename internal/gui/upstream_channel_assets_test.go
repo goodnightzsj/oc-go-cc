@@ -88,7 +88,7 @@ func TestUpstreamModelBadgeOnlyForARealRewrite(t *testing.T) {
 	// The model column names what ran and nothing else: the id we sent is a
 	// routing detail the gateway already resolved, and a second line under
 	// every row doubles its height to show a string the reader never acts on.
-	if !strings.Contains(source, "const servedModel = h.upstream_model || h.model") {
+	if !strings.Contains(source, "const servedModel = historyDisplayModel(h)") {
 		t.Error("the model column must show the observed model when one was recorded")
 	}
 	if strings.Contains(source, "history-requested-model") {

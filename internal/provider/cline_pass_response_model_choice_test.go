@@ -32,7 +32,7 @@ func TestExecuteNamesTheModelFromTheStreamWhenRoutingBlockIsAbsent(t *testing.T)
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.Copy(io.Discard, r.Body)
 				w.Header().Set("Content-Type", "text/event-stream")
-				chunk := map[string]any{"id": "c1", "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"content": "hi"}}}}
+				chunk := map[string]any{"id": "c1", "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"content": "hi"}, "finish_reason": "stop"}}}
 				if tc.chunkModel != "" {
 					chunk["model"] = tc.chunkModel
 				}
@@ -64,6 +64,9 @@ func TestExecuteNamesTheModelFromTheStreamWhenRoutingBlockIsAbsent(t *testing.T)
 			}
 			if !strings.Contains(got.Model, tc.want) {
 				t.Errorf("response model = %q, want %q", got.Model, tc.want)
+			}
+			if result.ResponseModel != tc.chunkModel || result.UpstreamModel != tc.routing {
+				t.Errorf("source declaration and canonical model conflated: %+v", result)
 			}
 		})
 	}

@@ -364,6 +364,7 @@ func (d *Database) initSchema(ctx context.Context) error {
 		cost_usd REAL,
 		cost_source TEXT,
 		details_known INTEGER NOT NULL DEFAULT 1,
+		outcome_known INTEGER,
 		usage_trusted INTEGER NOT NULL DEFAULT 0,
 		streaming INTEGER,
 		success INTEGER,
@@ -466,6 +467,8 @@ func (d *Database) migrateColumns(ctx context.Context) error {
 		{"requests", "cost_source", `ALTER TABLE requests ADD COLUMN cost_source TEXT`},
 		{"requests", "reasoning_tokens", `ALTER TABLE requests ADD COLUMN reasoning_tokens INTEGER DEFAULT 0`},
 		{"requests", "details_known", `ALTER TABLE requests ADD COLUMN details_known INTEGER NOT NULL DEFAULT 1`},
+		// NULL preserves legacy writers; observedOutcome resolves their recorded evidence.
+		{"requests", "outcome_known", `ALTER TABLE requests ADD COLUMN outcome_known INTEGER`},
 		{"requests", "usage_trusted", `ALTER TABLE requests ADD COLUMN usage_trusted INTEGER NOT NULL DEFAULT 0`},
 		{"requests", "peak_multiplier", `ALTER TABLE requests ADD COLUMN peak_multiplier REAL NOT NULL DEFAULT 1`},
 		// Existing rows keep NULL, meaning "the client asked for the model that
@@ -476,11 +479,10 @@ func (d *Database) migrateColumns(ctx context.Context) error {
 		// NULL means "this platform does not publish one, or the row predates
 		// the column" - not "the channel was empty". Only ClinePass fills it.
 		{"requests", "upstream_channel", `ALTER TABLE requests ADD COLUMN upstream_channel TEXT`},
-		// The model the gateway says it actually ran, when that is not the id we
-		// sent. NULL means the platform publishes none, the gateway ran what was
-		// asked for, or the row predates the column - all three read as "the
-		// recorded model is what ran".
+		// Canonical gateway model or the existing differing-model observation.
 		{"requests", "upstream_model", `ALTER TABLE requests ADD COLUMN upstream_model TEXT`},
+		// A separate source declaration; old rows cannot be inferred or backfilled.
+		{"requests", "response_model", `ALTER TABLE requests ADD COLUMN response_model TEXT`},
 		{"requests", "key_hint", `ALTER TABLE requests ADD COLUMN key_hint TEXT`},
 		// Milliseconds from request start to the upstream's first byte. NULL
 		// means it was not measured - a non-streaming request has no first byte,

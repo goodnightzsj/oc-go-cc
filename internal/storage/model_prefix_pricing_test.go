@@ -28,7 +28,7 @@ func TestPricingIdentityPreservesOtherProviders(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		rows, _, err := NewRequests(db).Query(RequestQuery{Page: 1, PageSize: 10})
+		rows, _, err := NewRequests(db).Query(t.Context(), RequestQuery{Page: 1, PageSize: 10})
 		if err != nil || len(rows) != 1 {
 			t.Fatalf("rows=%v err=%v", rows, err)
 		}
@@ -76,7 +76,7 @@ func TestRealmPrefixedModelIsPriced(t *testing.T) {
 		StartTime: time.Now().Add(-time.Minute), InputTokens: 1_000_000, Success: true,
 	})
 
-	rows, _, err := NewRequests(db).Query(RequestQuery{Page: 1, PageSize: 10})
+	rows, _, err := NewRequests(db).Query(t.Context(), RequestQuery{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatal(err)
 	}

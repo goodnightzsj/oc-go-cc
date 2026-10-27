@@ -24,7 +24,7 @@ func TestMissingObservationsSortLast(t *testing.T) {
 	for _, field := range []string{"first_byte_ms", "reasoning_effort"} {
 		for _, order := range []string{"asc", "desc"} {
 			t.Run(field+"/"+order, func(t *testing.T) {
-				recs, _, err := repo.Query(RequestQuery{SortBy: field, SortOrder: order})
+				recs, _, err := repo.Query(t.Context(), RequestQuery{SortBy: field, SortOrder: order})
 				if err != nil {
 					t.Fatal(err)
 				}

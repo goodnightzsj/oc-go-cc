@@ -55,6 +55,7 @@ func TestNormalizedResponsesPreservesCacheAndToolStop(t *testing.T) {
 		t.Fatalf("Responses conversion = %+v", got)
 	}
 	response.IncompleteDetails = &types.ResponsesIncompleteDetails{Reason: "max_output_tokens"}
+	response.Status = "incomplete"
 	if got, err := ResponsesToNormalized(&response, "synthetic"); err != nil || got.StopReason != "max_tokens" {
 		t.Fatalf("incomplete treated as complete: %+v, %v", got, err)
 	}
@@ -103,7 +104,7 @@ func TestResponsesReasoningUsageIsAnOptionalOutputSplit(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var wire types.ResponsesResponse
-			if err := json.Unmarshal([]byte(`{"usage":{"input_tokens":101,"output_tokens":36,"input_tokens_details":{"cached_tokens":90}`+tc.details+`}}`), &wire); err != nil {
+			if err := json.Unmarshal([]byte(`{"status":"completed","usage":{"input_tokens":101,"output_tokens":36,"input_tokens_details":{"cached_tokens":90}`+tc.details+`}}`), &wire); err != nil {
 				t.Fatal(err)
 			}
 			normalized, err := ResponsesToNormalized(&wire, "synthetic")

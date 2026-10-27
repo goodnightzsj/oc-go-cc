@@ -15,15 +15,31 @@ import (
 )
 
 func TestNativeResponsesReasoningReachesBothProtocolsAndHistory(t *testing.T) {
+	testResponsesReasoningReachesBothProtocolsAndHistory(t, "opencode-go")
+}
+
+func TestCommandCodeResponsesReachesBothProtocolsAndHistory(t *testing.T) {
+	testResponsesReasoningReachesBothProtocolsAndHistory(t, "commandcode")
+}
+
+func testResponsesReasoningReachesBothProtocolsAndHistory(t *testing.T, provider string) {
+	t.Helper()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/responses" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 			http.NotFound(w, r)
 			return
 		}
-		var req struct{ Stream bool }
+		var req struct {
+			Stream         bool
+			Input          json.RawMessage
+			PromptCacheKey string `json:"prompt_cache_key"`
+		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Error(err)
+		}
+		if strings.Contains(string(req.Input), "responses hello") && req.PromptCacheKey != "synthetic-affinity" {
+			t.Errorf("Responses affinity lost at HTTP adapter: %q", req.PromptCacheKey)
 		}
 		response := `{"id":"resp_synthetic","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":101,"output_tokens":36,"total_tokens":137,"input_tokens_details":{"cached_tokens":90},"output_tokens_details":{"reasoning_tokens":26}}}`
 		if req.Stream {
@@ -36,9 +52,10 @@ func TestNativeResponsesReasoningReachesBothProtocolsAndHistory(t *testing.T) {
 	t.Cleanup(upstream.Close)
 	respect := false
 	srv, err := NewServer(config.NewAtomicConfig(&config.Config{
-		ActiveSite:            "opencode-go",
+		ActiveSite:            provider,
 		OpenCodeGo:            config.OpenCodeGoConfig{ResponsesBaseURL: upstream.URL + "/v1/responses", APIKey: "synthetic-go-key"},
-		Models:                map[string]config.ModelConfig{"default": {Provider: "opencode-go", ModelID: "synthetic-responses", WireFormat: "responses", MaxTokens: 100}},
+		CommandCode:           config.CommandCodeConfig{ResponsesBaseURL: upstream.URL + "/v1/responses", APIKey: "synthetic-command-key"},
+		Models:                map[string]config.ModelConfig{"default": {Provider: provider, ModelID: "synthetic-responses", WireFormat: "responses", MaxTokens: 100}},
 		RespectRequestedModel: &respect,
 		Storage:               &config.StorageConfig{DatabasePath: filepath.Join(t.TempDir(), "history.db"), RetentionDays: -1},
 	}, ""), nil)
@@ -51,7 +68,7 @@ func TestNativeResponsesReasoningReachesBothProtocolsAndHistory(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/stream=%t", path, stream), func(t *testing.T) {
 				payload := fmt.Sprintf(`{"model":"m","max_tokens":100,"messages":[{"role":"user","content":"hi"}],"stream":%t}`, stream)
 				if path == "/v1/responses" {
-					payload = fmt.Sprintf(`{"model":"m","input":"hi","stream":%t}`, stream)
+					payload = fmt.Sprintf(`{"model":"m","input":"responses hello","prompt_cache_key":"synthetic-affinity","stream":%t}`, stream)
 				}
 				w := httptest.NewRecorder()
 				srv.httpSrv.Handler.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader(payload)))
@@ -104,11 +121,14 @@ func TestNativeResponsesReasoningReachesBothProtocolsAndHistory(t *testing.T) {
 			})
 		}
 	}
-	rows, total, err := storage.NewRequests(srv.Storage()).Query(storage.RequestQuery{})
+	rows, total, err := storage.NewRequests(srv.Storage()).Query(t.Context(), storage.RequestQuery{})
 	if err != nil || total != 4 {
 		t.Fatalf("history count=%d err=%v", total, err)
 	}
 	for _, row := range rows {
+		if row.Provider != provider {
+			t.Errorf("history attributed to %q, want %q", row.Provider, provider)
+		}
 		if row.InputTokens != 11 || row.CacheReadTokens != 90 || row.OutputTokens != 36 {
 			t.Errorf("wrong totals: input=%d cache=%d output=%d", row.InputTokens, row.CacheReadTokens, row.OutputTokens)
 		}

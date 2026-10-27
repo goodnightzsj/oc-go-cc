@@ -12,7 +12,7 @@ import (
 func TestResponsesPreservesKnownReasoning(t *testing.T) {
 	for _, reasoning := range []int{0, 26} {
 		usage := types.Usage{InputTokens: 20, OutputTokens: 36, ReasoningTokens: reasoning}
-		msg := types.MessageResponse{ID: "test", Type: "message", Role: "assistant", Model: "m", StopReason: "end_turn", Usage: usage}
+		msg := types.MessageResponse{ID: "test", Type: "message", Role: "assistant", Model: "m", StopReason: "end_turn", Usage: &usage}
 		for _, mode := range []string{"nonstream", "message_start", "message_delta", "interrupted"} {
 			t.Run(mode, func(t *testing.T) {
 				var raw []byte

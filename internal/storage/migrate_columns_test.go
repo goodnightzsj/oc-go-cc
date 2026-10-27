@@ -27,7 +27,7 @@ func TestMigrateColumnsIsANoOpOnACurrentSchema(t *testing.T) {
 // observed on that axis. A default would fabricate an observation.
 func TestMigrateColumnsAddsMissingColumnsAndLeavesOldRowsNull(t *testing.T) {
 	db := newCostTestDB(t)
-	added := []string{"first_byte_ms", "reasoning_effort", "upstream_model", "upstream_channel"}
+	added := []string{"first_byte_ms", "reasoning_effort", "upstream_model", "upstream_channel", "response_model"}
 	for _, column := range added {
 		if _, err := db.DB().Exec(`ALTER TABLE requests DROP COLUMN ` + column); err != nil {
 			t.Skipf("this SQLite cannot drop columns (%v)", err)
@@ -43,14 +43,15 @@ func TestMigrateColumnsAddsMissingColumnsAndLeavesOldRowsNull(t *testing.T) {
 		t.Fatalf("migration on an old database failed: %v", err)
 	}
 
-	var fb, re, um, uc any
+	var fb, re, um, uc, rm any
 	row := db.DB().QueryRow(
-		`SELECT first_byte_ms, reasoning_effort, upstream_model, upstream_channel FROM requests WHERE id='old'`)
-	if err := row.Scan(&fb, &re, &um, &uc); err != nil {
+		`SELECT first_byte_ms, reasoning_effort, upstream_model, upstream_channel, response_model FROM requests WHERE id='old'`)
+	if err := row.Scan(&fb, &re, &um, &uc, &rm); err != nil {
 		t.Fatalf("the added columns are not readable: %v", err)
 	}
 	for name, value := range map[string]any{
 		"first_byte_ms": fb, "reasoning_effort": re, "upstream_model": um, "upstream_channel": uc,
+		"response_model": rm,
 	} {
 		if value != nil {
 			t.Errorf("%s = %v for a pre-existing row, want NULL", name, value)

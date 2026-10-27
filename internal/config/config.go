@@ -595,10 +595,11 @@ func (c *OpenRouterConfig) EffectiveAPIKeys() []string {
 }
 
 // CommandCodeConfig uses the official Provider API, with its own credentials.
-// BaseURL and AnthropicBaseURL are complete endpoint URLs, like OpenCode Go.
+// URLs are complete endpoints, like OpenCode Go.
 type CommandCodeConfig struct {
 	BaseURL          string   `json:"base_url"`
 	AnthropicBaseURL string   `json:"anthropic_base_url"`
+	ResponsesBaseURL string   `json:"responses_base_url"`
 	APIKey           string   `json:"api_key,omitempty"`
 	APIKeys          []string `json:"api_keys,omitempty"`
 	// KeyStrategy names how requests are scheduled across this platform's keys.

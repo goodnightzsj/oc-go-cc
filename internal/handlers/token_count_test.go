@@ -1,10 +1,28 @@
 package handlers
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/routatic/proxy/internal/router"
 	"github.com/routatic/proxy/pkg/types"
 )
+
+func TestToolResultImagesAffectRoutingAndTokenEstimate(t *testing.T) {
+	blocks := []types.ContentBlock{{Type: "tool_result", ToolUseID: "shot", Content: json.RawMessage(`[{"type":"text","text":"screen"},{"type":"image","source":{"type":"url","url":"https://example.invalid/shot.png"}}]`)}}
+	hashes := imageHashesFromBlocks(blocks)
+	if len(hashes) != 1 || imageTokenEstimate(blocks) != 1500 {
+		t.Fatalf("nested image omitted: hashes=%v estimate=%d", hashes, imageTokenEstimate(blocks))
+	}
+	messages := []router.MessageContent{{Role: "user", HasImage: len(hashes) > 0, ImageHashes: hashes}}
+	if !router.AnalyzeRequestFacts(messages).NeedsVision {
+		t.Fatal("tool screenshot did not require vision")
+	}
+	messages = append(messages, messages[0])
+	if router.AnalyzeRequestFacts(messages).NeedsVision {
+		t.Fatal("replayed screenshot became new image")
+	}
+}
 
 func TestImageTokenEstimateFromBase64_Zero(t *testing.T) {
 	got := imageTokenEstimateFromBase64(0)

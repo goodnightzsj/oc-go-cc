@@ -26,20 +26,14 @@ type clineChannelBody struct {
 	line                                 []byte
 	dropping, done, reported, incomplete bool
 	target, actual, requestID            string
-	// upstreamModel is the model the gateway says it actually ran, which is not
-	// always the id we sent. The gateway rewrites some request ids onto a
-	// virtual model (`vmc/...-contributor-fallbacks`) and routes those through
-	// its own fallback chain, so the id in the request stops describing what
-	// produced the answer. Observing it is the only way to report that without
-	// changing the response the client already received.
+	// Canonical routing model, distinct from the response's virtual model ID.
 	upstreamModel string
 	// firstByteAt is when the upstream's first byte arrived, set by the peek.
 	// Zero means it was not measured.
 	firstByteAt time.Time
 	// servedModel is the OpenAI chunk's `model` field as the gateway filled it,
-	// which is available before any content is written. UpstreamModel is the
-	// same fact from the routing block at the end of the stream; ServedModel()
-	// prefers this one because it is the only one a response can carry.
+	// available before any content is written. It may differ from the routing
+	// block's canonical UpstreamModel, which arrives at the end of the stream.
 	servedModel string
 	// keyHint labels the credential this attempt used, for the history record.
 	keyHint string
@@ -200,9 +194,8 @@ func (b *clineChannelBody) observe(line []byte) {
 		// on every frame with the id it actually ran. It is the authoritative
 		// answer for "what produced this", and it is available on the FIRST
 		// frame - unlike canonicalSlug, which arrives in the routing block at
-		// the end. Both are recorded because they answer from different
-		// moments: Model is what the caller can be told before any content is
-		// written, canonicalSlug is what survives to the stored record.
+		// the end. The two describe different axes: response declaration and
+		// canonical routing model. Neither is an upstream channel.
 		Model   string `json:"model"`
 		Choices []struct {
 			Delta   clineRoutingMetadata `json:"delta"`

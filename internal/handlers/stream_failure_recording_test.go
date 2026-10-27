@@ -38,7 +38,7 @@ func TestTruncatedStreamWithoutUsageIsRecorded(t *testing.T) {
 		[]config.ModelConfig{{Provider: "opencode-zen", ModelID: "synthetic"}},
 		nil, router.ScenarioDefault, "no-usage-failure")
 
-	rows, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+	rows, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestClientCancelBeforePayloadIsNotRecorded(t *testing.T) {
 		[]config.ModelConfig{{Provider: "opencode-zen", ModelID: "synthetic"}},
 		nil, router.ScenarioDefault, "client-cancel")
 
-	_, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+	_, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestSuccessfulStreamStaysObserved(t *testing.T) {
 		[]config.ModelConfig{{Provider: "opencode-zen", ModelID: "synthetic"}},
 		nil, router.ScenarioDefault, "clean-success")
 
-	rows, total, err := storage.NewRequests(db).Query(storage.RequestQuery{Page: 1, PageSize: 10})
+	rows, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatal(err)
 	}

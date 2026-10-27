@@ -2,6 +2,27 @@ package gui
 
 import "testing"
 
+func TestOverviewCostWindowsHaveIndependentCoverage(t *testing.T) {
+	runPlatformBehavior(t, platformBehaviorDOMScript+`
+async function checks() {
+  const complete = {total_requests:3, unknown_cost_requests:0, est_cost_usd:4};
+  for (const lang of ['en','zh']) {
+    currentLang = lang;
+    for (const window of ['summary','today','retained']) {
+      const data = {summary:complete, today:complete, retained:complete};
+      data[window] = {...complete, unknown_cost_requests:1, est_cost_usd:5};
+      renderOverviewUsage(data, [], {});
+      const note = document.getElementById('m-cost-note').textContent;
+      assert.ok(note.includes(costCoverageNote(data[window])), window + ' missing its own coverage: ' + note);
+      assert.ok(note.includes((lang === 'zh' ? '今日' : 'Today') + ' (UTC) $' + (window === 'today' ? '5.00' : '4.00')));
+      assert.ok(note.includes(t('data.retained') + ' $' + (window === 'retained' ? '5.00' : '4.00')));
+      assert.equal(document.getElementById('m-cost').textContent, window === 'summary' ? '$5.00' : '$4.00');
+    }
+  }
+}
+`+platformBehaviorRunScript)
+}
+
 func TestAllPlatformCostPresentation(t *testing.T) {
 	runPlatformBehavior(t, platformBehaviorDOMScript+`
 async function checks() {

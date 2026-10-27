@@ -25,7 +25,7 @@ func TestStreamTimingStoragePreservesUnknownAndZero(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	rows, _, err := repo.Query(RequestQuery{})
+	rows, _, err := repo.Query(t.Context(), RequestQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,7 +16,7 @@ import (
 // RequestRecord holds metadata for a single completed proxy request.
 type RequestRecord struct {
 	ID             string        // unique request ID
-	Model          string        // actual upstream model used (e.g. "kimi-k2.6")
+	Model          string        // route/billing model sent to the provider
 	RequestedModel string        // model the client asked for, when it differs from Model
 	Provider       string        // provider name (e.g. "opencode-go")
 	Scenario       string        // routing scenario (e.g. "default", "complex")
@@ -60,18 +60,10 @@ type RequestRecord struct {
 	CostUSD         float64 // provider cost in USD, estimated when CostSource is "estimated"
 	CostKnown       bool    // whether CostUSD is available
 	CostSource      string  // "estimated" or "provider"
-	DetailsKnown    bool    // whether routing/status/latency fields were observed locally
-	// UsageUnobserved marks a failure recorded before any usage arrived: the
-	// upstream said nothing about tokens, so the row carries the outcome and
-	// nothing to average. It is stored as details_known = 0, which is what keeps
-	// success rate, latency and throughput from counting a measurement nobody
-	// made.
-	//
-	// It is a separate field rather than a use of DetailsKnown because the zero
-	// value of DetailsKnown means "unknown" while every ordinary row - all four
-	// Insert call sites but one - is a measured request. Keying the column on a
-	// field whose default is false would mark every successful request
-	// unobserved.
+	DetailsKnown    bool    // legacy local usage/measurement flag on readback
+	OutcomeKnown    bool    // whether the request outcome was observed, independent of usage
+	// UsageUnobserved keeps missing usage out of pricing and throughput. Local
+	// Insert calls always carry an observed outcome, even when usage is absent.
 	UsageUnobserved bool
 	Streaming       bool // whether this was a streaming request
 
@@ -98,18 +90,13 @@ type RequestRecord struct {
 	// what makes that visible after the fact.
 	UpstreamChannel string `json:"upstream_channel,omitempty"`
 
-	// UpstreamModel is the model the gateway says it actually ran, when that is
-	// not the id we sent. It is empty for every platform that does not report
-	// one, and for a gateway that ran exactly what was asked for.
-	//
-	// The distinction matters because a gateway may answer a request for one id
-	// by running a virtual model behind its own fallback chain: ClinePass
-	// answers `cline-pass/deepseek-v4.1-flash-1017` with
-	// `vmc/deepseek-v4p1-flash-1017-contributor-fallbacks`, and that virtual
-	// model is what decides which upstream channel is tried first. The Model
-	// column keeps the id the client asked for - it is what the dashboard and
-	// the billing rules key on - so this is the only place the real one lives.
+	// UpstreamModel preserves canonical routing metadata (ClinePass), otherwise
+	// the existing differing-model observation. It is not the billing identity.
 	UpstreamModel string `json:"upstream_model,omitempty"`
+	// ResponseModel is the source response's model declaration. ClinePass may
+	// declare vmc/... while canonicalSlug and the actual channel say deepseek.
+	// Empty means unobserved, including records predating this field.
+	ResponseModel string `json:"response_model,omitempty"`
 
 	// KeyHint identifies which credential in a pool carried the request, as a
 	// masked label - the last four characters. Never the credential itself.

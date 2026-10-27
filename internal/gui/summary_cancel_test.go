@@ -13,7 +13,7 @@ import (
 )
 
 func TestSummaryHandlersHonorCancellation(t *testing.T) {
-	for _, name := range []string{"history", "analytics", "daily", "hourly", "performance", "performance-aggregate"} {
+	for _, name := range []string{"history", "history-page", "history-channels", "analytics", "daily", "hourly", "performance", "performance-aggregate"} {
 		for _, phase := range []string{"before", "waiting"} {
 			t.Run(name+"/"+phase, func(t *testing.T) {
 				db, err := storage.Open(storage.Config{DatabasePath: filepath.Join(t.TempDir(), "summary.db"), WALEnabled: true})
@@ -24,6 +24,7 @@ func TestSummaryHandlersHonorCancellation(t *testing.T) {
 				s, analytics := &Server{storage: db}, NewAnalyticsHandler(db)
 				handler := map[string]http.HandlerFunc{
 					"history": s.handleHistorySummary, "analytics": analytics.Summary,
+					"history-page": s.handleHistory, "history-channels": s.handleHistoryChannels,
 					"daily": analytics.TokenTrend, "hourly": analytics.TokenTrend,
 					"performance": s.handlePerformance, "performance-aggregate": s.handlePerformanceAggregate,
 				}[name]

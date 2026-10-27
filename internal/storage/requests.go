@@ -16,6 +16,9 @@ import (
 const (
 	CostSourceEstimated = "estimated"
 	CostSourceProvider  = "provider"
+	// Legacy imports never mark streaming. A failed stream was locally observed
+	// even when missing usage left details_known=0. Explicit new values win.
+	observedOutcome = `COALESCE(outcome_known, CASE WHEN details_known = 1 OR (streaming = 1 AND success = 0) THEN 1 ELSE 0 END) = 1`
 )
 
 // Requests provides methods for reading and writing request records.
@@ -53,11 +56,11 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 		INSERT OR REPLACE INTO requests (
 			id, model, requested_model, provider, scenario, start_time, duration_ms,
 			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens,
-			cost_usd, cost_source, details_known, usage_trusted, streaming, success, error_msg, attempt,
-			peak_multiplier, upstream_channel, upstream_model, first_byte_ms, reasoning_effort,
+			cost_usd, cost_source, details_known, outcome_known, usage_trusted, streaming, success, error_msg, attempt,
+			peak_multiplier, upstream_channel, upstream_model, response_model, first_byte_ms, reasoning_effort,
 			key_hint, first_event_ms, first_content_ms, message_end_ms,
 			generation_first_output_ms, generation_duration_ms, generation_output_tokens
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		rec.ID,
 		rec.Model,
@@ -81,6 +84,7 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 		peakMultiplierForRecord(rec),
 		nullIfEmpty(rec.UpstreamChannel),
 		nullIfEmpty(rec.UpstreamModel),
+		nullIfEmpty(rec.ResponseModel),
 		nullIfZero(int64(rec.FirstByte.Milliseconds())),
 		nullIfEmpty(rec.ReasoningEffort),
 		nullIfEmpty(rec.KeyHint),
@@ -314,8 +318,8 @@ func (r *Requests) summarize(ctx context.Context, q RequestQuery) (*RequestSumma
 	rows, err := r.db.DB().QueryContext(ctx, `
 		SELECT model, COALESCE(provider, ''), `+scenarioDimension+`, DATE(start_time),
 		       COUNT(*),
-		       COALESCE(SUM(CASE WHEN details_known = 1 AND success = 1 THEN 1 ELSE 0 END), 0),
-		       COUNT(CASE WHEN details_known = 1 AND success IN (0, 1) THEN 1 END),
+		       COALESCE(SUM(CASE WHEN `+observedOutcome+` AND success = 1 THEN 1 ELSE 0 END), 0),
+		       COUNT(CASE WHEN `+observedOutcome+` AND success IN (0, 1) THEN 1 END),
 		       COALESCE(SUM(COALESCE(input_tokens, 0)), 0),
 		       COALESCE(SUM(COALESCE(output_tokens, 0)), 0),
 		       COALESCE(SUM(COALESCE(cache_read_tokens, 0)), 0),
@@ -449,7 +453,7 @@ func (r *Requests) summarize(ctx context.Context, q RequestQuery) (*RequestSumma
 }
 
 // Query returns one server-side filtered history page and the matching total.
-func (r *Requests) Query(q RequestQuery) ([]history.RequestRecord, int64, error) {
+func (r *Requests) Query(ctx context.Context, q RequestQuery) ([]history.RequestRecord, int64, error) {
 	if q.Page < 1 {
 		q.Page = 1
 	}
@@ -459,7 +463,7 @@ func (r *Requests) Query(q RequestQuery) ([]history.RequestRecord, int64, error)
 	offset := (q.Page - 1) * q.PageSize
 	where, args := requestWhere(q)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	var total int64
@@ -482,8 +486,8 @@ func (r *Requests) Query(q RequestQuery) ([]history.RequestRecord, int64, error)
 	rows, err := r.db.DB().QueryContext(ctx, `
 		SELECT id, model, requested_model, provider, scenario, start_time, duration_ms,
 		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens,
-		       cost_usd, cost_source, details_known, streaming, success, error_msg, attempt,
-		       peak_multiplier, upstream_channel, upstream_model, first_byte_ms, reasoning_effort,
+		       cost_usd, cost_source, details_known, `+observedOutcome+`, streaming, success, error_msg, attempt,
+		       peak_multiplier, upstream_channel, upstream_model, response_model, first_byte_ms, reasoning_effort,
 		       key_hint, first_event_ms, first_content_ms, message_end_ms,
 		       generation_first_output_ms, generation_duration_ms, generation_output_tokens
 		FROM requests`+where+`
@@ -515,8 +519,8 @@ func (r *Requests) Query(q RequestQuery) ([]history.RequestRecord, int64, error)
 // provider narrows the list to one platform's rows. It is empty for "every
 // platform", which is the same population the history filter sees when no
 // platform is selected.
-func (r *Requests) ObservedChannels(provider string) ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (r *Requests) ObservedChannels(ctx context.Context, provider string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	query := `SELECT upstream_channel FROM requests WHERE upstream_channel IS NOT NULL`
@@ -566,8 +570,8 @@ func requestWhere(q RequestQuery) (string, []any) {
 		// only the non-streaming failure path fills it, and a history with no
 		// such failure yet is not a history that never has one. Dropping the
 		// column would make "search the error text" silently match nothing.
-		clauses = append(clauses, `(id LIKE ? OR model LIKE ? OR COALESCE(requested_model, '') LIKE ? OR COALESCE(provider, '') LIKE ? OR COALESCE(scenario, '') LIKE ? OR COALESCE(error_msg, '') LIKE ?)`)
-		args = append(args, term, term, term, term, term, term)
+		clauses = append(clauses, `(id LIKE ? OR model LIKE ? OR COALESCE(requested_model, '') LIKE ? OR COALESCE(provider, '') LIKE ? OR COALESCE(scenario, '') LIKE ? OR COALESCE(error_msg, '') LIKE ? OR response_model LIKE ? OR upstream_model LIKE ? OR upstream_channel LIKE ?)`)
+		args = append(args, term, term, term, term, term, term, term, term, term)
 	}
 	for _, filter := range []struct {
 		column string
@@ -596,11 +600,11 @@ func requestWhere(q RequestQuery) (string, []any) {
 		args = append(args, q.End.UTC().Format(time.RFC3339Nano))
 	}
 	if q.Success != nil {
-		clauses = append(clauses, "details_known = 1 AND success = ?")
+		clauses = append(clauses, observedOutcome+" AND success = ?")
 		args = append(args, boolToInt(*q.Success))
 	}
 	if q.Streaming != nil {
-		clauses = append(clauses, "details_known = 1 AND streaming = ?")
+		clauses = append(clauses, observedOutcome+" AND streaming = ?")
 		args = append(args, boolToInt(*q.Streaming))
 	}
 	if len(clauses) == 0 {
@@ -612,7 +616,7 @@ func requestWhere(q RequestQuery) (string, []any) {
 func requestSortColumn(field string) string {
 	switch field {
 	case "model":
-		return "LOWER(model)"
+		return "LOWER(COALESCE(NULLIF(response_model, ''), NULLIF(upstream_model, ''), model))"
 	case "provider":
 		return "LOWER(COALESCE(provider, ''))"
 	case "scenario":
@@ -678,9 +682,9 @@ func (r *Requests) Totals() (*Totals, error) {
 	row := r.db.DB().QueryRowContext(ctx, `
 		SELECT
 			COUNT(*),
-			COALESCE(SUM(CASE WHEN details_known = 1 AND streaming = 1 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN details_known = 1 AND success = 1 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN details_known = 1 AND success = 0 THEN 1 ELSE 0 END), 0)
+			COALESCE(SUM(CASE WHEN `+observedOutcome+` AND streaming = 1 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN `+observedOutcome+` AND success = 1 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN `+observedOutcome+` AND success = 0 THEN 1 ELSE 0 END), 0)
 		FROM requests
 	`)
 	if err := row.Scan(&t.Received, &t.Streamed, &t.Success, &t.Failed); err != nil {
@@ -719,7 +723,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		var costSource sql.NullString
 		var errorMsg sql.NullString
 		var provider, scenario, requestedModel sql.NullString
-		var upstreamChannel, upstreamModel sql.NullString
+		var upstreamChannel, upstreamModel, responseModel sql.NullString
 		var firstByteMS sql.NullInt64
 		var generationStart, generationDuration, generationOutput sql.NullInt64
 		var reasoningEffort, keyHint sql.NullString
@@ -740,6 +744,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 			&costUSD,
 			&costSource,
 			&detailsKnown,
+			&rec.OutcomeKnown,
 			&streaming,
 			&success,
 			&errorMsg,
@@ -747,6 +752,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 			&peakMul,
 			&upstreamChannel,
 			&upstreamModel,
+			&responseModel,
 			&firstByteMS,
 			&reasoningEffort,
 			&keyHint,
@@ -763,6 +769,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		rec.RequestedModel = requestedModel.String
 		rec.UpstreamChannel = upstreamChannel.String
 		rec.UpstreamModel = upstreamModel.String
+		rec.ResponseModel = responseModel.String
 		rec.FirstByte = time.Duration(firstByteMS.Int64) * time.Millisecond
 		rec.ReasoningEffort = reasoningEffort.String
 		rec.KeyHint = keyHint.String
@@ -789,9 +796,9 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		rec.StartTime = rec.StartTime.UTC()
 		rec.Streaming = streaming.Valid && streaming.Int64 == 1
 		rec.Success = success.Valid && success.Int64 == 1
-		// DetailsKnown gates the observed status/metadata group, not token or cost data.
 		rec.DetailsKnown = detailsKnown.Valid && detailsKnown.Int64 == 1 &&
 			success.Valid && (success.Int64 == 0 || success.Int64 == 1)
+		rec.OutcomeKnown = rec.OutcomeKnown && success.Valid && (success.Int64 == 0 || success.Int64 == 1)
 		rec.Duration = time.Duration(rec.Duration) * time.Millisecond
 		if generationStart.Valid || generationDuration.Valid || generationOutput.Valid {
 			rec.GenerationSample = &metrics.GenerationSample{FirstOutputMs: generationStart.Int64, DurationMs: generationDuration.Int64, OutputTokens: generationOutput.Int64}

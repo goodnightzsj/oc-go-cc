@@ -176,7 +176,7 @@ func TestHistorySearchIsCaseInsensitiveWithoutLower(t *testing.T) {
 	repo := NewRequests(db)
 
 	for _, term := range []string{"deepseek", "DeepSeek", "DEEPSEEK", "deepSeek"} {
-		rows, total, err := repo.Query(RequestQuery{Page: 1, PageSize: 10, Search: term})
+		rows, total, err := repo.Query(t.Context(), RequestQuery{Page: 1, PageSize: 10, Search: term})
 		if err != nil {
 			t.Fatalf("search %q: %v", term, err)
 		}
@@ -190,7 +190,7 @@ func TestHistorySearchIsCaseInsensitiveWithoutLower(t *testing.T) {
 		ID: "case-3", Model: "model-x", Provider: "provider-a",
 		StartTime: time.Now().Add(-3 * time.Minute), Success: false, ErrorMsg: "quota exceeded",
 	})
-	rows, total, err := repo.Query(RequestQuery{Page: 1, PageSize: 10, Search: "quota"})
+	rows, total, err := repo.Query(t.Context(), RequestQuery{Page: 1, PageSize: 10, Search: "quota"})
 	if err != nil {
 		t.Fatal(err)
 	}

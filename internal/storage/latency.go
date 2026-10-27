@@ -154,7 +154,7 @@ func (l *Latency) getStats(ctx context.Context, since time.Time) ([]ModelLatency
 				WHERE julianday(start_time) >= julianday(?)
 				  AND (? = '' OR provider = ?)
 			  AND duration_ms > 0
-			  AND details_known = 1
+			  AND ` + observedOutcome + `
 		)
 		WHERE rn <= ?
 		ORDER BY provider, model
@@ -208,7 +208,7 @@ func (l *Latency) getSuccessCounts(ctx context.Context, since time.Time) (map[st
 		FROM requests
 			WHERE julianday(start_time) >= julianday(?)
 			  AND (? = '' OR provider = ?)
-		  AND details_known = 1
+		  AND ` + observedOutcome + `
 		  AND success IN (0, 1)
 		GROUP BY COALESCE(provider, ''), model, success
 	`

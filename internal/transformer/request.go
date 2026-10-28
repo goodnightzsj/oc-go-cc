@@ -98,14 +98,14 @@ func (t *RequestTransformer) TransformRequest(
 ) (*types.ChatCompletionRequest, error) {
 	openaiReq, err := t.transformParameters(anthropicReq, model)
 	if err != nil {
-		return nil, err
+		return nil, &core.RequestConversionError{Err: err}
 	}
 	// Transform messages
 	family := modelFamily(model.ModelID)
 	cacheBreakpoints := model.Provider == "openrouter" && (strings.HasPrefix(family, "claude") || strings.HasPrefix(family, "gemini"))
 	messages, err := t.transformMessages(anthropicReq, model.ModelID, imageHandlingFor(model), cacheBreakpoints)
 	if err != nil {
-		return nil, fmt.Errorf("failed to transform messages: %w", err)
+		return nil, &core.RequestConversionError{Err: fmt.Errorf("failed to transform messages: %w", err)}
 	}
 
 	// Strip cache_control for models that don't support it

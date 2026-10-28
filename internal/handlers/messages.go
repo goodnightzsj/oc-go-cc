@@ -1477,6 +1477,11 @@ func clientError(statusCode int, message string, err error) (int, string) {
 		}
 		return apiErr.StatusCode, apiErr.Error()
 	}
+	// A local request rejection never reached the upstream; it is not a 502.
+	var conversionErr *core.RequestConversionError
+	if errors.As(err, &conversionErr) {
+		return http.StatusBadRequest, truncateError(conversionErr.Error())
+	}
 
 	// The chain was scoped to the active platform and came up empty. That is a
 	// configuration fault on this side, not an upstream failure.

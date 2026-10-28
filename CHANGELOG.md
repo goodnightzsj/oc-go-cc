@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Return HTTP 400 with the conversion reason for locally rejected Chat Completions requests instead of a misleading 502. Already-started streams retain their terminal error events; unsupported tool-result content is still rejected rather than dropped.
+
 ## [v0.5.0] - 2026-07-11
 
 ### Fixed

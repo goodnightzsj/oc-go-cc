@@ -58,6 +58,15 @@ type ExecuteResult struct {
 	KeyHint string
 }
 
+// RequestConversionError marks a request rejected before an upstream call.
+// Another target may support its contents, so it does not prohibit fallback.
+type RequestConversionError struct {
+	Err error
+}
+
+func (e *RequestConversionError) Error() string { return e.Err.Error() }
+func (e *RequestConversionError) Unwrap() error { return e.Err }
+
 // ResponsesStatusError retains a failed execution's reported usage across
 // provider and fallback boundaries. Nil usage means it was not reported;
 // a non-nil all-zero usage is an explicit upstream observation.

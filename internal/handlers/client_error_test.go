@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/routatic/proxy/internal/client"
+	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/internal/router"
 )
 
@@ -33,6 +34,18 @@ func TestClientErrorReportsEmptyActiveSite(t *testing.T) {
 	status, _ := clientError(http.StatusInternalServerError, "routing failed", err)
 	if status != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want %d", status, http.StatusServiceUnavailable)
+	}
+}
+
+func TestClientErrorReportsLocalRequestConversion(t *testing.T) {
+	cause := errors.New("Chat cannot represent this tool output")
+	err := fmt.Errorf("all models failed: %w", &core.RequestConversionError{Err: cause})
+	status, message := clientError(http.StatusBadGateway, "all models failed", err)
+	if status != http.StatusBadRequest || message != cause.Error() {
+		t.Fatalf("status=%d message=%q", status, message)
+	}
+	if !errors.Is(err, cause) {
+		t.Fatal("conversion wrapper lost the original error")
 	}
 }
 

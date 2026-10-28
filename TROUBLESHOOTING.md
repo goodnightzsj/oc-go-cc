@@ -28,6 +28,25 @@ All models in the fallback chain returned errors. Check:
 2. You haven't exceeded your [usage limits](https://opencode.ai/auth)
 3. The OpenCode Go service is reachable: `curl -H "Authorization: Bearer $ROUTATIC_PROXY_API_KEY" https://opencode.ai/zen/go/v1/models`
 
+## "Chat Completions cannot represent tool_result content" Error
+
+The selected upstream uses Chat Completions, and the proxy cannot preserve a
+tool-result block such as an image or `tool_reference` in that format. It rejects
+the conversion before sending that attempt upstream instead of silently dropping
+the content. Non-streaming requests return HTTP 400 with the specific reason.
+If SSE headers have already been sent, the response remains HTTP 200 and ends
+with an `error` event (Messages) or `response.failed` event (Responses).
+
+Retrying the same request against the same target does not resolve this error.
+Use a target and protocol that support the content; Responses targets can retain
+supported tool-result images, but that does not imply support for every tool type.
+
+Older builds misclassified these local conversion rejections as HTTP 502
+`all models failed`. Intermediaries could replace that response with a generic
+gateway error. Correlate the request ID and application error before treating
+every 502 as an upstream outage. This fix changes error reporting, not Chat
+Completions tool-image support.
+
 ## Connection Refused
 
 Make sure the proxy is running:

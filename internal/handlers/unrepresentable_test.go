@@ -70,7 +70,7 @@ func TestHandleMessages_ToolReferenceIsNotSilentlyDropped(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	handler.HandleMessages(recorder, req)
 
-	if recorder.Code != http.StatusBadGateway || calls.Load() != 0 || !strings.Contains(recorder.Body.String(), `"type":"error"`) {
+	if recorder.Code != http.StatusBadRequest || calls.Load() != 0 || !strings.Contains(recorder.Body.String(), `"type":"invalid_request_error"`) || !strings.Contains(recorder.Body.String(), "tool_reference") {
 		t.Fatalf("unsupported tool content was sent or became success: status=%d calls=%d body=%s", recorder.Code, calls.Load(), recorder.Body.String())
 	}
 }

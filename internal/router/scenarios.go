@@ -32,7 +32,7 @@ type MessageContent struct {
 }
 
 // RequestFacts summarizes relevant properties of the request for scenario
-// detection — specifically whether the latest user message contains an image,
+// detection — specifically whether the latest user turn contains an image,
 // whether the text suggests complex intent, and the raw text for pattern
 // matching. This enables scenario detection to make routing decisions without
 // re-parsing the full message history.
@@ -90,7 +90,7 @@ func DetectScenario(messages []MessageContent, tokenCount int, cfg *config.Confi
 }
 
 // AnalyzeRequestFacts extracts routing-relevant facts from the message history.
-// It identifies the latest user message, checks for new images (avoiding
+// It identifies the latest user turn, checks for new images (avoiding
 // false positives from historical images), and flags complex or vision-related
 // intent. The result feeds into DetectScenario and is also useful for logging
 // and debugging routing decisions.
@@ -108,11 +108,16 @@ func AnalyzeRequestFacts(messages []MessageContent) RequestFacts {
 	}
 
 	latest := messages[latestIdx]
+	turnStart := latestIdx
+	for turnStart > 0 && messages[turnStart-1].Role == "user" {
+		turnStart--
+	}
 	facts.LatestUserText = latest.Content
-	facts.LatestUserHasImage = latest.HasImage && imageHashesAreNewForLatest(messages, latestIdx)
+	facts.LatestUserHasImage = imageHashesAreNewForTurn(messages, turnStart, latestIdx)
 	facts.LatestTextComplexIntent = hasComplexPattern([]MessageContent{latest}) || hasThinkingPattern([]MessageContent{latest})
 
-	// Trigger vision routing only when the latest user message actually
+	// Consecutive user messages can carry one batch of parallel tool results.
+	// Trigger vision routing only when that latest user turn actually
 	// contains a new image. The previous heuristic also fired on historical
 	// images + visual-intent keywords in the latest text, but that produces
 	// false positives on ordinary prose that happens to mention "image" /
@@ -127,20 +132,24 @@ func AnalyzeRequestFacts(messages []MessageContent) RequestFacts {
 	return facts
 }
 
-func imageHashesAreNewForLatest(messages []MessageContent, latestIdx int) bool {
-	latest := messages[latestIdx]
-	if len(latest.ImageHashes) == 0 {
-		return latest.HasImage
-	}
+func imageHashesAreNewForTurn(messages []MessageContent, start, end int) bool {
 	seen := map[string]bool{}
-	for i := 0; i < latestIdx; i++ {
+	for i := 0; i < start; i++ {
 		for _, hash := range messages[i].ImageHashes {
 			seen[hash] = true
 		}
 	}
-	for _, hash := range latest.ImageHashes {
-		if !seen[hash] {
+	for _, msg := range messages[start : end+1] {
+		if !msg.HasImage {
+			continue
+		}
+		if len(msg.ImageHashes) == 0 {
 			return true
+		}
+		for _, hash := range msg.ImageHashes {
+			if !seen[hash] {
+				return true
+			}
 		}
 	}
 	return false

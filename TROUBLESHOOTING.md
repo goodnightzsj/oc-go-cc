@@ -31,21 +31,23 @@ All models in the fallback chain returned errors. Check:
 ## "Chat Completions cannot represent tool_result content" Error
 
 The selected upstream uses Chat Completions, and the proxy cannot preserve a
-tool-result block such as an image or `tool_reference` in that format. It rejects
+tool-result block such as `tool_reference` in that format. It rejects
 the conversion before sending that attempt upstream instead of silently dropping
 the content. Non-streaming requests return HTTP 400 with the specific reason.
 If SSE headers have already been sent, the response remains HTTP 200 and ends
 with an `error` event (Messages) or `response.failed` event (Responses).
 
 Retrying the same request against the same target does not resolve this error.
-Use a target and protocol that support the content; Responses targets can retain
-supported tool-result images, but that does not imply support for every tool type.
+Use a target and protocol that support the content. Chat now sends tool-result
+images and their adjacent text in linked user content after the complete tool
+response batch. URL/base64 images are retained; known non-vision targets and
+unsupported block types are still rejected. Responses keeps its native image mapping.
 
 Older builds misclassified these local conversion rejections as HTTP 502
 `all models failed`. Intermediaries could replace that response with a generic
 gateway error. Correlate the request ID and application error before treating
-every 502 as an upstream outage. This fix changes error reporting, not Chat
-Completions tool-image support.
+every 502 as an upstream outage. Image projection does not make unsupported
+tool references or incomplete parallel tool batches valid.
 
 ## Connection Refused
 

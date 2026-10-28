@@ -766,7 +766,7 @@ func (h *MessagesHandler) buildModelChain(
 		decision.Models = append([]config.ModelConfig{primary}, ordered...)
 	}
 
-	return decision.Models, result, nil
+	return h.modelRouter.ApplyPublishedReasoning(ctx, decision.Models), result, nil
 }
 
 // routeOnce performs scenario-based routing, honoring the streaming-scenario-routing

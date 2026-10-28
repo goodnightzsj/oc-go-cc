@@ -1,0 +1,442 @@
+diff --git a/cmd/server/banner_test.go b/cmd/server/banner_test.go
+index b7af87b..349c75a 100644
+--- a/cmd/server/banner_test.go
++++ b/cmd/server/banner_test.go
+@@ -5,14 +5,16 @@ import (
+ 	"testing"
+ )
+ 
+-// 掩码只留首尾各两位，短密钥/空密钥整条隐去——横幅是写进 journal 的，不能出明文。
++// 横幅不暴露凭据内容或片段。
+ func TestMaskSecret(t *testing.T) {
+ 	const key = "gZb95oiQqT-A7VdssgI27FO"
+ 	cases := []struct{ in, want string }{
+ 		{"", "(未设置)"},
+ 		{"abc", "***"},
+-		{key, "gZ" + strings.Repeat("*", len(key)-4) + "FO"},
+-		{"密钥密钥密钥密钥密钥", "密钥" + strings.Repeat("*", 6) + "密钥"},
++		// Length only: the first and last characters are still part of the
++		// credential, and an operator already knows which key is configured.
++		{key, strings.Repeat("*", len(key))},
++		{"密钥密钥密钥密钥密钥", strings.Repeat("*", 10)},
+ 	}
+ 	for _, c := range cases {
+ 		if got := maskSecret(c.in); got != c.want {
+@@ -28,8 +30,8 @@ func TestListenBannerReportsKeySource(t *testing.T) {
+ 	t.Setenv("WB2A_API_KEY", "")
+ 
+ 	got := listenBanner("127.0.0.1:7863", "/etc/wb/config.json", key)
+-	want := "workbuddy2api listening on 127.0.0.1:7863 (api_key=gZ" + strings.Repeat("*", len(key)-4) +
+-		"FO, 来源 配置文件 /etc/wb/config.json)，管理面板 http://127.0.0.1:7863/panel/"
++	want := "workbuddy2api listening on 127.0.0.1:7863 (api_key=" + strings.Repeat("*", len(key)) +
++		", 来源 配置文件 /etc/wb/config.json)，管理面板 http://127.0.0.1:7863/panel/"
+ 	if got != want {
+ 		t.Fatalf("横幅=%q want %q", got, want)
+ 	}
+diff --git a/cmd/server/config.go b/cmd/server/config.go
+index 0ef2c7a..a2de1f3 100644
+--- a/cmd/server/config.go
++++ b/cmd/server/config.go
+@@ -195,6 +195,12 @@ type Config struct {
+ 		BillingBase string `json:"billing_base"`
+ 	} `json:"global"`
+ 
++	Resin struct {
++		URL      string `json:"url"`
++		Token    string `json:"token"`
++		Platform string `json:"platform"`
++	} `json:"resin"`
++
+ 	CN struct {
+ 		// ChatBase 国内版 chat/模型目录上游 base 覆盖；空 = 回落内置默认
+ 		// https://www.workbuddy.cn（internal/upstream.New 的 ChatBaseCN，官方桌面端
+diff --git a/cmd/server/main.go b/cmd/server/main.go
+index 49325da..2dfce8e 100644
+--- a/cmd/server/main.go
++++ b/cmd/server/main.go
+@@ -105,8 +105,8 @@ func main() {
+ 		if errors.Is(err, fs.ErrNotExist) {
+ 			// 首次运行：目录下没有配置 → 自动落一份推荐配置（含随机 api_key）再加载。
+ 			// 双击 exe / 裸跑 docker 即开，无需先手工复制样例。
+-			if key, werr := WriteDefault(*cfgPath); werr == nil {
+-				log.Printf("config %s 不存在，已生成推荐配置（api_key=%s，记录在该文件里，可自行修改）", *cfgPath, key)
++			if _, werr := WriteDefault(*cfgPath); werr == nil {
++				log.Printf("config %s 不存在，已生成推荐配置（api_key 已写入该文件，可自行修改）", *cfgPath)
+ 				cfg, err = Load(*cfgPath)
+ 			}
+ 			if err != nil {
+@@ -248,6 +248,10 @@ func main() {
+ 	up.ChatBaseGlobal = cfg.Global.ChatBase
+ 	up.BillingBaseGlobal = cfg.Global.BillingBase
+ 	applyCNChatBase(up, cfg)
++	if err := applyResinProxy(up, cfg); err != nil {
++		p.Flush()
++		log.Fatalf("configure resin: %v", err)
++	}
+ 	auth.SetGlobalEnabled(cfg.Global.Enabled)
+ 	// model.json 本地缓存接线（context_length/max_output_tokens 四级查找链第 3 级）：
+ 	// 数据目录与 state.json 同风格（Docker volume 持久化路径）。首次缺失/损坏自动
+@@ -691,16 +695,12 @@ func apiKeySource(path string) string {
+ 	return "配置文件 " + path
+ }
+ 
+-// maskSecret 只留首尾各两位便于对号入座；不足 8 位或未设置则整条隐去。
++// maskSecret 不向运行日志泄露凭据片段。
+ func maskSecret(s string) string {
+ 	if s == "" {
+ 		return "(未设置)"
+ 	}
+-	r := []rune(s)
+-	if len(r) < 8 {
+-		return strings.Repeat("*", len(r))
+-	}
+-	return string(r[:2]) + strings.Repeat("*", len(r)-4) + string(r[len(r)-2:])
++	return strings.Repeat("*", len([]rune(s)))
+ }
+ 
+ // panelListenPath 从 listen 地址提取 ":port" 形式，用于启动日志拼面板 URL
+@@ -941,6 +941,9 @@ func restartRequiredFields(current, next *Config) []string {
+ 	changed("upstream.passthrough_ip", current.Upstream.PassthroughIP, next.Upstream.PassthroughIP)
+ 	// cn.chat_base / cn.billing_base 同样只在装配期写进上游 client（请求路径并发读取，不做热改）。
+ 	changed("cn.chat_base", current.CN.ChatBase, next.CN.ChatBase)
++	changed("resin.url", current.Resin.URL, next.Resin.URL)
++	changed("resin.token", current.Resin.Token, next.Resin.Token)
++	changed("resin.platform", current.Resin.Platform, next.Resin.Platform)
+ 	changed("cn.billing_base", current.CN.BillingBase, next.CN.BillingBase)
+ 	changed("global.enabled", current.Global.Enabled, next.Global.Enabled)
+ 	changed("global.chat_base", current.Global.ChatBase, next.Global.ChatBase)
+diff --git a/cmd/server/resin.go b/cmd/server/resin.go
+new file mode 100644
+index 0000000..e1c65cc
+--- /dev/null
++++ b/cmd/server/resin.go
+@@ -0,0 +1,9 @@
++package main
++
++import "github.com/misakano7545/workbuddy2api-panel/internal/upstream"
++
++func applyResinProxy(up *upstream.Client, cfg *Config) error {
++	return up.SetResinProxy(upstream.ResinProxy{
++		URL: cfg.Resin.URL, Token: cfg.Resin.Token, Platform: cfg.Resin.Platform,
++	})
++}
+diff --git a/cmd/server/resin_test.go b/cmd/server/resin_test.go
+new file mode 100644
+index 0000000..792ead0
+--- /dev/null
++++ b/cmd/server/resin_test.go
+@@ -0,0 +1,37 @@
++package main
++
++import (
++	"net/http"
++	"slices"
++	"testing"
++
++	"github.com/misakano7545/workbuddy2api-panel/internal/upstream"
++)
++
++func TestLocalResinConfiguration(t *testing.T) {
++	cfg, err := ParseConfig([]byte(`{"resin":{"url":"http://127.0.0.1:12260","token":"synthetic","platform":"pool"}}`))
++	if err != nil {
++		t.Fatal(err)
++	}
++	u := upstream.New()
++	if err := applyResinProxy(u, cfg); err != nil {
++		t.Fatal(err)
++	}
++	r, _ := http.NewRequest("GET", "https://example.invalid/", nil)
++	r.Header.Set("X-User-Id", "a")
++	p, err := u.HTTP.Transport.(*http.Transport).Proxy(r)
++	if err != nil || p.User.Username() != "pool.a" {
++		t.Fatal("config not applied")
++	}
++	previous := *cfg
++	previous.Resin.URL, previous.Resin.Token, previous.Resin.Platform = "", "", ""
++	for _, name := range []string{"resin.url", "resin.token", "resin.platform"} {
++		if !slices.Contains(restartRequiredFields(&previous, cfg), name) {
++			t.Fatalf("missing restart marker %s", name)
++		}
++	}
++	cfg.Resin.URL = "relative"
++	if err := applyResinProxy(upstream.New(), cfg); err == nil {
++		t.Fatal("invalid proxy silently bypassed")
++	}
++}
+diff --git a/internal/updater/integration_test.go b/internal/updater/integration_test.go
+index 5849aae..92a217d 100644
+--- a/internal/updater/integration_test.go
++++ b/internal/updater/integration_test.go
+@@ -108,7 +108,11 @@ func TestInstallReplacesRestartsAndRecovers(t *testing.T) {
+ 		t.Run(fmt.Sprintf("broken=%v", broken), func(t *testing.T) {
+ 			dir := t.TempDir()
+ 			t.Setenv("WB2API_UPDATE_FIXTURE", dir)
+-			target := filepath.Join(dir, "wb2api"+filepath.Ext(executable))
++			name := "wb2api"
++			if runtime.GOOS == "windows" {
++				name += ".exe"
++			}
++			target := filepath.Join(dir, name)
+ 			if err := os.WriteFile(target, original, 0700); err != nil {
+ 				t.Fatal(err)
+ 			}
+diff --git a/internal/updater/local_supervised_test.go b/internal/updater/local_supervised_test.go
+new file mode 100644
+index 0000000..7f64f22
+--- /dev/null
++++ b/internal/updater/local_supervised_test.go
+@@ -0,0 +1,16 @@
++//go:build linux
++
++package updater
++
++import "testing"
++
++func TestLocalManagedUpdateCannotInstall(t *testing.T) {
++	t.Setenv("INVOCATION_ID", "synthetic-systemd")
++	if !processSupervised() {
++		t.Fatal("systemd not recognized")
++	}
++	m := &Manager{version: "2026.10.28.1800", executable: "/tmp/synthetic"}
++	if m.canInstallLocked() {
++		t.Fatal("managed install would discard local patches")
++	}
++}
+diff --git a/internal/upstream/client.go b/internal/upstream/client.go
+index 26d7fb1..a100292 100644
+--- a/internal/upstream/client.go
++++ b/internal/upstream/client.go
+@@ -1062,9 +1062,7 @@ func (c *Client) prepareBody(body []byte, realm, uid, conversationID string) ([]
+ 	efforts, defs := c.effortsSnapshot(realm), c.defaultEffortsSnapshot(realm)
+ 	maxOut := c.modelMaxOutSnapshot(realm)
+ 	if realmKey(realm) == "global" {
+-		// global 域降级源 = 远端探测桶（权威）∪ 产品静态兜底表（全局 21 名内档位如
+-		// deepseek-v4.1-flash ['high']）。当前探测桶为空时也按静态表降级，不全程透传
+-		//（issue #84：往 WorkBuddy 上游发 low/max 非法，须降级到 high）。
++		// 远端探测档位优先，缺失时使用 global 产品静态兜底表。
+ 		efforts, defs = globalEffortMap(efforts, defs)
+ 	} else {
+ 		// CN 域同口径：与 /v1/models 的 EffortListing 声明同源，保证「声明什么档位
+diff --git a/internal/upstream/effort_catalog.go b/internal/upstream/effort_catalog.go
+index 0c17c18..84673a3 100644
+--- a/internal/upstream/effort_catalog.go
++++ b/internal/upstream/effort_catalog.go
+@@ -7,8 +7,7 @@
+ //
+ // 档位值照抄参考仓库 dsh-codearts：CN/CodeBuddy 面取 src/product.ts CODEBUDDY_FALLBACK_MODELS
+ // ∪ src/buddy-adapter.ts:126-137 REASONING_EFFORTS；global/WorkBuddy 面取 src/product.ts
+-// WORKBUDDY_FALLBACK_MODELS。两个 realm 对同一模型给出不同档位（如 deepseek-v4.1-flash：
+-// CN 三档 ['low','high','max']、global 仅 ['high']），故**按 realm 分表**，绝不混用。
++// WORKBUDDY_FALLBACK_MODELS，本地核实后修正。两个 realm 独立，远端声明优先。
+ //
+ // 只列**可枚举**档位的模型；仅有固定默认档（glm-5.1/kimi-* 的 medium）同样入表，
+ // 但其档位是「可枚举单档」而非「无选择器」，照抄参考仓库如实暴露。
+@@ -49,15 +48,14 @@ var cnEffortFallback = map[string]effortCap{
+ }
+ 
+ // globalEffortFallback global / WorkBuddy 国际版面静态兜底表。
+-// 注意 deepseek-v4.1-flash 在国际版**只有 ['high']**（product.ts:190 实测 IDE 缓存），
+-// 与 CN 面的三档刻意不同——往 WorkBuddy 上游发 low/max 是非法参数 400。
++// 本地目录核实后补齐 DeepSeek 档位；远端显式声明继续优先。
+ var globalEffortFallback = map[string]effortCap{
+ 	"fast-model":          {efforts: []string{"medium"}},
+ 	"balanced-model":      {efforts: []string{"medium"}},
+ 	"primary-model":       {efforts: []string{"high"}},
+ 	"hy4-preview-f":       {efforts: []string{"high"}, defaultEffort: "high"},
+ 	"hy3":                 {efforts: []string{"low", "high"}, defaultEffort: "high"},
+-	"deepseek-v4.1-flash": {efforts: []string{"high"}},
++	"deepseek-v4.1-flash": {efforts: []string{"low", "high", "max"}},
+ 	"gpt-6-astra":         {efforts: []string{"low", "medium", "high", "xhigh", "max"}, defaultEffort: "high"},
+ 	"gpt-5.6-sol":         {efforts: []string{"low", "medium", "high", "xhigh", "max"}, defaultEffort: "high"},
+ 	"gpt-5.6-terra":       {efforts: []string{"low", "medium", "high", "xhigh", "max"}, defaultEffort: "high"},
+@@ -123,8 +121,7 @@ func containsEffort(efforts []string, want string) bool {
+ // globalEffortMap global 域降级用的 effort 能力表：静态兜底表为基，远端桶覆盖（权威优先）。
+ //
+ // prepareBody 对 global 请求调此函数（而非直接用远端桶），因为 global 上游可能不下发
+-// supportedEfforts——此时也必须按产品静态表降级（issue #84：deepseek-v4.1-flash 国际版
+-// 只认 high，客户端传 low/max 必降级到 high，否则上游 400 毁掉请求）。
++// supportedEfforts——此时按产品静态表归一化，远端明确下发的档位继续优先。
+ // 语义对齐参考仓库 effortsFor（remoteMeta → productFallback → 静态表），只取前两级：
+ // 远端桶（探测已解析）→ 本产品静态表（本文件），缺档位即无（不再到通用静态表）。
+ func globalEffortMap(remoteEfforts map[string][]string, remoteDefaults map[string]string) (map[string][]string, map[string]string) {
+diff --git a/internal/upstream/local_max_test.go b/internal/upstream/local_max_test.go
+new file mode 100644
+index 0000000..e41a8d0
+--- /dev/null
++++ b/internal/upstream/local_max_test.go
+@@ -0,0 +1,63 @@
++package upstream
++
++import (
++	"encoding/json"
++	"reflect"
++	"testing"
++)
++
++func TestLocalDeepSeekMaxFallback(t *testing.T) {
++	for _, tc := range []struct {
++		name, realm, model string
++		remote             []string
++		want               string
++	}{
++		{"global fallback", "global", "deepseek-v4.1-flash", nil, "max"},
++		{"global remote max", "global", "deepseek-v4.1-flash", []string{"low", "high", "max"}, "max"},
++		{"remote high remains authoritative", "global", "deepseek-v4.1-flash", []string{"high"}, "high"},
++		{"CN remote max", "cn", "deepseek-v4.1-flash", []string{"low", "high", "max"}, "max"},
++		{"SG remote max", "global", "deepseek-v4.1-flash-sg", []string{"low", "high", "max"}, "max"},
++		{"GLM ladder unchanged", "global", "glm-5.2", nil, "xhigh"},
++		{"Kimi ladder unchanged", "global", "kimi-k3", nil, "medium"},
++	} {
++		for _, field := range []string{"reasoning_effort", "reasoningEffort"} {
++			t.Run(tc.name+"/"+field, func(t *testing.T) {
++				c := &Client{}
++				if tc.remote != nil {
++					c.storeEfforts(tc.realm, map[string][]string{tc.model: tc.remote}, nil)
++				}
++				in, err := json.Marshal(map[string]any{"model": tc.realm + ":" + tc.model, field: "max", "messages": []any{}})
++				if err != nil {
++					t.Fatal(err)
++				}
++				out, requested, effective := c.prepareBody(in, tc.realm, "", "")
++				var body map[string]any
++				if err := json.Unmarshal(out, &body); err != nil {
++					t.Fatal(err)
++				}
++				if body[field] != tc.want || requested != "max" || effective != tc.want || body["model"] != tc.model {
++					t.Fatalf("body=%s requested=%q effective=%q want=%q", out, requested, effective, tc.want)
++				}
++			})
++		}
++	}
++	levels, _ := EffortListing("global", "deepseek-v4.1-flash", nil, "")
++	if !reflect.DeepEqual(levels, []string{"low", "high", "max"}) {
++		t.Fatalf("fallback listing=%v", levels)
++	}
++	levels, _ = EffortListing("global", "deepseek-v4.1-flash", []string{"high"}, "")
++	if !reflect.DeepEqual(levels, []string{"high"}) {
++		t.Fatalf("remote listing overridden: %v", levels)
++	}
++	for _, tc := range []struct{ input, want string }{
++		{`{"model":"global:deepseek-v4.1-flash"}`, "high"},
++		{`{"model":"global:deepseek-v4.1-flash","reasoning_effort":"low"}`, "low"},
++		{`{"model":"global:deepseek-v4.1-flash","reasoning_effort":"medium"}`, "high"},
++		{`{"model":"global:deepseek-v4.1-flash","reasoning_effort":"off"}`, ""},
++	} {
++		_, _, effective := (&Client{}).prepareBody([]byte(tc.input), "global", "", "")
++		if effective != tc.want {
++			t.Errorf("input=%s effective=%q want=%q", tc.input, effective, tc.want)
++		}
++	}
++}
+diff --git a/internal/upstream/resin_proxy.go b/internal/upstream/resin_proxy.go
+new file mode 100644
+index 0000000..1ec7650
+--- /dev/null
++++ b/internal/upstream/resin_proxy.go
+@@ -0,0 +1,58 @@
++package upstream
++
++import (
++	"errors"
++	"net/http"
++	"net/url"
++	"strings"
++)
++
++type ResinProxy struct {
++	URL, Token, Platform string
++}
++
++// Configure transports before serving; invalid configuration must not bypass Resin.
++func (c *Client) SetResinProxy(p ResinProxy) error {
++	fn, err := p.proxyFunc()
++	if err != nil || fn == nil {
++		return err
++	}
++	for _, cl := range []*http.Client{c.HTTP, c.ChatHTTP} {
++		if cl != nil {
++			if _, ok := cl.Transport.(*http.Transport); !ok {
++				return errors.New("resin requires an HTTP transport")
++			}
++		}
++	}
++	for _, cl := range []*http.Client{c.HTTP, c.ChatHTTP} {
++		if cl != nil {
++			cl.Transport.(*http.Transport).Proxy = fn
++		}
++	}
++	return nil
++}
++
++func (r ResinProxy) proxyFunc() (func(*http.Request) (*url.URL, error), error) {
++	if r.URL == "" {
++		return nil, nil
++	}
++	base, err := url.Parse(r.URL)
++	if err != nil || base.Hostname() == "" || (base.Scheme != "http" && base.Scheme != "https") {
++		return nil, errors.New("resin.url must be an absolute HTTP(S) URL")
++	}
++	platform := r.Platform
++	if platform == "" {
++		platform = "Default"
++	}
++	return func(req *http.Request) (*url.URL, error) {
++		u := *base
++		// UID survives access-token refresh and keeps each account on its own exit.
++		account := strings.TrimSpace(req.Header.Get("X-User-Id"))
++		if account != "" {
++			u.User = url.UserPassword(platform+"."+account, r.Token)
++		} else if r.Token != "" {
++			u.User = url.UserPassword(platform, r.Token)
++		}
++		return &u, nil
++	}, nil
++}
+diff --git a/internal/upstream/resin_proxy_test.go b/internal/upstream/resin_proxy_test.go
+new file mode 100644
+index 0000000..2df88a8
+--- /dev/null
++++ b/internal/upstream/resin_proxy_test.go
+@@ -0,0 +1,42 @@
++package upstream
++
++import (
++	"net/http"
++	"testing"
++)
++
++func TestResinProxy(t *testing.T) {
++	c := New()
++	if err := c.SetResinProxy(ResinProxy{URL: "http://127.0.0.1:12260", Token: "synthetic", Platform: "pool"}); err != nil {
++		t.Fatal(err)
++	}
++	for _, cl := range []*http.Client{c.HTTP, c.ChatHTTP} {
++		for _, tc := range []struct{ uid, token, want string }{
++			{"a", "old", "pool.a"}, {"a", "refreshed", "pool.a"}, {"b", "other", "pool.b"}, {"", "", "pool"},
++		} {
++			r, _ := http.NewRequest("GET", "https://example.invalid/models", nil)
++			r.Header.Set("X-User-Id", tc.uid)
++			r.Header.Set("Authorization", tc.token)
++			u, err := cl.Transport.(*http.Transport).Proxy(r)
++			if err != nil {
++				t.Fatal(err)
++			}
++			pw, _ := u.User.Password()
++			if u.User.Username() != tc.want || pw != "synthetic" || u.Host != "127.0.0.1:12260" || r.URL.Host != "example.invalid" {
++				t.Fatal("proxy identity or destination changed")
++			}
++		}
++	}
++	for _, bad := range []string{"%", "relative", "file:///tmp/proxy"} {
++		if err := c.SetResinProxy(ResinProxy{URL: bad}); err == nil {
++			t.Fatalf("accepted %q", bad)
++		}
++	}
++	plain := New()
++	if err := plain.SetResinProxy(ResinProxy{}); err != nil {
++		t.Fatal(err)
++	}
++	if plain.HTTP.Transport.(*http.Transport).Proxy != nil {
++		t.Fatal("empty config enabled proxy")
++	}
++}

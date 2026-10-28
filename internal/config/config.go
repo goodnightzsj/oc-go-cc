@@ -222,10 +222,21 @@ type ModelConfig struct {
 	// a model whose ladder differs means editing Go and rebuilding - which is
 	// the wrong shape for a gateway whose model list is config-driven.
 	//
-	// Unset means "use the built-in table"; a partial object overrides only the
+	// Unset uses the live roster and built-in table; a partial object overrides only the
 	// fields it names, so listing a ladder does not silently drop the budget
 	// bounds the table already had.
 	Reasoning *ReasoningConfig `json:"reasoning,omitempty"`
+	// PublishedReasoning belongs to the live roster, never the saved config.
+	PublishedReasoning *PublishedReasoning `json:"-"`
+}
+
+// PublishedReasoning is a gateway's statement for one exact model and realm.
+// Missing or empty levels are unknown, not a refusal of reasoning control.
+type PublishedReasoning struct {
+	// Levels preserves the roster's off switch for discovery, not numeric clamping.
+	Levels             []string
+	DefaultEffort      string
+	CanDisableThinking *bool
 }
 
 // ReasoningConfig is the operator's statement about one model's thinking

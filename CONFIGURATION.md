@@ -478,6 +478,22 @@ The proxy automatically detects the type of request and routes to the appropriat
 
 DeepSeek V4 users can set any scenario model to `deepseek-v4-pro` or `deepseek-v4-flash`. For deterministic max thinking, add `reasoning_effort: "max"` and `thinking: {"type":"enabled"}` to that scenario's model config and fallback entries.
 
+### WorkBuddy reasoning discovery
+
+WorkBuddy uses its configured gateway's authenticated `/v1/models` catalog for
+the exact model ID, including `global:` or `cn:`. Explicit model `reasoning`
+configuration takes precedence over published fields, which take precedence
+over static fallback tables. `off` is a thinking switch, not a numeric effort rung.
+The published default is used only when the proxy needs an implicit effort;
+explicit request/config intent keeps its existing precedence.
+
+The existing roster cache retains successful results for ten minutes and failures
+for one minute. Endpoint or credential changes invalidate the matching entry.
+Failed discovery is logged and uses static fallback capabilities; it does not
+prove the gateway supports those capabilities. WorkBuddy native IDs in this
+proxy's `/v1/models` expose published reasoning fields, not operator overrides.
+Aliases and unknown metadata do not receive invented directory declarations.
+
 ### Routing in Detail
 
 | Scenario         | Trigger                                                                      | Config Key            | Default Model  |

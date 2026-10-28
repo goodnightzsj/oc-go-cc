@@ -619,10 +619,13 @@ func thinkingForCapability(raw json.RawMessage, support core.ThinkingSupport, is
 	return converted
 }
 
-// setReasoningEffort sets reasoning_effort on the request, defaulting to
-// "high" when the config value is empty.
+// setReasoningEffort uses the published gateway default only without an override.
 func setReasoningEffort(openaiReq *types.ChatCompletionRequest, model config.ModelConfig) {
+	support := core.ReasoningSupportFor(model)
 	effort := model.ReasoningEffort
+	if effort == "" {
+		effort = support.DefaultEffort
+	}
 	if effort == "" {
 		effort = "high"
 	}
@@ -633,7 +636,6 @@ func setReasoningEffort(openaiReq *types.ChatCompletionRequest, model config.Mod
 	if _, ok := core.NormalizeEffort(effort); !ok {
 		return
 	}
-	support := core.ReasoningSupportFor(model)
 	if isOffEffort(effort) {
 		applyThinkingOff(openaiReq, model, support, support.TakesThinking || len(model.Thinking) > 0)
 		return
@@ -775,7 +777,38 @@ func (t *RequestTransformer) transformMessages(anthropicReq *types.MessageReques
 		result = append(result, openaiMsgs...)
 	}
 
-	return result, nil
+	// A tool batch can span consecutive Anthropic user messages. Chat must
+	// receive every result before any projected image/user message.
+	ordered := make([]types.ChatMessage, 0, len(result))
+	var deferred []types.ChatMessage
+	pending := map[string]bool{}
+	for _, msg := range result {
+		if msg.Role != "user" && msg.Role != "tool" && len(deferred) > 0 {
+			return nil, fmt.Errorf("Chat user content requires all preceding tool responses")
+		}
+		if msg.Role == "assistant" {
+			clear(pending)
+			for _, call := range msg.ToolCalls {
+				pending[call.ID] = true
+			}
+		}
+		if msg.Role == "user" && len(pending) > 0 {
+			deferred = append(deferred, msg)
+			continue
+		}
+		ordered = append(ordered, msg)
+		if msg.Role == "tool" {
+			delete(pending, msg.ToolCallID)
+			if len(pending) == 0 {
+				ordered = append(ordered, deferred...)
+				deferred = nil
+			}
+		}
+	}
+	if len(deferred) > 0 {
+		return nil, fmt.Errorf("Chat user content requires all preceding tool responses")
+	}
+	return ordered, nil
 }
 
 // transformMessage converts a single Anthropic message to one or more OpenAI messages.
@@ -842,12 +875,43 @@ func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, i
 			if err != nil {
 				return nil, err
 			}
+			toolImage := false
+			for _, part := range inner {
+				switch part.Type {
+				case "text":
+				case "image":
+					toolImage = true
+				default:
+					return nil, fmt.Errorf("Chat Completions cannot represent tool_result content %q", part.Type)
+				}
+			}
+			if toolImage && images != imagesForward {
+				return nil, fmt.Errorf("Chat tool_result image requires a vision-capable model")
+			}
+			// Project the whole mixed result so captions stay next to their images
+			// without repeating its text in both the tool and user messages.
+			if toolImage {
+				parts = append(parts, types.ChatContentPart{Type: "text", Text: fmt.Sprintf("Tool result for tool_call_id %q:\n", block.GetToolID())})
+			}
 			var toolContent strings.Builder
 			var toolParts []types.ChatContentPart
 			toolCache := false
 			for _, part := range inner {
-				if part.Type != "text" {
-					return nil, fmt.Errorf("Chat Completions cannot represent tool_result content %q", part.Type)
+				cache := part.CacheControl
+				if !cacheBreakpoints {
+					cache = nil
+				}
+				if toolImage {
+					projected := types.ChatContentPart{Type: "text", Text: part.Text, CacheControl: cache}
+					if part.Type == "image" {
+						url, err := imageSourceURL(part.Source)
+						if err != nil {
+							return nil, err
+						}
+						projected = types.ChatContentPart{Type: "image_url", ImageURL: &types.ImageURL{URL: url}, CacheControl: cache}
+					}
+					parts = append(parts, projected)
+					continue
 				}
 				toolContent.WriteString(part.Text)
 				if cacheBreakpoints {
@@ -856,6 +920,11 @@ func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, i
 				}
 			}
 			content := contentText(toolContent.String())
+			if toolImage {
+				visionImage = true
+				parts = append(parts, types.ChatContentPart{Type: "text", Text: fmt.Sprintf("\nEnd of tool result for tool_call_id %q.\n", block.GetToolID())})
+				content = contentText(fmt.Sprintf("Tool result for tool_call_id %q is provided in the following user message.", block.GetToolID()))
+			}
 			if toolCache {
 				content, err = json.Marshal(toolParts)
 				if err != nil {

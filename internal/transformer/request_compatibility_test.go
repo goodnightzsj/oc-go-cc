@@ -37,14 +37,17 @@ func TestRequestPreservesImageSourcesAndOrder(t *testing.T) {
 	}
 }
 
-// Cross-protocol content loss is an explicit error, even for a vision model.
-func TestRequestRejectsUnrepresentableToolResultParts(t *testing.T) {
+func TestRequestProjectsToolResultImages(t *testing.T) {
 	req := &types.MessageRequest{Messages: []types.Message{{Role: "user", Content: json.RawMessage(`[
 		{"type":"tool_result","tool_use_id":"call_1","content":[{"type":"text","text":"screenshot"},{"type":"image","source":{"type":"url","url":"https://example.test/one.png"}}]}
 	]`)}}}
-	_, err := AnthropicToChatCompletion(req, config.ModelConfig{ModelID: "vision-model", Vision: config.BoolPtr(true)})
-	if err == nil || !strings.Contains(err.Error(), `tool_result content "image"`) {
-		t.Fatalf("expected an explicit unsupported image error, got %v", err)
+	out, err := AnthropicToChatCompletion(req, config.ModelConfig{ModelID: "vision-model", Vision: config.BoolPtr(true)})
+	if err != nil || len(out.Messages) != 2 || out.Messages[0].Role != "tool" || out.Messages[0].ToolCallID != "call_1" || out.Messages[1].Role != "user" {
+		t.Fatalf("tool result/image association lost: %+v err=%v", out, err)
+	}
+	var parts []types.ChatContentPart
+	if err := json.Unmarshal(out.Messages[1].Content, &parts); err != nil || len(parts) != 4 || parts[1].Text != "screenshot" || parts[2].ImageURL == nil || parts[2].ImageURL.URL != "https://example.test/one.png" {
+		t.Fatalf("tool image missing from projected content: %s err=%v", out.Messages[1].Content, err)
 	}
 }
 

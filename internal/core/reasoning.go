@@ -94,6 +94,8 @@ type ThinkingSupport struct {
 	// Levels the model accepts, low to high. Empty means the model does not
 	// take a discrete level.
 	Levels []string
+	// DefaultEffort is the gateway's published default, not a client override.
+	DefaultEffort string
 	// Budget means the model takes thinking.budget_tokens. When both Budget
 	// and Levels are set the model accepts either, not both at once.
 	Budget bool
@@ -163,7 +165,7 @@ func ReasoningSupport(modelID string) ThinkingSupport {
 }
 
 // ReasoningSupportFor answers the same question, letting an operator's
-// declaration in the model config override the built-in table.
+// declaration override WorkBuddy's published facts, then the built-in table.
 //
 // Overrides are additive per field, not whole-object replacements: an operator
 // who lists a ladder has not said anything about the budget bounds, and
@@ -172,6 +174,27 @@ func ReasoningSupport(modelID string) ThinkingSupport {
 // speaks.
 func ReasoningSupportFor(model config.ModelConfig) ThinkingSupport {
 	support := builtinReasoningSupport(model.Provider, model.ModelID)
+	if published := model.PublishedReasoning; site.Normalize(model.Provider) == site.WorkBuddy && published != nil {
+		if len(published.Levels) > 0 {
+			levels := make([]string, 0, len(published.Levels))
+			for _, level := range published.Levels {
+				if level != "off" {
+					levels = append(levels, level)
+				}
+			}
+			if len(levels) > 0 {
+				support.Levels = levels
+				support.DefaultEffort = published.DefaultEffort
+			}
+		}
+		if published.CanDisableThinking != nil {
+			support.CannotDisable = !*published.CanDisableThinking
+			if *published.CanDisableThinking {
+				support.TakesThinking = true
+				support.NoOffLevel = false
+			}
+		}
+	}
 	if override := model.Reasoning; override != nil {
 		if len(override.Levels) > 0 {
 			support.Levels = override.Levels
@@ -210,6 +233,16 @@ func builtinReasoningSupport(provider, modelID string) ThinkingSupport {
 	// platform's forwarding path is the variable, not the model.
 	if capability, ok := platformReasoningSupport(provider); ok {
 		return capability
+	}
+	// Exact WorkBuddy fallback entries, matching the bridge's product catalog.
+	// Live directory fields still override these in ReasoningSupportFor.
+	if site.Normalize(provider) == site.WorkBuddy && realm == "global" {
+		switch family {
+		case "deepseek-v4.1-flash":
+			return ThinkingSupport{Levels: []string{"low", "high", "max"}, Budget: true, TakesThinking: true, EffortDriven: true}
+		case "kimi-k3":
+			return ThinkingSupport{Levels: []string{"medium"}, CannotDisable: true}
+		}
 	}
 
 	switch {

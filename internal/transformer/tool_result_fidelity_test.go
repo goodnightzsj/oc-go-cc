@@ -45,7 +45,6 @@ func TestResponsesToolOutputPreservesImagesAndCallOrder(t *testing.T) {
 
 func TestToolOutputUnsupportedContentIsNotDiscarded(t *testing.T) {
 	for _, content := range []string{
-		`[{"type":"image","source":{"type":"url","url":"https://example.invalid/a.png"}}]`,
 		`[{"type":"text","text":"prefix"},{"type":"tool_reference","tool_name":"lookup"}]`,
 		`{"invalid":"shape"}`,
 	} {
@@ -90,7 +89,12 @@ func TestResponsesInboundToolImagesReachSelectedWire(t *testing.T) {
 	if err := json.Unmarshal(out.Input[1].Output, &parts); err != nil || len(parts) != 3 || parts[0]["text"] != "before" || parts[1]["image_url"] != "https://example.invalid/a.png" || parts[2]["text"] != "after" {
 		t.Fatalf("tool image round trip lost: %+v err=%v", out, err)
 	}
-	if _, err := AnthropicToChatCompletion(req, config.ModelConfig{ModelID: "synthetic"}); err == nil {
-		t.Fatal("Chat silently accepted image-bearing tool output")
+	chat, err := AnthropicToChatCompletion(req, config.ModelConfig{ModelID: "synthetic"})
+	if err != nil || len(chat.Messages) != 3 || chat.Messages[1].ToolCallID != "c" || chat.Messages[2].Role != "user" {
+		t.Fatalf("Chat tool image projection failed: %+v err=%v", chat, err)
+	}
+	var chatParts []types.ChatContentPart
+	if err := json.Unmarshal(chat.Messages[2].Content, &chatParts); err != nil || len(chatParts) != 5 || chatParts[1].Text != "before" || chatParts[2].ImageURL == nil || chatParts[2].ImageURL.URL != "https://example.invalid/a.png" || chatParts[3].Text != "after" {
+		t.Fatalf("Chat tool image order lost: %s err=%v", chat.Messages[2].Content, err)
 	}
 }

@@ -7,8 +7,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
+	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/internal/site"
 )
 
@@ -17,6 +20,7 @@ type SiteModel struct {
 	ID          string
 	DisplayName string
 	Provider    string
+	Reasoning   *config.PublishedReasoning
 }
 
 // siteModelPathSuffix is the tail a platform's API endpoint must end with
@@ -129,13 +133,15 @@ func workBuddyModelsURL(apiEndpoint string) (string, error) {
 	return parsed.String(), nil
 }
 
-// siteModelsResponse is the shape the platform APIs publish. Only the fields
-// the listing shows are read; an unknown extra field is not an error, because
-// these endpoints carry vendor metadata this proxy has no use for.
+// Vendor reasoning metadata is decoded only for WorkBuddy, whose schema is
+// known; other platforms retain their existing ID/name-only contract.
 type siteModelsResponse struct {
 	Data []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID                 string          `json:"id"`
+		Name               string          `json:"name"`
+		ReasoningEfforts   json.RawMessage `json:"reasoning_supported_efforts"`
+		ReasoningDefault   json.RawMessage `json:"reasoning_default_effort"`
+		CanDisableThinking json.RawMessage `json:"can_disable_thinking"`
 	} `json:"data"`
 }
 
@@ -179,10 +185,66 @@ func parseSiteModels(provider string, raw []byte) ([]SiteModel, error) {
 	out := make([]SiteModel, 0, len(decoded.Data))
 	for _, m := range decoded.Data {
 		if model, ok := newSiteModel(provider, m.ID, m.Name); ok {
+			if model.Provider == site.WorkBuddy {
+				var err error
+				model.Reasoning, err = workBuddyReasoning(m.ReasoningEfforts, m.ReasoningDefault, m.CanDisableThinking)
+				if err != nil {
+					return nil, fmt.Errorf("decode workbuddy model list reasoning: %w", err)
+				}
+			}
 			out = append(out, model)
 		}
 	}
 	return requireSiteModels(provider, out)
+}
+
+func workBuddyReasoning(rawLevels, rawDefault, rawDisable json.RawMessage) (*config.PublishedReasoning, error) {
+	var levels []string
+	var defaultEffort string
+	var canDisable *bool
+	for _, field := range []struct {
+		name string
+		raw  json.RawMessage
+		dst  any
+	}{
+		{"reasoning_supported_efforts", rawLevels, &levels},
+		{"reasoning_default_effort", rawDefault, &defaultEffort},
+		{"can_disable_thinking", rawDisable, &canDisable},
+	} {
+		if len(field.raw) > 0 {
+			if err := json.Unmarshal(field.raw, field.dst); err != nil {
+				return nil, fmt.Errorf("invalid %s", field.name)
+			}
+		}
+	}
+	if len(levels) == 0 && defaultEffort == "" && canDisable == nil {
+		return nil, nil
+	}
+	result := &config.PublishedReasoning{CanDisableThinking: canDisable}
+	for _, raw := range levels {
+		if strings.EqualFold(strings.TrimSpace(raw), "off") {
+			result.CanDisableThinking = config.BoolPtr(true)
+			if !slices.Contains(result.Levels, "off") {
+				result.Levels = append(result.Levels, "off")
+			}
+			continue
+		}
+		level, ok := core.NormalizeEffort(strings.ToLower(strings.TrimSpace(raw)))
+		if !ok || level == "" {
+			return nil, fmt.Errorf("reasoning_supported_efforts contains an unrecognized level")
+		}
+		if !slices.Contains(result.Levels, level) {
+			result.Levels = append(result.Levels, level)
+		}
+	}
+	if defaultEffort != "" {
+		level, ok := core.NormalizeEffort(strings.ToLower(strings.TrimSpace(defaultEffort)))
+		if !ok || !slices.Contains(result.Levels, level) {
+			return nil, fmt.Errorf("reasoning_default_effort is not in reasoning_supported_efforts")
+		}
+		result.DefaultEffort = level
+	}
+	return result, nil
 }
 
 // parseClinePassModels reads the clinePass bucket out of Cline's recommended-

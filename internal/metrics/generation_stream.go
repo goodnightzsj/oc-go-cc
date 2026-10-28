@@ -68,6 +68,7 @@ type generationEvent struct {
 		Delta struct {
 			Content          string
 			ReasoningContent string `json:"reasoning_content"`
+			Reasoning        string `json:"reasoning"`
 			ToolCalls        []struct {
 				Function struct{ Name, Arguments string }
 			} `json:"tool_calls"`
@@ -104,7 +105,7 @@ func (b *generationBody) observeEvent(at time.Time) {
 	case core.WireFormatOpenAIChat:
 		for _, choice := range event.Choices {
 			d := choice.Delta
-			output = output || d.Content != "" || d.ReasoningContent != ""
+			output = output || d.Content != "" || d.ReasoningContent != "" || d.Reasoning != ""
 			for _, tool := range d.ToolCalls {
 				output = output || tool.Function.Name != "" || tool.Function.Arguments != ""
 			}

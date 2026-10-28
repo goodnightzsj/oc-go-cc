@@ -3,6 +3,7 @@ package router
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -31,10 +32,15 @@ type ModelRouter struct {
 	catErr      error
 	catCache    time.Time
 
-	siteMu          sync.Mutex
-	siteCache       []catalog.SiteModel
-	siteAt          time.Time
-	siteCacheActive string
+	siteMu    sync.Mutex
+	siteCache map[string]siteModelCache
+}
+
+type siteModelCache struct {
+	endpoint string
+	keyHash  [sha256.Size]byte
+	models   []catalog.SiteModel
+	expires  time.Time
 }
 
 // siteModelsTTL bounds how often a platform's own model list is re-read. The
@@ -47,9 +53,8 @@ const siteModelsTTL = 10 * time.Minute
 // failure for the full TTL would hide a transient outage for ten minutes.
 const siteModelsFailureTTL = time.Minute
 
-// siteModelsClient is separate from the sending client: this call carries no
-// credential and must not inherit the retry or timeout policy of an inference
-// request.
+// Roster discovery does not inherit inference retries or timeouts. WorkBuddy
+// authenticates its roster; public platform rosters receive no credential.
 var siteModelsClient = &http.Client{Timeout: 10 * time.Second}
 
 // activeSiteScope returns the platform the model listing is restricted to, or
@@ -80,47 +85,93 @@ func activeSiteScope(cfg *config.Config) string {
 // and a failure is logged rather than returned: this feeds a listing, and one
 // unreachable platform must not empty the whole answer.
 func (r *ModelRouter) siteModels(ctx context.Context) []catalog.SiteModel {
+	cfg := r.atomic.Get()
+	var out []catalog.SiteModel
+	for _, descriptor := range scopedDescriptors(activeSiteScope(cfg)) {
+		out = append(out, r.siteModelsFor(ctx, cfg, descriptor.ID)...)
+	}
+	return out
+}
+
+// One bounded entry per platform serves both listing and execution. URL/key
+// changes replace its identity so capabilities never cross gateway accounts.
+func (r *ModelRouter) siteModelsFor(ctx context.Context, cfg *config.Config, provider string) []catalog.SiteModel {
+	if len(cfg.ProviderAPIKeys(provider)) == 0 {
+		return nil
+	}
+	endpoint, err := catalog.SiteModelsURL(provider, cfg.ProviderModelEndpoint(provider))
+	if err != nil {
+		return nil
+	}
+	key := modelListKey(cfg, provider)
+	keyHash := sha256.Sum256([]byte(key))
 	r.siteMu.Lock()
 	defer r.siteMu.Unlock()
-
-	cfg := r.atomic.Get()
-	active := activeSiteScope(cfg)
+	if cached, ok := r.siteCache[provider]; ok && cached.endpoint == endpoint && cached.keyHash == keyHash && time.Now().Before(cached.expires) {
+		return cached.models
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	models, err := catalog.FetchSiteModelsWithKey(fetchCtx, siteModelsClient, provider, endpoint, key)
+	cancel()
 	ttl := siteModelsTTL
-	if r.siteCache == nil {
+	if err != nil {
+		slog.Warn("platform model list unavailable", "platform", provider, "err", err)
+		if ctx.Err() != nil {
+			return nil // One caller's cancellation must not poison the shared cache.
+		}
 		ttl = siteModelsFailureTTL
 	}
-	// The cache holds one platform's list under a scope, so a change of active
-	// site must re-read rather than serve the previous platform's models.
-	if r.siteCacheActive != active {
-		r.siteCache, r.siteAt = nil, time.Time{}
+	if r.siteCache == nil {
+		r.siteCache = make(map[string]siteModelCache)
 	}
-	if r.siteCache != nil || !r.siteAt.IsZero() {
-		if time.Since(r.siteAt) < ttl {
-			return r.siteCache
-		}
-	}
+	r.siteCache[provider] = siteModelCache{endpoint: endpoint, keyHash: keyHash, models: models, expires: time.Now().Add(ttl)}
+	return models
+}
 
-	var out []catalog.SiteModel
-	for _, descriptor := range scopedDescriptors(active) {
-		if len(cfg.ProviderAPIKeys(descriptor.ID)) == 0 {
-			continue
-		}
-		endpoint, err := catalog.SiteModelsURL(descriptor.ID, cfg.ProviderModelEndpoint(descriptor.ID))
-		if err != nil {
-			continue // this platform has no model-list endpoint of its own
-		}
-		fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		models, err := catalog.FetchSiteModelsWithKey(fetchCtx, siteModelsClient, descriptor.ID, endpoint,
-			modelListKey(cfg, descriptor.ID))
-		cancel()
-		if err != nil {
-			slog.Warn("platform model list unavailable", "platform", descriptor.ID, "err", err)
-			continue
-		}
-		out = append(out, models...)
+// ApplyPublishedReasoning enriches the final chain, including configured
+// overrides and cross-platform fallbacks, without changing routing identity.
+// Discovery failures retain the existing static fallback and are logged once
+// per discovery attempt rather than converted into inference failures.
+func (r *ModelRouter) ApplyPublishedReasoning(ctx context.Context, chain []config.ModelConfig) []config.ModelConfig {
+	if !slices.ContainsFunc(chain, func(m config.ModelConfig) bool { return config.NormalizeProvider(m.Provider) == site.WorkBuddy }) {
+		return chain
 	}
-	r.siteCache, r.siteAt, r.siteCacheActive = out, time.Now(), active
+	roster := r.siteModelsFor(ctx, r.atomic.Get(), site.WorkBuddy)
+	out := slices.Clone(chain)
+	for i := range out {
+		out[i] = applyPublishedReasoning(out[i], roster)
+	}
 	return out
+}
+
+func applyPublishedReasoning(model config.ModelConfig, roster []catalog.SiteModel) config.ModelConfig {
+	model.PublishedReasoning = nil
+	if config.NormalizeProvider(model.Provider) != site.WorkBuddy {
+		return model
+	}
+	for _, published := range roster {
+		if published.Provider != site.WorkBuddy || published.ID != model.ModelID || published.Reasoning == nil {
+			continue
+		}
+		model.PublishedReasoning = clonePublishedReasoning(published.Reasoning)
+		break
+	}
+	return model
+}
+
+func clonePublishedReasoning(published *config.PublishedReasoning) *config.PublishedReasoning {
+	if published == nil {
+		return nil
+	}
+	cloned := *published
+	cloned.Levels = slices.Clone(cloned.Levels)
+	if cloned.CanDisableThinking != nil {
+		cloned.CanDisableThinking = config.BoolPtr(*cloned.CanDisableThinking)
+	}
+	return &cloned
 }
 
 // scopedDescriptors lists the platforms whose published models belong in the
@@ -570,6 +621,9 @@ type ModelInfo struct {
 	DisplayName string
 	// Provider is the upstream provider that serves the model, when known.
 	Provider string
+	// Reasoning is the gateway's declaration, not an operator override or a
+	// family-table inference. It is only attached to its native roster IDs.
+	Reasoning *config.PublishedReasoning
 }
 
 // ListModels returns the set of model identifiers a client may request,
@@ -665,6 +719,21 @@ func (r *ModelRouter) ListModels(ctx context.Context) []ModelInfo {
 
 	for _, model := range siteModels {
 		add(model.ID, model.DisplayName, model.Provider)
+		info := seen[model.ID]
+		if model.Provider != site.WorkBuddy || info.Provider != site.WorkBuddy || model.Reasoning == nil {
+			continue
+		}
+		if active != site.WorkBuddy {
+			configured, ok := cfg.ModelOverrides[model.ID]
+			if !ok {
+				configured, ok = cfg.Models[model.ID]
+			}
+			if ok && config.ModelKey(configured) != config.ModelKey(config.ModelConfig{Provider: site.WorkBuddy, ModelID: model.ID}) {
+				continue // An unscoped alias can route this name to a different model.
+			}
+		}
+		info.Reasoning = clonePublishedReasoning(model.Reasoning)
+		seen[model.ID] = info
 	}
 
 	return slices.SortedFunc(maps.Values(seen), func(a, b ModelInfo) int {
@@ -771,8 +840,8 @@ func (r *ModelRouter) ActiveSite() string {
 // names, so a client that picked a model from the listing gets exactly that
 // model - it does not get re-mapped by a configured alias.
 //
-// Capabilities come from the catalog when it knows the model. The site's own
-// listing carries ids only, and the built-in registry is keyed by model family,
+// Limits come from the catalog when it knows the model; WorkBuddy's own roster
+// also supplies reasoning controls. The built-in registry is keyed by model family,
 // so a model absent from both would route with no context window and no output
 // ceiling at all. The catalog is the one source that has the platform's real
 // numbers for models it does not otherwise recognize.
@@ -789,7 +858,7 @@ func (r *ModelRouter) PublishedByActiveSite(ctx context.Context, modelID string)
 			// An alias that remaps its name to another model or site still loses.
 			for _, configured := range []config.ModelConfig{cfg.ModelOverrides[modelID], cfg.Models[modelID], cfg.Models["default"]} {
 				if config.ModelKey(configured) == config.ModelKey(target) {
-					return config.ResolveModelConfig(configured), true
+					return applyPublishedReasoning(config.ResolveModelConfig(configured), []catalog.SiteModel{m}), true
 				}
 			}
 			if resolved, err := r.catalogResolved(ctx, active, m.ID); err == nil {
@@ -807,7 +876,7 @@ func (r *ModelRouter) PublishedByActiveSite(ctx context.Context, modelID string)
 				// already carries.
 				target.ModelRef = resolved.CanonicalName
 			}
-			return config.ResolveModelConfig(target), true
+			return applyPublishedReasoning(config.ResolveModelConfig(target), []catalog.SiteModel{m}), true
 		}
 	}
 	return config.ModelConfig{}, false

@@ -8,7 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Recognize Chat `delta.reasoning` when measuring generation tok/s, without changing token accounting or stream bytes.
+- Preserve tool-result images and adjacent text on Chat targets, link them to their tool calls, and keep parallel tool responses together. Consecutive user messages in the current turn now participate in vision routing.
+- Use WorkBuddy's live, exact-model reasoning catalog before static fallbacks, while preserving explicit configuration overrides. Invalidate roster caches when the endpoint or credential changes and expose published reasoning fields in `/v1/models`.
 - Return HTTP 400 with the conversion reason for locally rejected Chat Completions requests instead of a misleading 502. Already-started streams retain their terminal error events; unsupported tool-result content is still rejected rather than dropped.
+
+### Added
+- Fixed-patch WorkBuddy upgrade tooling with isolated builds, verified rollback, and regression coverage. See `ops/workbuddy/README.md`.
 
 ## [v0.5.0] - 2026-07-11
 

@@ -19,6 +19,10 @@ func TestToolResultImagesAffectRoutingAndTokenEstimate(t *testing.T) {
 		t.Fatal("tool screenshot did not require vision")
 	}
 	messages = append(messages, messages[0])
+	if !router.AnalyzeRequestFacts(messages).NeedsVision {
+		t.Fatal("a split tool-result turn lost its new screenshot")
+	}
+	messages = append(messages, router.MessageContent{Role: "assistant", Content: "seen"}, messages[0])
 	if router.AnalyzeRequestFacts(messages).NeedsVision {
 		t.Fatal("replayed screenshot became new image")
 	}

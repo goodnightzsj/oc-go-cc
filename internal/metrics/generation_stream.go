@@ -67,6 +67,7 @@ type generationEvent struct {
 	Choices []struct {
 		Delta struct {
 			Content          string
+			Refusal          string
 			ReasoningContent string `json:"reasoning_content"`
 			Reasoning        string `json:"reasoning"`
 			ToolCalls        []struct {
@@ -105,7 +106,7 @@ func (b *generationBody) observeEvent(at time.Time) {
 	case core.WireFormatOpenAIChat:
 		for _, choice := range event.Choices {
 			d := choice.Delta
-			output = output || d.Content != "" || d.ReasoningContent != "" || d.Reasoning != ""
+			output = output || d.Content != "" || d.Refusal != "" || d.ReasoningContent != "" || d.Reasoning != ""
 			for _, tool := range d.ToolCalls {
 				output = output || tool.Function.Name != "" || tool.Function.Arguments != ""
 			}
@@ -137,7 +138,7 @@ func (b *generationBody) observeEvent(at time.Time) {
 		}
 	case core.WireFormatOpenAIResponses:
 		switch event.Type {
-		case "response.output_text.delta", "response.reasoning_summary_text.delta", "response.reasoning_text.delta", "response.reasoning.delta", "response.function_call_arguments.delta", "response.custom_tool_call_input.delta":
+		case "response.output_text.delta", "response.refusal.delta", "response.reasoning_summary_text.delta", "response.reasoning_text.delta", "response.reasoning.delta", "response.function_call_arguments.delta", "response.custom_tool_call_input.delta":
 			var delta string
 			if json.Unmarshal(event.Delta, &delta) != nil {
 				b.invalid = true

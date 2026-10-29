@@ -83,12 +83,14 @@ func TestStreamTimingAcrossProtocolsAndCapture(t *testing.T) {
 						}
 						r := records.rows[0]
 						wantEvent, wantEnd := int64(0), int64(7000)
+						wantDuration := 7 * time.Second
 						if wire == core.WireFormatAnthropic {
 							wantEvent, wantEnd = 1000, 6000
+							wantDuration = 6 * time.Second
 						}
 						if r.FirstEventMs == nil || *r.FirstEventMs != wantEvent ||
 							r.FirstContentMs == nil || *r.FirstContentMs != 3000 ||
-							r.MessageEndMs == nil || *r.MessageEndMs != wantEnd || r.Duration != 7*time.Second {
+							r.MessageEndMs == nil || *r.MessageEndMs != wantEnd || r.Duration != wantDuration {
 							t.Fatalf("unexpected timing: %+v", r)
 						}
 						if !body.closed.Load() || (capture && captured != body.delivered.String()) {
@@ -155,7 +157,7 @@ func TestStreamTimingFallbackAndInterruptedHistory(t *testing.T) {
 					if r.Success || r.MessageEndMs != nil || r.ContentTokensPerSecond() != nil || r.EventTokensPerSecond() != nil || r.GenerationSample != nil {
 						t.Fatalf("interruption fabricated success: %+v", r)
 					}
-				} else if !r.Success || r.MessageEndMs == nil || *r.MessageEndMs != 8000 || r.Duration != 9*time.Second {
+				} else if !r.Success || r.MessageEndMs == nil || *r.MessageEndMs != 8000 || r.Duration != 8*time.Second {
 					t.Fatalf("completion after fallback: %+v", r)
 				} else if s := r.GenerationSample; s == nil || s.FirstOutputMs != 5000 || s.DurationMs != 3000 || s.OutputTokens != 600 {
 					t.Fatalf("source sample mixed attempts or reset request origin: %+v", s)
@@ -165,7 +167,7 @@ func TestStreamTimingFallbackAndInterruptedHistory(t *testing.T) {
 	}
 }
 
-func TestGenerationSampleDiscardedWhenForwardingFailsAfterTerminal(t *testing.T) {
+func TestGenerationSamplePreservedAfterDeliveredTerminal(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		body := &timingScriptedBody{frames: timingFrames(core.WireFormatAnthropic), finalErr: io.ErrUnexpectedEOF}
 		provider := &timingProvider{body: body, wire: core.WireFormatAnthropic}
@@ -173,8 +175,8 @@ func TestGenerationSampleDiscardedWhenForwardingFailsAfterTerminal(t *testing.T)
 		h.handleStreaming(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/messages", nil),
 			&types.MessageRequest{Stream: boolPtr(true), MaxTokens: 1000},
 			[]config.ModelConfig{{Provider: provider.Name(), ModelID: "synthetic"}}, nil, router.ScenarioDefault, "synthetic")
-		if len(records.rows) != 1 || records.rows[0].Success || records.rows[0].GenerationSample != nil || records.rows[0].OutputTokens != 600 {
-			t.Fatalf("sampling changed forwarding failure or billing: %+v", records.rows)
+		if len(records.rows) != 1 || !records.rows[0].Success || records.rows[0].GenerationSample == nil || records.rows[0].OutputTokens != 600 {
+			t.Fatalf("delivered terminal lost success or billing: %+v", records.rows)
 		}
 	})
 }

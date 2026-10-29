@@ -243,7 +243,7 @@ func (p *AWSBedrockProvider) executeAnthropic(ctx context.Context, req *types.Me
 	client.SetProviderHeaders(httpReq, p.Name())
 	client.SetAnthropicHeaders(httpReq)
 	if cfg.AWSBedrock.ProjectID != "" {
-		httpReq.Header.Set("OpenAI-Project", cfg.AWSBedrock.ProjectID)
+		httpReq.Header.Set("anthropic-workspace-id", cfg.AWSBedrock.ProjectID)
 	}
 
 	resp, err := p.doSelected(httpReq, sel)
@@ -290,7 +290,7 @@ func (p *AWSBedrockProvider) streamAnthropic(ctx context.Context, req *types.Mes
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+sel.Key())
 	if cfg.AWSBedrock.ProjectID != "" {
-		httpReq.Header.Set("OpenAI-Project", cfg.AWSBedrock.ProjectID)
+		httpReq.Header.Set("anthropic-workspace-id", cfg.AWSBedrock.ProjectID)
 	}
 	httpReq.Header.Set("Accept", "text/event-stream")
 	client.SetProviderHeaders(httpReq, p.Name())

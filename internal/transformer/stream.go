@@ -117,6 +117,7 @@ func (h *StreamHandler) ProxyStream(
 	var decoder sse.Decoder
 	contentStarted := false
 	reasoningStarted := false
+	sawRefusal := false
 	terminalStopReason := ""
 	var terminalUsage *types.UsageInfo
 	startedToolCalls := make(map[int]*chatToolState)
@@ -146,7 +147,7 @@ func (h *StreamHandler) ProxyStream(
 			// lives as long as data keeps arriving.
 			ping()
 			if err := decoder.Feed((*readBuf)[:n], func(event string, data []byte) error {
-				return h.processChatEvent(w, flusher, event, data, &contentIndex, &contentStarted, &reasoningStarted, &terminalStopReason, &terminalUsage, startedToolCalls)
+				return h.processChatEvent(w, flusher, event, data, &contentIndex, &contentStarted, &reasoningStarted, &sawRefusal, &terminalStopReason, &terminalUsage, startedToolCalls)
 			}); err != nil {
 				return err
 			}
@@ -174,6 +175,9 @@ func (h *StreamHandler) ProxyStream(
 
 	if terminalStopReason == "" {
 		return fmt.Errorf("chat stream has no finish reason: %w", io.ErrUnexpectedEOF)
+	}
+	if terminalStopReason == "end_turn" && sawRefusal {
+		terminalStopReason = "refusal"
 	}
 
 	// Anthropic expects one terminal message_delta containing both stop_reason
@@ -211,6 +215,7 @@ func (h *StreamHandler) processChatEvent(
 	contentIndex *int,
 	contentStarted *bool,
 	reasoningStarted *bool,
+	sawRefusal *bool,
 	terminalStopReason *string,
 	terminalUsage **types.UsageInfo,
 	startedToolCalls map[int]*chatToolState,
@@ -264,7 +269,12 @@ func (h *StreamHandler) processChatEvent(
 	}
 
 	choice := chunk.Choices[0]
-	if *terminalStopReason != "" && (choice.Delta.ContentText() != "" || choice.Delta.ReasoningText() != "") {
+	textContent := choice.Delta.ContentText()
+	if choice.Delta.Refusal != nil && *choice.Delta.Refusal != "" {
+		textContent += *choice.Delta.Refusal
+		*sawRefusal = true
+	}
+	if *terminalStopReason != "" && (textContent != "" || choice.Delta.ReasoningText() != "") {
 		return fmt.Errorf("chat content arrived after finish_reason")
 	}
 
@@ -310,7 +320,7 @@ func (h *StreamHandler) processChatEvent(
 	}
 
 	// Handle text content deltas
-	if textContent := choice.Delta.ContentText(); textContent != "" {
+	if textContent != "" {
 		if !*contentStarted {
 			// If reasoning was already started, close it first
 			if *reasoningStarted {

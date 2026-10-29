@@ -14,10 +14,19 @@ import (
 // This reproduces the shape rather than the timing: a schema missing the newer
 // columns, opened concurrently.
 func TestConcurrentOpenOfAnOldDatabaseAllSucceeds(t *testing.T) {
+	for _, wal := range []bool{false, true} {
+		t.Run(fmt.Sprintf("wal=%v", wal), func(t *testing.T) {
+			checkConcurrentOpenOfAnOldDatabase(t, wal)
+		})
+	}
+}
+
+func checkConcurrentOpenOfAnOldDatabase(t *testing.T, wal bool) {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "old.db")
 
 	// Build an old-shaped database: requests with none of the added columns.
-	old, err := Open(Config{DatabasePath: path})
+	old, err := Open(Config{DatabasePath: path, WALEnabled: wal})
 	if err != nil {
 		t.Fatalf("seed open: %v", err)
 	}
@@ -56,7 +65,7 @@ func TestConcurrentOpenOfAnOldDatabaseAllSucceeds(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			dbs[i], errs[i] = Open(Config{DatabasePath: path})
+			dbs[i], errs[i] = Open(Config{DatabasePath: path, WALEnabled: wal})
 		}(i)
 	}
 	close(start)
@@ -74,7 +83,7 @@ func TestConcurrentOpenOfAnOldDatabaseAllSucceeds(t *testing.T) {
 	}
 
 	// The migration still had to happen exactly once, correctly.
-	final, err := Open(Config{DatabasePath: path})
+	final, err := Open(Config{DatabasePath: path, WALEnabled: wal})
 	if err != nil {
 		t.Fatalf("final open: %v", err)
 	}

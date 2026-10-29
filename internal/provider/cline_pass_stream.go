@@ -47,6 +47,7 @@ func aggregateChatStream(r io.Reader, modelID string) (_ *types.ChatCompletionRe
 	var toolOrder []int
 	seen := false
 	complete := false
+	sawRefusal := false
 
 	limited := &io.LimitedReader{R: r, N: maxAggregatedStreamBytes + 1}
 	var decoder sse.Decoder
@@ -90,15 +91,22 @@ func aggregateChatStream(r io.Reader, modelID string) (_ *types.ChatCompletionRe
 			out.Model = chunk.Model
 		}
 		for _, choice := range chunk.Choices {
+			delta := choice.Delta
+			if out.Choices[0].FinishReason != "" && (delta.ContentText() != "" || delta.ReasoningText() != "" || delta.Refusal != nil && *delta.Refusal != "") {
+				return fmt.Errorf("cline-pass content arrived after finish_reason")
+			}
 			if choice.FinishReason != "" {
 				out.Choices[0].FinishReason = choice.FinishReason
 			}
-			delta := choice.Delta
 			if delta.Content != nil {
 				var piece string
 				if err := json.Unmarshal(delta.Content, &piece); err == nil {
 					content.WriteString(piece)
 				}
+			}
+			if delta.Refusal != nil && *delta.Refusal != "" {
+				content.WriteString(*delta.Refusal)
+				sawRefusal = true
 			}
 			reasoning.WriteString(delta.ReasoningText())
 			for _, tc := range delta.ToolCalls {
@@ -154,6 +162,11 @@ func aggregateChatStream(r io.Reader, modelID string) (_ *types.ChatCompletionRe
 	// metadata may still follow. Only [DONE] confirms the complete stream.
 	if !complete {
 		return nil, fmt.Errorf("cline-pass stream ended before [DONE]: %w", io.ErrUnexpectedEOF)
+	}
+	// This internal Messages projection preserves visible text order and refusal
+	// classification; source bytes remain in the upstream capture, not this DTO.
+	if sawRefusal && out.Choices[0].FinishReason == "stop" {
+		out.Choices[0].FinishReason = "content_filter"
 	}
 	if content.Len() > 0 {
 		encoded, err := json.Marshal(content.String())

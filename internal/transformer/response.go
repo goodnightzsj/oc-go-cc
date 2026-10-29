@@ -63,6 +63,9 @@ func (t *ResponseTransformer) TransformResponse(
 	if err != nil {
 		return nil, err
 	}
+	if stopReason == "end_turn" && choice.Message.Refusal != nil && *choice.Message.Refusal != "" {
+		stopReason = "refusal"
+	}
 
 	// Build Anthropic response.
 	anthropicResp := &types.MessageResponse{
@@ -124,7 +127,11 @@ func (t *ResponseTransformer) transformContent(msg types.ChatMessage) ([]types.C
 	}
 
 	// Handle text content.
-	if text := msg.ContentText(); text != "" {
+	text := msg.ContentText()
+	if msg.Refusal != nil {
+		text += *msg.Refusal
+	}
+	if text != "" {
 		blocks = append(blocks, types.ContentBlock{
 			Type: "text",
 			Text: text,

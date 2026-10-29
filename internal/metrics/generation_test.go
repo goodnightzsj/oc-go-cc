@@ -56,6 +56,18 @@ func TestSourceGenerationSample(t *testing.T) {
 			generationFrame(`{"type":"response.completed","response":{"status":"completed","usage":{"output_tokens":100}}}`),
 			generationFrame(`[DONE]`),
 		}, &GenerationSample{2000, 1000, 100}},
+		{"chat refusal", core.WireFormatOpenAIChat, []string{
+			generationFrame(`{"choices":[{"delta":{"role":"assistant","refusal":""}}]}`),
+			generationFrame(`{"choices":[{"delta":{"refusal":"declined"}}]}`),
+			generationFrame(`{"choices":[{"delta":{"content":"text"},"finish_reason":"stop"}],"usage":{"completion_tokens":100}}`),
+			generationFrame(`[DONE]`),
+		}, &GenerationSample{2000, 2000, 100}},
+		{"responses refusal", core.WireFormatOpenAIResponses, []string{
+			generationFrame(`{"type":"response.refusal.delta","delta":""}`),
+			generationFrame(`{"type":"response.refusal.delta","delta":"declined"}`),
+			generationFrame(`{"type":"response.output_text.delta","delta":"text"}`),
+			generationFrame(`{"type":"response.completed","response":{"status":"completed","usage":{"output_tokens":100}}}`),
+		}, &GenerationSample{2000, 2000, 100}},
 		{"messages", core.WireFormatAnthropic, []string{
 			generationFrame(`{"type":"message_start","message":{"usage":{"output_tokens":1}}}`),
 			generationFrame(`{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"hmm"}}`),

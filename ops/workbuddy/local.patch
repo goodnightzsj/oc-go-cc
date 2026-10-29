@@ -163,6 +163,26 @@ index 0000000..792ead0
 +		t.Fatal("invalid proxy silently bypassed")
 +	}
 +}
+diff --git a/internal/scheduler/scheduler_test.go b/internal/scheduler/scheduler_test.go
+index e22142f..86d3d0c 100644
+--- a/internal/scheduler/scheduler_test.go
++++ b/internal/scheduler/scheduler_test.go
+@@ -125,8 +125,13 @@ func TestRunCatchesUpMissedSlots(t *testing.T) {
+ 	defer func() { wakeupGraceDelay = old }()
+ 
+ 	ctx, cancel := context.WithCancel(context.Background())
+-	defer cancel()
+-	go s.Run(ctx)
++	done := make(chan struct{})
++	go func() { s.Run(ctx); close(done) }()
++	defer func() {
++		cancel()
++		// Join before restoring wakeupGraceDelay or the caller's time.Local.
++		<-done
++	}()
+ 
+ 	// 补跑在 Run 进入主循环之前派发；命中即退出，不等固定时长。
+ 	deadline := time.Now().Add(10 * time.Second)
 diff --git a/internal/updater/integration_test.go b/internal/updater/integration_test.go
 index 5849aae..92a217d 100644
 --- a/internal/updater/integration_test.go
@@ -440,3 +460,507 @@ index 0000000..2df88a8
 +		t.Fatal("empty config enabled proxy")
 +	}
 +}
+diff --git a/internal/server/handler.go b/internal/server/handler.go
+index 3e11fee..2945aea 100644
+--- a/internal/server/handler.go
++++ b/internal/server/handler.go
+@@ -1000,7 +1000,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+ 	// ttfb 首 token 等待（仅流式有观测；非流式传 0 = 无观测，速率不扣减）。
+ 	// 显式入参而不是读 st.ttfb：后者在流式分支里是**调用之后**才赋值的，
+ 	// 靠顺序传递会让将来重排代码时静默把速率算回旧的错口径（吸收上游 8b18ab8）。
+-	recordAttempt := func(uid string, delta pool.TokenUsageDelta, credit float64, hasCredit bool, started time.Time, ttfb time.Duration) {
++	recordAttempt := func(uid string, delta pool.TokenUsageDelta, credit float64, hasCredit bool, latency, ttfb time.Duration, succeeded bool) {
+ 		// 请求指标（PR #71）：每次尝试累加 retry 次数与 token 口径。
+ 		st.attempts++
+ 		if delta.HasPromptTokens {
+@@ -1018,7 +1018,6 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+ 		if delta.Model == "" {
+ 			delta.Model = peek.Model
+ 		}
+-		latency := time.Since(started)
+ 		latencyMs := latency.Milliseconds()
+ 		if latencyMs < 1 {
+ 			latencyMs = 1
+@@ -1037,8 +1036,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+ 		}
+ 		h.cfg.Pool.RecordTokenUsage(uid, delta)
+ 
+-		// 用量时序记录。ok 以「上游是否给了 usage」判定：空 delta 意味着这次尝试
+-		// 没拿到任何 token 统计（传输错误 / >=400 / 解析失败），计为失败尝试。
++		// 失败尝试仍保留已观测 usage，不能以有 token 统计代替执行成功。
+ 		// 失败也计入请求数——否则重试放大在「用量」视图里看不见。
+ 		if h.cfg.Usage != nil {
+ 			realm := "cn"
+@@ -1062,7 +1060,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+ 				CacheHitTokens:   delta.CacheHitTokens,
+ 				CacheMissTokens:  delta.CacheMissTokens,
+ 				HasCache:         delta.HasCacheTokens,
+-			}, delta.HasTotalTokens || delta.HasCompletionTokens || delta.HasPromptTokens)
++			}, succeeded && (delta.HasTotalTokens || delta.HasCompletionTokens || delta.HasPromptTokens))
+ 		}
+ 	}
+ 
+@@ -1273,7 +1271,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+ 			// 连败兜底（issue #114）：喂连败计数——连不上上游是「不知道原因的失败」，
+ 			// 连败 N 次临时出池，单次/偶发不罚（NoteFailures 内部达阈才动作）。
+ 			// 上游 client 已打 transport error 日志。
+-			recordAttempt(acct.UID, pool.TokenUsageDelta{}, 0, false, attemptStarted, 0)
++			recordAttempt(acct.UID, pool.TokenUsageDelta{}, 0, false, time.Since(attemptStarted), 0, false)
+ 			st.status = http.StatusServiceUnavailable
+ 			lastErr = terr
+ 			// 客户端已断连（人走了）例外：传输错误是断连的**结果**，不是这个号的
+@@ -1293,7 +1291,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+ 			continue
+ 		}
+ 		if status >= 400 {
+-			recordAttempt(acct.UID, pool.TokenUsageDelta{}, 0, false, attemptStarted, 0)
++			recordAttempt(acct.UID, pool.TokenUsageDelta{}, 0, false, time.Since(attemptStarted), 0, false)
+ 			st.status = status
+ 			var kind upstream.ErrKind
+ 			if uerr != nil {
+@@ -1542,7 +1540,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+ 			// 透给客户端（SSE 发过字节就改不了状态码，此前只能这么兜底）。
+ 			var hv *upstream.HeadVetoError
+ 			if errors.As(sErr, &hv) {
+-				recordAttempt(acct.UID, pool.TokenUsageDelta{}, 0, false, attemptStarted, 0)
++				recordAttempt(acct.UID, pool.TokenUsageDelta{}, 0, false, time.Since(attemptStarted), 0, false)
+ 				st.status = http.StatusServiceUnavailable
+ 				st.outcome = reqlog.OutcomeStreamError
+ 				// 上游 body 是活的（200 长流），随轮转立即关闭，不留给函数末尾的 defer 堆 fd。
+@@ -1590,7 +1588,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+ 			// credit 显式存在且有限非负、total 为正整数时计入成本账本/用量账；
+ 			// 缺字段/NaN/负值不再被当成「免费」或脏数据污染台账（上游 PR #104）。
+ 			hasCredit = validUsageCost(credit, hasCredit, total, hasTotal)
+-			recordAttempt(acct.UID, stats.Usage(), credit, hasCredit, attemptStarted, stats.TTFB())
++			recordAttempt(acct.UID, stats.Usage(), credit, hasCredit, time.Since(attemptStarted), stats.TTFB(), st.outcome == reqlog.OutcomeSuccess)
+ 			if n, ok := stats.Thinking(); ok {
+ 				st.think = n
+ 			}
+@@ -1643,23 +1641,42 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+ 			rc.Close()
+ 			return
+ 		}
+-		resp, err := upstream.Aggregate(rc)
+-		rc.Close()
+-		if err != nil {
+-			recordAttempt(acct.UID, pool.TokenUsageDelta{}, 0, false, attemptStarted, 0)
++		failAggregate := func(resp map[string]any, err error, latency time.Duration) {
++			ud := usageDeltaFromResponse(resp)
++			credit, total, hasCredit := usageCreditTotal(resp)
++			recordAttempt(acct.UID, ud, credit, hasCredit, latency, 0, false)
++			st.toks = completionTokens(resp)
++			if ud.HasCacheTokens {
++				st.cacheHit, st.cacheMiss, st.hasCache = int(ud.CacheHitTokens), int(ud.CacheMissTokens), true
++			}
++			if hasCredit {
++				st.credit, st.hasCredit = credit, true
++				h.cfg.Pool.NoteModelCost(acct.UID, bareModel, credit, total)
++			}
+ 			// 上游流解析失败：客户端还没看到任何输出，回 502 并告知原因。
+ 			// 与流式空流那条 WARN 对称——此前这条只写响应不落日志，运维侧只能看到
+ 			// 一行 sync 502，无从判断是上游空体还是别的（同一失败在流式路径有 WARN）。
+ 			log.Printf("WARN: [server] sync acct=%s model=%s: upstream parse failed: %v", logfmt.Label(acct.UID, acct.Nickname), bareModel, err)
+-			writeOpenAIError(w, http.StatusBadGateway, "upstream_parse", err.Error())
++			if resp["error"] != nil {
++				writeJSON(w, http.StatusBadGateway, resp)
++			} else {
++				writeOpenAIError(w, http.StatusBadGateway, "upstream_parse", err.Error())
++			}
+ 			st.status = http.StatusBadGateway
+ 			st.outcome = reqlog.OutcomeHTTPError
++		}
++		resp, err := upstream.Aggregate(rc)
++		rc.Close()
++		if err != nil {
++			failAggregate(resp, err, time.Since(attemptStarted))
+ 			return
+ 		}
+ 		// 空截断救援（见 starved.go）：额度被思考吃光、正文零字节。非流式这一侧
+ 		// 没有 continueReader，救援在这里做——同预算关思考重发一次、重新聚合。
+ 		if aggregateStarved(resp) && bodyHasOutputLimit(body) {
+ 			if rb, ok := starvedRetryBody(body); ok {
++				firstLatency := time.Since(attemptStarted)
++				rescueStarted := time.Now()
+ 				if rc2, st2, _, e2 := h.cfg.Upstream.ChatStreamContext(r.Context(), acct, rb, clientIP, chatMeta, nil); e2 == nil && st2 < 400 && rc2 != nil {
+ 					if resp2, e3 := upstream.Aggregate(rc2); e3 == nil {
+ 						rc2.Close()
+@@ -1668,6 +1685,13 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+ 							logfmt.Label(acct.UID, acct.Nickname), bareModel)
+ 					} else {
+ 						rc2.Close()
++						if resp2["error"] != nil {
++							// 两次真实执行分别记账；明确源错误不能退回原来的空截断响应。
++							credit, _, hasCredit := usageCreditTotal(resp)
++							recordAttempt(acct.UID, usageDeltaFromResponse(resp), credit, hasCredit, firstLatency, 0, true)
++							failAggregate(resp2, e3, time.Since(rescueStarted))
++							return
++						}
+ 						log.Printf("WARN: [starved] non-stream acct=%s model=%s: 重发聚合失败: %v",
+ 							logfmt.Label(acct.UID, acct.Nickname), bareModel, e3)
+ 					}
+@@ -1696,7 +1720,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+ 		st.toolCalls = toolCallCount(resp)
+ 		ud := usageDeltaFromResponse(resp)
+ 		credit, total, hasCredit := usageCreditTotal(resp)
+-		recordAttempt(acct.UID, ud, credit, hasCredit, attemptStarted, 0)
++		recordAttempt(acct.UID, ud, credit, hasCredit, time.Since(attemptStarted), 0, true)
+ 		// 模型名回显（issue #30，与流式 WithModelEcho 同语义）：聚合体的 model
+ 		// 覆写回客户端原发名，严格校验客户端不当场报错。
+ 		if modelEcho != "" {
+diff --git a/internal/server/local_aggregate_error_test.go b/internal/server/local_aggregate_error_test.go
+new file mode 100644
+index 0000000..b594154
+--- /dev/null
++++ b/internal/server/local_aggregate_error_test.go
+@@ -0,0 +1,93 @@
++package server
++
++import (
++	"context"
++	"encoding/json"
++	"net/http/httptest"
++	"strings"
++	"testing"
++	"testing/synctest"
++	"time"
++
++	"github.com/misakano7545/workbuddy2api-panel/internal/auth"
++	"github.com/misakano7545/workbuddy2api-panel/internal/reqlog"
++	"github.com/misakano7545/workbuddy2api-panel/internal/usage"
++)
++
++const localErrorSSE = `data: {"choices":[{"delta":{"content":"partial"}}],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10,"credit":0.25}}` + "\n\n" +
++	`data: {"code":11140,"msg":"synthetic failure","requestId":"test-request"}` + "\n\ndata: [DONE]\n\n"
++
++func TestLocalAggregateFailureReachesHTTPAndHistory(t *testing.T) {
++	for _, rescue := range []bool{false, true} {
++		t.Run(map[bool]string{false: "direct", true: "starved-rescue"}[rescue], func(t *testing.T) {
++			synctest.Test(t, func(t *testing.T) {
++				calls := 0
++				up := newFakeUpstream(t, func(string) (int, string, bool) {
++					calls++
++					time.Sleep(time.Duration(calls) * time.Second)
++					if rescue && calls == 1 {
++						return 200, testSeg1Starved, true
++					}
++					return 200, localErrorSSE, true
++				})
++				p := testPoolWith(&auth.Auth{UID: "test-one", AccessToken: "test-only", ExpiresAt: 9999999999})
++				log := reqlog.New(reqlog.Config{})
++				recorded := usage.New("")
++				h := NewHandler(Config{Pool: p, Upstream: up, RequestLog: log, Usage: recorded})
++				rec := httptest.NewRecorder()
++				h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"deepseek-v4.1-flash","max_tokens":200,"messages":[{"role":"user","content":"synthetic"}]}`)))
++				if rec.Code != 502 {
++					t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
++				}
++				var body map[string]any
++				if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
++					t.Fatal(err)
++				}
++				if body["error"] == nil || body["choices"] != nil || !strings.Contains(rec.Body.String(), "test-request") {
++					t.Fatalf("lost source error: %s", rec.Body)
++				}
++				u, _ := body["usage"].(map[string]any)
++				if u["completion_tokens"] != float64(3) {
++					t.Fatalf("lost partial usage: %#v", body)
++				}
++				want := 1
++				if rescue {
++					want = 2
++				}
++				if calls != want {
++					t.Fatalf("calls=%d want=%d", calls, want)
++				}
++				snap := log.Snapshot()
++				if len(snap.Recent) != 1 {
++					t.Fatalf("history rows=%d", len(snap.Recent))
++				}
++				e := snap.Recent[0]
++				if e.OK || e.Outcome == reqlog.OutcomeSuccess || e.Status != 502 || e.CompletionTokens != 3 || e.Attempts != want || !e.HasCredit || e.Credit != 0.25 {
++					t.Fatalf("bad failure history: %#v", e)
++				}
++				totals := recorded.Snapshot(24, nil).Totals
++				wantTokens, wantLatency := int64(3), float64(1000)
++				if rescue {
++					wantTokens, wantLatency = 203, 1500
++				}
++				if totals.Requests != int64(want) || totals.Errors != 1 || totals.CompletionTok != wantTokens || totals.Credits != 0.25 {
++					t.Errorf("partial failure accounting: %#v", totals)
++				}
++				if totals.AvgLatencyMs != wantLatency {
++					t.Errorf("attempt latency=%v want=%v", totals.AvgLatencyMs, wantLatency)
++				}
++			})
++		})
++	}
++}
++
++func TestLocalSearchProbeReturnsExplicitFailureWithoutRetry(t *testing.T) {
++	calls := 0
++	up := newFakeUpstream(t, func(string) (int, string, bool) { calls++; return 200, localErrorSSE, true })
++	p := testPoolWith(&auth.Auth{UID: "test-one", AccessToken: "test-only", ExpiresAt: 9999999999}, &auth.Auth{UID: "test-two", AccessToken: "test-only-two", ExpiresAt: 9999999999})
++	h := NewHandler(Config{Pool: p, Upstream: up})
++	obj, err := h.probeOnce(context.Background(), "cn", "deepseek-v4.1-flash", []byte(`{"model":"deepseek-v4.1-flash","messages":[]}`))
++	if err == nil || calls != 1 || obj["error"] == nil {
++		t.Fatalf("probe hid or retried explicit failure: calls=%d obj=%#v err=%v", calls, obj, err)
++	}
++}
+diff --git a/internal/server/searchtool.go b/internal/server/searchtool.go
+index ee3e8b5..1941673 100644
+--- a/internal/server/searchtool.go
++++ b/internal/server/searchtool.go
+@@ -254,6 +254,9 @@ func (h *Handler) probeOnce(ctx context.Context, realm, model string, body []byt
+ 		obj, aerr := upstream.Aggregate(rc)
+ 		_ = rc.Close()
+ 		if aerr != nil {
++			if obj["error"] != nil {
++				return obj, aerr
++			}
+ 			lastErr = aerr
+ 			continue
+ 		}
+diff --git a/internal/upstream/local_aggregate_error_test.go b/internal/upstream/local_aggregate_error_test.go
+new file mode 100644
+index 0000000..ae55c26
+--- /dev/null
++++ b/internal/upstream/local_aggregate_error_test.go
+@@ -0,0 +1,110 @@
++package upstream
++
++import (
++	"encoding/json"
++	"fmt"
++	"strings"
++	"testing"
++)
++
++func TestLocalAggregateExplicitError(t *testing.T) {
++	for _, failure := range []string{
++		`{"error":{"code":6004,"message":"synthetic failure","requestId":"test-request"}}`,
++		`{"code":11140,"msg":"synthetic failure","requestId":"test-request"}`,
++	} {
++		for _, partial := range []bool{false, true} {
++			for _, done := range []bool{false, true} {
++				for _, separator := range []string{"data: ", "data:"} {
++					t.Run(fmt.Sprintf("%s/partial=%t/done=%t/space=%t", failure, partial, done, separator == "data: "), func(t *testing.T) {
++						prefix, suffix := "", ""
++						if partial {
++							prefix = `data: {"choices":[{"delta":{"content":"partial"}}],"usage":{"prompt_tokens":7,"completion_tokens":3,"completion_tokens_details":{"reasoning_tokens":2}}}` + "\n\n"
++						}
++						if done {
++							suffix = "data: [DONE]\n\n"
++						}
++						resp, err := Aggregate(strings.NewReader(prefix + separator + failure + "\r\n\r\n" + suffix))
++						if err == nil {
++							t.Fatalf("explicit error became success: %#v", resp)
++						}
++						if resp["error"] == nil || resp["choices"] != nil {
++							t.Fatalf("not an error response: %#v", resp)
++						}
++						raw, _ := json.Marshal(resp["error"])
++						if !strings.Contains(string(raw), "synthetic failure") || !strings.Contains(string(raw), "test-request") {
++							t.Fatalf("lost error details: %s", raw)
++						}
++						if partial {
++							u, _ := resp["usage"].(map[string]any)
++							if u["completion_tokens"] != float64(3) || u["total_tokens"] != float64(10) {
++								t.Fatalf("lost partial usage: %#v", u)
++							}
++							if d, _ := u["completion_tokens_details"].(map[string]any); d["reasoning_tokens"] != float64(2) {
++								t.Fatalf("lost reasoning usage: %#v", u)
++							}
++						} else if resp["usage"] != nil {
++							t.Fatalf("invented usage: %#v", resp)
++						}
++					})
++				}
++			}
++		}
++	}
++}
++
++func TestLocalAggregateErrorShapedContentIsNotFailure(t *testing.T) {
++	raw := `data: {"code":11140,"error":null,"choices":[{"delta":{"content":"request illegal 11140"},"finish_reason":"stop"}],"usage":{"prompt_tokens":0,"completion_tokens":0}}` + "\n\ndata: [DONE]\n\n"
++	resp, err := Aggregate(strings.NewReader(raw))
++	if err != nil || resp["error"] != nil {
++		t.Fatalf("ordinary content rejected: %#v %v", resp, err)
++	}
++	u := resp["usage"].(map[string]any)
++	if u["completion_tokens"] != float64(0) {
++		t.Fatal("explicit zero usage lost")
++	}
++}
++
++func TestLocalAggregatePartialErrorUsage(t *testing.T) {
++	for _, tokens := range []string{"", `,"completion_tokens":0`} {
++		raw := `data: {"choices":[{"delta":{"content":"partial"}}],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10,"completion_tokens_details":{"reasoning_tokens":2}}}` + "\n\n" +
++			`data: {"error":{"message":"failed"},"usage":{"credit":0.25,"completion_tokens_details":{"accepted_prediction_tokens":1}` + tokens + `}}` + "\n\n"
++		resp, err := Aggregate(strings.NewReader(raw))
++		if err == nil {
++			t.Fatal("explicit failure became success")
++		}
++		u, _ := resp["usage"].(map[string]any)
++		want := float64(3)
++		if tokens != "" {
++			want = 0
++		}
++		if u["prompt_tokens"] != float64(7) || u["completion_tokens"] != want || u["total_tokens"] != 7+want || u["credit"] != 0.25 {
++			t.Errorf("partial error usage lost: %#v", u)
++		}
++		d, _ := u["completion_tokens_details"].(map[string]any)
++		if d["reasoning_tokens"] != float64(2) || d["accepted_prediction_tokens"] != float64(1) {
++			t.Errorf("partial details lost: %#v", d)
++		}
++	}
++}
++
++func TestLocalAggregateLatestCacheObservation(t *testing.T) {
++	for _, cached := range []float64{0, 5} {
++		raw := `data: {"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3,"prompt_tokens_details":{"cached_tokens":2,"audio_tokens":1}}}` + "\n\n" +
++			fmt.Sprintf(`data: {"error":{"message":"failed"},"usage":{"prompt_cache_hit_tokens":%v}}`, cached) + "\n\n"
++		resp, err := Aggregate(strings.NewReader(raw))
++		if err == nil {
++			t.Fatal("expected failure")
++		}
++		u := resp["usage"].(map[string]any)
++		if u["prompt_cache_hit_tokens"] != cached {
++			t.Errorf("latest cache lost: %#v", u)
++		}
++		d := u["prompt_tokens_details"].(map[string]any)
++		if d["audio_tokens"] != float64(1) {
++			t.Errorf("unrelated details lost: %#v", d)
++		}
++		if v, ok := d["cached_tokens"]; ok && v != cached {
++			t.Errorf("stale cache details: %#v", d)
++		}
++	}
++}
+diff --git a/internal/upstream/sse.go b/internal/upstream/sse.go
+index d552933..a66f19c 100644
+--- a/internal/upstream/sse.go
++++ b/internal/upstream/sse.go
+@@ -62,6 +62,7 @@ const TruncationFinishReason = "length"
+ // Aggregate 读取完整 SSE 流，聚合 delta.content 为单个 OpenAI chat.completion 响应。
+ // 分片/半行由 bufio.Reader.ReadString 处理；遇到 "data: [DONE]" 结束。
+ // tool_calls 以流式 delta 到达（按 index 合并：首片带 id/type/name，后续只带 arguments 片段）。
++// 明确失败时返回错误信封和已观测 usage，同时返回非 nil error；调用方不得当作 completion。
+ func Aggregate(r io.Reader) (map[string]any, error) {
+ 	br := bufio.NewReaderSize(r, 64*1024)
+ 	var (
+@@ -181,8 +182,8 @@ func Aggregate(r io.Reader) (map[string]any, error) {
+ 			return nil, err
+ 		}
+ 		line = strings.TrimRight(line, "\r\n")
+-		if strings.HasPrefix(line, "data: ") {
+-			payload := strings.TrimPrefix(line, "data: ")
++		if strings.HasPrefix(line, "data:") {
++			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+ 			if payload == "[DONE]" {
+ 				// 上游显式结束：停止读取，DONE 之后的任何数据一律忽略。
+ 				sawDone = true
+@@ -202,7 +203,19 @@ func Aggregate(r io.Reader) (map[string]any, error) {
+ 						created = v
+ 					}
+ 					if u, ok := chunk["usage"].(map[string]any); ok {
+-						usage = u
++						usage = mergeAggregateUsage(usage, u)
++					}
++					if code, msg, failed := StreamErrorFrame(chunk); failed {
++						payload = streamErrorPayload(code, msg, payload)
++						if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
++							return nil, err
++						}
++					}
++					if chunk["error"] != nil {
++						if usage != nil {
++							chunk["usage"] = normalizeUsageCacheAliases(ensureUsageTotal(usage))
++						}
++						return chunk, &Error{Kind: FrameKind(payload), Msg: payload}
+ 					}
+ 					if ch, ok := chunk["choices"].([]any); ok {
+ 						for _, ci := range ch {
+diff --git a/internal/upstream/usage.go b/internal/upstream/usage.go
+index 3b20a1f..b6d980d 100644
+--- a/internal/upstream/usage.go
++++ b/internal/upstream/usage.go
+@@ -1,5 +1,47 @@
+ package upstream
+ 
++// Aggregate usage frames are cumulative observations, not additive deltas.
++func mergeAggregateUsage(previous, current map[string]any) map[string]any {
++	out := cloneUsageMap(previous)
++	if _, total := current["total_tokens"]; !total {
++		_, prompt := current["prompt_tokens"]
++		_, completion := current["completion_tokens"]
++		if prompt || completion {
++			delete(out, "total_tokens")
++		}
++	}
++	for _, path := range usageCachePaths {
++		fields := current
++		if path.section != "" {
++			fields, _ = current[path.section].(map[string]any)
++		}
++		if value, ok := fields[path.key].(float64); ok && value >= 0 {
++			// Alias priority applies within a frame, never over a newer observation.
++			for _, oldPath := range usageCachePaths {
++				if oldPath.section == "" {
++					delete(out, oldPath.key)
++				} else if _, exists := out[oldPath.section]; exists {
++					details := cloneUsageDetails(out, oldPath.section)
++					delete(details, oldPath.key)
++					out[oldPath.section] = details
++				}
++			}
++			break
++		}
++	}
++	for key, value := range current {
++		if details, ok := value.(map[string]any); ok {
++			merged := cloneUsageDetails(out, key)
++			for detailKey, detailValue := range details {
++				merged[detailKey] = detailValue
++			}
++			value = merged
++		}
++		out[key] = value
++	}
++	return out
++}
++
+ // normalizeUsageCacheAliases keeps cache-hit aliases consistent before the
+ // response leaves the gateway. Some WorkBuddy responses carry the real hit in
+ // prompt_tokens_details.cached_tokens while also emitting
+@@ -31,19 +73,19 @@ func normalizeUsageCacheAliases(usage map[string]any) map[string]any {
+ 	return out
+ }
+ 
+-func bestUsageCacheHitTokens(usage map[string]any) (float64, bool) {
+-	paths := []struct {
+-		section string
+-		key     string
+-	}{
+-		{"prompt_tokens_details", "cached_tokens"},
+-		{"", "prompt_cache_hit_tokens"},
+-		{"", "cache_read_input_tokens"},
+-		{"", "cached_tokens"},
+-		{"input_tokens_details", "cached_tokens"},
+-	}
++var usageCachePaths = []struct {
++	section string
++	key     string
++}{
++	{"prompt_tokens_details", "cached_tokens"},
++	{"", "prompt_cache_hit_tokens"},
++	{"", "cache_read_input_tokens"},
++	{"", "cached_tokens"},
++	{"input_tokens_details", "cached_tokens"},
++}
+ 
+-	for _, path := range paths {
++func bestUsageCacheHitTokens(usage map[string]any) (float64, bool) {
++	for _, path := range usageCachePaths {
+ 		var value any
+ 		if path.section == "" {
+ 			value = usage[path.key]

@@ -64,6 +64,7 @@ type responseWriter struct {
 	sseData           []byte
 	sseEvent          string
 	messageStopped    bool
+	stopReason        string
 	streamErr         error
 	sourceModel       string
 	sourceAnthropic   bool
@@ -164,8 +165,11 @@ func (w *responseWriter) observeSSEEvent(needContent bool) (streamMilestones, er
 		ReasoningTokens          *int `json:"reasoning_tokens"`
 	}
 	var event struct {
-		Type    string      `json:"type"`
-		Usage   *tokenUsage `json:"usage"`
+		Type  string      `json:"type"`
+		Usage *tokenUsage `json:"usage"`
+		Delta struct {
+			StopReason string `json:"stop_reason"`
+		} `json:"delta"`
 		Message struct {
 			Usage *tokenUsage `json:"usage"`
 			Model string      `json:"model"`
@@ -180,6 +184,10 @@ func (w *responseWriter) observeSSEEvent(needContent bool) (streamMilestones, er
 		event.Type = w.sseEvent
 	}
 	switch event.Type {
+	case "message_delta":
+		if event.Delta.StopReason != "" {
+			w.stopReason = event.Delta.StopReason
+		}
 	case "message_stop":
 		w.messageStopped = true
 	case "error":
@@ -220,6 +228,15 @@ func (w *responseWriter) observeSSEEvent(needContent bool) (streamMilestones, er
 		content: needContent && hasTimingContent(data, event.Type),
 		end:     event.Type == "message_stop",
 	}, nil
+}
+
+func (w *responseWriter) sourceTerminalObserved() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.nativeResponses != nil {
+		return w.nativeResponses.Done() && w.nativeDecoder.Finish() == nil
+	}
+	return w.messageStopped && len(bytes.TrimSpace(w.sseBuffer)) == 0 && len(w.sseData) == 0
 }
 
 // finish checks the observed protocol terminal event before accounting. An
@@ -302,6 +319,12 @@ func (w *responseWriter) hasContent() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.contentWritten
+}
+
+func (w *responseWriter) isRefusal() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.stopReason == "refusal"
 }
 
 func (w *responseWriter) getOutputTokens() int {
@@ -1165,7 +1188,7 @@ func (h *MessagesHandler) handleStreaming(
 
 		// OpenRouter's former Chat Completions path accepted completed empty
 		// replies. Moving its transport must not add this provider heuristic.
-		if !native && providerName != client.ProviderOpenRouter && isLowValueResponse(scenario, rw.getOutputTokens(), rw.hasContent()) {
+		if !native && !rw.isRefusal() && providerName != client.ProviderOpenRouter && isLowValueResponse(scenario, rw.getOutputTokens(), rw.hasContent()) {
 			h.logger.Warn("upstream returned low-value response, triggering fallback",
 				"model", model.ModelID, "provider", model.Provider,
 				"scenario", scenario, "output_tokens", rw.getOutputTokens())

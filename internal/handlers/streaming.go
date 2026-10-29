@@ -76,11 +76,20 @@ func (sp *StreamProxy) proxyAnthropicPassthroughStream(
 		n, rerr := body.Read(buf)
 		if n > 0 {
 			ping()
-			if _, werr := w.Write(buf[:n]); werr != nil {
+			written, werr := w.Write(buf[:n])
+			if werr != nil {
 				return fmt.Errorf("failed to forward upstream stream: %w", werr)
+			}
+			if written != n {
+				return fmt.Errorf("failed to forward upstream stream: %w", io.ErrShortWrite)
 			}
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
+			}
+			// Protocol completion does not depend on HTTP connection cleanup.
+			// finish still validates any error or partial frame in this batch.
+			if observed, ok := w.(*responseWriter); ok && observed.sourceTerminalObserved() {
+				return nil
 			}
 		}
 		if rerr == io.EOF {

@@ -51,7 +51,7 @@ index 0ef2c7a..a2de1f3 100644
  		// ChatBase 国内版 chat/模型目录上游 base 覆盖；空 = 回落内置默认
  		// https://www.workbuddy.cn（internal/upstream.New 的 ChatBaseCN，官方桌面端
 diff --git a/cmd/server/main.go b/cmd/server/main.go
-index 49325da..2dfce8e 100644
+index 0c961a5..a1e13e8 100644
 --- a/cmd/server/main.go
 +++ b/cmd/server/main.go
 @@ -105,8 +105,8 @@ func main() {
@@ -95,7 +95,7 @@ index 49325da..2dfce8e 100644
  }
  
  // panelListenPath 从 listen 地址提取 ":port" 形式，用于启动日志拼面板 URL
-@@ -941,6 +941,9 @@ func restartRequiredFields(current, next *Config) []string {
+@@ -942,6 +942,9 @@ func restartRequiredFields(current, next *Config) []string {
  	changed("upstream.passthrough_ip", current.Upstream.PassthroughIP, next.Upstream.PassthroughIP)
  	// cn.chat_base / cn.billing_base 同样只在装配期写进上游 client（请求路径并发读取，不做热改）。
  	changed("cn.chat_base", current.CN.ChatBase, next.CN.ChatBase)
@@ -163,6 +163,66 @@ index 0000000..792ead0
 +		t.Fatal("invalid proxy silently bypassed")
 +	}
 +}
+diff --git a/internal/panel/models_busy_cache_test.go b/internal/panel/models_busy_cache_test.go
+index 28cc367..17a79af 100644
+--- a/internal/panel/models_busy_cache_test.go
++++ b/internal/panel/models_busy_cache_test.go
+@@ -6,6 +6,7 @@ import (
+ 	"net/http"
+ 	"net/http/httptest"
+ 	"strings"
++	"sync/atomic"
+ 	"testing"
+ 
+ 	"github.com/misakano7545/workbuddy2api-panel/internal/auth"
+@@ -27,18 +28,18 @@ func TestPanelModelsBusyFailureDoesNotBlockCache(t *testing.T) {
+ 	auth.SetGlobalEnabled(true)
+ 	defer auth.SetGlobalEnabled(prev)
+ 
+-	var cfgHits, busyHits int
++	var cfgHits, busyHits atomic.Int64
+ 	up := &upstream.Client{
+ 		HTTP: &http.Client{Transport: fakeRoundTripper(func(r *http.Request) (*http.Response, error) {
+ 			status := 200
+ 			var body string
+ 			switch {
+ 			case strings.HasSuffix(r.URL.Path, "/v2/chat/busy"):
+-				busyHits++
++				busyHits.Add(1)
+ 				status = http.StatusNotFound
+ 				body = `{"error_msg":"404 Route Not Found"}`
+ 			case strings.HasSuffix(r.URL.Path, "/v3/config"):
+-				cfgHits++
++				cfgHits.Add(1)
+ 				body = `{"code":0,"data":{"models":[` +
+ 					`{"id":"fast-model","name":"Fast","maxInputTokens":200000,"maxOutputTokens":32000},` +
+ 					`{"id":"gpt-6-astra","name":"GPT-6-Astra","maxInputTokens":1000000,"maxOutputTokens":128000,` +
+@@ -82,10 +83,10 @@ func TestPanelModelsBusyFailureDoesNotBlockCache(t *testing.T) {
+ 	if _, ok := first["busy_errs"]; !ok {
+ 		t.Errorf("繁忙度失败应在 busy_errs 里可见（不静默）: %v", first)
+ 	}
+-	if cfgHits == 0 {
++	if cfgHits.Load() == 0 {
+ 		t.Fatal("首轮应真探过 /v3/config")
+ 	}
+-	cfgAfterFirst := cfgHits
++	cfgAfterFirst := cfgHits.Load()
+ 
+ 	// 第二轮：目录缓存必须已写入（此前的实现因为 busy 404 恒非空而永不写缓存）。
+ 	code, second := call()
+@@ -94,9 +95,9 @@ func TestPanelModelsBusyFailureDoesNotBlockCache(t *testing.T) {
+ 	}
+ 	if cached, _ := second["cached"].(bool); !cached {
+ 		t.Fatalf("繁忙度失败后目录仍应进缓存，实际 cached=%v（cfgHits=%d busyHits=%d）",
+-			second["cached"], cfgHits, busyHits)
++			second["cached"], cfgHits.Load(), busyHits.Load())
+ 	}
+-	if cfgHits != cfgAfterFirst {
+-		t.Fatalf("命中缓存后不应再探 /v3/config，首轮 %d → 现在 %d", cfgAfterFirst, cfgHits)
++	if got := cfgHits.Load(); got != cfgAfterFirst {
++		t.Fatalf("命中缓存后不应再探 /v3/config，首轮 %d → 现在 %d", cfgAfterFirst, got)
+ 	}
+ }
 diff --git a/internal/scheduler/scheduler_test.go b/internal/scheduler/scheduler_test.go
 index e22142f..86d3d0c 100644
 --- a/internal/scheduler/scheduler_test.go
@@ -183,288 +243,11 @@ index e22142f..86d3d0c 100644
  
  	// 补跑在 Run 进入主循环之前派发；命中即退出，不等固定时长。
  	deadline := time.Now().Add(10 * time.Second)
-diff --git a/internal/updater/integration_test.go b/internal/updater/integration_test.go
-index 5849aae..92a217d 100644
---- a/internal/updater/integration_test.go
-+++ b/internal/updater/integration_test.go
-@@ -108,7 +108,11 @@ func TestInstallReplacesRestartsAndRecovers(t *testing.T) {
- 		t.Run(fmt.Sprintf("broken=%v", broken), func(t *testing.T) {
- 			dir := t.TempDir()
- 			t.Setenv("WB2API_UPDATE_FIXTURE", dir)
--			target := filepath.Join(dir, "wb2api"+filepath.Ext(executable))
-+			name := "wb2api"
-+			if runtime.GOOS == "windows" {
-+				name += ".exe"
-+			}
-+			target := filepath.Join(dir, name)
- 			if err := os.WriteFile(target, original, 0700); err != nil {
- 				t.Fatal(err)
- 			}
-diff --git a/internal/updater/local_supervised_test.go b/internal/updater/local_supervised_test.go
-new file mode 100644
-index 0000000..7f64f22
---- /dev/null
-+++ b/internal/updater/local_supervised_test.go
-@@ -0,0 +1,16 @@
-+//go:build linux
-+
-+package updater
-+
-+import "testing"
-+
-+func TestLocalManagedUpdateCannotInstall(t *testing.T) {
-+	t.Setenv("INVOCATION_ID", "synthetic-systemd")
-+	if !processSupervised() {
-+		t.Fatal("systemd not recognized")
-+	}
-+	m := &Manager{version: "2026.10.28.1800", executable: "/tmp/synthetic"}
-+	if m.canInstallLocked() {
-+		t.Fatal("managed install would discard local patches")
-+	}
-+}
-diff --git a/internal/upstream/client.go b/internal/upstream/client.go
-index 26d7fb1..a100292 100644
---- a/internal/upstream/client.go
-+++ b/internal/upstream/client.go
-@@ -1062,9 +1062,7 @@ func (c *Client) prepareBody(body []byte, realm, uid, conversationID string) ([]
- 	efforts, defs := c.effortsSnapshot(realm), c.defaultEffortsSnapshot(realm)
- 	maxOut := c.modelMaxOutSnapshot(realm)
- 	if realmKey(realm) == "global" {
--		// global 域降级源 = 远端探测桶（权威）∪ 产品静态兜底表（全局 21 名内档位如
--		// deepseek-v4.1-flash ['high']）。当前探测桶为空时也按静态表降级，不全程透传
--		//（issue #84：往 WorkBuddy 上游发 low/max 非法，须降级到 high）。
-+		// 远端探测档位优先，缺失时使用 global 产品静态兜底表。
- 		efforts, defs = globalEffortMap(efforts, defs)
- 	} else {
- 		// CN 域同口径：与 /v1/models 的 EffortListing 声明同源，保证「声明什么档位
-diff --git a/internal/upstream/effort_catalog.go b/internal/upstream/effort_catalog.go
-index 0c17c18..84673a3 100644
---- a/internal/upstream/effort_catalog.go
-+++ b/internal/upstream/effort_catalog.go
-@@ -7,8 +7,7 @@
- //
- // 档位值照抄参考仓库 dsh-codearts：CN/CodeBuddy 面取 src/product.ts CODEBUDDY_FALLBACK_MODELS
- // ∪ src/buddy-adapter.ts:126-137 REASONING_EFFORTS；global/WorkBuddy 面取 src/product.ts
--// WORKBUDDY_FALLBACK_MODELS。两个 realm 对同一模型给出不同档位（如 deepseek-v4.1-flash：
--// CN 三档 ['low','high','max']、global 仅 ['high']），故**按 realm 分表**，绝不混用。
-+// WORKBUDDY_FALLBACK_MODELS，本地核实后修正。两个 realm 独立，远端声明优先。
- //
- // 只列**可枚举**档位的模型；仅有固定默认档（glm-5.1/kimi-* 的 medium）同样入表，
- // 但其档位是「可枚举单档」而非「无选择器」，照抄参考仓库如实暴露。
-@@ -49,15 +48,14 @@ var cnEffortFallback = map[string]effortCap{
- }
- 
- // globalEffortFallback global / WorkBuddy 国际版面静态兜底表。
--// 注意 deepseek-v4.1-flash 在国际版**只有 ['high']**（product.ts:190 实测 IDE 缓存），
--// 与 CN 面的三档刻意不同——往 WorkBuddy 上游发 low/max 是非法参数 400。
-+// 本地目录核实后补齐 DeepSeek 档位；远端显式声明继续优先。
- var globalEffortFallback = map[string]effortCap{
- 	"fast-model":          {efforts: []string{"medium"}},
- 	"balanced-model":      {efforts: []string{"medium"}},
- 	"primary-model":       {efforts: []string{"high"}},
- 	"hy4-preview-f":       {efforts: []string{"high"}, defaultEffort: "high"},
- 	"hy3":                 {efforts: []string{"low", "high"}, defaultEffort: "high"},
--	"deepseek-v4.1-flash": {efforts: []string{"high"}},
-+	"deepseek-v4.1-flash": {efforts: []string{"low", "high", "max"}},
- 	"gpt-6-astra":         {efforts: []string{"low", "medium", "high", "xhigh", "max"}, defaultEffort: "high"},
- 	"gpt-5.6-sol":         {efforts: []string{"low", "medium", "high", "xhigh", "max"}, defaultEffort: "high"},
- 	"gpt-5.6-terra":       {efforts: []string{"low", "medium", "high", "xhigh", "max"}, defaultEffort: "high"},
-@@ -123,8 +121,7 @@ func containsEffort(efforts []string, want string) bool {
- // globalEffortMap global 域降级用的 effort 能力表：静态兜底表为基，远端桶覆盖（权威优先）。
- //
- // prepareBody 对 global 请求调此函数（而非直接用远端桶），因为 global 上游可能不下发
--// supportedEfforts——此时也必须按产品静态表降级（issue #84：deepseek-v4.1-flash 国际版
--// 只认 high，客户端传 low/max 必降级到 high，否则上游 400 毁掉请求）。
-+// supportedEfforts——此时按产品静态表归一化，远端明确下发的档位继续优先。
- // 语义对齐参考仓库 effortsFor（remoteMeta → productFallback → 静态表），只取前两级：
- // 远端桶（探测已解析）→ 本产品静态表（本文件），缺档位即无（不再到通用静态表）。
- func globalEffortMap(remoteEfforts map[string][]string, remoteDefaults map[string]string) (map[string][]string, map[string]string) {
-diff --git a/internal/upstream/local_max_test.go b/internal/upstream/local_max_test.go
-new file mode 100644
-index 0000000..e41a8d0
---- /dev/null
-+++ b/internal/upstream/local_max_test.go
-@@ -0,0 +1,63 @@
-+package upstream
-+
-+import (
-+	"encoding/json"
-+	"reflect"
-+	"testing"
-+)
-+
-+func TestLocalDeepSeekMaxFallback(t *testing.T) {
-+	for _, tc := range []struct {
-+		name, realm, model string
-+		remote             []string
-+		want               string
-+	}{
-+		{"global fallback", "global", "deepseek-v4.1-flash", nil, "max"},
-+		{"global remote max", "global", "deepseek-v4.1-flash", []string{"low", "high", "max"}, "max"},
-+		{"remote high remains authoritative", "global", "deepseek-v4.1-flash", []string{"high"}, "high"},
-+		{"CN remote max", "cn", "deepseek-v4.1-flash", []string{"low", "high", "max"}, "max"},
-+		{"SG remote max", "global", "deepseek-v4.1-flash-sg", []string{"low", "high", "max"}, "max"},
-+		{"GLM ladder unchanged", "global", "glm-5.2", nil, "xhigh"},
-+		{"Kimi ladder unchanged", "global", "kimi-k3", nil, "medium"},
-+	} {
-+		for _, field := range []string{"reasoning_effort", "reasoningEffort"} {
-+			t.Run(tc.name+"/"+field, func(t *testing.T) {
-+				c := &Client{}
-+				if tc.remote != nil {
-+					c.storeEfforts(tc.realm, map[string][]string{tc.model: tc.remote}, nil)
-+				}
-+				in, err := json.Marshal(map[string]any{"model": tc.realm + ":" + tc.model, field: "max", "messages": []any{}})
-+				if err != nil {
-+					t.Fatal(err)
-+				}
-+				out, requested, effective := c.prepareBody(in, tc.realm, "", "")
-+				var body map[string]any
-+				if err := json.Unmarshal(out, &body); err != nil {
-+					t.Fatal(err)
-+				}
-+				if body[field] != tc.want || requested != "max" || effective != tc.want || body["model"] != tc.model {
-+					t.Fatalf("body=%s requested=%q effective=%q want=%q", out, requested, effective, tc.want)
-+				}
-+			})
-+		}
-+	}
-+	levels, _ := EffortListing("global", "deepseek-v4.1-flash", nil, "")
-+	if !reflect.DeepEqual(levels, []string{"low", "high", "max"}) {
-+		t.Fatalf("fallback listing=%v", levels)
-+	}
-+	levels, _ = EffortListing("global", "deepseek-v4.1-flash", []string{"high"}, "")
-+	if !reflect.DeepEqual(levels, []string{"high"}) {
-+		t.Fatalf("remote listing overridden: %v", levels)
-+	}
-+	for _, tc := range []struct{ input, want string }{
-+		{`{"model":"global:deepseek-v4.1-flash"}`, "high"},
-+		{`{"model":"global:deepseek-v4.1-flash","reasoning_effort":"low"}`, "low"},
-+		{`{"model":"global:deepseek-v4.1-flash","reasoning_effort":"medium"}`, "high"},
-+		{`{"model":"global:deepseek-v4.1-flash","reasoning_effort":"off"}`, ""},
-+	} {
-+		_, _, effective := (&Client{}).prepareBody([]byte(tc.input), "global", "", "")
-+		if effective != tc.want {
-+			t.Errorf("input=%s effective=%q want=%q", tc.input, effective, tc.want)
-+		}
-+	}
-+}
-diff --git a/internal/upstream/resin_proxy.go b/internal/upstream/resin_proxy.go
-new file mode 100644
-index 0000000..1ec7650
---- /dev/null
-+++ b/internal/upstream/resin_proxy.go
-@@ -0,0 +1,58 @@
-+package upstream
-+
-+import (
-+	"errors"
-+	"net/http"
-+	"net/url"
-+	"strings"
-+)
-+
-+type ResinProxy struct {
-+	URL, Token, Platform string
-+}
-+
-+// Configure transports before serving; invalid configuration must not bypass Resin.
-+func (c *Client) SetResinProxy(p ResinProxy) error {
-+	fn, err := p.proxyFunc()
-+	if err != nil || fn == nil {
-+		return err
-+	}
-+	for _, cl := range []*http.Client{c.HTTP, c.ChatHTTP} {
-+		if cl != nil {
-+			if _, ok := cl.Transport.(*http.Transport); !ok {
-+				return errors.New("resin requires an HTTP transport")
-+			}
-+		}
-+	}
-+	for _, cl := range []*http.Client{c.HTTP, c.ChatHTTP} {
-+		if cl != nil {
-+			cl.Transport.(*http.Transport).Proxy = fn
-+		}
-+	}
-+	return nil
-+}
-+
-+func (r ResinProxy) proxyFunc() (func(*http.Request) (*url.URL, error), error) {
-+	if r.URL == "" {
-+		return nil, nil
-+	}
-+	base, err := url.Parse(r.URL)
-+	if err != nil || base.Hostname() == "" || (base.Scheme != "http" && base.Scheme != "https") {
-+		return nil, errors.New("resin.url must be an absolute HTTP(S) URL")
-+	}
-+	platform := r.Platform
-+	if platform == "" {
-+		platform = "Default"
-+	}
-+	return func(req *http.Request) (*url.URL, error) {
-+		u := *base
-+		// UID survives access-token refresh and keeps each account on its own exit.
-+		account := strings.TrimSpace(req.Header.Get("X-User-Id"))
-+		if account != "" {
-+			u.User = url.UserPassword(platform+"."+account, r.Token)
-+		} else if r.Token != "" {
-+			u.User = url.UserPassword(platform, r.Token)
-+		}
-+		return &u, nil
-+	}, nil
-+}
-diff --git a/internal/upstream/resin_proxy_test.go b/internal/upstream/resin_proxy_test.go
-new file mode 100644
-index 0000000..2df88a8
---- /dev/null
-+++ b/internal/upstream/resin_proxy_test.go
-@@ -0,0 +1,42 @@
-+package upstream
-+
-+import (
-+	"net/http"
-+	"testing"
-+)
-+
-+func TestResinProxy(t *testing.T) {
-+	c := New()
-+	if err := c.SetResinProxy(ResinProxy{URL: "http://127.0.0.1:12260", Token: "synthetic", Platform: "pool"}); err != nil {
-+		t.Fatal(err)
-+	}
-+	for _, cl := range []*http.Client{c.HTTP, c.ChatHTTP} {
-+		for _, tc := range []struct{ uid, token, want string }{
-+			{"a", "old", "pool.a"}, {"a", "refreshed", "pool.a"}, {"b", "other", "pool.b"}, {"", "", "pool"},
-+		} {
-+			r, _ := http.NewRequest("GET", "https://example.invalid/models", nil)
-+			r.Header.Set("X-User-Id", tc.uid)
-+			r.Header.Set("Authorization", tc.token)
-+			u, err := cl.Transport.(*http.Transport).Proxy(r)
-+			if err != nil {
-+				t.Fatal(err)
-+			}
-+			pw, _ := u.User.Password()
-+			if u.User.Username() != tc.want || pw != "synthetic" || u.Host != "127.0.0.1:12260" || r.URL.Host != "example.invalid" {
-+				t.Fatal("proxy identity or destination changed")
-+			}
-+		}
-+	}
-+	for _, bad := range []string{"%", "relative", "file:///tmp/proxy"} {
-+		if err := c.SetResinProxy(ResinProxy{URL: bad}); err == nil {
-+			t.Fatalf("accepted %q", bad)
-+		}
-+	}
-+	plain := New()
-+	if err := plain.SetResinProxy(ResinProxy{}); err != nil {
-+		t.Fatal(err)
-+	}
-+	if plain.HTTP.Transport.(*http.Transport).Proxy != nil {
-+		t.Fatal("empty config enabled proxy")
-+	}
-+}
 diff --git a/internal/server/handler.go b/internal/server/handler.go
-index 3e11fee..2945aea 100644
+index 801bf0b..6fbfcab 100644
 --- a/internal/server/handler.go
 +++ b/internal/server/handler.go
-@@ -1000,7 +1000,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+@@ -1013,7 +1013,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  	// ttfb 首 token 等待（仅流式有观测；非流式传 0 = 无观测，速率不扣减）。
  	// 显式入参而不是读 st.ttfb：后者在流式分支里是**调用之后**才赋值的，
  	// 靠顺序传递会让将来重排代码时静默把速率算回旧的错口径（吸收上游 8b18ab8）。
@@ -473,7 +256,7 @@ index 3e11fee..2945aea 100644
  		// 请求指标（PR #71）：每次尝试累加 retry 次数与 token 口径。
  		st.attempts++
  		if delta.HasPromptTokens {
-@@ -1018,7 +1018,6 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+@@ -1031,7 +1031,6 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  		if delta.Model == "" {
  			delta.Model = peek.Model
  		}
@@ -481,7 +264,7 @@ index 3e11fee..2945aea 100644
  		latencyMs := latency.Milliseconds()
  		if latencyMs < 1 {
  			latencyMs = 1
-@@ -1037,8 +1036,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+@@ -1050,8 +1049,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  		}
  		h.cfg.Pool.RecordTokenUsage(uid, delta)
  
@@ -491,7 +274,7 @@ index 3e11fee..2945aea 100644
  		// 失败也计入请求数——否则重试放大在「用量」视图里看不见。
  		if h.cfg.Usage != nil {
  			realm := "cn"
-@@ -1062,7 +1060,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+@@ -1075,7 +1073,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  				CacheHitTokens:   delta.CacheHitTokens,
  				CacheMissTokens:  delta.CacheMissTokens,
  				HasCache:         delta.HasCacheTokens,
@@ -500,7 +283,7 @@ index 3e11fee..2945aea 100644
  		}
  	}
  
-@@ -1273,7 +1271,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+@@ -1302,7 +1300,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  			// 连败兜底（issue #114）：喂连败计数——连不上上游是「不知道原因的失败」，
  			// 连败 N 次临时出池，单次/偶发不罚（NoteFailures 内部达阈才动作）。
  			// 上游 client 已打 transport error 日志。
@@ -509,7 +292,7 @@ index 3e11fee..2945aea 100644
  			st.status = http.StatusServiceUnavailable
  			lastErr = terr
  			// 客户端已断连（人走了）例外：传输错误是断连的**结果**，不是这个号的
-@@ -1293,7 +1291,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+@@ -1322,7 +1320,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  			continue
  		}
  		if status >= 400 {
@@ -518,7 +301,7 @@ index 3e11fee..2945aea 100644
  			st.status = status
  			var kind upstream.ErrKind
  			if uerr != nil {
-@@ -1542,7 +1540,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+@@ -1571,7 +1569,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  			// 透给客户端（SSE 发过字节就改不了状态码，此前只能这么兜底）。
  			var hv *upstream.HeadVetoError
  			if errors.As(sErr, &hv) {
@@ -527,7 +310,7 @@ index 3e11fee..2945aea 100644
  				st.status = http.StatusServiceUnavailable
  				st.outcome = reqlog.OutcomeStreamError
  				// 上游 body 是活的（200 长流），随轮转立即关闭，不留给函数末尾的 defer 堆 fd。
-@@ -1590,7 +1588,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+@@ -1619,7 +1617,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  			// credit 显式存在且有限非负、total 为正整数时计入成本账本/用量账；
  			// 缺字段/NaN/负值不再被当成「免费」或脏数据污染台账（上游 PR #104）。
  			hasCredit = validUsageCost(credit, hasCredit, total, hasTotal)
@@ -536,7 +319,7 @@ index 3e11fee..2945aea 100644
  			if n, ok := stats.Thinking(); ok {
  				st.think = n
  			}
-@@ -1643,23 +1641,42 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+@@ -1672,17 +1670,19 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  			rc.Close()
  			return
  		}
@@ -544,6 +327,13 @@ index 3e11fee..2945aea 100644
 -		rc.Close()
 -		if err != nil {
 -			recordAttempt(acct.UID, pool.TokenUsageDelta{}, 0, false, attemptStarted, 0)
+-			// 调用方先走了（前置 CDN 回源超时、AsyncOpenAI 类客户端 timeout、用户点停止）：
+-			// 上游当时还在正常输出，网关也没出错。此前一律记 502 upstream_parse，把别人掐断
+-			// 报成上游故障——线上一天 11 次，全部恰好 total=15.0s、tok=-、do=1~3s（上游头已回、
+-			// 正文还在流），src 全是 43.174/43.175 的 EdgeOne 回源节点。
+-			// 实测（2026-10-29）：EdgeOne 回源默认 15s 超时，直连与非 EdgeOne 入口同请求 39.4s / 16.8s 均 200。
+-			// 499 = nginx 的 client closed request，与真 5xx 一眼可分；不写响应体（连接已关）。
+-			// 文案保留 err 原文（含 "context canceled"），错误汇总按「客户端中断/info」归类。
 +		failAggregate := func(resp map[string]any, err error, latency time.Duration) {
 +			ud := usageDeltaFromResponse(resp)
 +			credit, total, hasCredit := usageCreditTotal(resp)
@@ -556,7 +346,11 @@ index 3e11fee..2945aea 100644
 +				st.credit, st.hasCredit = credit, true
 +				h.cfg.Pool.NoteModelCost(acct.UID, bareModel, credit, total)
 +			}
- 			// 上游流解析失败：客户端还没看到任何输出，回 502 并告知原因。
++			// 取消仍保留已观测用量，但不写响应或误记成上游解析失败。
+ 			if cerr := r.Context().Err(); cerr != nil {
+ 				log.Printf("WARN: [server] sync acct=%s model=%s: 调用方断开（%v），上游输出已丢弃（CDN 回源超时常见于 EdgeOne 默认 15s）",
+ 					logfmt.Label(acct.UID, acct.Nickname), bareModel, cerr)
+@@ -1694,15 +1694,26 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  			// 与流式空流那条 WARN 对称——此前这条只写响应不落日志，运维侧只能看到
  			// 一行 sync 502，无从判断是上游空体还是别的（同一失败在流式路径有 WARN）。
  			log.Printf("WARN: [server] sync acct=%s model=%s: upstream parse failed: %v", logfmt.Label(acct.UID, acct.Nickname), bareModel, err)
@@ -584,7 +378,7 @@ index 3e11fee..2945aea 100644
  				if rc2, st2, _, e2 := h.cfg.Upstream.ChatStreamContext(r.Context(), acct, rb, clientIP, chatMeta, nil); e2 == nil && st2 < 400 && rc2 != nil {
  					if resp2, e3 := upstream.Aggregate(rc2); e3 == nil {
  						rc2.Close()
-@@ -1668,6 +1685,13 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+@@ -1711,6 +1722,13 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  							logfmt.Label(acct.UID, acct.Nickname), bareModel)
  					} else {
  						rc2.Close()
@@ -598,7 +392,7 @@ index 3e11fee..2945aea 100644
  						log.Printf("WARN: [starved] non-stream acct=%s model=%s: 重发聚合失败: %v",
  							logfmt.Label(acct.UID, acct.Nickname), bareModel, e3)
  					}
-@@ -1696,7 +1720,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+@@ -1739,7 +1757,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  		st.toolCalls = toolCallCount(resp)
  		ud := usageDeltaFromResponse(resp)
  		credit, total, hasCredit := usageCreditTotal(resp)
@@ -720,6 +514,54 @@ index ee3e8b5..1941673 100644
  			lastErr = aerr
  			continue
  		}
+diff --git a/internal/updater/integration_test.go b/internal/updater/integration_test.go
+index ab14020..77bf847 100644
+--- a/internal/updater/integration_test.go
++++ b/internal/updater/integration_test.go
+@@ -137,7 +137,11 @@ func TestInstallReplacesRestartsAndRecovers(t *testing.T) {
+ 			// helper 是独立进程，观察窗口只能经环境变量注入（见 updater.childGrace）。
+ 			// 缩到 400ms：真值 8s 会让这条用例每个分支多等 8 秒。
+ 			t.Setenv("WB2API_UPDATE_GRACE_MS", strconv.Itoa(fixtureGraceMS))
+-			target := filepath.Join(dir, "wb2api"+filepath.Ext(executable))
++			name := "wb2api"
++			if runtime.GOOS == "windows" {
++				name += ".exe"
++			}
++			target := filepath.Join(dir, name)
+ 			if err := os.WriteFile(target, original, 0700); err != nil {
+ 				t.Fatal(err)
+ 			}
+@@ -162,7 +166,7 @@ func TestInstallReplacesRestartsAndRecovers(t *testing.T) {
+ 			}
+ 
+ 			// 夹具进程：调 Install 排好 helper 后退出（helper 等它退出才替换文件）。
+-			cmd := exec.Command(executable, "-test.run=^TestInstallFixtureProcess$", "-test.timeout=40s")
++			cmd := exec.Command(target, "-test.run=^TestInstallFixtureProcess$", "-test.timeout=40s")
+ 			cmd.Dir = dir
+ 			cmd.Env = append(os.Environ(),
+ 				"WB2API_UPDATE_FIXTURE="+dir,
+diff --git a/internal/updater/local_supervised_test.go b/internal/updater/local_supervised_test.go
+new file mode 100644
+index 0000000..7f64f22
+--- /dev/null
++++ b/internal/updater/local_supervised_test.go
+@@ -0,0 +1,16 @@
++//go:build linux
++
++package updater
++
++import "testing"
++
++func TestLocalManagedUpdateCannotInstall(t *testing.T) {
++	t.Setenv("INVOCATION_ID", "synthetic-systemd")
++	if !processSupervised() {
++		t.Fatal("systemd not recognized")
++	}
++	m := &Manager{version: "2026.10.28.1800", executable: "/tmp/synthetic"}
++	if m.canInstallLocked() {
++		t.Fatal("managed install would discard local patches")
++	}
++}
 diff --git a/internal/upstream/local_aggregate_error_test.go b/internal/upstream/local_aggregate_error_test.go
 new file mode 100644
 index 0000000..ae55c26
@@ -834,6 +676,276 @@ index 0000000..ae55c26
 +		if v, ok := d["cached_tokens"]; ok && v != cached {
 +			t.Errorf("stale cache details: %#v", d)
 +		}
++	}
++}
+diff --git a/internal/upstream/local_max_test.go b/internal/upstream/local_max_test.go
+new file mode 100644
+index 0000000..14d8207
+--- /dev/null
++++ b/internal/upstream/local_max_test.go
+@@ -0,0 +1,65 @@
++package upstream
++
++import (
++	"encoding/json"
++	"reflect"
++	"testing"
++)
++
++func TestLocalDeepSeekMaxFallback(t *testing.T) {
++	for _, tc := range []struct {
++		name, realm, model string
++		remote             []string
++		want               string
++	}{
++		{"global fallback", "global", "deepseek-v4.1-flash", nil, "max"},
++		{"global remote max", "global", "deepseek-v4.1-flash", []string{"low", "high", "max"}, "max"},
++		{"remote high remains authoritative", "global", "deepseek-v4.1-flash", []string{"high"}, "high"},
++		{"CN remote max", "cn", "deepseek-v4.1-flash", []string{"low", "high", "max"}, "max"},
++		{"SG remote max", "global", "deepseek-v4.1-flash-sg", []string{"low", "high", "max"}, "max"},
++		{"SG fallback", "global", "deepseek-v4.1-flash-sg", nil, "max"},
++		{"global GLM ladder", "global", "glm-5.3", nil, "max"},
++		{"CN GLM ladder unchanged", "cn", "glm-5.2", nil, "xhigh"},
++		{"Kimi ladder unchanged", "global", "kimi-k3", nil, "medium"},
++	} {
++		for _, field := range []string{"reasoning_effort", "reasoningEffort"} {
++			t.Run(tc.name+"/"+field, func(t *testing.T) {
++				c := &Client{}
++				if tc.remote != nil {
++					c.storeEfforts(tc.realm, map[string][]string{tc.model: tc.remote}, nil)
++				}
++				in, err := json.Marshal(map[string]any{"model": tc.realm + ":" + tc.model, field: "max", "messages": []any{}})
++				if err != nil {
++					t.Fatal(err)
++				}
++				out, requested, effective := c.prepareBody(in, tc.realm, "", "")
++				var body map[string]any
++				if err := json.Unmarshal(out, &body); err != nil {
++					t.Fatal(err)
++				}
++				if body[field] != tc.want || requested != "max" || effective != tc.want || body["model"] != tc.model {
++					t.Fatalf("body=%s requested=%q effective=%q want=%q", out, requested, effective, tc.want)
++				}
++			})
++		}
++	}
++	levels, _ := EffortListing("global", "deepseek-v4.1-flash", nil, "")
++	if !reflect.DeepEqual(levels, []string{"low", "high", "max"}) {
++		t.Fatalf("fallback listing=%v", levels)
++	}
++	levels, _ = EffortListing("global", "deepseek-v4.1-flash", []string{"high"}, "")
++	if !reflect.DeepEqual(levels, []string{"high"}) {
++		t.Fatalf("remote listing overridden: %v", levels)
++	}
++	for _, tc := range []struct{ input, want string }{
++		{`{"model":"global:deepseek-v4.1-flash"}`, "high"},
++		{`{"model":"global:deepseek-v4.1-flash","reasoning_effort":"low"}`, "low"},
++		{`{"model":"global:deepseek-v4.1-flash","reasoning_effort":"medium"}`, "high"},
++		{`{"model":"global:deepseek-v4.1-flash","reasoning_effort":"off"}`, ""},
++	} {
++		_, _, effective := (&Client{}).prepareBody([]byte(tc.input), "global", "", "")
++		if effective != tc.want {
++			t.Errorf("input=%s effective=%q want=%q", tc.input, effective, tc.want)
++		}
++	}
++}
+diff --git a/internal/upstream/local_webagent_test.go b/internal/upstream/local_webagent_test.go
+new file mode 100644
+index 0000000..cc67499
+--- /dev/null
++++ b/internal/upstream/local_webagent_test.go
+@@ -0,0 +1,81 @@
++package upstream
++
++import (
++	"context"
++	"errors"
++	"io"
++	"net/http"
++	"strings"
++	"sync"
++	"testing"
++)
++
++// Release a final buffered event on Close so returning before the reader joins
++// deterministically loses the counters, even without the race detector.
++type localWebTurnBody struct {
++	closed chan struct{}
++	once   sync.Once
++	reader *strings.Reader
++}
++
++func (b *localWebTurnBody) Read(p []byte) (int, error) {
++	<-b.closed
++	return b.reader.Read(p)
++}
++
++func (b *localWebTurnBody) Close() error {
++	b.once.Do(func() { close(b.closed) })
++	return nil
++}
++
++func TestLocalWebAgentTurnJoinsReader(t *testing.T) {
++	for _, tc := range []struct {
++		name, status, failMethod, wantError string
++		cancel                              bool
++	}{
++		{name: "completed", status: "completed"},
++		{name: "failed", status: "failed", wantError: "status=failed"},
++		{name: "initialize", failMethod: "initialize", wantError: "acp initialize"},
++		{name: "load", failMethod: "session/load", wantError: "acp session/load"},
++		{name: "prompt", failMethod: "session/prompt", wantError: "acp session/prompt"},
++		{name: "set-model nonfatal", status: "completed", failMethod: "session/set_model"},
++		{name: "canceled", status: "working", cancel: true, wantError: "context canceled"},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			ctx, cancel := context.WithCancel(context.Background())
++			defer cancel()
++			body := &localWebTurnBody{closed: make(chan struct{}), reader: strings.NewReader(
++				"data: {\"method\":\"session/update\",\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\"}}}\n\n" +
++					"data: {\"method\":\"session/endTurn\"}\n\n")}
++			c := &Client{ChatBaseCN: "https://web.test"}
++			c.HTTP = &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
++				if r.URL.Path == "/acp" && r.Method == http.MethodGet {
++					return &http.Response{StatusCode: 200, Header: http.Header{"Acp-Connection-Id": {"test"}}, Body: body}, nil
++				}
++				status, reply := 200, `{"data":{"status":"`+tc.status+`"}}`
++				if r.Method == http.MethodPost {
++					payload, err := io.ReadAll(r.Body)
++					if err != nil {
++						return nil, err
++					}
++					if tc.failMethod != "" && strings.Contains(string(payload), `"method":"`+tc.failMethod+`"`) {
++						status = 500
++					}
++				} else if tc.cancel {
++					cancel()
++				}
++				return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(reply))}, nil
++			})}
++			res, err := c.RunWebAgentTurn(ctx, webTestAuth(), "c1", WebSession{Link: "https://web.test/acp", Token: "test"}, "", "")
++			if (err != nil) != (tc.wantError != "") || (err != nil && !strings.Contains(err.Error(), tc.wantError)) {
++				t.Fatalf("err=%v, want %q", err, tc.wantError)
++			}
++			if tc.cancel && !errors.Is(err, context.Canceled) {
++				t.Fatalf("lost cancellation: %v", err)
++			}
++			if res.Events != 2 || res.Chunks != 1 || res.Conversation != "c1" || res.SetModelFailed != (tc.failMethod == "session/set_model") {
++				t.Fatalf("unstable or incomplete result after stream close: %+v", res)
++			}
++		})
++	}
++}
+diff --git a/internal/upstream/resin_proxy.go b/internal/upstream/resin_proxy.go
+new file mode 100644
+index 0000000..1ec7650
+--- /dev/null
++++ b/internal/upstream/resin_proxy.go
+@@ -0,0 +1,58 @@
++package upstream
++
++import (
++	"errors"
++	"net/http"
++	"net/url"
++	"strings"
++)
++
++type ResinProxy struct {
++	URL, Token, Platform string
++}
++
++// Configure transports before serving; invalid configuration must not bypass Resin.
++func (c *Client) SetResinProxy(p ResinProxy) error {
++	fn, err := p.proxyFunc()
++	if err != nil || fn == nil {
++		return err
++	}
++	for _, cl := range []*http.Client{c.HTTP, c.ChatHTTP} {
++		if cl != nil {
++			if _, ok := cl.Transport.(*http.Transport); !ok {
++				return errors.New("resin requires an HTTP transport")
++			}
++		}
++	}
++	for _, cl := range []*http.Client{c.HTTP, c.ChatHTTP} {
++		if cl != nil {
++			cl.Transport.(*http.Transport).Proxy = fn
++		}
++	}
++	return nil
++}
++
++func (r ResinProxy) proxyFunc() (func(*http.Request) (*url.URL, error), error) {
++	if r.URL == "" {
++		return nil, nil
++	}
++	base, err := url.Parse(r.URL)
++	if err != nil || base.Hostname() == "" || (base.Scheme != "http" && base.Scheme != "https") {
++		return nil, errors.New("resin.url must be an absolute HTTP(S) URL")
++	}
++	platform := r.Platform
++	if platform == "" {
++		platform = "Default"
++	}
++	return func(req *http.Request) (*url.URL, error) {
++		u := *base
++		// UID survives access-token refresh and keeps each account on its own exit.
++		account := strings.TrimSpace(req.Header.Get("X-User-Id"))
++		if account != "" {
++			u.User = url.UserPassword(platform+"."+account, r.Token)
++		} else if r.Token != "" {
++			u.User = url.UserPassword(platform, r.Token)
++		}
++		return &u, nil
++	}, nil
++}
+diff --git a/internal/upstream/resin_proxy_test.go b/internal/upstream/resin_proxy_test.go
+new file mode 100644
+index 0000000..2df88a8
+--- /dev/null
++++ b/internal/upstream/resin_proxy_test.go
+@@ -0,0 +1,42 @@
++package upstream
++
++import (
++	"net/http"
++	"testing"
++)
++
++func TestResinProxy(t *testing.T) {
++	c := New()
++	if err := c.SetResinProxy(ResinProxy{URL: "http://127.0.0.1:12260", Token: "synthetic", Platform: "pool"}); err != nil {
++		t.Fatal(err)
++	}
++	for _, cl := range []*http.Client{c.HTTP, c.ChatHTTP} {
++		for _, tc := range []struct{ uid, token, want string }{
++			{"a", "old", "pool.a"}, {"a", "refreshed", "pool.a"}, {"b", "other", "pool.b"}, {"", "", "pool"},
++		} {
++			r, _ := http.NewRequest("GET", "https://example.invalid/models", nil)
++			r.Header.Set("X-User-Id", tc.uid)
++			r.Header.Set("Authorization", tc.token)
++			u, err := cl.Transport.(*http.Transport).Proxy(r)
++			if err != nil {
++				t.Fatal(err)
++			}
++			pw, _ := u.User.Password()
++			if u.User.Username() != tc.want || pw != "synthetic" || u.Host != "127.0.0.1:12260" || r.URL.Host != "example.invalid" {
++				t.Fatal("proxy identity or destination changed")
++			}
++		}
++	}
++	for _, bad := range []string{"%", "relative", "file:///tmp/proxy"} {
++		if err := c.SetResinProxy(ResinProxy{URL: bad}); err == nil {
++			t.Fatalf("accepted %q", bad)
++		}
++	}
++	plain := New()
++	if err := plain.SetResinProxy(ResinProxy{}); err != nil {
++		t.Fatal(err)
++	}
++	if plain.HTTP.Transport.(*http.Transport).Proxy != nil {
++		t.Fatal("empty config enabled proxy")
 +	}
 +}
 diff --git a/internal/upstream/sse.go b/internal/upstream/sse.go
@@ -964,3 +1076,62 @@ index 3b20a1f..b6d980d 100644
  		var value any
  		if path.section == "" {
  			value = usage[path.key]
+diff --git a/internal/upstream/webagent.go b/internal/upstream/webagent.go
+index 21239c6..4bba966 100644
+--- a/internal/upstream/webagent.go
++++ b/internal/upstream/webagent.go
+@@ -265,8 +265,8 @@ func (c *Client) DeleteWebConversation(ctx context.Context, a *auth.Auth, id str
+ // 只有「status 变成 completed」才算成功——SSE 收到 session/endTurn 也在里面判一次
+ // 提前收工的依据，但最终以 console 状态为准（hub 的判据同口径：只建会话不接沙箱、
+ // 或接了沙箱没等它跑完，上游都不计为一次有效对话）。
+-func (c *Client) RunWebAgentTurn(ctx context.Context, a *auth.Auth, id string, sess WebSession, prompt, model string) (WebTurnResult, error) {
+-	res := WebTurnResult{Conversation: id}
++func (c *Client) RunWebAgentTurn(ctx context.Context, a *auth.Auth, id string, sess WebSession, prompt, model string) (res WebTurnResult, retErr error) {
++	res = WebTurnResult{Conversation: id}
+ 	started := time.Now()
+ 	if strings.TrimSpace(prompt) == "" {
+ 		prompt = webDailyPrompt
+@@ -293,7 +293,15 @@ func (c *Client) RunWebAgentTurn(ctx context.Context, a *auth.Auth, id string, s
+ 	if err != nil {
+ 		return res, fmt.Errorf("acp sse: %w", err)
+ 	}
+-	defer stream.Body.Close()
++	var events, chunks int
++	var done chan struct{}
++	defer func() {
++		stream.Body.Close()
++		if done != nil {
++			<-done
++			res.Events, res.Chunks = events, chunks
++		}
++	}()
+ 	if stream.StatusCode != http.StatusOK {
+ 		return res, fmt.Errorf("acp sse: HTTP %d", stream.StatusCode)
+ 	}
+@@ -303,8 +311,8 @@ func (c *Client) RunWebAgentTurn(ctx context.Context, a *auth.Auth, id string, s
+ 	}
+ 
+ 	// 读 SSE：只统计，不解析 update 内容（打卡不关心说了什么）。
+-	// 流结束（或 ctx 取消）时 goroutine 自然退出，不阻塞主流程。
+-	done := make(chan struct{})
++	// 计数归读取协程所有；关闭流并等待退出后才发布到返回值。
++	done = make(chan struct{})
+ 	go func() {
+ 		defer close(done)
+ 		sc := bufio.NewScanner(stream.Body)
+@@ -331,12 +339,12 @@ func (c *Client) RunWebAgentTurn(ctx context.Context, a *auth.Auth, id string, s
+ 			}
+ 			switch msg.Method {
+ 			case "session/update":
+-				res.Events++
++				events++
+ 				if msg.Params.Update.SessionUpdate == "agent_message_chunk" {
+-					res.Chunks++
++					chunks++
+ 				}
+ 			case "session/endTurn":
+-				res.Events++
++				events++
+ 			}
+ 		}
+ 	}()

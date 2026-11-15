@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/routatic/proxy/internal/client"
+	"github.com/routatic/proxy/internal/core"
 )
 
 // Key scheduling defaults. They mirror the model-level circuit breaker's shape
@@ -49,6 +50,8 @@ type keyState struct {
 	// of concurrent requests from all picking the same key before any of them
 	// has reported a result.
 	inFlight int
+	// revision prevents an older success from clearing a newer rejection.
+	revision uint64
 }
 
 // keyPool schedules requests across one platform's API keys.
@@ -76,10 +79,10 @@ func newKeyPool() *keyPool {
 // ErrAllKeysCooling reports that every configured key is resting after an
 // upstream rejection, so there is nothing to send with. It is distinct from an
 // empty pool, which means no key was configured at all.
-var ErrAllKeysCooling = errors.New("every API key is resting after an upstream rejection")
+var ErrAllKeysCooling = core.ErrAllKeysCooling
 
-// selection is one reserved key. Defer Release at its owner; doSelected settles
-// HTTP outcomes. Either path releases in-flight exactly once.
+// selection is one reserved key. HTTP rejections settle immediately; handoff
+// transfers 2xx ownership to the consumer. Each reservation releases once.
 type selection struct {
 	pool *keyPool
 	key  string
@@ -88,7 +91,8 @@ type selection struct {
 	err error
 	// done guards against a double Settle, which would decrement in-flight
 	// twice and could unblock a key that is still in use.
-	done bool
+	done     bool
+	revision uint64
 }
 
 // KeyHint labels the reserved credential for the history record: the last four
@@ -149,7 +153,7 @@ func (p *keyPool) Reserve(keys []string) *selection {
 		defer p.mu.Unlock()
 		st := p.stateFor(keys[0])
 		st.inFlight++
-		return &selection{pool: p, key: keys[0]}
+		return &selection{pool: p, key: keys[0], revision: st.revision}
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -158,8 +162,12 @@ func (p *keyPool) Reserve(keys []string) *selection {
 	best := ""
 	bestScore := time.Duration(1<<62 - 1)
 	allResting := true
+	var retryAt time.Time
 	for _, key := range keys {
 		st := p.stateFor(key)
+		if retryAt.IsZero() || st.blockedUntil.Before(retryAt) {
+			retryAt = st.blockedUntil
+		}
 		wait := st.blockedUntil.Sub(now)
 		if wait <= 0 {
 			wait = 0
@@ -176,19 +184,33 @@ func (p *keyPool) Reserve(keys []string) *selection {
 		}
 	}
 	if allResting {
-		return &selection{pool: p, err: ErrAllKeysCooling}
+		return &selection{pool: p, err: &core.KeysCoolingError{RetryAt: retryAt}}
 	}
 	st := p.stateFor(best)
 	st.inFlight++
-	return &selection{pool: p, key: best}
+	return &selection{pool: p, key: best, revision: st.revision}
+}
+
+// handoff moves the reservation to the response owner without releasing it.
+func (s *selection) handoff() *selection {
+	if s == nil || s.pool == nil || s.key == "" {
+		return nil
+	}
+	s.pool.mu.Lock()
+	defer s.pool.mu.Unlock()
+	if s.done {
+		return nil
+	}
+	next := *s
+	s.done = true
+	return &next
 }
 
 // Settle reports what happened to a reserved key.
 //
-// A nil error means the request reached the upstream and it answered 2xx, which
-// clears the key's state outright: a success is direct proof the key works, so
-// any cooldown it was serving is over. An error is classified by status - see
-// classify - and only a verdict about the key changes its state. A 400 from a
+// A nil error means the source response completed. It clears health only if no
+// newer rejection occurred since reservation. Errors are classified by status
+// (see classify). A 400 from a
 // malformed request or a client cancellation says nothing about the key and is
 // not cooled. Cancellation is neutral and preserves concurrent health verdicts;
 // a non-key-related HTTP rejection retains the existing healthy verdict.
@@ -221,25 +243,37 @@ func (s *selection) settle(verdict verdict, err error) {
 
 	switch verdict {
 	case verdictHealthy:
-		st.consecutive = 0
-		st.blockedUntil = time.Time{}
+		if s.revision == st.revision {
+			st.consecutive = 0
+			st.blockedUntil = time.Time{}
+		}
 	case verdictAuth:
 		// Rejected credential or exhausted budget: no number of retries fixes
 		// it, so set it aside now rather than after the transient threshold.
 		st.consecutive = 0
-		st.blockedUntil = now.Add(authQuarantine)
+		st.revision++
+		st.blockedUntil = laterDeadline(st.blockedUntil, now.Add(authQuarantine))
 	case verdictRateLimited:
 		st.consecutive = 0
-		st.blockedUntil = now.Add(retryAfter(err, rateLimitCooldown))
+		st.revision++
+		st.blockedUntil = laterDeadline(st.blockedUntil, now.Add(retryAfter(err, rateLimitCooldown)))
 	case verdictTransient:
+		st.revision++
 		st.consecutive++
 		if st.consecutive >= transientThreshold {
-			st.blockedUntil = now.Add(transientCooldown)
+			st.blockedUntil = laterDeadline(st.blockedUntil, now.Add(transientCooldown))
 			// Reset so that when the cooldown expires the key starts fresh: the
 			// failures that opened it have been paid for by the rest.
 			st.consecutive = 0
 		}
 	}
+}
+
+func laterDeadline(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
 }
 
 // stateFor returns the key's state, creating it on first use. Callers hold mu.

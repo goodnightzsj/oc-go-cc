@@ -155,22 +155,25 @@ func (w *responsesHTTPWriter) Write(p []byte) (int, error) {
 }
 
 func (w *responsesHTTPWriter) Flush() {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.flush()
+	_ = w.FlushError()
 }
 
-func (w *responsesHTTPWriter) flush() {
+func (w *responsesHTTPWriter) FlushError() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.flush()
+}
+
+func (w *responsesHTTPWriter) flush() error {
 	if w.isSSE() {
 		if w.native {
 			w.commit(http.StatusOK, "text/event-stream")
 		} else {
 			w.startStream()
 		}
-		if f, ok := w.ResponseWriter.(http.Flusher); ok {
-			f.Flush()
-		}
+		return http.NewResponseController(w.ResponseWriter).Flush()
 	}
+	return nil
 }
 
 // Finish is shared with MessagesHandler so adaptation failures are accounted
@@ -196,8 +199,11 @@ func (w *responsesHTTPWriter) finish() error {
 	}
 	if w.stream != nil {
 		err := w.stream.Finish()
-		w.flush()
-		return err
+		flushErr := w.flush()
+		if err != nil {
+			return err
+		}
+		return flushErr
 	}
 	if w.status >= 400 {
 		var envelope struct {

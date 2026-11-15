@@ -15,6 +15,7 @@ import (
 
 	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/core"
 )
 
 // CircuitState represents the state of a circuit breaker.
@@ -255,7 +256,7 @@ func (h *FallbackHandler) AllowAttempt(model config.ModelConfig) func(context.Co
 // provider should be skipped for this request. ctx is the client's context, not
 // the per-attempt timeout: disconnects must not penalize a healthy upstream.
 func (h *FallbackHandler) recordAttempt(ctx context.Context, model config.ModelConfig, err error, cb *CircuitBreaker, generation uint64) bool {
-	blockProvider := IsUsageLimitError(err)
+	blockProvider := IsUsageLimitError(err) || errors.Is(err, core.ErrAllKeysCooling)
 	if IsAuthError(err) {
 		// An auth failure says the credential is bad. Whether that should skip
 		// the platform's remaining models depends on whether another key can
@@ -279,7 +280,7 @@ func (h *FallbackHandler) recordAttempt(ctx context.Context, model config.ModelC
 		}
 		return false
 	}
-	if IsUsageLimitError(err) || IsAuthError(err) {
+	if blockProvider || IsAuthError(err) {
 		return blockProvider
 	}
 	if current && IsRetryableError(err) {
@@ -484,7 +485,7 @@ var ErrWithinSiteNoTarget = errors.New("active site has no routing target")
 
 // IsRetryableError determines if an error is worth retrying with a fallback.
 func IsRetryableError(err error) bool {
-	if err == nil {
+	if err == nil || errors.Is(err, core.ErrAllKeysCooling) {
 		return false
 	}
 

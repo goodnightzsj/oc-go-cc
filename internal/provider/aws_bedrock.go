@@ -55,7 +55,9 @@ func (p *AWSBedrockProvider) WireFormat(modelID string) core.WireFormat {
 	}
 }
 
-func (p *AWSBedrockProvider) Execute(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
+func (p *AWSBedrockProvider) Execute(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (_ *core.ExecuteResult, err error) {
+	ctx, outcome := withKeyOutcome(ctx, core.ModelWireFormat(p, model), false, false)
+	defer func() { outcome.finish(err) }()
 	switch core.ModelWireFormat(p, model) {
 	case core.WireFormatAnthropic:
 		return p.executeAnthropic(ctx, req, model)
@@ -67,6 +69,7 @@ func (p *AWSBedrockProvider) Execute(ctx context.Context, req *types.MessageRequ
 }
 
 func (p *AWSBedrockProvider) Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
+	ctx, _ = withKeyOutcome(ctx, core.ModelWireFormat(p, model), true, false)
 	switch core.ModelWireFormat(p, model) {
 	case core.WireFormatAnthropic:
 		return p.streamAnthropic(ctx, req, model)

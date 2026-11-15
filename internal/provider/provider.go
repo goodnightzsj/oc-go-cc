@@ -74,19 +74,29 @@ func (b *baseProvider) withKeyHint(body io.ReadCloser, sel *selection) io.ReadCl
 	return &keyHintBody{ReadCloser: body, hint: sel.KeyHint()}
 }
 
-// doSelected records health at the shared HTTP boundary. Encoding and request
-// construction failures never reach here; the caller's deferred Release leaves
-// those neutral. Bodies remain owned by the protocol-specific caller.
-func (b *baseProvider) doSelected(req *http.Request, sel *selection) (*http.Response, error) {
+// do observes each upstream response before any provider consumes its body.
+func (b *baseProvider) do(req *http.Request) (*http.Response, error) {
 	logRequestControls(req, slog.Default())
 	resp, err := b.httpClient.Do(req)
+	if err == nil {
+		metrics.ObserveGenerationResponse(req.Context(), resp)
+	}
+	return resp, err
+}
+
+// doSelected settles HTTP rejections immediately; 2xx transfers health ownership
+// to Execute's parser or the source stream body. Local failures stay neutral.
+// Providers needing an error body for classification use do before transferring.
+func (b *baseProvider) doSelected(req *http.Request, sel *selection) (*http.Response, error) {
+	resp, err := b.do(req)
 	outcome := err
 	if err == nil && resp.StatusCode >= http.StatusBadRequest {
 		outcome = &client.APIError{StatusCode: resp.StatusCode, RetryAfter: resp.Header.Get("Retry-After")}
 	}
-	sel.Settle(outcome)
-	if err == nil {
-		metrics.ObserveGenerationResponse(req.Context(), resp)
+	if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		ownSelectedResponse(req.Context(), resp, sel)
+	} else {
+		sel.Settle(outcome)
 	}
 	return resp, err
 }
@@ -110,8 +120,8 @@ func (t *countingTransport) RoundTrip(req *http.Request) (*http.Response, error)
 // handle carries both the credential and the health record, so the caller only
 // has to pass the send result back - see selection.Settle.
 //
-// Callers defer Release immediately after reservation and send through
-// doSelected, so local failures and HTTP results have one lifecycle owner.
+// Callers defer Release immediately; doSelected hands successful responses to
+// their consumer without releasing the in-flight reservation at HTTP headers.
 func (b *baseProvider) reserveKey(keys []string) *selection {
 	if b.keys == nil {
 		// A zero-value baseProvider would otherwise panic; treat it as a pool

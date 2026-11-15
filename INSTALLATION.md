@@ -16,9 +16,14 @@ scoop install routatic-proxy
 
 ## Build from Source
 
+Install Go as required by `go.mod` and Node.js 22 with npm. Run `npm ci` before `make build`, `make build-ui` or `make dist`. These targets stop on CSS compilation failure; they never fall back to stale styles. After editing UI sources, regenerate and commit `internal/gui/assets/compiled-tailwind.css`; `make check-css` checks it against Git, as CI and release validation do.
+
+Direct `go build` and the Dockerfile embed the committed CSS without rebuilding it. They remain usable without Node, but do not validate UI source/asset consistency.
+
 ```bash
 git clone https://github.com/routatic/proxy.git
 cd proxy
+npm ci
 make build
 
 # Binary is at bin/routatic-proxy

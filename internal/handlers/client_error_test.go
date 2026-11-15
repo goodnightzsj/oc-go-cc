@@ -3,9 +3,13 @@ package handlers
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/core"
@@ -24,6 +28,23 @@ func TestClientErrorForwardsUpstreamRefusal(t *testing.T) {
 	}
 	if !strings.Contains(message, "model not in plan") {
 		t.Errorf("upstream reason missing from %q", message)
+	}
+}
+
+func TestClientErrorCoolingRetryAfterRoundsUp(t *testing.T) {
+	h := &MessagesHandler{logger: slog.Default()}
+	for _, delay := range []time.Duration{1500 * time.Millisecond, -time.Second} {
+		w := httptest.NewRecorder()
+		err := fmt.Errorf("cline-pass: %w", &core.KeysCoolingError{RetryAt: time.Now().Add(delay)})
+		h.sendError(w, http.StatusBadGateway, "all models failed", err)
+		want := 2
+		if delay < 0 {
+			want = 1
+		}
+		seconds, _ := strconv.Atoi(w.Header().Get("Retry-After"))
+		if w.Code != 503 || seconds != want || !strings.Contains(w.Body.String(), "retry at") {
+			t.Fatalf("status=%d retry=%d body=%s", w.Code, seconds, w.Body.String())
+		}
 	}
 }
 

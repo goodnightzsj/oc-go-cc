@@ -51,7 +51,9 @@ func (p *WorkBuddyProvider) Name() string { return client.ProviderWorkBuddy }
 // Anthropic has to be converted rather than forwarded.
 func (p *WorkBuddyProvider) WireFormat(string) core.WireFormat { return core.WireFormatOpenAIChat }
 
-func (p *WorkBuddyProvider) Execute(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
+func (p *WorkBuddyProvider) Execute(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (_ *core.ExecuteResult, err error) {
+	ctx, outcome := withKeyOutcome(ctx, core.ModelWireFormat(p, model), false, false)
+	defer func() { outcome.finish(err) }()
 	body, err := p.request(ctx, req, model, false)
 	if err != nil {
 		return nil, err
@@ -74,6 +76,7 @@ func (p *WorkBuddyProvider) Execute(ctx context.Context, req *types.MessageReque
 }
 
 func (p *WorkBuddyProvider) Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
+	ctx, _ = withKeyOutcome(ctx, core.ModelWireFormat(p, model), true, false)
 	return p.request(ctx, req, model, true)
 }
 

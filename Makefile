@@ -1,4 +1,4 @@
-.PHONY: build build-ui run test clean install dist lint vet docker-up docker-stop
+.PHONY: build build-ui build-css check-css run test clean install dist lint vet docker-up docker-stop
 
 # Build variables
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -9,19 +9,20 @@ CMD = ./cmd/routatic-proxy
 
 # ── Development ────────────────────────────────────────────────────
 
-build:
-	@$(MAKE) build-css || echo "[WARN] CSS build failed, using existing style.css"
+build: build-css
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
 	@ln -sf $(BINARY) bin/$(LEGACY_BINARY)
 
-build-ui:
-	@$(MAKE) build-css || echo "[WARN] CSS build failed, using existing style.css"
+build-ui: build-css
 	CGO_ENABLED=1 go build -tags darwin -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
 	@ln -sf $(BINARY) bin/$(LEGACY_BINARY)
 
 build-css:
 	@echo "Building Tailwind CSS..."
 	@./scripts/build-css.sh
+
+check-css: build-css
+	git diff --exit-code -- internal/gui/assets/compiled-tailwind.css
 
 dmg: build-ui
 	@./scripts/build_dmg.sh "$(VERSION)"
@@ -94,7 +95,8 @@ PLATFORMS = \
 
 RELEASE_LDFLAGS = $(LDFLAGS) -s -w
 
-dist: clean
+dist: build-css
+	@$(MAKE) clean
 	@mkdir -p dist
 	@echo "Building release binaries (version: $(VERSION))..."
 	@for platform in $(PLATFORMS); do \

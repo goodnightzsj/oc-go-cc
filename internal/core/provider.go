@@ -4,7 +4,9 @@ package core
 
 import (
 	"context"
+	"errors"
 	"io"
+	"time"
 
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/pkg/types"
@@ -66,6 +68,19 @@ type RequestConversionError struct {
 
 func (e *RequestConversionError) Error() string { return e.Err.Error() }
 func (e *RequestConversionError) Unwrap() error { return e.Err }
+
+var ErrAllKeysCooling = errors.New("every API key is resting after an upstream rejection")
+
+// KeysCoolingError is local unavailability, not a new upstream HTTP failure.
+type KeysCoolingError struct {
+	RetryAt time.Time
+}
+
+func (e *KeysCoolingError) Error() string {
+	return ErrAllKeysCooling.Error() + "; retry at " + e.RetryAt.UTC().Format(time.RFC3339Nano)
+}
+
+func (e *KeysCoolingError) Unwrap() error { return ErrAllKeysCooling }
 
 // ResponsesStatusError retains a failed execution's reported usage across
 // provider and fallback boundaries. Nil usage means it was not reported;

@@ -83,8 +83,8 @@ func (sp *StreamProxy) proxyAnthropicPassthroughStream(
 			if written != n {
 				return fmt.Errorf("failed to forward upstream stream: %w", io.ErrShortWrite)
 			}
-			if f, ok := w.(http.Flusher); ok {
-				f.Flush()
+			if err := http.NewResponseController(w).Flush(); err != nil {
+				return fmt.Errorf("failed to flush upstream stream: %w", err)
 			}
 			// Protocol completion does not depend on HTTP connection cleanup.
 			// finish still validates any error or partial frame in this batch.

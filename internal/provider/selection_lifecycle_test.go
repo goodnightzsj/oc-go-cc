@@ -60,9 +60,9 @@ func TestZenAnthropicDoesNotRetryRejectedKey(t *testing.T) {
 }
 
 func TestProviderSelectionLifecycle(t *testing.T) {
-	for _, name := range []string{"opencode-go", "opencode-zen", "aws-bedrock", "openrouter", "commandcode", "cline-pass"} {
+	for _, name := range []string{"opencode-go", "opencode-zen", "aws-bedrock", "openrouter", "commandcode", "cline-pass", "workbuddy"} {
 		formats := []core.WireFormat{core.WireFormatOpenAIChat}
-		if name != "openrouter" && name != "cline-pass" {
+		if name != "openrouter" && name != "cline-pass" && name != "workbuddy" {
 			formats = append(formats, core.WireFormatAnthropic)
 		}
 		if name == "opencode-go" || name == "opencode-zen" || name == "aws-bedrock" {
@@ -97,6 +97,7 @@ func TestProviderSelectionLifecycle(t *testing.T) {
 							OpenRouter:  config.OpenRouterConfig{BaseURL: endpoint},
 							CommandCode: config.CommandCodeConfig{BaseURL: endpoint, AnthropicBaseURL: endpoint, APIKeys: keys},
 							ClinePass:   config.ClinePassConfig{BaseURL: endpoint, APIKeys: keys},
+							WorkBuddy:   config.WorkBuddyConfig{BaseURL: endpoint, APIKeys: keys},
 						}
 						atomic := config.NewAtomicConfig(cfg, "")
 						var p core.Provider
@@ -119,6 +120,9 @@ func TestProviderSelectionLifecycle(t *testing.T) {
 							p, pool = v, v.keys
 						case "cline-pass":
 							v := NewClinePassProvider(atomic, nil)
+							p, pool = v, v.keys
+						case "workbuddy":
+							v := NewWorkBuddyProvider(atomic, nil)
 							p, pool = v, v.keys
 						}
 						model := config.ModelConfig{Provider: name, ModelID: "test", WireFormat: format.String()}

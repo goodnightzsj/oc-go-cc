@@ -158,12 +158,12 @@ func directPin(body map[string]any) string {
 func TestChannelPinProbeComparesPinnedAgainstUnpinned(t *testing.T) {
 	model := "cline-pass/minimax-m3"
 
-	t.Run("enforced: the pinned request moves to the pinned channel", func(t *testing.T) {
+	t.Run("matched: the pinned request moves to the pinned channel", func(t *testing.T) {
 		srv := probeUpstream(t, []string{model}, pinAwareUpstream(t, "minimax",
 			[]string{"minimax", "nebius", "gmicloud"}, true, plannerPin))
 		got := probeVerdict(t, probeConfig(t, srv))
-		if !strings.Contains(got, "verdict=enforced") {
-			t.Errorf("a followed pin is enforcement; got:\n%s", got)
+		if !strings.Contains(got, "verdict=matched") {
+			t.Errorf("one followed pin is a match, not proof of enforcement; got:\n%s", got)
 		}
 		if !strings.Contains(got, "pin to nebius honoured") {
 			t.Errorf("the probe must name the channel it pinned and where it landed; got:\n%s", got)
@@ -204,25 +204,24 @@ func TestChannelPinProbeComparesPinnedAgainstUnpinned(t *testing.T) {
 		}
 	})
 
-	// A model with one channel has nothing to pin to. Reporting that as
-	// "ignored" would blame the gateway for a model that has nowhere else to go.
-	t.Run("locked: a single-channel model has nothing to pin to", func(t *testing.T) {
+	// A single observed candidate cannot prove that no other channel exists.
+	t.Run("unknown: only the baseline channel was reported", func(t *testing.T) {
 		srv := probeUpstream(t, []string{model}, pinAwareUpstream(t, "minimax", []string{"minimax"}, true, plannerPin))
 		got := probeVerdict(t, probeConfig(t, srv))
-		if !strings.Contains(got, "verdict=locked") {
-			t.Errorf("a one-channel model is locked, not ignored; got:\n%s", got)
+		if !strings.Contains(got, "verdict=unknown") || strings.Contains(got, "verdict=locked") {
+			t.Errorf("no alternate candidate is not a lock; got:\n%s", got)
 		}
 	})
 
 	// The real account's shape: a private route reports no candidates at all.
-	t.Run("locked: a private route with no candidates", func(t *testing.T) {
+	t.Run("unknown: a private route with no candidates", func(t *testing.T) {
 		srv := probeUpstream(t, []string{model}, func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "text/event-stream")
 			_, _ = io.WriteString(w, routingFrame("openai-compatible-private"))
 		})
 		got := probeVerdict(t, probeConfig(t, srv))
-		if !strings.Contains(got, "verdict=locked") {
-			t.Errorf("a private route cannot be pinned; got:\n%s", got)
+		if !strings.Contains(got, "verdict=unknown") || strings.Contains(got, "verdict=locked") {
+			t.Errorf("missing metadata is not a lock; got:\n%s", got)
 		}
 	})
 }
@@ -387,14 +386,7 @@ func TestChannelPinProbeSendsAServablePin(t *testing.T) {
 	}
 }
 
-// A pin to a channel the model cannot serve is a hard failure, and the gateway
-// reports it inside the stream with HTTP 200 rather than as a status code:
-//
-//	data: {"error":{"code":"stream_initialization_failed", ...}}
-//
-// Read as "no routing metadata" that would be unknown, but it is in fact the
-// strongest evidence of enforcement - the gateway read the pin and tried to
-// honour it, then could not find the channel.
+// An in-stream failure does not establish that the routing field was applied.
 func TestChannelPinProbeReadsInStreamErrors(t *testing.T) {
 	model := "cline-pass/minimax-m3"
 	srv := probeUpstream(t, []string{model}, func(w http.ResponseWriter, r *http.Request) {
@@ -410,8 +402,8 @@ func TestChannelPinProbeReadsInStreamErrors(t *testing.T) {
 	})
 	got := probeVerdict(t, probeConfig(t, srv))
 
-	if !strings.Contains(got, "verdict=enforced") {
-		t.Errorf("an in-stream rejection of the pin proves enforcement; got:\n%s", got)
+	if !strings.Contains(got, "verdict=unknown") || strings.Contains(got, "verdict=enforced") || strings.Contains(got, "verdict=matched") {
+		t.Errorf("an in-stream rejection cannot prove enforcement; got:\n%s", got)
 	}
 	if !strings.Contains(got, "stream_initialization_failed") {
 		t.Errorf("the gateway's error code must be reported; got:\n%s", got)
@@ -419,6 +411,75 @@ func TestChannelPinProbeReadsInStreamErrors(t *testing.T) {
 	// The upstream vendor's wording must not be copied into the log.
 	if strings.Contains(got, "failed to invoke model") {
 		t.Errorf("the upstream message must not be logged, only its code; got:\n%s", got)
+	}
+}
+
+func TestChannelPinProbeRequiresSuccessfulEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		status  int
+		body    string
+		verdict string
+	}{
+		{"routing refusal", 403, clineRoutingRejectionFixture, "unsupported"},
+		{"HTTP failure with metadata", 500, routingFrame("nebius"), "unknown"},
+		{"SSE error without code", 200, "data: {\"error\":{\"message\":\"synthetic failure\"}}\n\n" + routingFrame("nebius"), "unknown"},
+		{"multiline SSE error", 200, "data: {\"error\":\ndata: {\"code\":\"synthetic_failure\"}}\n\n" + routingFrame("nebius"), "unknown"},
+		{"unterminated stream", 200, strings.TrimSuffix(routingFrame("nebius"), "data: [DONE]\n\n"), "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := probeUpstream(t, []string{"synthetic"}, func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				if plannerPin(body) != "" || directPin(body) != "" {
+					w.WriteHeader(tc.status)
+					_, _ = io.WriteString(w, tc.body)
+					return
+				}
+				_, _ = io.WriteString(w, routingFrame("minimax", "minimax", "nebius"))
+			})
+			got := probeVerdict(t, probeConfig(t, srv))
+			if strings.Count(got, "verdict="+tc.verdict) != 2 || strings.Contains(got, "verdict=enforced") || strings.Contains(got, "verdict=matched") {
+				t.Fatalf("invalid routing verdict: %s", got)
+			}
+			if tc.status == 403 && strings.Contains(got, "account refused") {
+				t.Fatalf("routing refusal mislabeled as credential rejection: %s", got)
+			}
+		})
+	}
+}
+
+func TestChannelPinProbeDisabledSendsNothing(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("disabled probe sent a request") }))
+	t.Cleanup(srv.Close)
+	cfg := probeConfig(t, srv)
+	cfg.ClinePass.ChannelPinEnabled = false
+	if got := probeVerdict(t, cfg); !strings.Contains(got, "pinning is off") {
+		t.Fatalf("missing skip reason: %s", got)
+	}
+}
+
+func TestChannelPinProbeRejectsTruncatedEvidence(t *testing.T) {
+	for _, oversized := range []bool{false, true} {
+		srv := probeUpstream(t, []string{"synthetic"}, func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if plannerPin(body) == "" && directPin(body) == "" {
+				_, _ = io.WriteString(w, routingFrame("minimax", "minimax", "nebius"))
+				return
+			}
+			if !oversized {
+				w.Header().Set("Content-Length", "100000")
+			}
+			_, _ = io.WriteString(w, routingFrame("nebius"))
+			if oversized {
+				_, _ = io.WriteString(w, strings.Repeat(": heartbeat\n\n", 6000))
+			}
+		})
+		got := probeVerdict(t, probeConfig(t, srv))
+		if strings.Count(got, "verdict=unknown") != 2 || strings.Contains(got, "verdict=matched") {
+			t.Fatalf("truncated evidence treated as valid: %s", got)
+		}
 	}
 }
 

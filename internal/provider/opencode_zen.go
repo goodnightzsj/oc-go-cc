@@ -49,7 +49,9 @@ func (p *OpenCodeZenProvider) WireFormat(modelID string) core.WireFormat {
 }
 
 // Execute sends a non-streaming request and returns the response.
-func (p *OpenCodeZenProvider) Execute(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
+func (p *OpenCodeZenProvider) Execute(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (_ *core.ExecuteResult, err error) {
+	ctx, outcome := withKeyOutcome(ctx, core.ModelWireFormat(p, model), false, false)
+	defer func() { outcome.finish(err) }()
 	switch core.ModelWireFormat(p, model) {
 	case core.WireFormatAnthropic:
 		return p.executeAnthropic(ctx, req, model)
@@ -64,6 +66,7 @@ func (p *OpenCodeZenProvider) Execute(ctx context.Context, req *types.MessageReq
 
 // Stream sends a streaming request and returns an io.ReadCloser for SSE events.
 func (p *OpenCodeZenProvider) Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
+	ctx, _ = withKeyOutcome(ctx, core.ModelWireFormat(p, model), true, false)
 	switch core.ModelWireFormat(p, model) {
 	case core.WireFormatAnthropic:
 		return p.streamAnthropic(ctx, req, model)

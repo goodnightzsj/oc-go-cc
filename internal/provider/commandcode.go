@@ -43,7 +43,9 @@ func (p *CommandCodeProvider) WireFormat(modelID string) core.WireFormat {
 	return core.WireFormatOpenAIChat
 }
 
-func (p *CommandCodeProvider) Execute(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
+func (p *CommandCodeProvider) Execute(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (_ *core.ExecuteResult, err error) {
+	ctx, outcome := withKeyOutcome(ctx, core.ModelWireFormat(p, model), false, false)
+	defer func() { outcome.finish(err) }()
 	body, err := p.request(ctx, req, model, false)
 	if err != nil {
 		return nil, err
@@ -76,6 +78,7 @@ func (p *CommandCodeProvider) Execute(ctx context.Context, req *types.MessageReq
 }
 
 func (p *CommandCodeProvider) Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
+	ctx, _ = withKeyOutcome(ctx, core.ModelWireFormat(p, model), true, false)
 	return p.request(ctx, req, model, true)
 }
 

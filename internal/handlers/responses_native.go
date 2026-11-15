@@ -125,13 +125,12 @@ func (w *responseWriter) writeNativeError(message string) error {
 		return nil
 	}
 	data, _ := json.Marshal(map[string]any{"type": "error", "code": "upstream_error", "message": message, "param": nil})
-	if _, err := fmt.Fprintf(w.ResponseWriter, "\n\nevent: error\ndata: %s\n\n", data); err != nil {
-		return err
-	}
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-	return nil
+	return w.writeIO(w.writeTimeout, func() error {
+		if _, err := fmt.Fprintf(w.ResponseWriter, "\n\nevent: error\ndata: %s\n\n", data); err != nil {
+			return err
+		}
+		return http.NewResponseController(w.ResponseWriter).Flush()
+	})
 }
 
 func nativeResponseUsage(raw []byte) *types.Usage {

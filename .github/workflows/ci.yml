@@ -24,6 +24,16 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Verify compiled CSS
+        run: |
+          npm ci
+          make check-css
+
       - name: Check formatting
         run: |
           if [ -n "$(gofmt -l .)" ]; then

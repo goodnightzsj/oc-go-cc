@@ -6,6 +6,18 @@ import (
 	"time"
 )
 
+type idleCancellationKey struct{}
+
+// WithIdleCancellation preserves the watchdog's cause on the upstream context,
+// while ordinary cleanup and client cancellation remain context.Canceled.
+func WithIdleCancellation(ctx context.Context, cancel context.CancelFunc) (context.Context, context.CancelFunc) {
+	ctx, cancelCause := context.WithCancelCause(ctx)
+	return context.WithValue(ctx, idleCancellationKey{}, cancelCause), func() {
+		cancelCause(nil)
+		cancel()
+	}
+}
+
 // StartIdleWatchdog launches a goroutine that calls cancel() if no call to the
 // returned ping function occurs within idleTimeout. The caller must invoke ping()
 // after every successful byte read from the upstream stream.
@@ -42,6 +54,9 @@ func StartIdleWatchdog(ctx context.Context, cancel context.CancelFunc, idleTimeo
 			case <-ctx.Done():
 				return
 			case <-timer.C:
+				if cancelCause, ok := ctx.Value(idleCancellationKey{}).(context.CancelCauseFunc); ok {
+					cancelCause(ErrStreamIdle)
+				}
 				cancel()
 				return
 			}

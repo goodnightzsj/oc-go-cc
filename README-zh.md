@@ -48,6 +48,10 @@ routatic-proxy start -b
 
 同筛选的慢轮询复用在途请求，换筛选才取消旧请求；清空视图同时清空图表数据，缩放不会重画旧结果。请求结果与 token 观测独立：缺失用量保持未知，不显示为免费，明确报告的零仍是零。
 
+用量分析切换筛选时统一取消旧汇总、趋势和价格请求，重复刷新复用同筛选的在途请求；布局和动画不变。
+
+SSE 普通写入、刷新及 Responses 收尾、Anthropic-first 转发共用单次 5 秒写入期限，写失败会取消上游读取，不记为成功交付。key 健康延迟到响应消费完成后结算，不把 HTTP200 响应头当作成功；上游断流和 idle 超时影响调度，客户端取消与下游写失败保持中性。在途预留持续到完成或关闭，迟到成功不能清除并发新隔离。协议字节、用量及模型/渠道身份不变。
+
 协议转换对坏帧和缺失终态显式失败，不伪造完成，并保留失败前已报告的用量。公开思考和拒绝文本保留；工具结果图片可经 Responses 目标发送，其他无法表达的桥明确拒绝。Gemini 的 system、角色、图片、函数调用和控制字段保留；不透明 thoughtSignature 与 Responses 加密重放仍需绑定来源的原生路径。本地协议测试不证明模型质量等同官方渠道。
 
 Chat Completions 与原生 Responses 上游报告的推理 Token 均保留到 Messages/Responses 的 JSON、流式输出及请求历史，失败时保留已报告的部分用量。Responses 使用 `usage.output_tokens_details.reasoning_tokens`，Messages 使用非标准扩展 `usage.reasoning_tokens`。推理 Token 已包含在输出总量中，不再次相加；转换输出省略未知或零值拆分，原生 Responses 保留源字段原样。OpenCode Go 的三种上游协议在捕获开启或关闭时均记录脱敏 key 标记。这些修复仅作用于新请求，不回填历史。

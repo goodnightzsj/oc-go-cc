@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/site"
+	"github.com/routatic/proxy/internal/sse"
 )
 
 // Cline routes a model through one of two pipelines, each with its own pin
@@ -175,11 +177,10 @@ func (p *ClinePassProvider) clinePassProbeModels(ctx context.Context, cfg *confi
 // to a channel the baseline did NOT use - and compares where each was served.
 //
 //	baseline unpinned  -> served=minimax
-//	pinned to nebius   -> served=nebius    => enforced
+//	pinned to nebius   -> served=nebius    => matched (one observation)
 //	pinned to nebius   -> served=minimax   => ignored
 //
-// A model with no candidate list has one channel, so there is nothing to pin to
-// and no experiment to run; that is reported as locked rather than as a failure.
+// Missing alternatives leave the experiment inconclusive, not locked.
 func (p *ClinePassProvider) probeOneModel(ctx context.Context, cfg *config.Config, keys []string, model, pipeline string) {
 	status, text, err := p.sendProbe(ctx, cfg, keys[0], model, pipeline, nil)
 	if err != nil {
@@ -195,19 +196,19 @@ func (p *ClinePassProvider) probeOneModel(ctx context.Context, cfg *config.Confi
 		p.logProbe(model, pipeline, "unknown", status, "unpinned baseline refused: "+candidateList(text))
 		return
 	}
+	if reason := probeStreamFailure(text); reason != "" {
+		p.logProbe(model, pipeline, "unknown", status, "unpinned baseline failed: "+reason)
+		return
+	}
 
 	served, candidates := routingSummary(text)
+	if served == "" {
+		p.logProbe(model, pipeline, "unknown", status, "unpinned baseline reported no serving channel")
+		return
+	}
 	target := firstCandidateOtherThan(candidates, served)
 	if target == "" {
-		// One channel, or none reported. There is no second channel to ask for,
-		// so this model cannot be pinned on this pipeline whatever the account's
-		// policy is - and saying "ignored" here would blame the gateway for a
-		// model that simply has nowhere else to go.
-		if served == "" {
-			p.logProbe(model, pipeline, "unknown", status, "unpinned baseline reported no routing metadata")
-			return
-		}
-		p.logProbe(model, pipeline, "locked", status, "single channel "+served+": nothing to pin to")
+		p.logProbe(model, pipeline, "unknown", status, "baseline served by "+served+"; no alternative channel reported")
 		return
 	}
 
@@ -216,28 +217,26 @@ func (p *ClinePassProvider) probeOneModel(ctx context.Context, cfg *config.Confi
 		p.logProbe(model, pipeline, "unknown", 0, "transport on pinned request: "+err.Error())
 		return
 	}
+	if clineRoutingRejected(pinStatus, pinText) {
+		p.logProbe(model, pipeline, "unsupported", pinStatus, "upstream rejects client-supplied routing fields")
+		return
+	}
 	if reason := accountRefusal(pinStatus, pinText); reason != "" {
 		p.logProbe(model, pipeline, "unknown", pinStatus, reason)
 		return
 	}
-	// A pin to a channel this model cannot use is a hard failure, and it arrives
-	// as HTTP 200 with an SSE error frame rather than a status code:
-	//
-	//	data: {"error":{"code":"stream_initialization_failed",
-	//	  "message":"... failed to invoke model 'qwen/qwen3.7-max' ..."}}
-	//
-	// Read as "no routing metadata" that would report unknown, which is wrong:
-	// the gateway did read the pin and did try to honour it, so this is the
-	// strongest available evidence that pinning is enforced. It is also what an
-	// operator sees when channel_pin names a channel the model cannot serve.
-	if code := streamErrorCode(pinText); code != "" {
-		p.logProbe(model, pipeline, "enforced", pinStatus, "pin to "+target+" rejected in-stream: "+code)
+	if pinStatus < 200 || pinStatus >= 300 {
+		p.logProbe(model, pipeline, "unknown", pinStatus, "pinned request refused: "+candidateList(pinText))
+		return
+	}
+	if reason := probeStreamFailure(pinText); reason != "" {
+		p.logProbe(model, pipeline, "unknown", pinStatus, "pin to "+target+" failed in-stream: "+reason)
 		return
 	}
 	pinned, _ := routingSummary(pinText)
 	switch {
 	case pinned == target:
-		p.logProbe(model, pipeline, "enforced", pinStatus, "pin to "+target+" honoured (baseline was "+served+")")
+		p.logProbe(model, pipeline, "matched", pinStatus, "pin to "+target+" honoured in this sample (baseline was "+served+"); enforcement unverified")
 	case pinned == "":
 		p.logProbe(model, pipeline, "unknown", pinStatus, "pinned request reported no routing metadata")
 	default:
@@ -245,33 +244,40 @@ func (p *ClinePassProvider) probeOneModel(ctx context.Context, cfg *config.Confi
 	}
 }
 
-// streamErrorCode reads an error the gateway reported inside the SSE stream.
-//
-// The Cline API answers some failures with HTTP 200 and an error frame, so a
-// status-only reader treats them as successes. Only a code is returned, never
-// the message: the message embeds the upstream vendor's own wording and is not
-// something to copy into a log line.
-func streamErrorCode(text string) string {
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		payload := strings.TrimSpace(line[len("data:"):])
-		if payload == "" || payload == "[DONE]" {
-			continue
+// probeStreamFailure rejects failed or incomplete evidence without logging vendor messages.
+func probeStreamFailure(text string) string {
+	var decoder sse.Decoder
+	var done bool
+	var failure string
+	err := decoder.Feed([]byte(text), func(event string, payload []byte) error {
+		if string(bytes.TrimSpace(payload)) == "[DONE]" {
+			done = true
+			return nil
 		}
 		var chunk struct {
-			Error struct {
+			Error *struct {
 				Code string `json:"code"`
 			} `json:"error"`
 		}
-		if json.Unmarshal([]byte(payload), &chunk) != nil {
-			continue
+		if err := json.Unmarshal(payload, &chunk); err != nil {
+			return err
 		}
-		if chunk.Error.Code != "" {
-			return chunk.Error.Code
+		if event == "error" || chunk.Error != nil {
+			failure = "upstream error without a code"
+			if chunk.Error != nil && chunk.Error.Code != "" {
+				failure = chunk.Error.Code
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return "invalid SSE payload"
+	}
+	if failure != "" {
+		return failure
+	}
+	if decoder.Finish() != nil || !done {
+		return "incomplete SSE response"
 	}
 	return ""
 }
@@ -310,7 +316,14 @@ func (p *ClinePassProvider) sendProbe(ctx context.Context, cfg *config.Config, k
 		return 0, "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	const maxProbeBody = 1 << 16
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxProbeBody+1))
+	if err != nil {
+		return resp.StatusCode, "", err
+	}
+	if len(body) > maxProbeBody {
+		return resp.StatusCode, "", errors.New("probe response exceeds 64 KiB")
+	}
 	return resp.StatusCode, string(body), nil
 }
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/core"
 )
 
 func TestHalfOpenNeutralCompletionAndGeneration(t *testing.T) {
@@ -60,5 +61,21 @@ func TestHalfOpenNeutralCompletionAndGeneration(t *testing.T) {
 	last(ctx, nil)
 	if cb.State() != CircuitClosed {
 		t.Fatal("healthy probes did not close circuit")
+	}
+}
+
+func TestKeyCoolingSkipsProviderWithoutOpeningCircuit(t *testing.T) {
+	h := NewFallbackHandler(nil, 1, time.Second)
+	model := config.ModelConfig{Provider: "cline-pass", ModelID: "synthetic"}
+	// The timestamp contains "500"; legacy text classification must not apply.
+	err := &core.KeysCoolingError{RetryAt: time.Date(2026, 11, 15, 1, 2, 3, 500, time.UTC)}
+	if IsRetryableError(err) {
+		t.Fatal("local cooling penalizes the model")
+	}
+	if !h.AllowAttempt(model)(t.Context(), err) {
+		t.Fatal("all keys cooling must skip the provider for this request")
+	}
+	if h.getCircuitBreaker(config.ModelKey(model)).State() != CircuitClosed {
+		t.Fatal("local cooling opened the model circuit")
 	}
 }

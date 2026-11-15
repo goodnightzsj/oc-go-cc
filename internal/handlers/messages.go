@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -66,6 +67,9 @@ type responseWriter struct {
 	messageStopped    bool
 	stopReason        string
 	streamErr         error
+	writeErr          error
+	writeTimeout      time.Duration
+	cancelWrites      context.CancelFunc
 	sourceModel       string
 	sourceAnthropic   bool
 	nativeResponses   *transformer.ResponsesObservation
@@ -86,16 +90,18 @@ func (w *responseWriter) WriteHeader(code int) {
 	defer w.mu.Unlock()
 	if !w.wroteHeader {
 		w.wroteHeader = true
-		w.ResponseWriter.WriteHeader(code)
+		_ = w.writeIO(w.writeTimeout, func() error {
+			w.ResponseWriter.WriteHeader(code)
+			return nil
+		})
 	}
 }
 
 func (w *responseWriter) Write(b []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if !w.wroteHeader {
-		w.wroteHeader = true
-		w.ResponseWriter.WriteHeader(http.StatusOK)
+	if w.writeErr != nil {
+		return 0, w.writeErr
 	}
 	var observed streamMilestones
 	if len(b) > 0 {
@@ -111,7 +117,19 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 			return 0, err
 		}
 	}
-	n, err := w.ResponseWriter.Write(b)
+	var n int
+	err := w.writeIO(w.writeTimeout, func() error {
+		if !w.wroteHeader {
+			w.wroteHeader = true
+			w.ResponseWriter.WriteHeader(http.StatusOK)
+		}
+		var err error
+		n, err = w.ResponseWriter.Write(b)
+		if err == nil && n != len(b) {
+			err = io.ErrShortWrite
+		}
+		return err
+	})
 	if err == nil && n == len(b) {
 		w.timing.record(observed)
 	}
@@ -244,6 +262,9 @@ func (w *responseWriter) sourceTerminalObserved() bool {
 func (w *responseWriter) finish() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.writeErr != nil {
+		return w.writeErr
+	}
 	if w.streamErr != nil {
 		return w.streamErr
 	}
@@ -258,7 +279,7 @@ func (w *responseWriter) finish() error {
 		return fmt.Errorf("upstream stream ended before a complete message_stop: %w", io.ErrUnexpectedEOF)
 	}
 	if finisher, ok := w.ResponseWriter.(interface{ Finish() error }); ok {
-		return finisher.Finish()
+		return withStreamWriteDeadline(w.ResponseWriter, w.writeTimeout, finisher.Finish)
 	}
 	return nil
 }
@@ -364,11 +385,13 @@ func (w *responseWriter) headerWritten() bool {
 // Flush remain serialized. Without this, a concurrent Flush and Write on the
 // underlying http.ResponseWriter's *bufio.Writer would be a data race.
 func (w *responseWriter) Flush() {
+	_ = w.FlushError()
+}
+
+func (w *responseWriter) FlushError() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
+	return w.writeIO(w.writeTimeout, http.NewResponseController(w.ResponseWriter).Flush)
 }
 
 const (
@@ -383,24 +406,12 @@ func (w *responseWriter) WriteKeepalive(writeTimeout time.Duration) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	controller := http.NewResponseController(w.ResponseWriter)
-	if err := controller.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
-		return fmt.Errorf("set keepalive write deadline: %w", err)
-	}
-	if _, err := io.WriteString(w.ResponseWriter, ":keepalive\n\n"); err != nil {
-		return fmt.Errorf("write keepalive: %w", err)
-	}
-	if err := controller.Flush(); err != nil {
-		return fmt.Errorf("flush keepalive: %w", err)
-	}
-
-	// Clear the heartbeat-specific deadline after a successful flush. On error,
-	// leave it in place so later response writes fail instead of blocking on the
-	// same stalled client indefinitely.
-	if err := controller.SetWriteDeadline(time.Time{}); err != nil {
-		return fmt.Errorf("clear keepalive write deadline: %w", err)
-	}
-	return nil
+	return w.writeIO(writeTimeout, func() error {
+		if _, err := io.WriteString(w.ResponseWriter, ":keepalive\n\n"); err != nil {
+			return fmt.Errorf("write keepalive: %w", err)
+		}
+		return http.NewResponseController(w.ResponseWriter).Flush()
+	})
 }
 
 // startKeepaliveHeartbeat starts the streaming keepalive loop and returns a
@@ -839,14 +850,15 @@ func (h *MessagesHandler) handleStreaming(
 	scenario router.Scenario,
 	requestID string,
 ) {
-	clientCtx := h.metrics.WithUpstreamCounting(r.Context())
+	clientCtx, cancelWrites := context.WithCancel(h.metrics.WithUpstreamCounting(r.Context()))
+	defer cancelWrites()
 	// The model the client named, recorded alongside the one that served it so a
 	// rerouted request can be told apart from a passthrough after the fact.
 	requestedModel := anthropicReq.Model
 	// A caller's correlation ID may be reused; each billed execution is distinct.
 	recordID := uuid.NewString()
 
-	rw := &responseWriter{ResponseWriter: w}
+	rw := &responseWriter{ResponseWriter: w, cancelWrites: cancelWrites}
 
 	// Set SSE headers immediately
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -900,6 +912,7 @@ func (h *MessagesHandler) handleStreaming(
 		// Upstream context carries the streaming timeout configured for the model.
 		timeout := h.client.StreamingTimeout(model)
 		attemptCtx, cancelAttempt := context.WithTimeout(clientCtx, timeout)
+		attemptCtx, cancelAttempt = transformer.WithIdleCancellation(attemptCtx, cancelAttempt)
 		idleTimeout := h.client.StreamIdleTimeout(model)
 		var generation *metrics.GenerationObservation
 
@@ -1491,6 +1504,9 @@ const maxForwardedErrorBody = 4096
 // both hides the cause and lets an intermediary replace the body - Cloudflare
 // substitutes its own page for a 502, so the reason never arrived at all.
 func clientError(statusCode int, message string, err error) (int, string) {
+	if errors.Is(err, core.ErrAllKeysCooling) {
+		return http.StatusServiceUnavailable, truncateError(err.Error())
+	}
 	// Retained upstream refusal: this is the platform's own answer and already
 	// maps to an Anthropic status, so pass it through unchanged.
 	var apiErr *client.APIError
@@ -1543,6 +1559,16 @@ func (h *MessagesHandler) sendError(w http.ResponseWriter, statusCode int, messa
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	var cooling *core.KeysCoolingError
+	if errors.As(err, &cooling) {
+		// Round up: a fractional second must not tell the caller to retry early.
+		remaining := time.Until(cooling.RetryAt)
+		seconds := max(int64(1), int64(remaining/time.Second))
+		if remaining > time.Second && remaining%time.Second != 0 {
+			seconds++
+		}
+		w.Header().Set("Retry-After", strconv.FormatInt(seconds, 10))
+	}
 	w.WriteHeader(clientStatus)
 
 	errorResp := transformer.TransformErrorResponse(clientStatus, clientMessage)

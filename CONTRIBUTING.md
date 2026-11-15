@@ -6,6 +6,7 @@
 - [golangci-lint](https://golangci-lint.run/usage/install/) (for linting)
 - [Git](https://git-scm.com/)
 - [Make](https://www.gnu.org/software/make/) (build automation)
+- Node.js 22 and npm (locked Tailwind compiler and dashboard behavior tests)
 
 ## Getting Started
 
@@ -15,7 +16,7 @@
    cd routatic-proxy
    ```
 
-2. Build the binary:
+2. Install frontend build dependencies with `npm ci`, then build the binary:
    ```bash
    make build
    ```
@@ -98,6 +99,8 @@ This project follows standard Go conventions:
 ---
 
 ## Development
+
+After UI source changes, run `make build-css` and commit the generated `internal/gui/assets/compiled-tailwind.css`. `make check-css` rebuilds and checks for drift; CI and release validation run it after `npm ci`. Standard build targets fail on CSS errors and retain compiler diagnostics. Direct Go-only builds consume the committed asset without validating it.
 
 ```bash
 # Build (version auto-detected from git)

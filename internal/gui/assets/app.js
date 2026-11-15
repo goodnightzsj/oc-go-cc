@@ -6230,6 +6230,7 @@ document.addEventListener('DOMContentLoaded', () => {
 const AnalyticsModule = {
   loadSeq: 0,
   loading: false,
+  request: null,
   ready: false,
   query: '',
   breakdownMetric: 'tokens',
@@ -6415,26 +6416,31 @@ const AnalyticsModule = {
 
   async load(force) {
     if (!force && this.loading) return;
-    const seq = ++this.loadSeq;
-    this.loading = true;
+    let seq;
+    let controller;
     const genEl = document.getElementById('analytics-generated');
     const errorEl = document.getElementById('analytics-error');
-    if (errorEl) errorEl.hidden = true;
 
     try {
       // Polling updates the applied range, never an open popover's draft.
       this.syncDateRange(false);
       const params = this.queryParams();
+      if (this.request && this.query === params.toString()) return;
+      seq = ++this.loadSeq;
+      this.request?.abort();
+      controller = this.request = new AbortController();
+      this.loading = true;
+      if (errorEl) errorEl.hidden = true;
       if (!this.ready || this.query !== params.toString()) {
         this.query = params.toString();
         this.clearView(true);
       }
       const [summary, trend, prices] = await Promise.all([
-        fetchJSON(`/api/analytics/summary?${params}`),
-        fetchJSON(`/api/analytics/tokens/trend?${params}`),
+        fetchJSON(`/api/analytics/summary?${params}`, {signal: controller.signal}),
+        fetchJSON(`/api/analytics/tokens/trend?${params}`, {signal: controller.signal}),
         // Prices are instance state, not window state, but they belong to this
         // tab. A failure here must not blank the cost figures it explains.
-        fetchJSON('/api/prices').catch(() => null)
+        fetchJSON('/api/prices', {signal: controller.signal}).catch(() => null)
       ]);
       if (seq !== this.loadSeq) return;
       if (!summary?.summary || !trend || (trend.trend !== null && !Array.isArray(trend.trend))) {
@@ -6458,6 +6464,12 @@ const AnalyticsModule = {
         genEl.textContent = '· ' + ts.toLocaleDateString(undefined, {month:'short', day:'numeric'});
       }
     } catch (e) {
+      // Invalid filters also supersede any query that was already running.
+      if (seq === undefined) {
+        seq = ++this.loadSeq;
+        this.request?.abort();
+        this.request = null;
+      }
       if (seq !== this.loadSeq) return;
       console.error('Analytics error:', e);
       this.clearView();
@@ -6466,7 +6478,11 @@ const AnalyticsModule = {
         errorEl.hidden = false;
       }
     } finally {
-      if (seq === this.loadSeq) this.loading = false;
+      controller?.abort();
+      if (seq === this.loadSeq) {
+        this.loading = false;
+        this.request = null;
+      }
     }
   },
 

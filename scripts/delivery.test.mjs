@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,8 +44,12 @@ if (process.argv.includes('--dist')) {
     const cwd = path.join(dir, fail);
     const stub = path.join(cwd, 'stub');
     mkdirSync(stub, { recursive: true });
+    for (const child of ['scripts', 'node_modules/.bin', 'internal/gui/assets']) mkdirSync(path.join(cwd, child), { recursive: true });
+    for (const name of ['Makefile', 'scripts/build-css.sh']) copyFileSync(path.join(root, name), path.join(cwd, name));
+    writeFileSync(path.join(cwd, 'node_modules/.bin/tailwindcss'), '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do\nif [ "$1" = -o ]; then shift; printf fixture > "$1"; exit 0; fi\nshift\ndone\nexit 29\n', { mode: 0o755 });
     writeFileSync(path.join(stub, 'go'), '#!/bin/sh\nif [ "$GOARCH" = "$FAIL_ARCH" ]; then exit 23; fi\nwhile [ "$#" -gt 0 ]; do\nif [ "$1" = -o ]; then shift; printf fixture > "$1"; exit 0; fi\nshift\ndone\nexit 29\n', { mode: 0o755 });
-    const result = run('make', ['-f', path.join(root, 'Makefile'), '-o', 'clean', 'dist', 'VERSION=test', 'PLATFORMS=linux-amd64 linux-arm64'], cwd, { PATH: `${stub}:${process.env.PATH}`, FAIL_ARCH: fail });
+    const result = run('make', ['dist', 'VERSION=test', 'PLATFORMS=linux-amd64 linux-arm64'], cwd, { PATH: `${stub}:${process.env.PATH}`, FAIL_ARCH: fail });
+    assert.equal(readFileSync(path.join(cwd, 'internal/gui/assets/compiled-tailwind.css'), 'utf8'), 'fixture');
     const sums = path.join(cwd, 'dist/checksums.txt');
     if (fail === 'none') {
       assert.equal(result.status, 0, result.stderr);
@@ -53,6 +57,9 @@ if (process.argv.includes('--dist')) {
       assert.match(readFileSync(sums, 'utf8'), /linux-arm64/);
     } else {
       assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /Error 23/);
+      assert.equal(existsSync(path.join(cwd, 'dist/routatic-proxy_linux-amd64')), fail === 'arm64');
+      assert.equal(existsSync(path.join(cwd, 'dist/routatic-proxy_linux-arm64')), false);
       assert.equal(existsSync(sums), false);
     }
   }

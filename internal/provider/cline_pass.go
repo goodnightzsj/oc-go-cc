@@ -62,7 +62,9 @@ func (p *ClinePassProvider) WireFormat(string) core.WireFormat { return core.Wir
 // asked for is therefore not what goes upstream - but it is what comes back,
 // since the reassembled document is a complete Chat Completions response, not
 // SSE.
-func (p *ClinePassProvider) Execute(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (*core.ExecuteResult, error) {
+func (p *ClinePassProvider) Execute(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (_ *core.ExecuteResult, err error) {
+	ctx, outcome := withKeyOutcome(ctx, core.ModelWireFormat(p, model), false, true)
+	defer func() { outcome.finish(err) }()
 	body, err := p.request(ctx, req, model, true)
 	if err != nil {
 		return nil, err
@@ -109,6 +111,7 @@ func (p *ClinePassProvider) Execute(ctx context.Context, req *types.MessageReque
 }
 
 func (p *ClinePassProvider) Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {
+	ctx, outcome := withKeyOutcome(ctx, core.ModelWireFormat(p, model), true, true)
 	// The peek below reads ahead, so it needs the same idle bound the caller is
 	// about to install on the body it gets back - otherwise a stalled upstream
 	// is held for the platform-wide total timeout instead of the idle one.
@@ -129,6 +132,7 @@ func (p *ClinePassProvider) Stream(ctx context.Context, req *types.MessageReques
 	peeked, _, _, peekErr := peekServedModel(peekCtx, cancelPeek, body, maxServedModelPeekBytes, idleTimeout)
 	if peekErr != nil {
 		// Fail before message_start so the handler can still try the next model.
+		outcome.finish(peekErr)
 		cancelPeek()
 		_ = body.Close()
 		return nil, peekErr
@@ -256,13 +260,7 @@ func (p *ClinePassProvider) request(ctx context.Context, req *types.MessageReque
 		var payload []byte
 		payload, err = json.Marshal(out)
 		if err == nil {
-			body, sendErr := p.send(ctx, cfg, sel, payload, stream)
-			// A stream body that opens successfully is a success even though the
-			// caller reads it later: the upstream has accepted the key and
-			// started answering, which is what the health record is about. A
-			// failure that arrives mid-stream is reported by the stream reader,
-			// not here.
-			return body, sendErr
+			return p.send(ctx, cfg, sel, payload, stream)
 		}
 	}
 	return nil, fmt.Errorf("encode cline-pass request: %w", err)
@@ -282,18 +280,27 @@ func (p *ClinePassProvider) send(ctx context.Context, cfg *config.Config, sel *s
 	if p.capture != nil {
 		p.capture.CaptureUpstreamRequest(rid(ctx), p.Name(), payload)
 	}
-	resp, err := p.doSelected(httpReq, sel)
+	resp, err := p.do(httpReq)
 	if err != nil {
+		sel.Settle(err)
 		return nil, fmt.Errorf("cline-pass request failed: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer func() { _ = resp.Body.Close() }()
+		apiErr := &client.APIError{StatusCode: resp.StatusCode, RetryAfter: resp.Header.Get("Retry-After")}
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		// Cline also uses 403 for unsupported routing fields, which says nothing
+		// about the credential. Release neutrally without erasing concurrent health.
+		if err != nil || !clineRoutingRejected(resp.StatusCode, string(body)) {
+			sel.Settle(apiErr)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("read cline-pass error (HTTP %d): %w", resp.StatusCode, err)
 		}
-		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: clineErrorBody(resp, body), RetryAfter: resp.Header.Get("Retry-After")}
+		apiErr.Body = clineErrorBody(resp, body)
+		return nil, apiErr
 	}
+	ownSelectedResponse(ctx, resp, sel)
 	// The observer is attached whether or not pinning is on. Pinning decides
 	// whether we ask for a channel; it does not decide whether we may see which
 	// one answered, and the caller records the observed value either way. With
@@ -311,6 +318,24 @@ func (p *ClinePassProvider) send(ctx context.Context, cfg *config.Config, sel *s
 		}), nil
 	}
 	return resp.Body, nil
+}
+
+// clineRoutingRejected matches the observed routing refusal, not every 403 or
+// every API_REQUEST_ERROR_CODE (both are also used for account failures).
+func clineRoutingRejected(status int, body string) bool {
+	if status != http.StatusForbidden {
+		return false
+	}
+	var envelope struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal([]byte(body), &envelope) != nil {
+		return false
+	}
+	message := strings.TrimPrefix(strings.TrimSpace(envelope.Error.Message), "Error 403: ")
+	return message == `client-supplied "providerOptions" model routing is not supported`
 }
 
 // clineErrorBody makes a gateway rejection readable when it is not JSON.

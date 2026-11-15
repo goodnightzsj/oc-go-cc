@@ -222,7 +222,13 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	h.gate.available(attempt)
 	h.logger.Debug("Anthropic request succeeded", "status", resp.StatusCode)
 	copyHeader(w.Header(), resp.Header)
-	w.WriteHeader(resp.StatusCode)
+	if err := withStreamWriteDeadline(w, keepaliveWriteTimeout, func() error {
+		w.WriteHeader(resp.StatusCode)
+		return nil
+	}); err != nil {
+		h.logger.Debug("Anthropic response delivery failed", "error", err)
+		return
+	}
 	copyStreamingResponse(r.Context(), w, resp.Body)
 }
 
@@ -294,11 +300,17 @@ func copyStreamingResponse(ctx context.Context, w http.ResponseWriter, body io.R
 		}
 		n, err := body.Read(buf)
 		if n > 0 {
-			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+			if writeErr := withStreamWriteDeadline(w, keepaliveWriteTimeout, func() error {
+				written, writeErr := w.Write(buf[:n])
+				if writeErr != nil {
+					return writeErr
+				}
+				if written != n {
+					return io.ErrShortWrite
+				}
+				return http.NewResponseController(w).Flush()
+			}); writeErr != nil {
 				return
-			}
-			if flusher, ok := w.(http.Flusher); ok {
-				flusher.Flush()
 			}
 		}
 		if err != nil {

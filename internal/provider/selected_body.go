@@ -66,7 +66,11 @@ func (b *selectedBody) Read(p []byte) (int, error) {
 		// A later client cancellation cannot erase an already observed source error.
 		b.outcome.finish(sourceErr)
 	}
-	if err == io.EOF {
+	// Native consumers stop at a complete terminal, before HTTP cleanup.
+	native := b.observation.Format == core.WireFormatAnthropic || b.observation.Format == core.WireFormatOpenAIResponses
+	if err != nil && native && b.observation.Complete() && b.observation.Finish() == nil {
+		b.outcome.finish(nil)
+	} else if err == io.EOF {
 		b.outcome.finish(b.observation.Finish())
 	} else if err != nil {
 		outcomeErr := err

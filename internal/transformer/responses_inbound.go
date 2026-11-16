@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/routatic/proxy/internal/core"
+	"github.com/routatic/proxy/internal/sse"
 	"github.com/routatic/proxy/pkg/types"
 )
 
@@ -478,9 +479,9 @@ func inboundResponseItem(block types.ContentBlock) (map[string]any, error) {
 // AnthropicMessageToResponse converts non-streaming output without changing the
 // accounting path. Unknown reasoning-token breakdowns are intentionally omitted.
 func AnthropicMessageToResponse(body []byte, model string) (map[string]any, error) {
-	var msg types.MessageResponse
-	if err := json.Unmarshal(body, &msg); err != nil || msg.Type != "message" {
-		return nil, fmt.Errorf("invalid upstream Messages response")
+	msg, err := DecodeAnthropicResponse(body)
+	if err != nil {
+		return nil, err
 	}
 	if msg.Model != "" {
 		model = msg.Model
@@ -524,9 +525,7 @@ type ResponsesStreamWriter struct {
 	usage     types.Usage
 	usageSeen bool
 	sequence  int
-	line      []byte
-	data      []byte
-	eventName string
+	decoder   sse.Decoder
 	stop      string
 	started   bool
 	ended     bool
@@ -534,7 +533,12 @@ type ResponsesStreamWriter struct {
 }
 
 func NewResponsesStreamWriter(out io.Writer, model string) *ResponsesStreamWriter {
-	return &ResponsesStreamWriter{out: out, response: newInboundResponse(model), output: []map[string]any{}, blocks: make(map[int]*inboundResponseBlock)}
+	w := &ResponsesStreamWriter{out: streamOutputWriter{out}, response: newInboundResponse(model), output: []map[string]any{}, blocks: make(map[int]*inboundResponseBlock)}
+	w.decoder.OnComment = func(line []byte) error {
+		_, err := fmt.Fprintf(w.out, "%s\n\n", line)
+		return err
+	}
+	return w
 }
 
 func (w *ResponsesStreamWriter) emit(kind string, fields map[string]any) error {
@@ -551,6 +555,15 @@ func (w *ResponsesStreamWriter) emit(kind string, fields map[string]any) error {
 func (w *ResponsesStreamWriter) fail(err error) error {
 	if w.err == nil {
 		w.err = err
+		var delivery *streamOutputError
+		if !errors.As(err, &delivery) {
+			var usage *types.Usage
+			if w.usageSeen {
+				copy := w.usage
+				usage = &copy
+			}
+			w.err = &core.ResponseError{Err: err, Usage: usage}
+		}
 	}
 	if !w.ended {
 		w.ended = true
@@ -569,54 +582,30 @@ func (w *ResponsesStreamWriter) Write(p []byte) (int, error) {
 	if w.err != nil {
 		return 0, w.err
 	}
-	for _, b := range p {
-		if b != '\n' {
-			w.line = append(w.line, b)
-			continue
-		}
-		line := strings.TrimSuffix(string(w.line), "\r")
-		w.line = w.line[:0]
-		switch {
-		case strings.HasPrefix(line, "event:"):
-			w.eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		case strings.HasPrefix(line, "data:"):
-			w.data = append(w.data, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")...)
-			w.data = append(w.data, '\n')
-		case strings.HasPrefix(line, ":"):
-			if _, err := fmt.Fprintln(w.out, line+"\n"); err != nil {
-				return 0, w.fail(err)
-			}
-		case line == "":
-			if len(w.data) > 0 {
-				if err := w.event(w.data); err != nil {
-					return 0, w.fail(err)
-				}
-			}
-			w.data = w.data[:0]
-			w.eventName = ""
-		}
+	if err := w.decoder.Feed(p, w.event); err != nil {
+		return 0, w.fail(err)
 	}
 	return len(p), nil
 }
 
-func (w *ResponsesStreamWriter) event(data []byte) error {
+func (w *ResponsesStreamWriter) event(name string, data []byte) error {
 	var event struct {
 		Type    string `json:"type"`
 		Message *struct {
 			Model string       `json:"model"`
 			Usage *types.Usage `json:"usage"`
 		} `json:"message"`
-		Index        *int                `json:"index"`
-		ContentBlock *types.ContentBlock `json:"content_block"`
-		Delta        *types.Delta        `json:"delta"`
-		Usage        map[string]int      `json:"usage"`
-		Error        *types.APIError     `json:"error"`
+		Index        *int                  `json:"index"`
+		ContentBlock *types.ContentBlock   `json:"content_block"`
+		Delta        *types.Delta          `json:"delta"`
+		Usage        *AnthropicStreamUsage `json:"usage"`
+		Error        *types.APIError       `json:"error"`
 	}
 	if err := json.Unmarshal(data, &event); err != nil {
 		return fmt.Errorf("invalid upstream SSE JSON: %w", err)
 	}
 	if event.Type == "" {
-		event.Type = w.eventName
+		event.Type = name
 	}
 	if event.Type == "ping" {
 		_, err := io.WriteString(w.out, ":keepalive\n\n")
@@ -732,22 +721,21 @@ func (w *ResponsesStreamWriter) event(data []byte) error {
 		if event.Delta != nil && event.Delta.StopReason != "" {
 			w.stop = event.Delta.StopReason
 		}
-		for field, value := range event.Usage {
-			switch field {
-			case "input_tokens":
-				w.usage.InputTokens = value
-			case "output_tokens":
-				w.usage.OutputTokens = value
-			case "cache_read_input_tokens":
-				w.usage.CacheReadInputTokens = value
-			case "cache_creation_input_tokens":
-				w.usage.CacheCreationInputTokens = value
-			case "reasoning_tokens":
-				if value > 0 {
-					w.usage.ReasoningTokens = value
-				}
-			default:
-				continue
+		if usage := event.Usage; usage != nil {
+			if usage.InputTokens != nil {
+				w.usage.InputTokens = *usage.InputTokens
+			}
+			if usage.OutputTokens != nil {
+				w.usage.OutputTokens = *usage.OutputTokens
+			}
+			if usage.CacheReadInputTokens != nil {
+				w.usage.CacheReadInputTokens = *usage.CacheReadInputTokens
+			}
+			if usage.CacheCreationInputTokens != nil {
+				w.usage.CacheCreationInputTokens = *usage.CacheCreationInputTokens
+			}
+			if usage.ReasoningTokens != nil && *usage.ReasoningTokens > 0 {
+				w.usage.ReasoningTokens = *usage.ReasoningTokens
 			}
 			w.usageSeen = true
 		}
@@ -848,7 +836,10 @@ func (w *ResponsesStreamWriter) Finish() error {
 	if w.err != nil {
 		return w.err
 	}
-	if !w.ended || len(w.data) > 0 || len(bytes.TrimSpace(w.line)) > 0 {
+	if err := w.decoder.Finish(); err != nil {
+		return w.fail(err)
+	}
+	if !w.ended {
 		return w.fail(fmt.Errorf("upstream stream ended without a complete message_stop"))
 	}
 	return nil

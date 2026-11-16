@@ -1,11 +1,13 @@
 package router
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
 
 	"github.com/routatic/proxy/internal/client"
+	"github.com/routatic/proxy/internal/core"
 )
 
 // A rejected request is the client's answer, not a reason to try another
@@ -51,6 +53,17 @@ func TestAttemptFailuresRemainRetryable(t *testing.T) {
 	}
 	if IsNonRetryableRequestError(nil) {
 		t.Error("nil is not a request error")
+	}
+}
+
+func TestMalformedSourceResponseIsNotAnInvalidRequest(t *testing.T) {
+	var value any
+	err := json.Unmarshal([]byte(`{"type":`), &value)
+	if !IsNonRetryableRequestError(err) {
+		t.Fatal("local request syntax classification changed")
+	}
+	if IsNonRetryableRequestError(&core.ResponseError{Err: err}) {
+		t.Fatal("upstream response syntax stopped fallback as a client error")
 	}
 }
 

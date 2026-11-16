@@ -2,7 +2,6 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -61,9 +60,7 @@ type responseWriter struct {
 	wroteHeader       bool
 	ssePayloadWritten bool
 	contentWritten    bool
-	sseBuffer         []byte
-	sseData           []byte
-	sseEvent          string
+	sseDecoder        sse.Decoder
 	messageStopped    bool
 	stopReason        string
 	streamErr         error
@@ -142,64 +139,29 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 // Write holds mu while calling this method.
 func (w *responseWriter) observeSSE(b []byte) (streamMilestones, error) {
 	var observed streamMilestones
-	w.sseBuffer = append(w.sseBuffer, b...)
-	for {
-		i := bytes.IndexByte(w.sseBuffer, '\n')
-		if i < 0 {
-			return observed, nil
+	err := w.sseDecoder.Feed(b, func(name string, data []byte) error {
+		event, err := w.observeSSEEvent(name, data, w.timing.firstContent.IsZero() && !observed.content)
+		if err != nil {
+			return err
 		}
-		line := strings.TrimSuffix(string(w.sseBuffer[:i]), "\r")
-		w.sseBuffer = w.sseBuffer[i+1:]
-		switch {
-		case strings.HasPrefix(line, "event:"):
-			w.sseEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		case strings.HasPrefix(line, "data:"):
-			w.sseData = append(w.sseData, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")...)
-			w.sseData = append(w.sseData, '\n')
-		case line == "":
-			if len(w.sseData) > 0 {
-				event, err := w.observeSSEEvent(w.timing.firstContent.IsZero() && !observed.content)
-				if err != nil {
-					return streamMilestones{}, err
-				}
-				observed.event = observed.event || event.event
-				observed.content = observed.content || event.content
-				observed.end = observed.end || event.end
-			}
-			w.sseData = w.sseData[:0]
-			w.sseEvent = ""
-		}
-	}
+		observed.event = observed.event || event.event
+		observed.content = observed.content || event.content
+		observed.end = observed.end || event.end
+		return nil
+	})
+	return observed, err
 }
 
-func (w *responseWriter) observeSSEEvent(needContent bool) (streamMilestones, error) {
-	// Usage also carries non-integer metadata. Only token counts are ours to
-	// parse; pointers preserve the distinction between omitted and zero deltas.
-	type tokenUsage struct {
-		InputTokens              *int `json:"input_tokens"`
-		OutputTokens             *int `json:"output_tokens"`
-		CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
-		CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
-		ReasoningTokens          *int `json:"reasoning_tokens"`
-	}
-	var event struct {
-		Type  string      `json:"type"`
-		Usage *tokenUsage `json:"usage"`
-		Delta struct {
-			StopReason string `json:"stop_reason"`
-		} `json:"delta"`
-		Message struct {
-			Usage *tokenUsage `json:"usage"`
-			Model string      `json:"model"`
-		} `json:"message"`
-	}
-	data := w.sseData
-	w.sseData = nil
+func (w *responseWriter) observeSSEEvent(name string, data []byte, needContent bool) (streamMilestones, error) {
+	var event transformer.AnthropicStreamEvent
 	if err := json.Unmarshal(data, &event); err != nil {
 		return streamMilestones{}, fmt.Errorf("invalid upstream SSE event: %w", err)
 	}
 	if event.Type == "" {
-		event.Type = w.sseEvent
+		event.Type = name
+	}
+	if err := event.ValidateAfterStop(w.messageStopped); err != nil {
+		return streamMilestones{}, err
 	}
 	switch event.Type {
 	case "message_delta":
@@ -224,7 +186,7 @@ func (w *responseWriter) observeSSEEvent(needContent bool) (streamMilestones, er
 	if usage != nil {
 		w.usage.observed = true
 	} else {
-		usage = &tokenUsage{}
+		usage = &transformer.AnthropicStreamUsage{}
 	}
 	if usage.InputTokens != nil {
 		w.usage.inputTokens = *usage.InputTokens
@@ -254,7 +216,7 @@ func (w *responseWriter) sourceTerminalObserved() bool {
 	if w.nativeResponses != nil {
 		return w.nativeResponses.Done() && w.nativeDecoder.Finish() == nil
 	}
-	return w.messageStopped && len(bytes.TrimSpace(w.sseBuffer)) == 0 && len(w.sseData) == 0
+	return w.messageStopped && w.sseDecoder.Finish() == nil
 }
 
 // finish checks the observed protocol terminal event before accounting. An
@@ -275,11 +237,11 @@ func (w *responseWriter) finish() error {
 		if !w.nativeResponses.Done() {
 			return fmt.Errorf("Responses stream ended without a terminal event: %w", io.ErrUnexpectedEOF)
 		}
-	} else if !w.messageStopped || len(bytes.TrimSpace(w.sseBuffer)) > 0 || len(w.sseData) > 0 {
+	} else if !w.messageStopped || w.sseDecoder.Finish() != nil {
 		return fmt.Errorf("upstream stream ended before a complete message_stop: %w", io.ErrUnexpectedEOF)
 	}
 	if finisher, ok := w.ResponseWriter.(interface{ Finish() error }); ok {
-		return withStreamWriteDeadline(w.ResponseWriter, w.writeTimeout, finisher.Finish)
+		return w.writeIO(w.writeTimeout, finisher.Finish)
 	}
 	return nil
 }
@@ -758,6 +720,17 @@ func (h *MessagesHandler) buildModelChain(
 		chain = result.GetModelChain()
 	}
 
+	// Required routing is request intent, not model health: validate the original
+	// primary before filters can silently replace or skip it.
+	if len(chain) > 0 && h.providerRegistry != nil {
+		if prov, ok := h.providerRegistry.Get(client.Provider(chain[0])); ok {
+			if policy, ok := prov.(core.RoutePolicyValidator); ok {
+				if err := policy.ValidateRoute(); err != nil {
+					return nil, result, err
+				}
+			}
+		}
+	}
 	decision, err := router.FilterByCapacity(chain, tokenCount, requestedMaxTokens, needsVision, needsTools)
 	if err != nil {
 		return nil, result, err
@@ -1142,12 +1115,11 @@ func (h *MessagesHandler) handleStreaming(
 				h.logger.Debug("client disconnected during upstream request")
 				return
 			}
-			// Streaming cannot retry once the SSE head is out, so a
-			// deterministic refusal is the client's answer. Keeping it
-			// lets the terminal error below name the cause instead of a
-			// generic "all streaming models failed".
 			lastStreamErr = err
 			h.logger.Warn("streaming request failed via provider", "model", model.ModelID, "provider", model.Provider, "error", err)
+			if router.IsNonRetryableRequestError(err) {
+				break
+			}
 			continue
 		}
 
@@ -1266,6 +1238,15 @@ func (h *MessagesHandler) sendStreamError(w http.ResponseWriter, message string)
 	}
 
 	data, _ := json.Marshal(errorEvent)
+	if rw, ok := w.(*responseWriter); ok {
+		rw.mu.Lock()
+		err := rw.writeErrorEvent(data)
+		rw.mu.Unlock()
+		if err != nil {
+			h.logger.Debug("failed to write stream error event", "error", err, "message", message)
+		}
+		return
+	}
 	if _, err := fmt.Fprintf(w, "event: error\ndata: %s\n\n", string(data)); err != nil {
 		h.logger.Debug("failed to write stream error event", "error", err, "message", message)
 	}
@@ -1406,8 +1387,8 @@ func (h *MessagesHandler) handleNonStreaming(
 		}
 	}
 	latency := time.Since(startTime)
-	if err != nil && writeErr == nil {
-		writeErr = err
+	if err != nil {
+		writeErr = errors.Join(err, writeErr)
 	}
 	if writeErr != nil {
 		h.metrics.RecordFailureForModel(result.ModelID)

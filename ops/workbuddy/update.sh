@@ -21,7 +21,10 @@ HAD_MANIFEST=0
 log() {
     printf '[wb-update] %s\n' "$*" >&2
     if [[ -n "$RUN" ]]; then
-        printf '[wb-update] %s\n' "$*" >> "$RUN/update.log"
+        if ! printf '[wb-update] %s\n' "$*" >> "$RUN/update.log"; then
+            printf '[wb-update] ERROR: cannot append diagnostics to %s/update.log\n' "$RUN" >&2
+            return 1
+        fi
     fi
 }
 
@@ -64,6 +67,8 @@ on_exit() {
     local status=$?
     trap - EXIT ERR
     trap '' INT TERM
+    # Cleanup must not depend on diagnostic I/O; rollback checks every failure.
+    set +e
     if (( NEEDS_ROLLBACK )); then
         if (( status == 0 )); then status=1; fi
         log "activation failed; restoring the previous binary and manifest"
@@ -80,7 +85,7 @@ on_exit() {
 }
 
 trap on_exit EXIT
-trap 'log "command failed at line $LINENO"' ERR
+trap 'log "command failed at line $LINENO" || :' ERR
 trap 'exit 130' INT
 trap 'exit 143' TERM
 

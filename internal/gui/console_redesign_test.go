@@ -113,6 +113,7 @@ async function checks() {
 
 const consoleRetainedDataScript = platformBehaviorDOMScript + `
 async function checks() {
+  activeTab = 'analytics';
   const get = id => document.getElementById(id);
   const empty = {total_requests:0,known_requests:0,success_rate:0,input_tokens:0,output_tokens:0,cache_read_tokens:0,cache_creation_tokens:0,est_cost_usd:0,unknown_cost_requests:0};
   for (const lang of ['en','zh']) {

@@ -649,21 +649,15 @@ type ClinePassConfig struct {
 	TimeoutMs          int    `json:"timeout_ms"`
 	StreamTimeoutMs    int    `json:"stream_timeout_ms"`
 	StreamingTimeoutMs int    `json:"streaming_timeout_ms,omitempty"`
-	// Channel pinning requests a gateway restriction, not a guarantee that
-	// Cline honors it. Actual routing is observed from upstream metadata.
+	// False selects automatic routing; true requires a guaranteed channel.
+	// Cline currently has no verified enforcement contract: true fails locally
+	// with channel_pin_unsupported, without spending quota or silently unpinning.
 	ChannelPinEnabled bool   `json:"channel_pin_enabled,omitempty"`
 	ChannelPin        string `json:"channel_pin,omitempty"`
-	// ChannelPinCapabilities is a per-model capability filter sent alongside
-	// the channel pin as `providerOptions.gateway.has`.
-	//
-	// It is not a hint. A capability the model's routed channel does not
-	// declare is refused outright with stream_initialization_failed, so a
-	// wrong value does not degrade the pin - it fails every request for that
-	// model. Measured on 2026-10-23: deepseek-v4.1-flash-1017 accepts vision
-	// and implicit-caching; deepseek-v4-pro rejects vision and accepts the
-	// rest. That is why this is keyed by model rather than global.
-	//
-	// Only `has`, never `only`, carries a capability: `only` names channels.
+	// Paid diagnostics are separately opt-in and never authorize a strict pin.
+	ChannelProbeEnabled bool `json:"channel_probe_enabled,omitempty"`
+	// Legacy per-model `has` filters are retained on config round trips but
+	// are not sent: capability filters cannot establish channel enforcement.
 	ChannelPinCapabilities map[string][]string `json:"channel_pin_capabilities,omitempty"`
 }
 

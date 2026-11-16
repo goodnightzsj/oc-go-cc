@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +14,83 @@ import (
 	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/core"
+	"github.com/routatic/proxy/internal/transformer"
 )
+
+type terminalReadError struct{ payload string }
+
+func (b *terminalReadError) Read(p []byte) (int, error) {
+	n := copy(p, b.payload)
+	b.payload = b.payload[n:]
+	return n, io.ErrUnexpectedEOF
+}
+func (b *terminalReadError) Close() error { return nil }
+
+func TestSelectedBodyNativeTerminalBeforeTransportCleanup(t *testing.T) {
+	for _, tc := range []struct {
+		name, wire string
+		format     core.WireFormat
+		healthy    bool
+	}{
+		{"anthropic", "data: {\"type\":\"message_stop\"}\n\n", core.WireFormatAnthropic, true},
+		{"responses", "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n", core.WireFormatOpenAIResponses, true},
+		{"chat-awaits-eof", "data: {\"choices\":[{\"finish_reason\":\"stop\"}]}\n\n", core.WireFormatOpenAIChat, false},
+		{"half-tail", "data: {\"type\":\"message_stop\"}\n\ndata: {", core.WireFormatAnthropic, false},
+		{"source-error", "data: {\"type\":\"message_stop\"}\n\ndata: {\"type\":\"error\"}\n\n", core.WireFormatAnthropic, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pool := newKeyPool()
+			keys := []string{"synthetic-a", "synthetic-b"}
+			for i := 0; i < 3; i++ {
+				sel := pool.Reserve(keys)
+				b := &selectedBody{ReadCloser: &terminalReadError{tc.wire}, outcome: &keyOutcome{ctx: t.Context(), sel: sel.handoff()}, observation: transformer.StreamTermination{Format: tc.format}}
+				_, err := b.Read(make([]byte, 2048))
+				if !errors.Is(err, io.ErrUnexpectedEOF) {
+					t.Fatalf("observer changed raw transport error: %v", err)
+				}
+				_ = b.Close()
+			}
+			next := pool.Reserve(keys)
+			defer next.Release()
+			if (next.Key() == keys[0]) != tc.healthy {
+				t.Fatalf("terminal health disagrees with protocol: next=%s healthy=%t", next.Key(), tc.healthy)
+			}
+		})
+	}
+}
+
+func TestSelectedBodyMalformedToolMatchesConsumer(t *testing.T) {
+	for _, finish := range []string{"tool_calls", "length"} {
+		t.Run(finish, func(t *testing.T) {
+			payload := "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"q\\\":\"}}]}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"" + finish + "\"}]}\n\ndata: [DONE]\n\n"
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, payload) }))
+			defer upstream.Close()
+			p, pool := selectedTestProvider("workbuddy", upstream.URL)
+			_, _, req := cancellationTestProvider("")
+			pool.stateFor("synthetic-a").consecutive = 1
+			body, err := p.Stream(t.Context(), req, config.ModelConfig{Provider: "workbuddy", ModelID: "synthetic", WireFormat: "openai"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			err = transformer.NewStreamHandler().ProxyStream(httptest.NewRecorder(), body, "synthetic", ctx, 0, cancel)
+			want := 0
+			if finish != "length" {
+				want = 2
+				if err == nil || !strings.Contains(err.Error(), "arguments") {
+					t.Fatalf("consumer did not reject incomplete arguments: %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if got := pool.states["synthetic-a"].consecutive; got != want {
+				t.Fatalf("consumer=%v key failures=%d want=%d", err, got, want)
+			}
+		})
+	}
+}
 
 func selectedTestProvider(name, endpoint string) (core.Provider, *keyPool) {
 	keys := []string{"synthetic-a", "synthetic-b"}

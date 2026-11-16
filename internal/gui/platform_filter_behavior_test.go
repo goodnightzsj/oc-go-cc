@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/routatic/proxy/internal/site"
@@ -205,6 +206,7 @@ async function checks() {
   PerfModule.sortDir = 'asc';
   for (const provider of [...providers, '']) {
     calls = [];
+    activeTab = 'overview';
     get('overview-provider').value = provider;
     await refreshMetrics();
     for (const path of ['/api/analytics/summary','/api/analytics/tokens/trend','/api/perf/aggregate']) assertScope(path, provider);
@@ -213,6 +215,7 @@ async function checks() {
     assert.equal(get('m-throughput').textContent, String(provider ? providers.indexOf(provider) + 1 : 15) + ' RPM');
 
     calls = [];
+    activeTab = 'analytics';
     get('analytics-provider').value = provider;
     await get('analytics-provider').emit('change');
     for (const path of ['/api/analytics/summary','/api/analytics/tokens/trend']) assertScope(path,provider);
@@ -233,6 +236,7 @@ async function checks() {
     assert.equal(get('kpi-tokens').textContent,'17');
 
     calls = [];
+    activeTab = 'performance';
     get('perf-provider').value = provider;
     await get('perf-provider').emit('change');
     assertScope('/api/perf/models',provider);
@@ -241,6 +245,7 @@ async function checks() {
     assert.equal(PerfModule.sortDir,'asc');
     assert.equal(PerfModule.data.length, provider ? 1 : providers.length);
   }
+  activeTab = 'overview';
   overviewDays = 90;
   calls = [];
   await get('overview-provider').emit('change');
@@ -253,6 +258,7 @@ async function checks() {
     {id:'provider-filter',run:()=>refreshHistory(),hasProvider:()=>get('history-tbody').innerHTML,kpi:()=>get('history-summary-requests').textContent,error:'history-error'},
   ];
   for (const view of views) {
+    activeTab = {'overview-provider':'overview','perf-provider':'performance','analytics-provider':'analytics','provider-filter':'history'}[view.id];
     for (const oldFails of [false,true]) {
       const pending = [];
       fetch = raw => new URL(raw,'http://synthetic.invalid').searchParams.get('provider') === 'opencode-go'
@@ -280,6 +286,7 @@ async function checks() {
     if (view.kpi) assert.equal(view.kpi(),'—','failed requests must not look like zero usage');
   }
 
+  activeTab = 'overview';
   fetch = async raw => raw === '/api/metrics' ? reply(raw) : {ok:false,status:503,text:async()=> 'only usage failed'};
   await refreshMetrics();
   assert.equal(CONN.fails,0,'a failed usage endpoint must not mark the service offline');
@@ -288,23 +295,28 @@ async function checks() {
 
   empty = true;
   fetch = normalFetch;
+  activeTab = 'overview';
   await refreshOverviewUsage();
   assert.equal(get('m-total').textContent,'0','a successfully queried empty ledger is known zero');
   assert.equal(get('m-cache-hit').textContent,'—');
   assert.equal(get('m-success').textContent,'—','no records must not claim a success rate');
   assert.ok(get('overview-request-trend').innerHTML.includes(t('analytics.noTrend')));
+  activeTab = 'analytics';
   await AnalyticsModule.load(true);
   assert.equal(get('kpi-requests').textContent,'0');
   assert.equal(get('kpi-input').textContent,'0','a known zero token count remains zero');
   assert.equal(get('kpi-tokens').textContent,'0','known zero totals must not look unavailable');
   assert.equal(get('kpi-cache-rate').textContent,'—');
   assert.ok(get('analytics-model-tbody').innerHTML.includes(t('analytics.noData')));
+  activeTab = 'performance';
   await PerfModule.refresh();
   assert.ok(get('perf-tbody').innerHTML.includes(t('empty.noData')));
   assert.ok(!get('perf-tbody').innerHTML.includes('100.0%'));
 
   fetch = async () => ({ok:true,json:async()=>null});
+  activeTab = 'overview';
   await refreshOverviewUsage();
+  activeTab = 'analytics';
   await AnalyticsModule.load(true);
   assert.equal(get('m-total').textContent,'—');
   assert.equal(get('kpi-requests').textContent,'—');
@@ -341,7 +353,14 @@ async function checks() {
 }
 ` + platformBehaviorRunScript
 
-const platformBehaviorRunScript = `
+const behaviorDeadlineScript = `
+const behaviorDeadline = setTimeout(() => {
+  console.error('GUI behavior checks did not complete');
+  process.exit(1);
+}, 10000);
+`
+
+const platformBehaviorRunScript = behaviorDeadlineScript + `
 (async()=>{
   vm.runInContext(input.app,context,{timeout:3000});
   // Defined inside the vm so it closes over the panel's own readSavedView: the
@@ -349,8 +368,23 @@ const platformBehaviorRunScript = `
   vm.runInContext('globalThis.savedView = () => readSavedView();',context);
   await new Promise(setImmediate);
   await vm.runInContext('(' + checks.toString() + ')()',context,{timeout:3000});
-})().catch(error=>{console.error(error);process.exitCode=1});
+})().catch(error=>{console.error(error);process.exitCode=1}).finally(()=>clearTimeout(behaviorDeadline));
 `
+
+func TestPlatformBehaviorRejectsUnfinishedChecks(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node unavailable")
+	}
+	script := platformBehaviorDOMScript + "async function checks() { await new Promise(() => {}); }\n" + platformBehaviorRunScript
+	cmd := exec.CommandContext(t.Context(), node, "-e", script)
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
+	cmd.Stdin = strings.NewReader(`{"app":"","page":"","visible":[],"all":[]}`)
+	output, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "GUI behavior checks did not complete") {
+		t.Fatalf("unfinished async checks did not fail explicitly: %v %s", err, output)
+	}
+}
 
 const historyCSVExportScopeScript = platformBehaviorDOMScript + `
 context.Blob = require('node:buffer').Blob;

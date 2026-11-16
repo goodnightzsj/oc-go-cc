@@ -1,4 +1,4 @@
-.PHONY: build build-ui build-css check-css run test clean install dist lint vet docker-up docker-stop
+.PHONY: build build-ui build-css check-css run test clean install dist dist-binaries lint vet docker-up docker-stop
 
 # Build variables
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -40,7 +40,7 @@ GOBIN=$(shell go env GOPATH)/bin
 
 lint:
 	@echo "Running gofmt..."
-	@test -z "$$(gofmt -d . | tee /dev/stderr)" || (echo "gofmt check failed" && exit 1)
+	@bash scripts/check-go-format.sh
 	@echo "Running go vet..."
 	CGO_ENABLED=0 go vet ./...
 	@echo "Lint checks passed!"
@@ -95,7 +95,7 @@ PLATFORMS = \
 
 RELEASE_LDFLAGS = $(LDFLAGS) -s -w
 
-dist: build-css
+dist-binaries: build-css
 	@$(MAKE) clean
 	@mkdir -p dist
 	@echo "Building release binaries (version: $(VERSION))..."
@@ -110,6 +110,8 @@ dist: build-css
 				$(CMD) || exit $$?; \
 		test -s "dist/$(BINARY)_$${platform}$${EXT}" || exit 1; \
 	done
+
+dist: dist-binaries
 	@echo ""
 	@echo "Generating checksums..."
 	@cd dist && sha256sum $(BINARY)_* > checksums.txt

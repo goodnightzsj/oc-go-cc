@@ -45,17 +45,23 @@ hash_cmd() {
 source_fingerprint() {
   local root_dir="$1"
   local hasher="$2"
+  # Inputs stay stable across our own CSS publication; full hashes include it.
+  local generated_css=""
+  if [[ "${3:-}" == "inputs" ]]; then generated_css="internal/gui/assets/compiled-tailwind.css"; fi
 
   (
-    cd "${root_dir}"
-    # These source trees also own embedded assets and templates. Hash all files
-    # so newly added embed inputs are watched without a second pattern registry.
-    find cmd internal pkg -type f -print
-    printf '%s\n' go.mod go.sum
-  ) | sort | while IFS= read -r path; do
-    [[ -f "${root_dir}/${path}" ]] || continue
-    printf '%s\0' "${path}"
-    cat "${root_dir}/${path}"
-    printf '\0'
-  done | eval "${hasher}" | awk '{print $1}'
+    cd "${root_dir}" || exit
+    local reader
+    # Eval avoids Node resolving an entry path through a lossy cwd string.
+    reader="$(< scripts/source-fingerprint.mjs)" || exit
+    if [[ -z "${reader}" ]]; then
+      echo "Cannot fingerprint sources: empty fingerprint reader." >&2
+      exit 1
+    fi
+    (
+      # Include embedded inputs without a second filename registry.
+      find cmd internal pkg -type f ! -path 'internal/gui/.compiled-tailwind.*' ! -path "${generated_css}" -print || exit
+      printf '%s\n' go.mod go.sum tailwind.config.js package.json package-lock.json scripts/build-css.sh scripts/go-common.sh scripts/source-fingerprint.mjs
+    ) | sort | node --input-type=module -e "${reader}" | eval "${hasher}" | awk '{print $1}'
+  )
 }

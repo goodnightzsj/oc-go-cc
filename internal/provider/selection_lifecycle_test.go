@@ -27,7 +27,11 @@ func TestZenAnthropicDoesNotRetryRejectedKey(t *testing.T) {
 					_, _ = io.WriteString(w, `{"error":"rejected"}`)
 					return
 				}
-				_, _ = io.WriteString(w, `{"type":"message","content":[{"type":"text","text":"ok"}]}`)
+				if stream {
+					_, _ = io.WriteString(w, "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\ndata: {\"type\":\"message_stop\"}\n\n")
+					return
+				}
+				_, _ = io.WriteString(w, `{"type":"message","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`)
 			}))
 			defer upstream.Close()
 			cfg := &config.Config{OpenCodeZen: config.OpenCodeZenConfig{AnthropicBaseURL: upstream.URL, APIKeys: []string{"synthetic-rejected", "synthetic-healthy"}}}
@@ -39,8 +43,8 @@ func TestZenAnthropicDoesNotRetryRejectedKey(t *testing.T) {
 				if stream {
 					body, err := p.Stream(context.Background(), req, model)
 					if body != nil {
-						_, _ = io.Copy(io.Discard, body)
-						_ = body.Close()
+						_, readErr := io.Copy(io.Discard, body)
+						err = errors.Join(err, readErr, body.Close())
 					}
 					return err
 				}
@@ -50,7 +54,7 @@ func TestZenAnthropicDoesNotRetryRejectedKey(t *testing.T) {
 			if err := attempt(); err == nil {
 				t.Fatal("initial rejected key unexpectedly succeeded")
 			}
-			for i := 2; i <= 4; i++ {
+			for i := 2; i <= 6; i++ {
 				if err := attempt(); err != nil {
 					t.Fatalf("attempt %d reused rejected key instead of staying with healthy key: %v", i, err)
 				}

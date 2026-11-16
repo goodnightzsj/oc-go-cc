@@ -454,9 +454,38 @@ const TRANSLATIONS = {
     'clinepass.quotaHint': 'Reads the plan usage windows with this platform API key. No browser session is required. The endpoint is undocumented, so its fields may change.',
     'clinepass.subscription': 'Subscription dashboard',
     'clinepass.docs': 'ClinePass docs',
-    'clinepass.channelPin': 'Pin upstream channel (experimental)',
-    'clinepass.channelTarget': 'Target channel',
-    'clinepass.channelHint': 'Off by default. Applies to all ClinePass models. Sends an only restriction; Cline may ignore it. Logs report matched, mismatch or unverified. A match alone does not prove enforcement.',
+    'clinepass.channelPin': 'Require the specified upstream channel',
+    'clinepass.diagnostics': 'Recent diagnostics (read-only)',
+    'clinepass.diagnosticsRefresh': 'Refresh results (no quota used)',
+    'clinepass.diagnosticsLoading': 'Loading diagnostic results…',
+    'clinepass.diagnosticsUnavailable': 'Diagnostic state is unavailable from this instance.',
+    'clinepass.diagnosticsOff': 'Diagnostics are off; refreshing does not run probes.',
+    'clinepass.diagnosticsWaiting': 'No diagnostic sample for the current endpoint and key pool.',
+    'clinepass.diagnosticsFailed': 'Unable to load diagnostic results.',
+    'clinepass.diagnosticsMatched': 'Sample matched; enforcement unverified',
+    'clinepass.diagnosticsIgnored': 'Routing condition ignored',
+    'clinepass.diagnosticsUnsupported': 'Upstream rejected routing conditions',
+    'clinepass.diagnosticsUnknown': 'Inconclusive',
+    'clinepass.diagnosticsExpired': 'Expired; historical sample only',
+    'clinepass.diagnosticsChecked': 'Checked: {time}',
+    'clinepass.diagnosticsExpires': 'Expires: {time}',
+    'clinepass.diagnosticsRoute': 'Baseline: {baseline} · Target: {target} · Actual: {actual}',
+    'clinepass.diagnosticsCanonical': 'Canonical model: {model}',
+    'clinepass.diagnosticReason.timeout': 'Probe timed out',
+    'clinepass.diagnosticReason.cancelled': 'Probe cancelled',
+    'clinepass.diagnosticReason.transport_error': 'Transport failed',
+    'clinepass.diagnosticReason.account_refused': 'Credential, plan or quota refused',
+    'clinepass.diagnosticReason.upstream_refused': 'Upstream request failed',
+    'clinepass.diagnosticReason.stream_failed': 'Stream failed or was incomplete',
+    'clinepass.diagnosticReason.response_too_large': 'Probe response exceeded 64 KiB',
+    'clinepass.diagnosticReason.invalid_metadata': 'Routing metadata was invalid',
+    'clinepass.diagnosticReason.missing_channel': 'Serving channel was not reported',
+    'clinepass.diagnosticReason.no_alternative': 'No alternative channel was reported',
+    'clinepass.diagnosticReason.unknown': 'Cause was not reported',
+    'clinepass.channelTarget': 'Required channel (not an observation)',
+    'clinepass.channelHint': 'Off: automatic routing. On: requires a guaranteed channel for all ClinePass models. Cline currently has no verified enforcement contract, so requests fail locally with 422 channel_pin_unsupported; no silent downgrade. History shows observed routing, not this target.',
+    'clinepass.channelProbe': 'Allow quota-consuming channel diagnostics',
+    'clinepass.channelProbeHint': 'Off by default, independent of the required-channel setting. When enabled, probes run at startup and every 6 hours, up to 12 calls per round. Samples are scoped to endpoint, credential, model and pipeline; a match is not an enforcement guarantee.',
     'clinepass.channelInput': 'Type to filter or use the arrow to browse channels. Custom values are allowed; empty uses deepseek. Suggestions do not guarantee support for every model.',
     'clinepass.channelChoose': 'Show channels',
     'clinepass.channelEmpty': 'No matching channels. You can use your typed value.',
@@ -1090,9 +1119,38 @@ const TRANSLATIONS = {
     'clinepass.quotaHint': '使用本平台 API 密钥读取套餐用量窗口，无需浏览器会话。该端点未公开，字段可能变化。',
     'clinepass.subscription': '订阅面板',
     'clinepass.docs': 'ClinePass 文档',
-    'clinepass.channelPin': '钉死上游渠道（实验性）',
-    'clinepass.channelTarget': '目标渠道',
-    'clinepass.channelHint': '默认关闭，开启后作用于所有 ClinePass 模型。发送 only 限制，但 Cline 可能忽略。日志区分 matched（匹配）、mismatch（不匹配）和 unverified（无法验证）；匹配不等于强制生效。',
+    'clinepass.channelPin': '必须使用指定上游渠道',
+    'clinepass.diagnostics': '最近诊断（只读）',
+    'clinepass.diagnosticsRefresh': '刷新结果（不消耗额度）',
+    'clinepass.diagnosticsLoading': '正在加载诊断结果…',
+    'clinepass.diagnosticsUnavailable': '当前实例未提供诊断状态。',
+    'clinepass.diagnosticsOff': '诊断已关闭；刷新结果不会运行探测。',
+    'clinepass.diagnosticsWaiting': '当前 endpoint 和 key 池尚无诊断样本。',
+    'clinepass.diagnosticsFailed': '无法加载诊断结果。',
+    'clinepass.diagnosticsMatched': '样本命中，强制能力未验证',
+    'clinepass.diagnosticsIgnored': '路由条件被忽略',
+    'clinepass.diagnosticsUnsupported': '上游拒绝路由条件',
+    'clinepass.diagnosticsUnknown': '无法判定',
+    'clinepass.diagnosticsExpired': '已过期，仅供历史参考',
+    'clinepass.diagnosticsChecked': '检查时间：{time}',
+    'clinepass.diagnosticsExpires': '过期时间：{time}',
+    'clinepass.diagnosticsRoute': '基线：{baseline} · 目标：{target} · 实际：{actual}',
+    'clinepass.diagnosticsCanonical': '规范模型：{model}',
+    'clinepass.diagnosticReason.timeout': '探测超时',
+    'clinepass.diagnosticReason.cancelled': '探测已取消',
+    'clinepass.diagnosticReason.transport_error': '传输失败',
+    'clinepass.diagnosticReason.account_refused': '凭据、套餐或额度被拒绝',
+    'clinepass.diagnosticReason.upstream_refused': '上游请求失败',
+    'clinepass.diagnosticReason.stream_failed': '流失败或未完整结束',
+    'clinepass.diagnosticReason.response_too_large': '探测响应超过 64 KiB',
+    'clinepass.diagnosticReason.invalid_metadata': '路由元数据无效',
+    'clinepass.diagnosticReason.missing_channel': '未报告实际渠道',
+    'clinepass.diagnosticReason.no_alternative': '未报告替代渠道',
+    'clinepass.diagnosticReason.unknown': '未报告原因',
+    'clinepass.channelTarget': '要求的渠道（非观测结果）',
+    'clinepass.channelHint': '关闭时自动路由；开启时要求所有 ClinePass 模型严格使用指定渠道。当前 Cline 没有已核实的强制保证，请求将在本地返回 422 channel_pin_unsupported，不静默降级。历史展示源观测值，不是这里的目标值。',
+    'clinepass.channelProbe': '允许消耗配额进行渠道诊断',
+    'clinepass.channelProbeHint': '默认关闭，与严格渠道要求独立。开启后启动时及每6小时探测，每轮最多12次请求。样本仅适用于对应端点、凭证、模型和管线，匹配不代表强制保证。',
     'clinepass.channelInput': '输入可模糊匹配，点击箭头查看全部渠道；也可直接填写，留空使用 deepseek。候选不代表所有模型都支持。',
     'clinepass.channelChoose': '展开渠道候选',
     'clinepass.channelEmpty': '没有匹配渠道，可使用当前输入值。',
@@ -1778,6 +1836,7 @@ const PerfModule = {
   },
 
   async refresh() {
+    if (document.hidden || activeTab !== 'performance') return;
     const params = new URLSearchParams({range: this.timeRange});
     const provider = document.getElementById('perf-provider')?.value;
     if (provider) params.set('provider', provider);
@@ -1785,6 +1844,7 @@ const PerfModule = {
     const seq = ++this.loadSeq;
     this.request?.abort();
     const controller = this.request = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), DISPLAY_REQUEST_TIMEOUT_MS);
     if (this.query !== params.toString() || !this.data) {
       this.query = params.toString();
       this.data = null;
@@ -1811,6 +1871,7 @@ const PerfModule = {
       }
       console.error('PerfModule refresh failed:', e);
     } finally {
+      clearTimeout(timeout);
       controller.abort();
       if (seq === this.loadSeq) this.request = null;
     }
@@ -1876,6 +1937,7 @@ function activateTab(name) {
   const tabEl = tabs.find(tab => tab.dataset.tab === name);
   const panel = document.getElementById('tab-' + name);
   if (!tabEl || !panel) return;
+  if (name !== activeTab) cancelTabRequests(activeTab);
   document.querySelectorAll('.chart-tip').forEach(tip => { tip.style.display = 'none'; });
   tabs.forEach(tab => {
     tab.classList.toggle('active', tab === tabEl);
@@ -2179,8 +2241,6 @@ window.addEventListener('hashchange', () => {
 });
 
 /* ── Polling ───────────────────────────────────────────────────── */
-let perfPollTimer = null;
-let perfPollCounter = 0;
 let activeTab = 'overview';
 let overviewDays = 7;
 let overviewBreakdownMetric = 'requests';
@@ -2195,6 +2255,35 @@ const HISTORY_RENDER_LIMIT = 200;
 // history tab's breakdown depth so the same figure is ranked identically in both
 // places, and bounds the panel's height on a many-model instance.
 const MODEL_DISTRIBUTION_LIMIT = 5;
+const DISPLAY_REQUEST_TIMEOUT_MS = 15000;
+
+function cancelTabRequests(name) {
+  if (name === 'analytics') AnalyticsModule.cancel();
+  if (name === 'quota') QuotaModule.cancel();
+  if (name === 'performance') {
+    PerfModule.loadSeq++;
+    PerfModule.request?.abort();
+    PerfModule.request = null;
+  }
+  if (name === 'overview') {
+    overviewLoadSeq++;
+    overviewRequest?.abort();
+    overviewRequest = null;
+  }
+}
+
+function handleVisibilityChange() {
+  if (document.hidden) {
+    for (const tab of ['overview', 'performance', 'analytics', 'quota']) cancelTabRequests(tab);
+    return;
+  }
+  if (activeTab === 'overview') refreshOverviewUsage();
+  if (activeTab === 'performance') PerfModule.refresh();
+  if (activeTab === 'analytics') AnalyticsModule.load(true);
+  if (activeTab === 'quota') QuotaModule.tickCountdowns();
+  refreshCurrentTab();
+}
+document.addEventListener('visibilitychange', handleVisibilityChange);
 
 function startPolling() {
   refreshAll();
@@ -2204,20 +2293,15 @@ function startPolling() {
   // call covers the case where the history tab is not the one being viewed.
   syncChannelFilter();
   PerfModule.init();
-  PerfModule.refresh();
   // The active site is not a metric: it changes when an operator changes it,
   // which is rare, so it is polled slowly rather than with the 3s core loop.
   startActiveSitePolling();
   // Core metrics stay warm globally; tab-specific work only runs when visible.
   setInterval(refreshCore, 3000);
   setInterval(refreshCurrentTab, 3000);
-  perfPollTimer = setInterval(() => {
-    perfPollCounter++;
-    if (perfPollCounter >= 2) {
-      PerfModule.refresh();
-      perfPollCounter = 0;
-    }
-  }, 3000);
+  setInterval(() => {
+    if (!document.hidden && activeTab === 'performance') PerfModule.refresh();
+  }, 6000);
 }
 
 // Lightweight poll: metrics + catalog age only, always on.
@@ -2233,6 +2317,7 @@ async function refreshAll() {
 
 // Refresh only tab-specific data; refreshCore already handles shared metrics.
 async function refreshCurrentTab() {
+  if (document.hidden) return;
   switch (activeTab) {
     case 'history':
       await refreshHistory();
@@ -2261,13 +2346,19 @@ function debouncedRefresh() {
 
 /* ── /api/metrics ──────────────────────────────────────────────── */
 async function refreshMetrics() {
-  await Promise.all([refreshServiceStatus(), activeTab === 'overview' ? refreshOverviewUsage() : null]);
+  await Promise.all([refreshServiceStatus(), !document.hidden && activeTab === 'overview' ? refreshOverviewUsage() : null]);
 }
 
+let serviceStatusRequest = null;
+
 async function refreshServiceStatus() {
+  if (serviceStatusRequest) return;
+  const controller = serviceStatusRequest = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), DISPLAY_REQUEST_TIMEOUT_MS);
   try {
     // Process health remains global; usage failures must not mark the proxy down.
-    const d = await fetchJSON('/api/metrics');
+    const d = await fetchJSON('/api/metrics', {signal: controller.signal});
+    if (controller.signal.aborted) throw new Error('metrics request timed out');
     markPollOk();
 
     // status badge
@@ -2305,10 +2396,14 @@ async function refreshServiceStatus() {
     // Startup races are expected, so the first failures stay quiet; markPollFail
     // only surfaces the stale badge once several polls in a row have failed.
     markPollFail();
+  } finally {
+    clearTimeout(deadline);
+    serviceStatusRequest = null;
   }
 }
 
 async function refreshOverviewUsage() {
+  if (document.hidden || activeTab !== 'overview') return;
   const params = new URLSearchParams({days: String(overviewDays)});
   const latencyParams = new URLSearchParams({range: `${overviewDays}d`});
   const provider = document.getElementById('overview-provider')?.value;
@@ -2320,6 +2415,7 @@ async function refreshOverviewUsage() {
   const seq = ++overviewLoadSeq;
   overviewRequest?.abort();
   const controller = overviewRequest = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DISPLAY_REQUEST_TIMEOUT_MS);
   if (overviewQuery !== params.toString() || !lastOverviewView) {
     overviewQuery = params.toString();
     clearOverviewUsage(true);
@@ -2345,6 +2441,7 @@ async function refreshOverviewUsage() {
       errorEl.hidden = false;
     }
   } finally {
+    clearTimeout(timeout);
     controller.abort();
     if (seq === overviewLoadSeq) overviewRequest = null;
   }
@@ -3028,11 +3125,18 @@ async function refreshConfig() {
 }
 
 /* ── /api/catalog/lock & /api/catalog/sync ─────────────────────── */
-async function refreshCatalogAge() {
+let catalogAgeRequest = null;
+
+async function refreshCatalogAge(force = false) {
+  if (catalogAgeRequest && !force) return;
+  catalogAgeRequest?.abort();
+  const controller = catalogAgeRequest = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), DISPLAY_REQUEST_TIMEOUT_MS);
   try {
-    const r = await fetch('/api/catalog/lock');
+    const r = await fetch('/api/catalog/lock', {signal: controller.signal});
     if (!r.ok) return;
     const d = await r.json();
+    if (catalogAgeRequest !== controller || controller.signal.aborted) return;
     const el = document.getElementById('catalog-age');
     if (!el) return;
     if (!d.synced) {
@@ -3040,7 +3144,12 @@ async function refreshCatalogAge() {
       return;
     }
     el.textContent = t('setting.catalogAge').replace('{age}', fmtAge(d.age_seconds));
-  } catch(e) {}
+  } catch(e) {
+    // Keep the last successful catalog age; the metrics poll reports connection health.
+  } finally {
+    clearTimeout(deadline);
+    if (catalogAgeRequest === controller) catalogAgeRequest = null;
+  }
 }
 
 async function refreshCatalog() {
@@ -3053,7 +3162,7 @@ async function refreshCatalog() {
   try {
     const r = await fetch('/api/catalog/sync', { method: 'POST' });
     if (r.ok) {
-      await refreshCatalogAge();
+      await refreshCatalogAge(true);
       // The model browser is showing the previous catalog, so a successful
       // sync has to refresh what is on screen - otherwise the one place an
       // operator looks to confirm the sync still shows the old set.
@@ -3962,6 +4071,7 @@ const CONFIG_FIELDS = [
   ['cline_pass.streaming_timeout_ms', 'cfg-cline-pass-streaming-timeout', 'int'],
   ['cline_pass.channel_pin_enabled', 'cfg-cline-pass-channel-pin-enabled', 'bool'],
   ['cline_pass.channel_pin', 'cfg-cline-pass-channel-pin', 'string'],
+  ['cline_pass.channel_probe_enabled', 'cfg-cline-pass-channel-probe-enabled', 'bool'],
 
   // WorkBuddy. Points at a local workbuddy2api-panel gateway, which owns the
   // vendor's OAuth; there is nothing here that speaks WorkBuddy's own protocol.
@@ -4365,13 +4475,47 @@ function fillDefaultChannel() {
   if (input && !input.value.trim()) input.value = 'deepseek';
 }
 
+let channelCatalogRequest = null;
+
+function renderChannelDiagnostics(data) {
+  const status = document.getElementById('cline-pass-channel-diagnostics');
+  if (!status) return;
+  if (!data) { status.textContent = t('clinepass.diagnosticsUnavailable'); return; }
+  if (!data.enabled) { status.textContent = t('clinepass.diagnosticsOff'); return; }
+  if (!data.results.length) { status.textContent = t('clinepass.diagnosticsWaiting'); return; }
+  const verdicts = {matched:'Matched', ignored:'Ignored', unsupported:'Unsupported', unknown:'Unknown'};
+  const reasons = {timeout:1,cancelled:1,transport_error:1,account_refused:1,upstream_refused:1,
+    stream_failed:1,response_too_large:1,invalid_metadata:1,missing_channel:1,no_alternative:1};
+  status.textContent = data.results.map(row => {
+    const verdict = t('clinepass.diagnostics' + (verdicts[row.verdict] || 'Unknown'));
+    const expiry = Date.now() >= Date.parse(row.expires_at) ? ' · ' + t('clinepass.diagnosticsExpired') : '';
+    const reason = row.reason ? t('clinepass.diagnosticReason.' + (Object.hasOwn(reasons,row.reason) ? row.reason : 'unknown')) + '\n' : '';
+    const route = row.baseline || row.target || row.actual
+      ? t('clinepass.diagnosticsRoute').replace(/\{(baseline|target|actual)\}/g,(_,key)=>row[key] || '—') + '\n' : '';
+    const canonical = row.canonical_slug ? t('clinepass.diagnosticsCanonical').replace('{model}',()=>row.canonical_slug) + '\n' : '';
+    return `${row.model} · ${row.pipeline} · ${verdict}${expiry}${row.status ? ' · HTTP ' + row.status : ''}\n`
+      + reason
+      + route + canonical
+      + `${row.endpoint} · ${row.key_hint}\n`
+      + t('clinepass.diagnosticsChecked').replace('{time}', new Date(row.checked_at).toLocaleString()) + '\n'
+      + t('clinepass.diagnosticsExpires').replace('{time}', new Date(row.expires_at).toLocaleString());
+  }).join('\n\n');
+}
+
 async function loadChannelCatalog() {
   const source = document.getElementById('cline-pass-channel-source');
   const list = document.getElementById('cline-pass-channel-options');
   if (!source || !list) return;
+  channelCatalogRequest?.abort();
+  const controller = channelCatalogRequest = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), 15000);
+  const diagnostics = document.getElementById('cline-pass-channel-diagnostics');
+  if (diagnostics) diagnostics.textContent = t('clinepass.diagnosticsLoading');
   try {
-    const r = await settingsRequest('/api/cline-pass/channels');
+    const r = await settingsRequest('/api/cline-pass/channels', {signal: controller.signal});
     const data = await r.json();
+    if (channelCatalogRequest !== controller) return;
+    if (controller.signal.aborted) throw settingsFailure(t('clinepass.diagnosticsFailed'));
     channelSuggestions = [...new Set(Object.values(data.channels).flatMap(channels =>
       [...(channels.actual || []), ...(channels.available || [])]))].sort();
     renderChannelOptions();
@@ -4380,9 +4524,15 @@ async function loadChannelCatalog() {
       : data.last_checked ? t('clinepass.channelChecked').replace('{time}', new Date(data.last_checked).toLocaleString())
       : t('clinepass.channelWaiting');
     source.classList.toggle('is-error', !!data.error);
+    renderChannelDiagnostics(data.diagnostics);
   } catch (_) {
+    if (channelCatalogRequest !== controller) return;
     source.textContent = t('clinepass.channelFailed');
     source.classList.add('is-error');
+    if (diagnostics) diagnostics.textContent = t('clinepass.diagnosticsFailed');
+  } finally {
+    clearTimeout(deadline);
+    if (channelCatalogRequest === controller) channelCatalogRequest = null;
   }
 }
 
@@ -4535,6 +4685,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateConfigChangeCount();
   });
   initChannelCombobox();
+  document.getElementById('btn-cline-pass-diagnostics-refresh')?.addEventListener('click', loadChannelCatalog);
   initKeyEditors();
   document.addEventListener('click', event => {
     const add = event.target.closest('[data-key-add]');
@@ -4667,6 +4818,7 @@ async function saveProxyConfig() {
       body: JSON.stringify(patch)
     }, true);
     confirmed = true;
+    if (Object.hasOwn(patch, 'cline_pass')) loadChannelCatalog();
     // Record exactly what was acknowledged, even if the follow-up GET fails.
     // Key pools are deliberately left out: the saved form is an instruction to
     // the server, not a description of the pool, and the server's label for a
@@ -6227,10 +6379,13 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /* ── Analytics Tab (minimal, vanilla JS + SVG/CSS) ─────────────── */
+const PRICE_CACHE_TTL_MS = 60000;
 const AnalyticsModule = {
   loadSeq: 0,
   loading: false,
   request: null,
+  priceRequest: null,
+  priceCache: null,
   ready: false,
   query: '',
   breakdownMetric: 'tokens',
@@ -6244,7 +6399,10 @@ const AnalyticsModule = {
 
   init() {
     const refreshBtn = document.getElementById('btn-refresh-analytics');
-    if (refreshBtn) refreshBtn.addEventListener('click', () => this.load(true));
+    if (refreshBtn) refreshBtn.addEventListener('click', () => {
+      this.priceCache = null;
+      return this.load(true);
+    });
     document.getElementById('analytics-provider')?.addEventListener('change', () => this.load(true));
     for (const id of ['analytics-start', 'analytics-end']) {
       document.getElementById(id)?.addEventListener('change', () => {
@@ -6414,10 +6572,50 @@ const AnalyticsModule = {
     return params;
   },
 
+  cancel() {
+    this.loadSeq++;
+    this.request?.abort();
+    this.request = null;
+    this.priceRequest?.abort();
+    this.priceRequest = null;
+    this.loading = false;
+  },
+
+  async loadPrices() {
+    if (this.priceRequest) return;
+    if (this.priceCache && Date.now() < this.priceCache.expiresAt) {
+      this.renderPriceTables(this.priceCache.data);
+      return;
+    }
+    const controller = this.priceRequest = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), DISPLAY_REQUEST_TIMEOUT_MS);
+    try {
+      const prices = await fetchJSON('/api/prices', {signal: controller.signal});
+      if (this.priceRequest === controller) {
+        if (!prices?.tables || typeof prices.tables !== 'object' || Array.isArray(prices.tables)) {
+          throw new Error(t('data.invalid'));
+        }
+        this.renderPriceTables(prices);
+        this.priceCache = {data: prices, expiresAt: Date.now() + PRICE_CACHE_TTL_MS};
+      }
+    } catch (e) {
+      if (this.priceRequest === controller) {
+        this.priceCache = null;
+        this.renderPriceTables(null);
+        console.error('Analytics prices failed:', e);
+      }
+    } finally {
+      clearTimeout(timeout);
+      if (this.priceRequest === controller) this.priceRequest = null;
+    }
+  },
+
   async load(force) {
+    if (document.hidden || activeTab !== 'analytics') return;
     if (!force && this.loading) return;
     let seq;
     let controller;
+    let timeout;
     const genEl = document.getElementById('analytics-generated');
     const errorEl = document.getElementById('analytics-error');
 
@@ -6425,23 +6623,28 @@ const AnalyticsModule = {
       // Polling updates the applied range, never an open popover's draft.
       this.syncDateRange(false);
       const params = this.queryParams();
-      if (this.request && this.query === params.toString()) return;
+      if (this.request && this.query === params.toString()) {
+        this.loadPrices();
+        return;
+      }
+      if (this.query !== params.toString()) this.cancel();
       seq = ++this.loadSeq;
       this.request?.abort();
       controller = this.request = new AbortController();
+      timeout = setTimeout(() => controller.abort(), DISPLAY_REQUEST_TIMEOUT_MS);
       this.loading = true;
       if (errorEl) errorEl.hidden = true;
       if (!this.ready || this.query !== params.toString()) {
         this.query = params.toString();
         this.clearView(true);
       }
-      const [summary, trend, prices] = await Promise.all([
+      const stats = Promise.all([
         fetchJSON(`/api/analytics/summary?${params}`, {signal: controller.signal}),
         fetchJSON(`/api/analytics/tokens/trend?${params}`, {signal: controller.signal}),
-        // Prices are instance state, not window state, but they belong to this
-        // tab. A failure here must not blank the cost figures it explains.
-        fetchJSON('/api/prices', {signal: controller.signal}).catch(() => null)
       ]);
+      // Prices explain costs but must not hold statistics or their next poll.
+      this.loadPrices();
+      const [summary, trend] = await stats;
       if (seq !== this.loadSeq) return;
       if (!summary?.summary || !trend || (trend.trend !== null && !Array.isArray(trend.trend))) {
         throw new Error(t('data.invalid'));
@@ -6457,7 +6660,6 @@ const AnalyticsModule = {
       this.renderPeriodTable(this.currentTrend);
       this.renderModelTable(summary.models || []);
       this.renderRetainedRange(summary.summary || {}, params);
-      this.renderPriceTables(prices);
       this.ready = true;
       if (genEl) {
         const ts = summary.generated_at ? new Date(summary.generated_at) : new Date();
@@ -6466,11 +6668,12 @@ const AnalyticsModule = {
     } catch (e) {
       // Invalid filters also supersede any query that was already running.
       if (seq === undefined) {
-        seq = ++this.loadSeq;
-        this.request?.abort();
-        this.request = null;
+        this.cancel();
+        seq = this.loadSeq;
       }
       if (seq !== this.loadSeq) return;
+      this.priceRequest?.abort();
+      this.priceRequest = null;
       console.error('Analytics error:', e);
       this.clearView();
       if (errorEl) {
@@ -6478,6 +6681,7 @@ const AnalyticsModule = {
         errorEl.hidden = false;
       }
     } finally {
+      clearTimeout(timeout);
       controller?.abort();
       if (seq === this.loadSeq) {
         this.loading = false;
@@ -7047,6 +7251,8 @@ const QUOTA_WINDOWS = [
 // The dashboard polls every 3s; quota only moves as fast as real spend, so
 // unforced reloads are throttled well below the server-side cache TTL.
 const QUOTA_MIN_RELOAD_MS = 20000;
+// Account lookup (15s) plus optional supplements (3s), with delivery headroom.
+const QUOTA_ACCOUNT_TIMEOUT_MS = 20000;
 const QUOTA_RING_RADIUS = 54;
 const QUOTA_RING_LENGTH = 2 * Math.PI * QUOTA_RING_RADIUS;
 
@@ -7056,12 +7262,14 @@ const QuotaModule = {
   view: null,
   loadSeq: 0,
   loading: false,
+  accountRequest: null,
   lastLoadedAt: 0,
   accountError: '',
   localView: null,
   localQuery: '',
   localLoadSeq: 0,
   localLoading: false,
+  localRequest: null,
   localLastLoadedAt: 0,
   localError: '',
 
@@ -7072,26 +7280,41 @@ const QuotaModule = {
     });
     document.getElementById('quota-provider')?.addEventListener('change', event => {
       this.provider = event.target.value;
-      return this.load(true);
+      if (!document.hidden && activeTab === 'quota') return this.load(true);
     });
     document.getElementById('quota-local-days')?.addEventListener('change', () => this.loadLocalUsage(true));
     document.getElementById('quota-view-local')?.addEventListener('click', () => viewProviderHistory(this.provider));
     document.getElementById('quota-open-settings')?.addEventListener('click', () => openProviderSettings(this.provider));
     // A single ticker drives every countdown on the page and idles while the
-    // Quota tab is hidden.
-    setInterval(() => { if (activeTab === 'quota') this.tickCountdowns(); }, 1000);
+    // Quota tab or browser page is hidden.
+    setInterval(() => { if (!document.hidden && activeTab === 'quota') this.tickCountdowns(); }, 1000);
   },
 
   async load(force) {
     await Promise.all([this.loadAccounts(force), this.loadLocalUsage(force)]);
   },
 
+  cancel() {
+    this.loadSeq++;
+    this.localLoadSeq++;
+    this.accountRequest?.abort();
+    this.localRequest?.abort();
+    this.accountRequest = this.localRequest = null;
+    this.loading = this.localLoading = false;
+    this.render();
+    this.renderLocalUsage();
+  },
+
   async loadAccounts(force, billingRefresh = false) {
+    if (document.hidden || activeTab !== 'quota') return;
     const provider = this.provider;
     const changed = this.accountProvider !== provider;
     if (!changed && this.loading) return;
-    if (!changed && !force && Date.now() - this.lastLoadedAt < QUOTA_MIN_RELOAD_MS) return;
+    if (!changed && !force && this.view && Date.now() - this.lastLoadedAt < QUOTA_MIN_RELOAD_MS) return;
     const seq = ++this.loadSeq;
+    this.accountRequest?.abort();
+    const controller = this.accountRequest = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), QUOTA_ACCOUNT_TIMEOUT_MS);
     this.accountProvider = provider;
     this.loading = true;
     this.accountError = '';
@@ -7102,7 +7325,7 @@ const QuotaModule = {
       if (force) params.set('refresh', '1');
       const manualBilling = provider === 'aws-bedrock' && billingRefresh;
       if (manualBilling) params.set('billing_refresh', '1');
-      const view = await fetchJSON(`/api/quota?${params}`, manualBilling ? {method: 'POST'} : undefined);
+      const view = await fetchJSON(`/api/quota?${params}`, {signal: controller.signal, ...(manualBilling ? {method: 'POST'} : {})});
       if (seq !== this.loadSeq || provider !== this.provider) return;
       if (!view || view.provider !== provider || !['available', 'partial', 'not_configured', 'unavailable', 'error'].includes(view.status)) {
         throw new Error(t('data.invalid'));
@@ -7114,7 +7337,9 @@ const QuotaModule = {
       this.view = null;
       this.accountError = e.message || String(e);
     } finally {
+      clearTimeout(timeout);
       if (seq === this.loadSeq) {
+        this.accountRequest = null;
         this.loading = false;
         this.render();
       }
@@ -7122,13 +7347,17 @@ const QuotaModule = {
   },
 
   async loadLocalUsage(force) {
+    if (document.hidden || activeTab !== 'quota') return;
     const provider = this.provider;
     const days = document.getElementById('quota-local-days')?.value || '30';
     const params = new URLSearchParams({provider, days});
     const changed = this.localQuery !== params.toString();
     if (!changed && this.localLoading) return;
-    if (!changed && !force && Date.now() - this.localLastLoadedAt < QUOTA_MIN_RELOAD_MS) return;
+    if (!changed && !force && this.localView && Date.now() - this.localLastLoadedAt < QUOTA_MIN_RELOAD_MS) return;
     const seq = ++this.localLoadSeq;
+    this.localRequest?.abort();
+    const controller = this.localRequest = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), DISPLAY_REQUEST_TIMEOUT_MS);
     this.localQuery = params.toString();
     this.localLoading = true;
     this.localError = '';
@@ -7136,7 +7365,7 @@ const QuotaModule = {
     this.renderLocalUsage();
     this.syncRefreshButton();
     try {
-      const data = await fetchJSON(`/api/analytics/summary?${params}`);
+      const data = await fetchJSON(`/api/analytics/summary?${params}`, {signal: controller.signal});
       if (seq !== this.localLoadSeq || provider !== this.provider) return;
       if (!data?.summary || data.provider !== provider) throw new Error(t('data.invalid'));
       this.localView = data;
@@ -7146,7 +7375,9 @@ const QuotaModule = {
       this.localView = null;
       this.localError = e.message || String(e);
     } finally {
+      clearTimeout(timeout);
       if (seq === this.localLoadSeq) {
+        this.localRequest = null;
         this.localLoading = false;
         this.renderLocalUsage();
         this.syncRefreshButton();

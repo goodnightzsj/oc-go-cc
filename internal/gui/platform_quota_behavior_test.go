@@ -8,6 +8,7 @@ func TestPlatformQuotaBehavior(t *testing.T) {
 
 const platformQuotaBehaviorScript = platformBehaviorDOMScript + `
 async function checks() {
+  activeTab = 'quota';
   const get = id => document.getElementById(id);
   // Only the platforms the dashboard offers can be selected at all.
   const providers = visiblePlatforms;

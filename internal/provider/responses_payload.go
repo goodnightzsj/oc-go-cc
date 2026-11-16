@@ -33,7 +33,7 @@ func responsesPayload(ctx context.Context, req *types.MessageRequest, model conf
 func responsesResult(ctx context.Context, raw []byte, model config.ModelConfig, keyHint string) (*core.ExecuteResult, error) {
 	var response types.ResponsesResponse
 	if err := json.Unmarshal(raw, &response); err != nil {
-		return nil, fmt.Errorf("decode Responses response: %w", err)
+		return nil, &core.ResponseError{Err: fmt.Errorf("decode Responses response: %w", err)}
 	}
 	result := &core.ExecuteResult{KeyHint: keyHint, UpstreamModel: differingResponseModel(response.Model, model.ModelID), ResponseModel: response.Model}
 	if len(core.RequestMetadataFromContext(ctx).ResponsesBody) > 0 {

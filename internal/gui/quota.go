@@ -32,6 +32,9 @@ const limitsRefreshTTL = 24 * time.Hour
 // limitsFetchTimeout is the per-attempt bound for pulling the docs page.
 const limitsFetchTimeout = 20 * time.Second
 
+// The 15s account fetch plus this optional phase fits the UI's 20s deadline.
+const quotaSupplementTimeout = 3 * time.Second
+
 // quotaAccount reports one credential's view, never a sum across keys.
 // WorkBuddy's view covers the entire gateway pool, not one vendor account.
 // Reports and Error are mutually exclusive; partial reports retain block errors.
@@ -239,8 +242,10 @@ func (s *Server) handleGoQuota(w http.ResponseWriter, r *http.Request, cfg *conf
 	}
 
 	resp.Accounts = fetchQuotaAccounts(r.Context(), resp.Provider, endpoint, keys)
-	resp.ModelLimits = s.ensureModelLimits(r.Context())
-	resp.ModelUsage, err = s.monthlyModelUsage(r.Context(), resp.Accounts, resp.ModelLimits)
+	resp.ModelLimits = s.modelLimitsSnapshot()
+	usageCtx, cancel := context.WithTimeout(r.Context(), quotaSupplementTimeout)
+	defer cancel()
+	resp.ModelUsage, err = s.monthlyModelUsage(usageCtx, resp.Accounts, resp.ModelLimits)
 	if r.Context().Err() != nil {
 		return // A canceled local query must not replace the account cache.
 	}
@@ -372,7 +377,9 @@ func (s *Server) handleCommandCodeQuota(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	resp.Accounts = fetchQuotaAccounts(r.Context(), resp.Provider, endpoint, keys)
-	s.attachCommandCodeLedger(r.Context(), resp.Accounts)
+	ledgerCtx, cancel := context.WithTimeout(r.Context(), quotaSupplementTimeout)
+	defer cancel()
+	s.attachCommandCodeLedger(ledgerCtx, resp.Accounts)
 	if r.Context().Err() != nil {
 		return // A canceled local query must not replace the account cache.
 	}
@@ -462,7 +469,9 @@ func (s *Server) handleClinePassQuota(w http.ResponseWriter, r *http.Request, cf
 	// the fetch rather than inside it because they come from a second endpoint
 	// and are not part of an account's report: a plan lookup that fails leaves
 	// the percentages intact, which is the part the platform computes.
-	s.attachClinePassLimits(r.Context(), cfg, resp.Accounts)
+	limitsCtx, cancel := context.WithTimeout(r.Context(), quotaSupplementTimeout)
+	defer cancel()
+	s.attachClinePassLimits(limitsCtx, cfg, resp.Accounts)
 
 	resp.Status = quotaStatus(resp)
 	resp.FetchedAt = time.Now().UTC()
@@ -632,27 +641,44 @@ func quotaCacheKey(endpoint string, keys []string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// ensureModelLimits returns the cached per-model allowance snapshot, fetching
-// it when missing or older than limitsRefreshTTL. A failed refresh keeps the
-// previous snapshot (possibly nil, which just omits the section).
-func (s *Server) ensureModelLimits(ctx context.Context) *quota.ModelLimits {
+// Reads never wait on optional docs I/O. The service loop owns refreshes;
+// concurrent requests can queue at most one wake-up, not one worker per caller.
+func (s *Server) modelLimitsSnapshot() *quota.ModelLimits {
 	s.limitsMu.Lock()
 	defer s.limitsMu.Unlock()
-	if s.modelLimits != nil && time.Since(s.modelLimits.FetchedAt) < limitsRefreshTTL {
-		return s.modelLimits
+	if s.modelLimits == nil || time.Since(s.modelLimits.FetchedAt) >= limitsRefreshTTL {
+		select {
+		case s.limitsRefresh <- struct{}{}:
+		default:
+		}
 	}
-	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limitsFetchTimeout)
+	return s.modelLimits
+}
+
+// Only limitsLoop fetches at runtime; failed refreshes keep the old snapshot.
+func (s *Server) ensureModelLimits(ctx context.Context) *quota.ModelLimits {
+	s.limitsMu.Lock()
+	cached := s.modelLimits
+	s.limitsMu.Unlock()
+	if cached != nil && time.Since(cached.FetchedAt) < limitsRefreshTTL {
+		return cached
+	}
+	fetchCtx, cancel := context.WithTimeout(ctx, limitsFetchTimeout)
 	defer cancel()
 	lim, err := quota.FetchModelLimits(fetchCtx, &http.Client{Timeout: limitsFetchTimeout}, s.modelLimitsURL...)
 	if err != nil {
-		return s.modelLimits
+		if ctx.Err() == nil {
+			slog.Warn("model allowance refresh failed; retaining previous snapshot", "err", err)
+		}
+		return cached
 	}
+	s.limitsMu.Lock()
 	s.modelLimits = lim
+	s.limitsMu.Unlock()
 	return lim
 }
 
-// limitsLoop refreshes the per-model allowance table once a day; it is
-// otherwise identical to the handler-side refresh.
+// limitsLoop refreshes daily or when a quota read finds no fresh snapshot.
 func (s *Server) limitsLoop(ctx context.Context) {
 	ticker := time.NewTicker(limitsRefreshTTL)
 	defer ticker.Stop()
@@ -661,8 +687,12 @@ func (s *Server) limitsLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.ensureModelLimits(context.Background())
+		case <-s.limitsRefresh:
 		}
+		if ctx.Err() != nil {
+			return
+		}
+		s.ensureModelLimits(ctx)
 	}
 }
 

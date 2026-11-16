@@ -114,7 +114,7 @@ func (p *AWSBedrockProvider) executeOpenAI(ctx context.Context, req *types.Messa
 
 	var chatResp types.ChatCompletionResponse
 	if err := json.Unmarshal(body, &chatResp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+		return nil, &core.ResponseError{Err: fmt.Errorf("failed to unmarshal response: %w", err)}
 	}
 
 	anthropicResp, err := transformer.NewResponseTransformer().TransformResponse(&chatResp, model.ModelID)
@@ -266,7 +266,7 @@ func (p *AWSBedrockProvider) executeAnthropic(ctx context.Context, req *types.Me
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	return &core.ExecuteResult{Body: body, KeyHint: sel.KeyHint()}, nil
+	return anthropicResult(body, sel.KeyHint())
 }
 
 func (p *AWSBedrockProvider) streamAnthropic(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error) {

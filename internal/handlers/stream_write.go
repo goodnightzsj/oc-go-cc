@@ -3,8 +3,11 @@ package handlers
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
+
+	"github.com/routatic/proxy/internal/core"
 )
 
 // Bound each network write, not the lifetime of a long-running stream.
@@ -36,11 +39,37 @@ func (w *responseWriter) writeIO(timeout time.Duration, write func() error) erro
 		return w.writeErr
 	}
 	if err := withStreamWriteDeadline(w.ResponseWriter, timeout, write); err != nil {
+		var source *core.ResponseError
+		// Keep an already observed source failure when its delivery also fails.
+		if w.streamErr != nil && !errors.As(err, &source) {
+			err = errors.Join(&core.ResponseError{Err: w.streamErr}, err)
+		}
 		w.writeErr = err
-		if w.cancelWrites != nil {
+		if !errors.As(err, &source) && w.cancelWrites != nil {
 			w.cancelWrites()
 		}
 		return err
 	}
 	return nil
+}
+
+// Caller holds mu. Local failures bypass the source decoder and end any
+// already-forwarded partial frame before emitting their own terminal event.
+func (w *responseWriter) writeErrorEvent(data []byte) error {
+	return w.writeIO(w.writeTimeout, func() error {
+		if !w.wroteHeader {
+			w.wroteHeader = true
+			w.ResponseWriter.WriteHeader(http.StatusOK)
+		}
+		w.ssePayloadWritten = true
+		frame := fmt.Sprintf("\n\nevent: error\ndata: %s\n\n", data)
+		n, err := w.ResponseWriter.Write([]byte(frame))
+		if err != nil {
+			return err
+		}
+		if n != len(frame) {
+			return io.ErrShortWrite
+		}
+		return http.NewResponseController(w.ResponseWriter).Flush()
+	})
 }

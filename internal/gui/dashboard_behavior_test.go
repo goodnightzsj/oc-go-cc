@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/routatic/proxy/internal/site"
@@ -13,6 +14,32 @@ import (
 // Run the shipped script with synthetic DOM/network collaborators. No browser,
 // platform credentials or third-party JavaScript dependency is required.
 func TestDashboardPlatformDataBehavior(t *testing.T) {
+	for _, zone := range []string{"Asia/Shanghai", "America/Los_Angeles"} {
+		t.Run(zone, func(t *testing.T) {
+			if output, err := dashboardBehaviorCommand(t, dashboardBehaviorScript, zone).CombinedOutput(); err != nil {
+				t.Fatalf("dashboard behavior: %v\n%s", err, output)
+			}
+		})
+	}
+}
+
+func TestDashboardBehaviorHostRejectsUnfinishedChecks(t *testing.T) {
+	anchor := "  const quotaFetches = [];"
+	if strings.Count(dashboardBehaviorScript, anchor) != 1 {
+		t.Fatal("unfinished check injection anchor is not unique")
+	}
+	script := strings.Replace(dashboardBehaviorScript, anchor, "  await new Promise(() => {});\n"+anchor, 1)
+	if script == dashboardBehaviorScript {
+		t.Fatal("unfinished check injection did not change the script")
+	}
+	output, err := dashboardBehaviorCommand(t, script, "Asia/Shanghai").CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "GUI behavior checks did not complete") {
+		t.Fatalf("unfinished dashboard checks did not fail explicitly: %v %s", err, output)
+	}
+}
+
+func dashboardBehaviorCommand(t *testing.T, script, zone string) *exec.Cmd {
+	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node is unavailable; dashboard JavaScript behavior was not checked")
@@ -33,19 +60,13 @@ func TestDashboardPlatformDataBehavior(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, zone := range []string{"Asia/Shanghai", "America/Los_Angeles"} {
-		t.Run(zone, func(t *testing.T) {
-			cmd := exec.Command(node, "-e", dashboardBehaviorScript)
-			cmd.Env = append(os.Environ(), "TZ="+zone)
-			cmd.Stdin = bytes.NewReader(payload)
-			if output, err := cmd.CombinedOutput(); err != nil {
-				t.Fatalf("dashboard behavior: %v\n%s", err, output)
-			}
-		})
-	}
+	cmd := exec.CommandContext(t.Context(), node, "-e", script)
+	cmd.Env = append(os.Environ(), "TZ="+zone)
+	cmd.Stdin = bytes.NewReader(payload)
+	return cmd
 }
 
-const dashboardBehaviorScript = `
+const dashboardBehaviorScript = behaviorDeadlineScript + `
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const input = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
@@ -622,6 +643,10 @@ vm.runInContext(` + "`" + `
     return {ok:true,json:async()=>url.startsWith('/api/quota?') ? commandcodeQuota : {provider:'commandcode',summary:{total_requests:0,input_tokens:0,output_tokens:0,cache_read_tokens:0,cache_creation_tokens:0,unknown_cost_requests:0,est_cost_usd:0},models:[]}};
   };
   QuotaModule.provider = 'commandcode';
+  activeTab = 'overview';
+  await QuotaModule.load(true);
+  assert.equal(quotaFetches.length, 0, 'hidden quota views must not start requests');
+  activeTab = 'quota';
   await QuotaModule.load(true);
   assert.equal(quotaFetches.length, 2, 'account capability and local ledger use independent requests');
   assert.ok(quotaFetches.every(url => new URLSearchParams(url.split('?')[1]).get('provider') === 'commandcode'), 'CommandCode must never request Go quota or Go ledger data');
@@ -630,6 +655,7 @@ vm.runInContext(` + "`" + `
   assert.equal(document.getElementById('quota-go').hidden, true);
   assert.equal(document.getElementById('quota-local-requests').textContent, '0');
 
+  activeTab = 'history';
   const pending = [];
   const reply = (url, provider) => ({ok:true,json:async()=> url.startsWith('/api/history?') ? {items:[{id:provider,provider,model:'shared',success:true,details_known:true}],total:1} : {total_requests:1}});
   fetch = url => url.includes('provider=opencode-go') ? new Promise(resolve => pending.push({url,resolve})) : Promise.resolve(reply(url,'commandcode'));
@@ -646,5 +672,5 @@ vm.runInContext(` + "`" + `
   assert.equal(document.getElementById('history-error').hidden, false);
   assert.ok(document.getElementById('history-error').textContent.includes('503'), 'failed log refresh must remain visible');
 })()
-` + "`" + `, context, {timeout: 3000}).catch(error => {console.error(error); process.exitCode = 1});
+` + "`" + `, context, {timeout: 3000}).catch(error => {console.error(error); process.exitCode = 1}).finally(() => clearTimeout(behaviorDeadline));
 `

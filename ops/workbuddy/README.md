@@ -10,7 +10,7 @@
 4. 只有候选通过且旧服务健康，才保留旧二进制/manifest，使用同目录原子 rename 安装 `bin/wb2api` 并重启。
 5. 只有 systemd active、`/healthz` 返回 HTTP **200** 且 JSON `service` 为 **`workbuddy2api`** 才提交新 manifest。503 表示目前不可服务，不算上线成功。
 
-冲突、测试或构建失败均不替换运行二进制。切换后的命令失败、INT/TERM 或健康失败会恢复旧二进制及 manifest，并再次验证恢复后的服务。若恢复也失败，明确报 `CRITICAL`、非零退出，不声称回滚成功。SIGKILL、断电及同时绕过此锁的人工操作不在自动回退保证内。
+冲突、测试或构建失败均不替换运行二进制。切换后的命令失败、INT/TERM 或健康失败会恢复旧二进制及 manifest，并再次验证恢复后的服务。退出清理不依赖日志写入成功，保留原失败退出码；普通执行阶段日志写入失败仍明确报错并停止。若恢复也失败，明确报 `CRITICAL`、非零退出，不声称回滚成功。SIGKILL、断电、存储故障导致恢复操作本身失败及同时绕过此锁的人工操作不在自动回退保证内。
 
 生产 checkout 的 HEAD **不表示运行版本**。权威证据是 state 目录的 `current.manifest`（上游 SHA、patch SHA-256、binary SHA-256）与实际 `bin/wb2api` 的 hash；每次候选目录保留对应源码。三个值均匹配才跳过构建，因此 patch-only 变更和被外部修改的二进制也会重新验证、部署。
 

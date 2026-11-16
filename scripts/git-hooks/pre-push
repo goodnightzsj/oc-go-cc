@@ -38,12 +38,10 @@ fi
 
 # Check 1: Format check (gofmt)
 echo -e "${YELLOW}[1/5] Checking code formatting...${NC}"
-FORMAT_ISSUES=$(gofmt -d .)
-if [ -n "$FORMAT_ISSUES" ]; then
+if ! bash scripts/check-go-format.sh; then
     echo -e "${RED}✗ Code is not properly formatted${NC}"
     echo ""
-    echo "Run 'gofmt -w .' to fix formatting issues:"
-    echo "$FORMAT_ISSUES"
+    echo "Format the listed project files with 'gofmt -w <files>' and retry."
     exit 1
 fi
 echo -e "${GREEN}✓ Code formatting check passed${NC}"

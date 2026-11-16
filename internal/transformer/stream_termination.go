@@ -19,6 +19,7 @@ type StreamTermination struct {
 	RequireDone    bool
 	decoder        sse.Decoder
 	responses      ResponsesObservation
+	chatTools      map[int]*chatToolState
 	terminal, done bool
 	err            error
 }
@@ -63,7 +64,7 @@ func (s *StreamTermination) event(event string, data []byte) error {
 	switch s.Format {
 	case core.WireFormatAnthropic:
 		var chunk struct {
-			Type  string          `json:"type"`
+			AnthropicStreamEvent
 			Error json.RawMessage `json:"error"`
 		}
 		if err := json.Unmarshal(data, &chunk); err != nil {
@@ -75,7 +76,13 @@ func (s *StreamTermination) event(event string, data []byte) error {
 		if event == "error" || chunk.Type == "error" {
 			return fmt.Errorf("upstream Anthropic error event")
 		}
-		if chunk.Type == "message_stop" || (chunk.Type == "" && event == "message_stop") {
+		if chunk.Type == "" {
+			chunk.Type = event
+		}
+		if err := chunk.ValidateAfterStop(s.terminal); err != nil {
+			return err
+		}
+		if chunk.Type == "message_stop" {
 			s.terminal = true
 		}
 	case core.WireFormatGemini:
@@ -113,8 +120,41 @@ func (s *StreamTermination) event(event string, data []byte) error {
 		if event == "error" {
 			return upstreamJSONError("Chat Completions", data)
 		}
-		if len(chunk.Choices) > 0 && chunk.Choices[0].FinishReason != "" {
-			if _, err := NewResponseTransformer().mapFinishReason(chunk.Choices[0].FinishReason); err != nil {
+		if len(chunk.Choices) == 0 {
+			return nil
+		}
+		choice := chunk.Choices[0]
+		if s.terminal && (choice.Delta.ContentText() != "" || choice.Delta.ReasoningText() != "" || (choice.Delta.Refusal != nil && *choice.Delta.Refusal != "")) {
+			return fmt.Errorf("chat content arrived after finish_reason")
+		}
+		for _, delta := range choice.Delta.ToolCalls {
+			tool := s.chatTools[delta.Index]
+			if tool == nil {
+				// Match the consumer's nameless/closed-index ghost handling.
+				if delta.Function.Name == "" {
+					continue
+				}
+				if s.terminal {
+					return fmt.Errorf("chat tool arrived after finish_reason")
+				}
+				if s.chatTools == nil {
+					s.chatTools = make(map[int]*chatToolState)
+				}
+				tool = &chatToolState{}
+				s.chatTools[delta.Index] = tool
+			}
+			if err := tool.appendArguments(delta.Function.Arguments); err != nil {
+				return err
+			}
+		}
+		if choice.FinishReason != "" {
+			for _, tool := range s.chatTools {
+				if err := tool.finishArguments(choice.FinishReason); err != nil {
+					return err
+				}
+			}
+			clear(s.chatTools)
+			if _, err := NewResponseTransformer().mapFinishReason(choice.FinishReason); err != nil {
 				return err
 			}
 			s.terminal = true

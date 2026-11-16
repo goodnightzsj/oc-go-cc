@@ -31,6 +31,7 @@ import (
 	"github.com/routatic/proxy/internal/daemon"
 	"github.com/routatic/proxy/internal/history"
 	"github.com/routatic/proxy/internal/metrics"
+	"github.com/routatic/proxy/internal/provider"
 	"github.com/routatic/proxy/internal/quota"
 	"github.com/routatic/proxy/internal/site"
 	"github.com/routatic/proxy/internal/storage"
@@ -86,12 +87,14 @@ type Server struct {
 	limitsMu       sync.Mutex
 	modelLimits    *quota.ModelLimits
 	modelLimitsURL []string
+	limitsRefresh  chan struct{}
 
 	// circuitStates reports the live fallback circuit breakers, keyed by model.
 	// It is injected rather than computed here so the handler that owns that
 	// state stays its only owner; nil means the dashboard omits breaker state
 	// instead of inventing a healthy default.
-	circuitStates func() map[string]string
+	circuitStates      func() map[string]string
+	channelDiagnostics func() provider.ChannelDiagnosticsSnapshot
 
 	storage *storage.Database
 }
@@ -111,6 +114,8 @@ type Options struct {
 	// when no fallback handler is wired; the dashboard then reports breaker
 	// state as unknown rather than as closed.
 	CircuitStates func() map[string]string
+	// ChannelDiagnostics reads the provider's existing, scoped diagnostic results.
+	ChannelDiagnostics func() provider.ChannelDiagnosticsSnapshot
 }
 
 // New creates a new GUI server.
@@ -119,15 +124,16 @@ func New(opts Options) *Server {
 		opts.Logger = slog.Default()
 	}
 	s := &Server{
-		met:              opts.Metrics,
-		atomicCfg:        opts.AtomicConfig,
-		proxyPort:        opts.ProxyPort,
-		startProxy:       opts.StartProxy,
-		stopProxy:        opts.StopProxy,
-		catalogDir:       opts.CatalogDir,
-		catalogSourceURL: opts.CatalogSourceURL,
-		logger:           opts.Logger,
-		circuitStates:    opts.CircuitStates,
+		met:                opts.Metrics,
+		atomicCfg:          opts.AtomicConfig,
+		proxyPort:          opts.ProxyPort,
+		startProxy:         opts.StartProxy,
+		stopProxy:          opts.StopProxy,
+		catalogDir:         opts.CatalogDir,
+		catalogSourceURL:   opts.CatalogSourceURL,
+		logger:             opts.Logger,
+		circuitStates:      opts.CircuitStates,
+		channelDiagnostics: opts.ChannelDiagnostics,
 
 		storage: opts.Storage,
 	}
@@ -262,6 +268,7 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 	limitsCtx, cancel := context.WithCancel(ctx)
 	s.limitsCancel = cancel
 	s.limitsDone = make(chan struct{})
+	s.limitsRefresh = make(chan struct{}, 1)
 	go func() {
 		defer close(s.limitsDone)
 		var workers sync.WaitGroup

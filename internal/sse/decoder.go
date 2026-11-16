@@ -9,6 +9,9 @@ import (
 // Decoder dispatches complete events only; Read boundaries are not event boundaries.
 // It retains at most 1 MiB per event and does not own the input stream.
 type Decoder struct {
+	// OnComment receives a complete comment line, including ':', when forwarding
+	// heartbeats is required. The bytes are valid only during the callback.
+	OnComment       func([]byte) error
 	line, data      []byte
 	event           string
 	started, skipLF bool
@@ -41,6 +44,10 @@ func (d *Decoder) Feed(chunk []byte, dispatch func(string, []byte) error) error 
 			}
 			d.data = d.data[:0]
 			d.event = ""
+		} else if line[0] == ':' && d.OnComment != nil {
+			if err := d.OnComment(line); err != nil {
+				return err
+			}
 		} else {
 			field, value, _ := bytes.Cut(line, []byte(":"))
 			switch string(field) {

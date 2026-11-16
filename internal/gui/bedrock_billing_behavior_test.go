@@ -8,6 +8,7 @@ func TestBedrockBillingPageBehavior(t *testing.T) {
 
 const bedrockBillingBehaviorScript = platformBehaviorDOMScript + `
 async function checks() {
+  activeTab = 'quota';
   const get = id => document.getElementById(id);
   const select = async provider => {get('quota-provider').value=provider; await get('quota-provider').emit('change')};
   const empty = {provider:'aws-bedrock',status:'unavailable',source:'official_api',accounts:[],links:[],reason:'aws_billing_refresh_required'};

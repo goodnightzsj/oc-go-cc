@@ -20,6 +20,28 @@ Install Go as required by `go.mod` and Node.js 22 with npm. Run `npm ci` before 
 
 Direct `go build` and the Dockerfile embed the committed CSS without rebuilding it. They remain usable without Node, but do not validate UI source/asset consistency.
 
+CSS staging uses `internal/gui/.compiled-tailwind.*` on the same filesystem, outside the embedded `assets/*` tree. Compilation failure or changed source inputs preserves the old stylesheet; output is renamed into place only after successful compilation and matching before/after input fingerprints.
+
+`scripts/dev-watch.sh` rebuilds CSS before each Go build, so it also requires the local compiler installed by `npm ci`. CSS failure preserves the generated asset and waits for a source edit without building or starting a new process. Its input fingerprint excludes generated CSS and staging files and retains the pre-CSS baseline, so edits anywhere during CSS/Go compilation remain pending without restarting for its own output. Waiting propagates polling and fingerprint errors instead of spinning on failure.
+
+INT/TERM stop the development watcher with status 130/143; EXIT owns child cleanup, so a later source edit cannot restart it. Waiting runs in the parent shell, without a command substitution delaying signal traps until another edit. Shared source fingerprinting also uses Node.js 22 via `scripts/source-fingerprint.mjs`: one streamed reader preserves filename bytes and the sorted path/content SHA-256 encoding, and propagates read errors instead of launching `cat` for every file. Keep this helper alongside `go-common.sh` when copying watcher/deployment scripts.
+
+Builds run as owned background process groups: stopping the watcher cancels compiler descendants, waits about one second, then kills remaining workers and reaps the build job. Fingerprinting runs from the root selected by Bash, evaluates the helper without a filesystem entry path, and reads relative Buffer paths without passing the root through Node argv. Missing or empty helpers fail without returning an empty-stream hash; production deployment stops before building or creating a release. The existing LF-separated filename list is unchanged; newline-containing filenames are not newly supported. Linux byte-root tests are included; on macOS only controlled decoding-boundary tests can run.
+
+`make lint` checks Go formatting and runs `go vet`. Formatting uses `scripts/check-go-format.sh`, shared with CI, release validation and the optional pre-push hook: it checks tracked and non-ignored untracked Go files, including names with spaces, but not ignored research copies. Enumeration or formatter errors fail the check; it never rewrites source files. The hook's existing protected-branch skip policy is unchanged.
+
+Production hosts using `scripts/prod-deploy.sh` also need Node.js 22 and dependencies installed with `npm ci`. The script records an input fingerprint, rebuilds CSS, then fingerprints the full release inputs; a missing compiler, failed/empty output or changed inputs stops deployment without changing the running release. It does not install dependencies. The optional `scripts/prod-watch.sh` retains its pre-CSS input baseline across deployment, so generated assets do not trigger a duplicate restart and source edits remain pending.
+
+Deployment is serialized by `.tmp/prod/deploy.lock` from before CSS compilation through health verification and pruning. Each release gets a unique directory and never overwrites an existing release. Normal exits release the lock; after SIGKILL or power loss, confirm no deployment is running before removing the empty stale lock with `rmdir`. Fingerprints include Tailwind config, npm manifests, the CSS build script and shared fingerprint helpers. After Go compilation, both the pre-CSS input fingerprint and the post-CSS full fingerprint must still match, along with HEAD, before catalog sync or service cutover. This checks a stable worktree, not an isolated source snapshot; publish from a fixed checkout. Successful pruning retains the current release and never follows release symlinks.
+
+The deployment root uses its physical path so pruning also protects the current release when the checkout is accessed through a symlink.
+
+After cutover begins and until health is confirmed, EXIT cleanup handles both ordinary failures and INT/TERM: it restores the old link and verifies the restarted service, or removes the candidate link and stops a failed first deployment. Recovery failures are reported as `CRITICAL`; the original failure/signal exit status is preserved and the lock is released last. Once health is confirmed, pruning failure or a signal does not roll back the healthy version. Watcher output no longer assumes that rollback succeeded.
+
+Lock contention returns exit status `75`; `prod-watch.sh` retries that pending source version on its next poll. Other build/deployment failures still wait for a source edit. Failed source enumeration or reads return a nonzero fingerprint result, and the post-build check refuses deployment before catalog sync or cutover if it cannot read the fingerprint.
+
+Linux CI and shared release validation run `WB2A_TEST_PORTABLE=0 bash ops/workbuddy/update.test.sh` after delivery checks. Missing native tools exit `77` and fail the gate; portable checks do not replace native locking/timeout validation.
+
 ```bash
 git clone https://github.com/routatic/proxy.git
 cd proxy

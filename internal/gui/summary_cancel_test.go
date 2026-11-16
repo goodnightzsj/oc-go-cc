@@ -115,6 +115,7 @@ func TestCanceledQuotaLedgerIsNotCached(t *testing.T) {
 				srv = quotaTestServer(t, upstream.URL, "synthetic-go-key")
 				srv.storage = db
 				srv.modelLimitsURL = []string{upstream.URL + "/docs"}
+				srv.ensureModelLimits(t.Context())
 			}
 			conn, err := db.DB().Conn(t.Context())
 			if err != nil {

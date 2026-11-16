@@ -18,6 +18,7 @@ import (
 
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/debug"
+	"github.com/routatic/proxy/internal/provider"
 )
 
 type channelSet struct {
@@ -30,11 +31,12 @@ type channelData map[string]channelSet
 // Only this metadata projection is persisted. Capture data and request IDs
 // never enter the catalogue or its API response.
 type channelSnapshot struct {
-	DefaultTarget  string      `json:"default_target"`
-	CaptureEnabled bool        `json:"capture_enabled"`
-	Channels       channelData `json:"channels"`
-	LastChecked    *time.Time  `json:"last_checked,omitempty"`
-	Error          string      `json:"error,omitempty"`
+	DefaultTarget  string                               `json:"default_target"`
+	CaptureEnabled bool                                 `json:"capture_enabled"`
+	Channels       channelData                          `json:"channels"`
+	LastChecked    *time.Time                           `json:"last_checked,omitempty"`
+	Error          string                               `json:"error,omitempty"`
+	Diagnostics    *provider.ChannelDiagnosticsSnapshot `json:"diagnostics,omitempty"`
 }
 
 type capturePosition struct {
@@ -107,7 +109,12 @@ func (s *Server) handleChannelCatalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, s.channels.snapshot(s.channelDirectory()))
+	result := s.channels.snapshot(s.channelDirectory())
+	if s.channelDiagnostics != nil {
+		diagnostics := s.channelDiagnostics()
+		result.Diagnostics = &diagnostics
+	}
+	writeJSON(w, result)
 }
 
 func (s *Server) channelLoop(ctx context.Context) {

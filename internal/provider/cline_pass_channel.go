@@ -3,29 +3,23 @@ package provider
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"sync"
 	"time"
-)
 
-type clineChannelOptions struct {
-	Only []string `json:"only,omitempty"`
-	// Has is a capability filter, measured to behave differently from Only: a
-	// channel that does not declare the named capability is refused with
-	// stream_initialization_failed rather than quietly skipped. Omitting it
-	// keeps the exact request shape this proxy has always sent.
-	Has []string `json:"has,omitempty"`
-}
+	"github.com/routatic/proxy/internal/sse"
+)
 
 // clineChannelBody observes routing without changing bytes, buffering the full
 // response or introducing a goroutine. Metadata can arrive after finish_reason.
 type clineChannelBody struct {
 	io.ReadCloser
-	mu                                   sync.Mutex
-	line                                 []byte
-	dropping, done, reported, incomplete bool
-	target, actual, requestID            string
+	mu                         sync.Mutex
+	decoder                    sse.Decoder
+	done, reported, incomplete bool
+	target, actual, requestID  string
 	// Canonical routing model, distinct from the response's virtual model ID.
 	upstreamModel string
 	// firstByteAt is when the upstream's first byte arrived, set by the peek.
@@ -54,26 +48,10 @@ func (b *clineChannelBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for rest := p[:n]; len(rest) > 0; {
-		piece, after, newline := bytes.Cut(rest, []byte{'\n'})
-		// Match the existing SSE parser's 1 MiB line ceiling. An oversized
-		// line is unobservable, never a reason to corrupt or truncate the stream.
-		if len(b.line)+len(piece) > 1<<20 {
-			b.line = nil
-			b.dropping = true
-			b.incomplete = true
-		}
-		if !b.dropping {
-			b.line = append(b.line, piece...)
-		}
-		if newline {
-			if !b.dropping {
-				b.observe(b.line)
-			}
-			b.line = b.line[:0]
-			b.dropping = false
-		}
-		rest = after
+	if !b.incomplete && b.decoder.Feed(p[:n], b.observe) != nil {
+		// Observation is advisory: stop parsing an invalid stream, not forwarding it.
+		b.incomplete = true
+		b.decoder = sse.Decoder{}
 	}
 	if err != nil {
 		b.report()
@@ -170,23 +148,33 @@ type clineRoutingMetadata struct {
 // channel returns the channel that served the request, under whichever name
 // this pipeline publishes it. Both spellings mean the same thing, and only one
 // is populated per response.
-func (m clineRoutingMetadata) channel() string {
+func (m clineRoutingMetadata) channel() (string, error) {
 	routing := m.ProviderMetadata.Gateway.Routing
-	if routing.FinalProvider != "" {
-		return routing.FinalProvider
+	final, resolved := routing.FinalProvider, routing.ResolvedProvider
+	if final != "" && resolved != "" && canonicalClineChannel(final) != canonicalClineChannel(resolved) {
+		return "", errors.New("conflicting routing channel fields")
 	}
-	return routing.ResolvedProvider
+	if routing.FinalProvider != "" {
+		return routing.FinalProvider, nil
+	}
+	return routing.ResolvedProvider, nil
 }
 
-func (b *clineChannelBody) observe(line []byte) {
-	data, ok := bytes.CutPrefix(line, []byte("data:"))
-	if !ok {
-		return
+func canonicalClineChannel(channel string) string {
+	if channel == "z-ai" {
+		return "zai"
 	}
+	return channel
+}
+
+func (b *clineChannelBody) observe(_ string, data []byte) error {
 	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return nil
+	}
 	if bytes.Equal(data, []byte("[DONE]")) {
 		b.done = true
-		return
+		return nil
 	}
 	var chunk struct {
 		clineRoutingMetadata
@@ -202,16 +190,21 @@ func (b *clineChannelBody) observe(line []byte) {
 			Message clineRoutingMetadata `json:"message"`
 		} `json:"choices"`
 	}
-	if json.Unmarshal(data, &chunk) != nil {
-		return // Observation is advisory; the existing stream parser owns errors.
+	if err := json.Unmarshal(data, &chunk); err != nil {
+		return err
 	}
 	// The first frame wins: a later frame repeating the same value changes
 	// nothing, and one that disagrees would be reporting a second attempt.
 	if b.servedModel == "" && chunk.Model != "" {
 		b.servedModel = chunk.Model
 	}
-	remember := func(m clineRoutingMetadata) {
-		if actual := m.channel(); actual != "" {
+	remember := func(m clineRoutingMetadata) error {
+		actual, err := m.channel()
+		if err != nil {
+			b.actual = ""
+			return err
+		}
+		if actual != "" {
 			b.actual = actual
 		}
 		// canonicalSlug names the upstream model. It is set on the same routing
@@ -219,12 +212,20 @@ func (b *clineChannelBody) observe(line []byte) {
 		if slug := m.ProviderMetadata.Gateway.Routing.CanonicalSlug; slug != "" {
 			b.upstreamModel = slug
 		}
+		return nil
 	}
-	remember(chunk.clineRoutingMetadata)
+	if err := remember(chunk.clineRoutingMetadata); err != nil {
+		return err
+	}
 	for _, choice := range chunk.Choices {
-		remember(choice.Message)
-		remember(choice.Delta)
+		if err := remember(choice.Message); err != nil {
+			return err
+		}
+		if err := remember(choice.Delta); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (b *clineChannelBody) report() {
@@ -232,6 +233,9 @@ func (b *clineChannelBody) report() {
 		return
 	}
 	b.reported = true
+	if b.decoder.Finish() != nil {
+		b.incomplete = true
+	}
 	// No target means pinning is off. There is then no verdict to give - the
 	// request was never pinned - and the observed channel is still recorded by
 	// the caller, so reporting one here would only be noise.
@@ -241,14 +245,7 @@ func (b *clineChannelBody) report() {
 	status := "unverified"
 	if b.done && !b.incomplete && b.actual != "" {
 		status = "mismatch"
-		actual, target := b.actual, b.target
-		if actual == "z-ai" {
-			actual = "zai"
-		}
-		if target == "z-ai" {
-			target = "zai"
-		}
-		if actual == target {
+		if canonicalClineChannel(b.actual) == canonicalClineChannel(b.target) {
 			status = "matched"
 		}
 	}

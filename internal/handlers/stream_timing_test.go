@@ -52,12 +52,13 @@ func TestStreamTimingSeparatesEnvelopeContentAndEnd(t *testing.T) {
 				}
 				time.Sleep(time.Second)
 				frame := "data: " + content.event + "\r\n\r\n"
-				write(frame[:len(frame)-1])
+				// CR alone terminates a line; omit the whole blank line.
+				write(frame[:len(frame)-2])
 				if !w.timing.firstContent.IsZero() {
 					t.Fatal("incomplete SSE frame started the clock")
 				}
 				time.Sleep(time.Second)
-				write(frame[len(frame)-1:])
+				write(frame[len(frame)-2:])
 				time.Sleep(10 * time.Second)
 				write("data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":600,\"reasoning_tokens\":100}}\n\ndata: {\"type\":\"message_stop\"}\n\n")
 				time.Sleep(2 * time.Second)

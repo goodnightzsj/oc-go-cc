@@ -30,16 +30,12 @@ func channelUpstream(t *testing.T) http.HandlerFunc {
 // - reading it earlier yields "" for every request, which looks like a platform
 // that does not report a channel at all.
 func TestClinePassReportsTheServingChannel(t *testing.T) {
-	for _, pinEnabled := range []bool{true, false} {
-		name := "pinning off"
-		if pinEnabled {
-			name = "pinning on"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, target := range []string{"deepseek", "private"} {
+		t.Run(target, func(t *testing.T) {
 			p, _ := clinePassTestProvider(t, channelUpstream(t))
 			cfg := p.atomic.Get()
-			cfg.ClinePass.ChannelPinEnabled = pinEnabled
-			cfg.ClinePass.ChannelPin = "deepseek"
+			cfg.ClinePass.ChannelPinEnabled = false
+			cfg.ClinePass.ChannelPin = target
 			model := config.ModelConfig{Provider: "cline-pass", ModelID: "cline-pass/deepseek-v4.1-flash"}
 
 			t.Run("Execute", func(t *testing.T) {

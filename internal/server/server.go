@@ -210,12 +210,16 @@ func (s *Server) Fallback() *router.FallbackHandler {
 	return s.fallback
 }
 
-// StartChannelProbe starts the ClinePass channel-pin probe. It returns at once
-// when pinning is off, and a failed probe never affects a request.
+// StartChannelProbe starts independent diagnostics; disabled rounds are skipped
+// and a failed probe never affects request policy or health.
 func (s *Server) StartChannelProbe(ctx context.Context) {
 	if s.clinePass != nil {
 		s.clinePass.Start(ctx)
 	}
+}
+
+func (s *Server) ChannelDiagnostics() provider.ChannelDiagnosticsSnapshot {
+	return s.clinePass.ChannelDiagnostics()
 }
 
 // Start serves until Shutdown closes the listener. The application owns signals

@@ -194,8 +194,7 @@ func (w *responsesHTTPWriter) finish() error {
 			return nil
 		}
 		w.commit(http.StatusOK, "application/json")
-		_, err := w.ResponseWriter.Write(w.body.Bytes())
-		return err
+		return w.writeBody()
 	}
 	if w.stream != nil {
 		err := w.stream.Finish()
@@ -224,10 +223,22 @@ func (w *responsesHTTPWriter) finish() error {
 		return err
 	}
 	w.commit(http.StatusOK, "application/json")
-	if err := json.NewEncoder(w.ResponseWriter).Encode(response); err != nil {
+	w.body.Reset()
+	if err := json.NewEncoder(&w.body).Encode(response); err != nil {
+		return fmt.Errorf("write Responses output: %w", err)
+	}
+	if err := w.writeBody(); err != nil {
 		return fmt.Errorf("write Responses output: %w", err)
 	}
 	return nil
+}
+
+func (w *responsesHTTPWriter) writeBody() error {
+	n, err := w.ResponseWriter.Write(w.body.Bytes())
+	if err == nil && n != w.body.Len() {
+		return io.ErrShortWrite
+	}
+	return err
 }
 
 func writeResponsesError(w http.ResponseWriter, status int, message string) {

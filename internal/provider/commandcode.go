@@ -56,11 +56,7 @@ func (p *CommandCodeProvider) Execute(ctx context.Context, req *types.MessageReq
 		return nil, fmt.Errorf("read commandcode response: %w", err)
 	}
 	if core.ModelWireFormat(p, model) == core.WireFormatAnthropic {
-		var response types.MessageResponse
-		if err := json.Unmarshal(raw, &response); err != nil || response.Type != "message" {
-			return nil, fmt.Errorf("invalid commandcode Messages response")
-		}
-		return &core.ExecuteResult{Body: raw, KeyHint: client.KeyHintOf(body), ResponseModel: response.Model}, nil
+		return anthropicResult(raw, client.KeyHintOf(body))
 	}
 	if core.ModelWireFormat(p, model) == core.WireFormatOpenAIResponses {
 		return responsesResult(ctx, raw, model, client.KeyHintOf(body))
@@ -139,10 +135,10 @@ func (p *CommandCodeProvider) request(ctx context.Context, req *types.MessageReq
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer func() { _ = resp.Body.Close() }()
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		if err != nil {
-			return nil, fmt.Errorf("read commandcode error (HTTP %d): %w", resp.StatusCode, err)
-		}
 		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(body), RetryAfter: resp.Header.Get("Retry-After")}
+		if err != nil {
+			return nil, fmt.Errorf("read commandcode error: %w: %w", err, apiErr)
+		}
 		return nil, apiErr
 	}
 	if p.capture != nil {

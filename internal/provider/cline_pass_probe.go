@@ -3,22 +3,29 @@ package provider
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/routatic/proxy/internal/catalog"
 	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/internal/site"
 	"github.com/routatic/proxy/internal/sse"
+	"github.com/routatic/proxy/internal/transformer"
 )
 
 // Cline routes a model through one of two pipelines, each with its own pin
@@ -26,11 +33,8 @@ import (
 // providerOptions.gateway.only and runs on Vercel AI Gateway, the direct one
 // reads the top-level provider.only and runs on OpenRouter.
 //
-// The gateway never says which pipeline served a request, and the two do not
-// share a channel list, so a single probe cannot answer for both. The proxy's
-// own send path already writes both fields for exactly this reason; the probe
-// has to ask each separately, because the question is which of the two is still
-// being read.
+// These are independent diagnostic experiments, not enabled request policies.
+// A match on either path cannot establish an enforcement contract for Cline.
 //
 // They also behave differently, which is what makes separating them worth the
 // extra request: measured on 2026-10-18 with 6 repeats per pin, the planner
@@ -45,6 +49,73 @@ const (
 var probePipelines = []string{pipelinePlanner, pipelineDirect}
 
 const probeInterval = 6 * time.Hour
+const maxProbeModels = 3
+
+var errProbeResponseTooLarge = errors.New("probe response exceeds 64 KiB")
+
+// ChannelProbeResult is a safe metadata projection, never a response or error body.
+type ChannelProbeResult struct {
+	Model         string    `json:"model"`
+	Pipeline      string    `json:"pipeline"`
+	Verdict       string    `json:"verdict"`
+	Reason        string    `json:"reason,omitempty"`
+	Baseline      string    `json:"baseline,omitempty"`
+	Target        string    `json:"target,omitempty"`
+	Actual        string    `json:"actual,omitempty"`
+	CanonicalSlug string    `json:"canonical_slug,omitempty"`
+	Status        int       `json:"status"`
+	Endpoint      string    `json:"endpoint"`
+	KeyHint       string    `json:"key_hint"`
+	CheckedAt     time.Time `json:"checked_at"`
+	ExpiresAt     time.Time `json:"expires_at"`
+}
+
+type ChannelDiagnosticsSnapshot struct {
+	Enabled             bool                 `json:"enabled"`
+	EnforcementVerified bool                 `json:"enforcement_verified"`
+	Results             []ChannelProbeResult `json:"results"`
+}
+
+// ChannelDiagnostics reads existing results; it never starts a paid probe.
+func (p *ClinePassProvider) ChannelDiagnostics() ChannelDiagnosticsSnapshot {
+	cfg := p.atomic.Get()
+	result := ChannelDiagnosticsSnapshot{Enabled: cfg.ClinePass.ChannelProbeEnabled, Results: []ChannelProbeResult{}}
+	if !result.Enabled {
+		return result
+	}
+	p.probeMu.Lock()
+	defer p.probeMu.Unlock()
+	if p.recentProbeScope == clineProbeScope(cfg) {
+		result.Results = append(result.Results, p.probeResults...)
+	}
+	return result
+}
+
+// Caller holds probeMu; endpoint/key changes invalidate both kinds of evidence.
+func (p *ClinePassProvider) setProbeScope(scope [32]byte) {
+	if scope != p.recentProbeScope {
+		p.recentProbeModels, p.probeResults = nil, nil
+		p.recentProbeScope = scope
+	}
+}
+
+func (p *ClinePassProvider) recordProbeResult(cfg *config.Config, result ChannelProbeResult) {
+	p.probeMu.Lock()
+	defer p.probeMu.Unlock()
+	current := p.atomic.Get()
+	scope := clineProbeScope(cfg)
+	if !current.ClinePass.ChannelProbeEnabled || scope != clineProbeScope(current) {
+		return // A completed old round cannot publish evidence for a changed configuration.
+	}
+	p.setProbeScope(scope)
+	p.probeResults = slices.DeleteFunc(p.probeResults, func(r ChannelProbeResult) bool {
+		return r.Model == result.Model && r.Pipeline == result.Pipeline
+	})
+	p.probeResults = append([]ChannelProbeResult{result}, p.probeResults...)
+	if limit := maxProbeModels * len(probePipelines); len(p.probeResults) > limit {
+		p.probeResults = p.probeResults[:limit]
+	}
+}
 
 // probeOutputTokens must clear the reasoning budget. Small values make a
 // reasoning model return "empty response content" with HTTP 500, which would be
@@ -93,14 +164,12 @@ func (p *ClinePassProvider) runChannelPinProbe(ctx context.Context) {
 	if cfg == nil {
 		return
 	}
-	keys := cfg.ClinePass.EffectiveAPIKeys()
+	keys := cfg.ProviderAPIKeys(p.Name())
 	if len(keys) == 0 {
 		return
 	}
-	// The probe is a request against a paid quota. A pinned configuration is
-	// the only reason to spend it.
-	if !cfg.ClinePass.ChannelPinEnabled {
-		slog.Debug("cline-pass channel pin probe skipped: pinning is off")
+	if !cfg.ClinePass.ChannelProbeEnabled {
+		slog.Debug("cline-pass channel pin probe skipped: diagnostics are off")
 		return
 	}
 
@@ -125,15 +194,66 @@ func (p *ClinePassProvider) runChannelPinProbe(ctx context.Context) {
 	wg.Wait()
 }
 
-// clinePassProbeModels lists the models to probe.
-//
-// It asks the platform for its own roster rather than reading cfg.Models or the
-// overrides. Both were wrong on the deployment this was written for: cfg.Models
-// held only CommandCode entries, and the ClinePass model ids arrived through
-// model_overrides, so a config scan found nothing to probe and the loop
-// silently did no work. The roster endpoint is the same source the model picker
-// uses, so it cannot disagree with what the platform actually serves.
+func clineProbeScope(cfg *config.Config) [32]byte {
+	data, _ := json.Marshal(append([]string{cfg.ClinePass.BaseURL}, cfg.ProviderAPIKeys("cline-pass")...))
+	return sha256.Sum256(data)
+}
+
+func (p *ClinePassProvider) rememberProbeModel(cfg *config.Config, model string) {
+	if model == "" {
+		return
+	}
+	p.probeMu.Lock()
+	defer p.probeMu.Unlock()
+	scope := clineProbeScope(cfg)
+	if scope != clineProbeScope(p.atomic.Get()) {
+		return // A delayed request must not rewind the current evidence scope.
+	}
+	p.setProbeScope(scope)
+	p.recentProbeModels = slices.DeleteFunc(p.recentProbeModels, func(id string) bool { return id == model })
+	p.recentProbeModels = append([]string{model}, p.recentProbeModels...)
+	if len(p.recentProbeModels) > maxProbeModels {
+		p.recentProbeModels = p.recentProbeModels[:maxProbeModels]
+	}
+}
+
+// Prefer recently requested and explicitly configured models (including
+// overrides); use the public roster only when neither identifies a target.
 func (p *ClinePassProvider) clinePassProbeModels(ctx context.Context, cfg *config.Config) []string {
+	p.probeMu.Lock()
+	var ids []string
+	if p.recentProbeScope == clineProbeScope(cfg) {
+		ids = slices.Clone(p.recentProbeModels)
+	}
+	p.probeMu.Unlock()
+	add := func(model config.ModelConfig) {
+		if client.Provider(model) == p.Name() && model.ModelID != "" && !slices.Contains(ids, model.ModelID) && len(ids) < maxProbeModels {
+			ids = append(ids, model.ModelID)
+		}
+	}
+	for _, entries := range []map[string]config.ModelConfig{cfg.ModelOverrides, cfg.Models} {
+		names := make([]string, 0, len(entries))
+		for name := range entries {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			add(entries[name])
+		}
+	}
+	names := make([]string, 0, len(cfg.Fallbacks))
+	for name := range cfg.Fallbacks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		for _, model := range cfg.Fallbacks[name] {
+			add(model)
+		}
+	}
+	if len(ids) > 0 {
+		return ids
+	}
 	// Two steps, and both are required: ProviderModelEndpoint returns the
 	// platform's API endpoint, and SiteModelsURL derives the list URL from it.
 	// Passing the API endpoint straight to FetchSiteModels silently queries
@@ -149,17 +269,14 @@ func (p *ClinePassProvider) clinePassProbeModels(ctx context.Context, cfg *confi
 		slog.Debug("cline-pass channel pin probe skipped: model list unavailable", "error", err)
 		return nil
 	}
-	ids := make([]string, 0, len(models))
+	ids = make([]string, 0, len(models))
 	for _, model := range models {
 		if id := strings.TrimSpace(model.ID); id != "" {
 			ids = append(ids, id)
 		}
 	}
 	sort.Strings(ids)
-	// A platform-wide probe costs one request per model. If the roster is large,
-	// probing all of it every cycle spends quota to answer a question one model
-	// answers just as well: the gateway applies the same policy to the platform.
-	const maxProbeModels = 3
+	// Bound paid samples; these results never stand for untested models.
 	if len(ids) > maxProbeModels {
 		ids = ids[:maxProbeModels]
 	}
@@ -182,66 +299,118 @@ func (p *ClinePassProvider) clinePassProbeModels(ctx context.Context, cfg *confi
 //
 // Missing alternatives leave the experiment inconclusive, not locked.
 func (p *ClinePassProvider) probeOneModel(ctx context.Context, cfg *config.Config, keys []string, model, pipeline string) {
-	status, text, err := p.sendProbe(ctx, cfg, keys[0], model, pipeline, nil)
+	sel, err := p.reserveKeyChecked(p.Name(), keys)
 	if err != nil {
-		p.logProbe(model, pipeline, "unknown", 0, "transport: "+err.Error())
+		slog.Debug("cline-pass channel pin probe skipped: no usable key")
+		return
+	}
+	defer sel.Release() // Diagnostics neither reset nor penalize request health.
+	endpoint := ""
+	if u, err := url.Parse(cfg.ClinePass.BaseURL); err == nil {
+		endpoint = u.Scheme + "://" + u.Host + u.EscapedPath()
+	}
+	var baseline, target, actual, canonical string
+	logProbe := func(model, pipeline, verdict string, status int, reason, detail string) {
+		checked := time.Now().UTC()
+		p.recordProbeResult(cfg, ChannelProbeResult{Model: model, Pipeline: pipeline, Verdict: verdict, Reason: reason,
+			Baseline: baseline, Target: target, Actual: actual, CanonicalSlug: canonical,
+			Status: status, Endpoint: endpoint, KeyHint: sel.KeyHint(), CheckedAt: checked, ExpiresAt: checked.Add(probeInterval)})
+		slog.Info("cline-pass channel pin probe", "model", model, "pipeline", pipeline,
+			"verdict", verdict, "status", status, "reason", reason, "detail", detail,
+			"baseline", baseline, "target", target, "actual", actual, "canonical_slug", canonical,
+			"endpoint", endpoint, "key_hint", sel.KeyHint(), "checked_at", checked,
+			"expires_at", checked.Add(probeInterval), "enforcement_verified", false,
+			"session_policy", "fresh-per-request", "capabilities", "none")
+	}
+	status, text, err := p.sendProbe(ctx, cfg, sel.Key(), model, pipeline, nil)
+	if err != nil {
+		logProbe(model, pipeline, "unknown", status, probeReadReason(status, err), "probe request: "+err.Error())
 		return
 	}
 	if reason := accountRefusal(status, text); reason != "" {
-		p.logProbe(model, pipeline, "unknown", status, reason)
+		logProbe(model, pipeline, "unknown", status, "account_refused", reason)
 		return
 	}
 	if status < 200 || status >= 300 {
 		// A refusal of the unpinned request is not about pinning at all.
-		p.logProbe(model, pipeline, "unknown", status, "unpinned baseline refused: "+candidateList(text))
+		logProbe(model, pipeline, "unknown", status, "upstream_refused", "unpinned baseline refused: "+candidateList(text))
 		return
 	}
 	if reason := probeStreamFailure(text); reason != "" {
-		p.logProbe(model, pipeline, "unknown", status, "unpinned baseline failed: "+reason)
+		logProbe(model, pipeline, "unknown", status, "stream_failed", "unpinned baseline failed: "+reason)
 		return
 	}
 
-	served, candidates := routingSummary(text)
-	if served == "" {
-		p.logProbe(model, pipeline, "unknown", status, "unpinned baseline reported no serving channel")
-		return
-	}
-	target := firstCandidateOtherThan(candidates, served)
-	if target == "" {
-		p.logProbe(model, pipeline, "unknown", status, "baseline served by "+served+"; no alternative channel reported")
-		return
-	}
-
-	pinStatus, pinText, err := p.sendProbe(ctx, cfg, keys[0], model, pipeline, []string{target})
+	served, slug, candidates, err := routingSummary(text)
 	if err != nil {
-		p.logProbe(model, pipeline, "unknown", 0, "transport on pinned request: "+err.Error())
+		logProbe(model, pipeline, "unknown", status, "invalid_metadata", "unpinned baseline has invalid routing metadata")
+		return
+	}
+	baseline, actual, canonical = served, served, slug
+	if served == "" {
+		logProbe(model, pipeline, "unknown", status, "missing_channel", "unpinned baseline reported no serving channel")
+		return
+	}
+	target = firstCandidateOtherThan(candidates, served)
+	if target == "" {
+		logProbe(model, pipeline, "unknown", status, "no_alternative", "baseline served by "+served+"; no alternative channel reported")
+		return
+	}
+
+	// A failed variant must not display the baseline's model/channel as its result.
+	actual, canonical = "", ""
+	pinStatus, pinText, err := p.sendProbe(ctx, cfg, sel.Key(), model, pipeline, []string{target})
+	if err != nil {
+		logProbe(model, pipeline, "unknown", pinStatus, probeReadReason(pinStatus, err), "pinned probe request: "+err.Error())
 		return
 	}
 	if clineRoutingRejected(pinStatus, pinText) {
-		p.logProbe(model, pipeline, "unsupported", pinStatus, "upstream rejects client-supplied routing fields")
+		logProbe(model, pipeline, "unsupported", pinStatus, "", "upstream rejects client-supplied routing fields")
 		return
 	}
 	if reason := accountRefusal(pinStatus, pinText); reason != "" {
-		p.logProbe(model, pipeline, "unknown", pinStatus, reason)
+		logProbe(model, pipeline, "unknown", pinStatus, "account_refused", reason)
 		return
 	}
 	if pinStatus < 200 || pinStatus >= 300 {
-		p.logProbe(model, pipeline, "unknown", pinStatus, "pinned request refused: "+candidateList(pinText))
+		logProbe(model, pipeline, "unknown", pinStatus, "upstream_refused", "pinned request refused: "+candidateList(pinText))
 		return
 	}
 	if reason := probeStreamFailure(pinText); reason != "" {
-		p.logProbe(model, pipeline, "unknown", pinStatus, "pin to "+target+" failed in-stream: "+reason)
+		logProbe(model, pipeline, "unknown", pinStatus, "stream_failed", "pin to "+target+" failed in-stream: "+reason)
 		return
 	}
-	pinned, _ := routingSummary(pinText)
-	switch {
-	case pinned == target:
-		p.logProbe(model, pipeline, "matched", pinStatus, "pin to "+target+" honoured in this sample (baseline was "+served+"); enforcement unverified")
-	case pinned == "":
-		p.logProbe(model, pipeline, "unknown", pinStatus, "pinned request reported no routing metadata")
-	default:
-		p.logProbe(model, pipeline, "ignored", pinStatus, "pin to "+target+" ignored; still served by "+pinned)
+	pinned, slug, _, err := routingSummary(pinText)
+	if err != nil {
+		logProbe(model, pipeline, "unknown", pinStatus, "invalid_metadata", "pinned request has invalid routing metadata")
+		return
 	}
+	actual, canonical = pinned, slug
+	switch {
+	case canonicalClineChannel(pinned) == canonicalClineChannel(target):
+		logProbe(model, pipeline, "matched", pinStatus, "", "pin to "+target+" honoured in this sample (baseline was "+served+"); enforcement unverified")
+	case pinned == "":
+		logProbe(model, pipeline, "unknown", pinStatus, "missing_channel", "pinned request reported no routing metadata")
+	default:
+		logProbe(model, pipeline, "ignored", pinStatus, "", "pin to "+target+" ignored; still served by "+pinned)
+	}
+}
+
+func probeReadReason(status int, err error) string {
+	var timeout net.Error
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout()) {
+		return "timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "cancelled"
+	}
+	if errors.Is(err, errProbeResponseTooLarge) {
+		return "response_too_large"
+	}
+	if status != 0 {
+		return "stream_failed"
+	}
+	return "transport_error"
 }
 
 // probeStreamFailure rejects failed or incomplete evidence without logging vendor messages.
@@ -279,6 +448,10 @@ func probeStreamFailure(text string) string {
 	if decoder.Finish() != nil || !done {
 		return "incomplete SSE response"
 	}
+	completion := transformer.StreamTermination{Format: core.WireFormatOpenAIChat, RequireDone: true}
+	if completion.Feed([]byte(text)) != nil || completion.Finish() != nil {
+		return "invalid or incomplete Chat stream"
+	}
 	return ""
 }
 
@@ -288,7 +461,7 @@ func probeStreamFailure(text string) string {
 // having made no decision at all.
 func firstCandidateOtherThan(candidates []string, baseline string) string {
 	for _, candidate := range candidates {
-		if candidate != baseline {
+		if canonicalClineChannel(candidate) != canonicalClineChannel(baseline) {
 			return candidate
 		}
 	}
@@ -310,6 +483,7 @@ func (p *ClinePassProvider) sendProbe(ctx context.Context, cfg *config.Config, k
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Accept", "text/event-stream")
 	client.SetProviderHeaders(req, p.Name())
+	req.Header.Set("X-Session-Id", uuid.NewString())
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -322,15 +496,14 @@ func (p *ClinePassProvider) sendProbe(ctx context.Context, cfg *config.Config, k
 		return resp.StatusCode, "", err
 	}
 	if len(body) > maxProbeBody {
-		return resp.StatusCode, "", errors.New("probe response exceeds 64 KiB")
+		return resp.StatusCode, "", errProbeResponseTooLarge
 	}
 	return resp.StatusCode, string(body), nil
 }
 
 // probeBody builds one pipeline's probe request.
 //
-// Each pipeline carries only its own field. Sending both at once - which the
-// proxy's real send path does, deliberately - cannot tell which one the
+// Each pipeline carries only its own field. Sending both at once cannot tell which one the
 // rejection came from, and the two are separate questions with separate
 // answers: an account can have one pipeline honouring the pin and the other
 // discarding it.
@@ -354,18 +527,18 @@ func probeBody(model, pipeline string, only []string) map[string]any {
 	return body
 }
 
-// routingSummary reads the serving channel and the candidate list out of an SSE
+// routingSummary reads the serving channel, canonical model and candidates out of an SSE
 // body. The gateway sends the block in the last chunk before [DONE], so this
 // scans the whole body.
 //
 // It reads the same block the per-request observer does, through the same
 // struct, so the two cannot disagree about which field names the channel.
-func routingSummary(text string) (served string, candidates []string) {
+func routingSummary(text string) (served, canonical string, candidates []string, err error) {
 	seen := map[string]bool{}
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "data:") {
-			continue
+	var decoder sse.Decoder
+	err = decoder.Feed([]byte(text), func(_ string, payload []byte) error {
+		if string(bytes.TrimSpace(payload)) == "[DONE]" {
+			return nil
 		}
 		var chunk struct {
 			clineRoutingMetadata
@@ -374,29 +547,51 @@ func routingSummary(text string) (served string, candidates []string) {
 				Message clineRoutingMetadata `json:"message"`
 			} `json:"choices"`
 		}
-		if json.Unmarshal([]byte(strings.TrimSpace(line[len("data:"):])), &chunk) != nil {
-			continue
+		if err := json.Unmarshal(payload, &chunk); err != nil {
+			return err
 		}
-		remember := func(m clineRoutingMetadata) {
+		remember := func(m clineRoutingMetadata) error {
 			routing := m.ProviderMetadata.Gateway.Routing
-			if v := m.channel(); v != "" {
+			v, err := m.channel()
+			if err != nil {
+				return err
+			}
+			if v != "" {
 				served = v
+			}
+			if routing.CanonicalSlug != "" {
+				canonical = routing.CanonicalSlug
 			}
 			for _, candidate := range routing.FallbacksAvailable {
 				candidate = strings.TrimSpace(candidate)
-				if candidate != "" && !seen[candidate] {
-					seen[candidate] = true
+				identity := canonicalClineChannel(candidate)
+				if candidate != "" && !seen[identity] {
+					seen[identity] = true
 					candidates = append(candidates, candidate)
 				}
 			}
+			return nil
 		}
-		remember(chunk.clineRoutingMetadata)
+		if err := remember(chunk.clineRoutingMetadata); err != nil {
+			return err
+		}
 		for _, choice := range chunk.Choices {
-			remember(choice.Message)
-			remember(choice.Delta)
+			if err := remember(choice.Message); err != nil {
+				return err
+			}
+			if err := remember(choice.Delta); err != nil {
+				return err
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return "", "", nil, err
 	}
-	return served, candidates
+	if err := decoder.Finish(); err != nil {
+		return "", "", nil, err
+	}
+	return served, canonical, candidates, nil
 }
 
 // accountRefusal reports why a response is an account-level refusal rather than
@@ -440,20 +635,6 @@ func errorCode(text string) string {
 		return ""
 	}
 	return payload.Error.Code
-}
-
-// logProbe emits one line per model per pipeline per run.
-//
-// It is deliberately Info, not Warn: a verdict of "ignored" is the steady state
-// on an affected account, and a warning that repeats every six hours forever is
-// a warning nobody reads. The signal a reader needs is in the field.
-func (p *ClinePassProvider) logProbe(model, pipeline, verdict string, status int, detail string) {
-	slog.Info("cline-pass channel pin probe",
-		"model", model,
-		"pipeline", pipeline,
-		"verdict", verdict,
-		"status", status,
-		"detail", detail)
 }
 
 // candidateList extracts the channel list a rejection may carry. This is the

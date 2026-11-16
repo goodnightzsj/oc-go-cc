@@ -40,6 +40,7 @@ async function checks() {
   let postCount = 0, mode = 'ok', resolvePost;
   fetch = async (url, init) => {
     if (url === '/api/sites') return ok({sites:[],active:''});
+    if (url === '/api/cline-pass/channels') return ok({capture_enabled:false,channels:{}});
     if (url === '/api/proxy/config' && !init) {
       if (mode === 'refresh-failed') throw new Error('private-sentinel');
       return ok(stored);
@@ -137,12 +138,17 @@ async function checks() {
   // the settings tab's independence - a chain write is scoped to fallbacks and
   // must not carry a pending settings edit with it.
   FallbackModule.chains = {default:[{model_id:'first'}]};
-  fetch = async()=>{await new Promise(resolve => {resolvePost = resolve});return ok({})};
+  let fallbackPosts = 0;
+  fetch = async()=>{
+    if (++fallbackPosts === 1) await new Promise(resolve => {resolvePost = resolve});
+    return ok({});
+  };
   const fallbackSave = FallbackModule.persist();
   FallbackModule.chains.default.push({model_id:'second'});
   const secondWrite = FallbackModule.persist();
   resolvePost(); await fallbackSave; await secondWrite;
   assert.equal(FallbackModule.chains.default.length,2);
+  assert.equal(fallbackPosts,2,'queued state must be written after the first acknowledgement');
   fetch = async()=>failure(400,{code:'unknown_provider',message:'请选择已有平台。',saved:false});
   FallbackModule.removeModel(0);
   await FallbackModule.persist();

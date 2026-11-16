@@ -252,10 +252,7 @@ Press Ctrl+C to stop the server.`,
 				defer close(holidaysDone)
 				history.HolidayRefreshLoop(ctx, history.DefaultHolidayRefreshInterval, nil, logHolidayRefresh)
 			}()
-			// The ClinePass channel-pin probe reports whether the upstream still
-			// reads the pinning field. It is not a health check: a failed probe
-			// never fails a request, and the loop returns at once when pinning
-			// is off.
+			// Diagnostics have their own paid opt-in and never change routing or health.
 			srv.StartChannelProbe(ctx)
 			defer func() {
 				cancel()
@@ -293,13 +290,14 @@ Press Ctrl+C to stop the server.`,
 			if !headless {
 				// Start GUI server on port 3445.
 				guiSrv = gui.New(gui.Options{
-					Metrics:          srv.Metrics(),
-					AtomicConfig:     atomicCfg,
-					ProxyPort:        cfg.Port,
-					Storage:          srv.Storage(),
-					CatalogDir:       resolveCatalogDir(configPath),
-					CatalogSourceURL: cfg.Catalog.SourceURL,
-					CircuitStates:    srv.Fallback().GetCircuitStates,
+					Metrics:            srv.Metrics(),
+					AtomicConfig:       atomicCfg,
+					ProxyPort:          cfg.Port,
+					Storage:            srv.Storage(),
+					CatalogDir:         resolveCatalogDir(configPath),
+					CatalogSourceURL:   cfg.Catalog.SourceURL,
+					CircuitStates:      srv.Fallback().GetCircuitStates,
+					ChannelDiagnostics: srv.ChannelDiagnostics,
 				})
 				guiSrv.SetProxyRunning(true)
 

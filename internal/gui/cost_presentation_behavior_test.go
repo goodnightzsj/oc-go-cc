@@ -26,6 +26,7 @@ async function checks() {
 func TestAllPlatformCostPresentation(t *testing.T) {
 	runPlatformBehavior(t, platformBehaviorDOMScript+`
 async function checks() {
+  activeTab = 'analytics';
   const get = id => document.getElementById(id);
   for (const lang of ['en', 'zh']) {
     currentLang = lang;

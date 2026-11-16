@@ -47,7 +47,7 @@ func (p *OpenRouterProvider) Execute(ctx context.Context, req *types.MessageRequ
 	}
 	var response types.ChatCompletionResponse
 	if err := json.Unmarshal(raw, &response); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+		return nil, &core.ResponseError{Err: fmt.Errorf("failed to unmarshal response: %w", err)}
 	}
 	converted, err := transformer.NewResponseTransformer().TransformResponse(&response, model.ModelID)
 	if err != nil {

@@ -3,6 +3,8 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/pkg/types"
@@ -64,6 +67,47 @@ func TestCommandCodeWireFormatSelection(t *testing.T) {
 	} {
 		if got := core.ModelWireFormat(p, tc.model).String(); got != tc.want {
 			t.Errorf("%s (wire_format=%q) = %s, want %s", tc.model.ModelID, tc.model.WireFormat, got, tc.want)
+		}
+	}
+}
+
+func TestCommandCodeTruncatedRejectionRetainsMetadata(t *testing.T) {
+	for _, format := range []string{"openai", "anthropic", "responses"} {
+		for _, stream := range []bool{false, true} {
+			for _, status := range []int{401, 429, 503} {
+				t.Run(fmt.Sprintf("%s/stream=%t/status=%d", format, stream, status), func(t *testing.T) {
+					upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						_, _ = io.Copy(io.Discard, r.Body)
+						w.Header().Set("Content-Length", "1000")
+						w.Header().Set("Retry-After", "120")
+						w.WriteHeader(status)
+						_, _ = io.WriteString(w, "synthetic rejection")
+					}))
+					defer upstream.Close()
+					p, pool := selectedTestProvider("commandcode", upstream.URL)
+					_, _, req := cancellationTestProvider("")
+					req.MaxTokens = 16
+					model := config.ModelConfig{Provider: "commandcode", ModelID: "synthetic", WireFormat: format}
+					var err error
+					if stream {
+						var body io.ReadCloser
+						body, err = p.Stream(t.Context(), req, model)
+						if body != nil {
+							_ = body.Close()
+							t.Fatal("rejection returned a successful stream")
+						}
+					} else {
+						_, err = p.Execute(t.Context(), req, model)
+					}
+					var apiErr *client.APIError
+					if !errors.As(err, &apiErr) || apiErr.StatusCode != status || apiErr.RetryAfter != "120" || apiErr.Body != "synthetic rejection" || !errors.Is(err, io.ErrUnexpectedEOF) {
+						t.Fatalf("known rejection metadata or read error lost: %v", err)
+					}
+					if pool.stateFor("synthetic-a").inFlight != 0 {
+						t.Fatal("failed rejection read leaked selection")
+					}
+				})
+			}
 		}
 	}
 }

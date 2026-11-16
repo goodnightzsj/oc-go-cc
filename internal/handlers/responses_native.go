@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 
 	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
@@ -125,12 +124,7 @@ func (w *responseWriter) writeNativeError(message string) error {
 		return nil
 	}
 	data, _ := json.Marshal(map[string]any{"type": "error", "code": "upstream_error", "message": message, "param": nil})
-	return w.writeIO(w.writeTimeout, func() error {
-		if _, err := fmt.Fprintf(w.ResponseWriter, "\n\nevent: error\ndata: %s\n\n", data); err != nil {
-			return err
-		}
-		return http.NewResponseController(w.ResponseWriter).Flush()
-	})
+	return w.writeErrorEvent(data)
 }
 
 func nativeResponseUsage(raw []byte) *types.Usage {

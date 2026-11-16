@@ -256,6 +256,10 @@ func (h *FallbackHandler) AllowAttempt(model config.ModelConfig) func(context.Co
 // provider should be skipped for this request. ctx is the client's context, not
 // the per-attempt timeout: disconnects must not penalize a healthy upstream.
 func (h *FallbackHandler) recordAttempt(ctx context.Context, model config.ModelConfig, err error, cb *CircuitBreaker, generation uint64) bool {
+	var source *core.ResponseError
+	if errors.As(err, &source) {
+		err = source.Err // Delivery errors joined for history must not vote on source health.
+	}
 	blockProvider := IsUsageLimitError(err) || errors.Is(err, core.ErrAllKeysCooling)
 	if IsAuthError(err) {
 		// An auth failure says the credential is bad. Whether that should skip
@@ -322,7 +326,7 @@ func (h *FallbackHandler) ExecuteWithFallback(
 
 		provider := client.Provider(model)
 		if blockedProviders[provider] {
-			h.logger.Info("provider usage limit reached, skipping model", "provider", provider, "model", model.ModelID)
+			h.logger.Info("provider unavailable for this request, skipping model", "provider", provider, "model", model.ModelID)
 			continue
 		}
 
@@ -389,9 +393,11 @@ func (h *FallbackHandler) ExecuteWithFallback(
 		// A provider-wide usage limit makes its remaining models pointless.
 		// Skip them, but continue if the chain includes another provider.
 		lastErr = err
+		if blockProvider {
+			blockedProviders[provider] = true
+		}
 		if IsUsageLimitError(err) {
 			usageLimitErr = err
-			blockedProviders[provider] = true
 			h.logger.Warn("provider usage limit reached, trying another provider",
 				"provider", provider,
 				"model", model.ModelID,
@@ -411,7 +417,6 @@ func (h *FallbackHandler) ExecuteWithFallback(
 					"model", model.ModelID,
 					"error", err,
 				)
-				blockedProviders[provider] = true
 				authErr = err
 				authAttempted = i + 1
 				continue
@@ -560,7 +565,12 @@ func IsNonRetryableRequestError(err error) bool {
 		// about the credential or the model's availability and stays retryable.
 		return false
 	}
-	// A body that cannot be parsed at all never reached a model's judgement.
+	// A source response parse failure is not malformed client input.
+	var responseErr *core.ResponseError
+	if errors.As(err, &responseErr) {
+		return false
+	}
+	// An unclassified local body parse failure still rejects the request.
 	var syntaxErr *json.SyntaxError
 	if errors.As(err, &syntaxErr) {
 		return true

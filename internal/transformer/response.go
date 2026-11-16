@@ -33,6 +33,30 @@ func NewResponseTransformer() *ResponseTransformer {
 	return &ResponseTransformer{}
 }
 
+// DecodeAnthropicResponse validates a complete native result without rewriting
+// its bytes or rejecting extensions that only the upstream understands.
+func DecodeAnthropicResponse(body []byte) (_ *types.MessageResponse, err error) {
+	var envelope struct {
+		types.MessageResponse
+		Error json.RawMessage `json:"error"`
+	}
+	defer func() {
+		if err != nil {
+			err = &core.ResponseError{Err: err, Usage: envelope.Usage}
+		}
+	}()
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, fmt.Errorf("invalid upstream Messages response: %w", err)
+	}
+	if err := upstreamJSONError("Anthropic", envelope.Error); err != nil {
+		return nil, err
+	}
+	if envelope.Type != "message" || envelope.StopReason == "" {
+		return nil, fmt.Errorf("upstream Messages response is not a completed message")
+	}
+	return &envelope.MessageResponse, nil
+}
+
 // TransformResponse converts an OpenAI ChatCompletionResponse to Anthropic MessageResponse.
 func (t *ResponseTransformer) TransformResponse(
 	openaiResp *types.ChatCompletionResponse,
@@ -116,6 +140,9 @@ func (t *ResponseTransformer) transformContent(msg types.ChatMessage) ([]types.C
 		inputJSON := json.RawMessage(`{}`)
 		if tc.Function.Arguments != "" {
 			inputJSON = json.RawMessage(tc.Function.Arguments)
+			if !json.Valid(inputJSON) {
+				return nil, fmt.Errorf("invalid Chat Completions function arguments")
+			}
 		}
 
 		blocks = append(blocks, types.ContentBlock{

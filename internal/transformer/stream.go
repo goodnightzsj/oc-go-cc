@@ -427,10 +427,9 @@ func (h *StreamHandler) processChatEvent(
 
 			// Send argument delta (if any) — whether new or continuation.
 			if tc.Function.Arguments != "" {
-				if len(tool.arguments)+len(tc.Function.Arguments) > 1<<20 {
-					return fmt.Errorf("chat tool arguments exceed 1 MiB")
+				if err := tool.appendArguments(tc.Function.Arguments); err != nil {
+					return err
 				}
-				tool.arguments += tc.Function.Arguments
 				delta := types.Delta{
 					Type:        "input_json_delta",
 					PartialJSON: tc.Function.Arguments,
@@ -451,8 +450,8 @@ func (h *StreamHandler) processChatEvent(
 	// Handle finish reason
 	if choice.FinishReason != "" {
 		for _, tool := range startedToolCalls {
-			if choice.FinishReason != "length" && tool.arguments != "" && !json.Valid([]byte(tool.arguments)) {
-				return fmt.Errorf("incomplete Chat Completions function arguments")
+			if err := tool.finishArguments(choice.FinishReason); err != nil {
+				return err
 			}
 		}
 		// Close any open content block (reasoning or text)
@@ -500,7 +499,22 @@ func (h *StreamHandler) processChatEvent(
 
 type chatToolState struct {
 	index     int
-	arguments string
+	arguments strings.Builder
+}
+
+func (t *chatToolState) appendArguments(delta string) error {
+	if t.arguments.Len()+len(delta) > 1<<20 {
+		return fmt.Errorf("chat tool arguments exceed 1 MiB")
+	}
+	t.arguments.WriteString(delta)
+	return nil
+}
+
+func (t *chatToolState) finishArguments(reason string) error {
+	if reason != "length" && t.arguments.Len() != 0 && !json.Valid([]byte(t.arguments.String())) {
+		return fmt.Errorf("incomplete Chat Completions function arguments")
+	}
+	return nil
 }
 
 // ChatUsageToAnthropic preserves absence and maps cache/reasoning counts once.
@@ -722,8 +736,8 @@ func (h *StreamHandler) ProxyResponsesStream(
 	}
 	indices := make([]int, 0, len(state.tools))
 	for _, tool := range state.tools {
-		if state.stopReason != "max_tokens" && !json.Valid([]byte(tool.arguments)) {
-			return fmt.Errorf("incomplete Responses function arguments")
+		if err := tool.finishArguments(state.stopReason == "max_tokens"); err != nil {
+			return err
 		}
 		if !tool.closed {
 			indices = append(indices, tool.index)
@@ -785,6 +799,11 @@ func (h *StreamHandler) processResponsesSSELine(
 	if chunk.Type == "response.completed" || chunk.Type == "response.done" || chunk.Type == "response.incomplete" {
 		if chunk.Response != nil {
 			for _, item := range chunk.Response.Output {
+				if item.Type == "function_call" {
+					if err := state.functionItem(w, item, true); err != nil {
+						return err
+					}
+				}
 				if item.Type == "reasoning" || item.Type == "message" {
 					if err := state.visibleItem(w, item, true); err != nil {
 						return err
@@ -871,39 +890,7 @@ func (h *StreamHandler) processResponsesSSELine(
 		if item.Type != "function_call" {
 			return nil
 		}
-		tool := state.tools[item.ID]
-		if tool == nil {
-			if item.ID == "" || item.CallID == "" || item.Name == "" {
-				return fmt.Errorf("incomplete Responses function identity")
-			}
-			if err := state.closeText(w); err != nil {
-				return err
-			}
-			tool = &responsesToolState{index: state.nextIndex}
-			state.nextIndex++
-			state.tools[item.ID] = tool
-			if err := writeSSEEvent(w, types.MessageEvent{Type: "content_block_start", Index: &tool.index, ContentBlock: &types.ContentBlock{Type: "tool_use", ID: item.CallID, Name: item.Name, Input: json.RawMessage(`{}`)}}); err != nil {
-				return ErrClientDisconnected
-			}
-		}
-		if item.Arguments != "" && item.Arguments != tool.arguments {
-			if tool.closed || !bytes.HasPrefix([]byte(item.Arguments), []byte(tool.arguments)) {
-				return fmt.Errorf("responses function arguments changed after streaming")
-			}
-			if err := tool.appendArguments(w, item.Arguments[len(tool.arguments):]); err != nil {
-				return err
-			}
-		}
-		if chunk.Type == "response.output_item.done" && !tool.closed {
-			if item.Status != "incomplete" && !json.Valid([]byte(tool.arguments)) {
-				return fmt.Errorf("invalid completed Responses function arguments")
-			}
-			if err := writeContentBlockStop(w, tool.index); err != nil {
-				return ErrClientDisconnected
-			}
-			tool.closed = true
-		}
-		flusher.Flush()
+		return state.functionItem(w, *item, chunk.Type == "response.output_item.done")
 	}
 	if chunk.Type == "response.function_call_arguments.delta" {
 		tool := state.tools[chunk.ItemID]
@@ -920,22 +907,29 @@ func (h *StreamHandler) processResponsesSSELine(
 }
 
 type responsesToolState struct {
-	index     int
-	arguments string
-	closed    bool
+	index int
+	responsesFunctionState
+}
+
+// The conversion cap is not a source/native protocol limit.
+func (t *responsesToolState) checkDelta(delta string) error {
+	if t.arguments.Len()+len(delta) > 1<<20 {
+		return fmt.Errorf("Responses function arguments exceed 1 MiB")
+	}
+	return nil
 }
 
 func (t *responsesToolState) appendArguments(w http.ResponseWriter, delta string) error {
 	if delta == "" {
 		return nil
 	}
-	if len(t.arguments)+len(delta) > 1<<20 {
-		return fmt.Errorf("Responses function arguments exceed 1 MiB")
+	if err := t.checkDelta(delta); err != nil {
+		return err
 	}
 	if err := writeSSEEvent(w, types.MessageEvent{Type: "content_block_delta", Index: &t.index, Delta: &types.Delta{Type: "input_json_delta", PartialJSON: delta}}); err != nil {
 		return ErrClientDisconnected
 	}
-	t.arguments += delta
+	t.arguments.WriteString(delta)
 	return nil
 }
 
@@ -948,6 +942,45 @@ type responsesStreamState struct {
 	visibleParts  map[responsesVisibleKey]*responsesVisibleState
 	activeVisible *responsesVisibleState
 	refused       bool
+}
+
+func (s *responsesStreamState) functionItem(w http.ResponseWriter, item types.ResponsesOutput, done bool) error {
+	tool := s.tools[item.ID]
+	if tool == nil {
+		tool = &responsesToolState{index: s.nextIndex}
+	}
+	delta, err := tool.snapshotDelta(item)
+	if err != nil {
+		return err
+	}
+	if err := tool.checkDelta(delta); err != nil {
+		return err
+	}
+	if s.tools[item.ID] == nil {
+		if err := s.closeText(w); err != nil {
+			return err
+		}
+		tool.callID, tool.name = item.CallID, item.Name
+		if err := writeSSEEvent(w, types.MessageEvent{Type: "content_block_start", Index: &tool.index, ContentBlock: &types.ContentBlock{Type: "tool_use", ID: item.CallID, Name: item.Name, Input: json.RawMessage(`{}`)}}); err != nil {
+			return ErrClientDisconnected
+		}
+		s.nextIndex++
+		s.tools[item.ID] = tool
+	}
+	if err := tool.appendArguments(w, delta); err != nil {
+		return err
+	}
+	if done && !tool.closed {
+		if err := tool.finishArguments(item.Status == "incomplete" || s.stopReason == "max_tokens"); err != nil {
+			return err
+		}
+		if err := writeContentBlockStop(w, tool.index); err != nil {
+			return ErrClientDisconnected
+		}
+		tool.closed = true
+	}
+	w.(http.Flusher).Flush()
+	return nil
 }
 
 func (s *responsesStreamState) closeText(w http.ResponseWriter) error {

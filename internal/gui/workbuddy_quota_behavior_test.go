@@ -8,6 +8,7 @@ func TestWorkBuddyQuotaBehavior(t *testing.T) {
 
 const workBuddyQuotaBehaviorScript = platformBehaviorDOMScript + `
 async function checks() {
+  activeTab = 'quota';
   const get = id => document.getElementById(id);
   const totals = {requests:3,errors:1,prompt_tokens:100,completion_tokens:20,total_tokens:120,cache_hit_tokens:40,cache_miss_tokens:60,credits:0,credit_samples:2,avg_latency_ms:250,avg_tokens_per_second:5};
   const report = {

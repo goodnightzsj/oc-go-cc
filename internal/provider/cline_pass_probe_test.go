@@ -52,15 +52,15 @@ func probeUpstream(t *testing.T, roster []string, completion http.HandlerFunc) *
 	return srv
 }
 
-// probeConfig points the platform at a test server, with pinning on.
+// probeConfig opts into diagnostics without enabling the strict request policy.
 func probeConfig(t *testing.T, srv *httptest.Server) *config.Config {
 	t.Helper()
 	return &config.Config{
 		ClinePass: config.ClinePassConfig{
-			APIKey:            "cline-key",
-			BaseURL:           srv.URL + "/api/v1/chat/completions",
-			ChannelPinEnabled: true,
-			ChannelPin:        "deepseek",
+			APIKey:              "cline-key",
+			BaseURL:             srv.URL + "/api/v1/chat/completions",
+			ChannelProbeEnabled: true,
+			ChannelPin:          "deepseek",
 		},
 	}
 }
@@ -97,7 +97,7 @@ func routingFrame(served string, candidates ...string) string {
 		quoted = append(quoted, `"`+c+`"`)
 	}
 	block := `{"finalProvider":"` + served + `","fallbacksAvailable":[` + strings.Join(quoted, ",") + `]}`
-	return "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n" +
+	return "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n" +
 		"data: {\"choices\":[{\"delta\":{\"provider_metadata\":{\"gateway\":{\"routing\":" + block + "}}}}]}\n\n" +
 		"data: [DONE]\n\n"
 }
@@ -340,7 +340,7 @@ func TestChannelPinProbeReadsTheDirectPipelineSpellings(t *testing.T) {
 		pinnedTo = directPin(body)
 		mu.Unlock()
 		// resolvedProvider, not finalProvider.
-		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"provider_metadata\":{\"gateway\":{\"routing\":{\"resolvedProvider\":\"nebius\"}}}}}]}\n\n"+
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"provider_metadata\":{\"gateway\":{\"routing\":{\"resolvedProvider\":\"nebius\"}}}},\"finish_reason\":\"stop\"}]}\n\n"+
 			"data: [DONE]\n\n")
 	})
 	got := probeVerdict(t, probeConfig(t, srv))
@@ -426,6 +426,9 @@ func TestChannelPinProbeRequiresSuccessfulEvidence(t *testing.T) {
 		{"SSE error without code", 200, "data: {\"error\":{\"message\":\"synthetic failure\"}}\n\n" + routingFrame("nebius"), "unknown"},
 		{"multiline SSE error", 200, "data: {\"error\":\ndata: {\"code\":\"synthetic_failure\"}}\n\n" + routingFrame("nebius"), "unknown"},
 		{"unterminated stream", 200, strings.TrimSuffix(routingFrame("nebius"), "data: [DONE]\n\n"), "unknown"},
+		{"unavailable candidate rejected", 400, `{"error":{"message":"No allowed providers"}}`, "unknown"},
+		{"unavailable candidate silently falls back", 200, routingFrame("minimax"), "ignored"},
+		{"conflicting channel fields", 200, strings.Replace(routingFrame("nebius"), `"finalProvider":"nebius"`, `"finalProvider":"nebius","resolvedProvider":"private"`, 1), "unknown"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := probeUpstream(t, []string{"synthetic"}, func(w http.ResponseWriter, r *http.Request) {
@@ -449,12 +452,26 @@ func TestChannelPinProbeRequiresSuccessfulEvidence(t *testing.T) {
 	}
 }
 
+func TestChannelPinProbeNonexistentTargetIsNotEnforcementEvidence(t *testing.T) {
+	srv := probeUpstream(t, []string{"synthetic"}, pinAwareUpstream(t, "minimax", []string{"minimax", "synthetic-nonexistent"}, false, func(body map[string]any) string {
+		if target := plannerPin(body); target != "" {
+			return target
+		}
+		return directPin(body)
+	}))
+	got := probeVerdict(t, probeConfig(t, srv))
+	if strings.Count(got, "verdict=ignored") != 2 || strings.Contains(got, "verdict=matched") || !strings.Contains(got, "pin to synthetic-nonexistent ignored") {
+		t.Fatalf("accepted nonexistent target cannot prove enforcement: %s", got)
+	}
+}
+
 func TestChannelPinProbeDisabledSendsNothing(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("disabled probe sent a request") }))
 	t.Cleanup(srv.Close)
 	cfg := probeConfig(t, srv)
-	cfg.ClinePass.ChannelPinEnabled = false
-	if got := probeVerdict(t, cfg); !strings.Contains(got, "pinning is off") {
+	cfg.ClinePass.ChannelPinEnabled = true
+	cfg.ClinePass.ChannelProbeEnabled = false
+	if got := probeVerdict(t, cfg); !strings.Contains(got, "diagnostics are off") {
 		t.Fatalf("missing skip reason: %s", got)
 	}
 }

@@ -52,8 +52,17 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Check formatting
+        run: bash scripts/check-go-format.sh
+
       - name: Test
         run: go test ./... -v -race
+
+      - name: Verify delivery failure handling
+        run: node scripts/delivery.test.mjs --dist
+
+      - name: Verify native WorkBuddy updater
+        run: WB2A_TEST_PORTABLE=0 bash ops/workbuddy/update.test.sh
 
       - name: Build (sanity check)
         run: go build -o /dev/null ./cmd/routatic-proxy
@@ -159,31 +168,7 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          mkdir -p dist
-
-          LDFLAGS="-X main.version=${VERSION}"
-
-          # Define target platforms (bash 3 compatible — macOS default)
-          TARGETS="darwin-amd64:darwin/amd64 darwin-arm64:darwin/arm64 linux-amd64:linux/amd64 linux-arm64:linux/arm64 windows-amd64:windows/amd64 windows-arm64:windows/arm64"
-
-          for TARGET in $TARGETS; do
-            NAME="${TARGET%%:*}"
-            PAIR="${TARGET##*:}"
-            GOOS="${PAIR%/*}"
-            GOARCH="${PAIR#*/}"
-            EXT=""
-            [ "$GOOS" = "windows" ] && EXT=".exe"
-
-            echo "Building ${NAME}..."
-            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
-              go build -ldflags "$LDFLAGS -s -w" \
-                -o "dist/routatic-proxy_${NAME}${EXT}" \
-                ./cmd/routatic-proxy
-          done
-
-          echo ""
-          echo "Built binaries:"
-          ls -lh dist/
+          make dist-binaries VERSION="$VERSION"
 
       - name: Stage Windows binaries for signing
         if: ${{ steps.signing.outputs.enabled == 'true' }}
@@ -226,12 +211,6 @@ jobs:
           cd dist
           sha256sum routatic-proxy_* > checksums.txt
           cat checksums.txt
-
-      - name: Build CGO-enabled binary (for DMG)
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          CGO_ENABLED=1 go build -tags darwin -ldflags "-X main.version=${VERSION}" -o bin/routatic-proxy ./cmd/routatic-proxy
 
       - name: Build macOS DMG
         env:

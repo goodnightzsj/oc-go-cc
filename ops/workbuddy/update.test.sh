@@ -40,6 +40,13 @@ case "${0##*/}" in
         [[ "${*: -1}" == workbuddy2api.service ]] || exit 9
         if [[ "$1" == restart ]]; then
             touch "$WB_TEST_CASE/restarted"
+            if [[ -n "${WB_TEST_FAIL_LOG:-}" ]] && ! cmp -s "$WB2A_REPO/bin/wb2api" "$WB_TEST_CASE/original.binary"; then
+                logs=("$WB2A_STATE_DIR"/runs/update.*/update.log)
+                [[ ${#logs[@]} == 1 ]]
+                mv "${logs[0]}" "$WB_TEST_CASE/update.before-failure.log"
+                mkdir "${logs[0]}"
+            fi
+            if [[ -n "${WB_TEST_FAIL_ROLLBACK:-}" ]] && cmp -s "$WB2A_REPO/bin/wb2api" "$WB_TEST_CASE/original.binary"; then exit 7; fi
             if [[ -n "${WB_TEST_FAIL_SERVICE:-}" ]] && ! cmp -s "$WB2A_REPO/bin/wb2api" "$WB_TEST_CASE/original.binary"; then exit 1; fi
             if [[ -n "${WB_TEST_SIGNAL:-}" ]] && ! cmp -s "$WB2A_REPO/bin/wb2api" "$WB_TEST_CASE/original.binary"; then
                 kill -"$WB_TEST_SIGNAL" "$PPID"
@@ -103,7 +110,7 @@ assert() { "$@" || { printf 'FAIL: %s\n' "$*" >&2; exit 1; }; }
 new_case() {
     export WB_TEST_CASE="$TEST_ROOT/$1"
     mkdir "$WB_TEST_CASE"
-    unset WB_TEST_FAIL_GO WB_TEST_FAIL_SERVICE WB_TEST_FAIL_HEALTH WB_TEST_BAD_IDENTITY WB_TEST_WAIT WB_TEST_SIGNAL WB2A_REF GOCACHE GOMODCACHE
+    unset WB_TEST_FAIL_GO WB_TEST_FAIL_SERVICE WB_TEST_FAIL_HEALTH WB_TEST_BAD_IDENTITY WB_TEST_WAIT WB_TEST_SIGNAL WB_TEST_FAIL_LOG WB_TEST_FAIL_ROLLBACK WB2A_REF GOCACHE GOMODCACHE
     export WB2A_REPO="$WB_TEST_CASE/production" WB2A_STATE_DIR="$WB_TEST_CASE/state" WB2A_PATCH_FILE="$WB_TEST_CASE/local.patch"
     git init -q -b main "$WB_TEST_CASE/upstream"
     git -C "$WB_TEST_CASE/upstream" config user.name synthetic
@@ -270,6 +277,32 @@ unchanged
 assert cmp -s "$WB2A_STATE_DIR/current.manifest" "$WB_TEST_CASE/previous.manifest"
 assert grep -q 'rollback verified' "$WB_TEST_CASE/run.log"
 printf 'PASS: failure restores the previous manifest as well as the binary\n'
+
+for failure in service signal rollback; do
+    new_case "log-failure-$failure"
+    # A pre-existing manifest must survive cleanup even when diagnostic I/O fails.
+    mkdir -p "$WB2A_STATE_DIR"
+    printf 'previous-manifest\n' > "$WB2A_STATE_DIR/current.manifest"
+    cp "$WB2A_STATE_DIR/current.manifest" "$WB_TEST_CASE/previous.manifest"
+    export WB_TEST_FAIL_LOG=1
+    case "$failure" in
+        service) export WB_TEST_FAIL_SERVICE=1; expected=1 ;;
+        signal) export WB_TEST_SIGNAL=TERM; expected=143 ;;
+        rollback) export WB_TEST_FAIL_SERVICE=1 WB_TEST_FAIL_ROLLBACK=1; expected=1 ;;
+    esac
+    code=0
+    update || code=$?
+    assert test "$code" = "$expected"
+    unchanged
+    assert cmp -s "$WB2A_STATE_DIR/current.manifest" "$WB_TEST_CASE/previous.manifest"
+    assert test "$(grep -c '^restart ' "$WB_TEST_CASE/service.calls")" = 2
+    if [[ "$failure" == rollback ]]; then
+        assert grep -q 'CRITICAL: rollback could not be verified' "$WB_TEST_CASE/run.log"
+    else
+        assert grep -q 'rollback verified' "$WB_TEST_CASE/run.log"
+    fi
+done
+printf 'PASS: diagnostic I/O failure cannot skip rollback or replace the original exit status\n'
 
 if [[ "$PORTABLE" != 1 ]]; then
     new_case concurrent

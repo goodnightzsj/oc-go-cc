@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/routatic/proxy/internal/client"
@@ -24,7 +25,11 @@ import (
 // that does not exist answers the same 401 from the same gateway.
 type ClinePassProvider struct {
 	baseProvider
-	capture *debug.CaptureLogger
+	capture           *debug.CaptureLogger
+	probeMu           sync.Mutex
+	recentProbeModels []string
+	recentProbeScope  [32]byte
+	probeResults      []ChannelProbeResult
 }
 
 func NewClinePassProvider(atomic *config.AtomicConfig, capture *debug.CaptureLogger) *ClinePassProvider {
@@ -38,9 +43,19 @@ func NewClinePassProvider(atomic *config.AtomicConfig, capture *debug.CaptureLog
 
 func (p *ClinePassProvider) Name() string { return "cline-pass" }
 
-// Start begins the periodic channel-pin probe. It is a no-op unless pinning is
-// enabled, because the probe spends a real request against a metered quota and
-// there is nothing to explain when pinning is off.
+func (p *ClinePassProvider) ValidateRoute() error {
+	return clineRoutePolicy(p.atomic.Get())
+}
+
+func clineRoutePolicy(cfg *config.Config) error {
+	if cfg.ClinePass.ChannelPinEnabled {
+		return &client.APIError{StatusCode: http.StatusUnprocessableEntity,
+			Body: `{"error":{"code":"channel_pin_unsupported","message":"ClinePass cannot guarantee the required upstream channel. Disable channel_pin_enabled only if automatic routing is acceptable."}}`}
+	}
+	return nil
+}
+
+// Start begins the periodic channel diagnostic, only with separate paid opt-in.
 //
 // It is called once from main rather than from the constructor so that a
 // provider built in a test never starts a background loop.
@@ -220,6 +235,12 @@ func (p *ClinePassProvider) streamIdleTimeout(model config.ModelConfig) time.Dur
 // unchanged on the non-streaming path.
 func (p *ClinePassProvider) request(ctx context.Context, req *types.MessageRequest, model config.ModelConfig, stream bool) (io.ReadCloser, error) {
 	cfg := p.atomic.Get()
+	p.rememberProbeModel(cfg, model.ModelID)
+	// Cline offers no verified enforcement contract. Never turn a required pin
+	// into an automatic route or promote a successful probe into permission.
+	if err := clineRoutePolicy(cfg); err != nil {
+		return nil, err
+	}
 	sel, err := p.reserveKeyChecked(p.Name(), cfg.ProviderAPIKeys(p.Name()))
 	if err != nil {
 		return nil, err
@@ -231,34 +252,8 @@ func (p *ClinePassProvider) request(ctx context.Context, req *types.MessageReque
 		// Cline API documents `stream` as defaulting to true, so relying on the
 		// default would send every request down the streaming path by accident.
 		converted.Stream = &stream
-		// Cline has direct and planner pipelines. Send the restriction to both;
-		// only (unlike order) excludes other channels when the gateway honors it.
-		out := struct {
-			*types.ChatCompletionRequest
-			Provider        *clineChannelOptions `json:"provider,omitempty"`
-			ProviderOptions *struct {
-				Gateway clineChannelOptions `json:"gateway"`
-			} `json:"providerOptions,omitempty"`
-		}{ChatCompletionRequest: converted}
-		if cfg.ClinePass.ChannelPinEnabled {
-			target := cfg.ClinePass.ChannelPin
-			direct, planner := target, target
-			if target == "zai" || target == "z-ai" {
-				direct, planner = "z-ai", "zai"
-			}
-			// The capability filter is per model because it is a hard refusal,
-			// not a hint: vision is accepted for deepseek-v4.1-flash-1017 and
-			// rejected for deepseek-v4-pro. A model absent from the map sends
-			// no `has` at all, which is the behaviour every existing deployment
-			// already has.
-			has := cfg.ClinePass.ChannelPinCapabilities[model.ModelID]
-			out.Provider = &clineChannelOptions{Only: []string{direct}, Has: has}
-			out.ProviderOptions = &struct {
-				Gateway clineChannelOptions `json:"gateway"`
-			}{Gateway: clineChannelOptions{Only: []string{planner}, Has: has}}
-		}
 		var payload []byte
-		payload, err = json.Marshal(out)
+		payload, err = json.Marshal(converted)
 		if err == nil {
 			return p.send(ctx, cfg, sel, payload, stream)
 		}
@@ -289,15 +284,15 @@ func (p *ClinePassProvider) send(ctx context.Context, cfg *config.Config, sel *s
 		defer func() { _ = resp.Body.Close() }()
 		apiErr := &client.APIError{StatusCode: resp.StatusCode, RetryAfter: resp.Header.Get("Retry-After")}
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		apiErr.Body = clineErrorBody(resp, body)
 		// Cline also uses 403 for unsupported routing fields, which says nothing
 		// about the credential. Release neutrally without erasing concurrent health.
 		if err != nil || !clineRoutingRejected(resp.StatusCode, string(body)) {
 			sel.Settle(apiErr)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("read cline-pass error (HTTP %d): %w", resp.StatusCode, err)
+			return nil, fmt.Errorf("read cline-pass error: %w: %w", err, apiErr)
 		}
-		apiErr.Body = clineErrorBody(resp, body)
 		return nil, apiErr
 	}
 	ownSelectedResponse(ctx, resp, sel)

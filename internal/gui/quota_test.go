@@ -22,7 +22,7 @@ func quotaTestServer(t *testing.T, upstream string, keys ...string) *Server {
 	cfg.OpenCodeGo.BaseURL = upstream + "/chat/completions"
 	cfg.OpenCodeGo.APIKeys = keys
 	// The allowance-table fetch must never leave the test process; point it at
-	// a dead local port so ensureModelLimits fails fast and stays empty.
+	// a dead local port if a test starts the background refresh loop.
 	return &Server{atomicCfg: config.NewAtomicConfig(cfg, ""), modelLimitsURL: []string{"http://127.0.0.1:1/no"}}
 }
 
@@ -168,6 +168,7 @@ func TestHandleQuotaAttachesModelLimits(t *testing.T) {
 
 	srv := quotaTestServer(t, upstream.URL, "sk-key")
 	srv.modelLimitsURL = []string{upstream.URL + "/docs"}
+	srv.ensureModelLimits(t.Context())
 
 	resp := getQuota(t, srv, "")
 	if resp.ModelLimits == nil || len(resp.ModelLimits.Models) != 4 {
@@ -198,10 +199,11 @@ func TestHandleQuotaAttachesModelLimits(t *testing.T) {
 		t.Errorf("docs hits after cached response = %d, want 1", docsHits.Load())
 	}
 
-	// Stale (>24h) limits refresh on the next uncached request.
+	// The service-owned refresh replaces stale (>24h) limits, not the handler.
 	srv.limitsMu.Lock()
 	srv.modelLimits.FetchedAt = time.Now().Add(-25 * time.Hour)
 	srv.limitsMu.Unlock()
+	srv.ensureModelLimits(t.Context())
 	_ = getQuota(t, srv, "?refresh=1")
 	if docsHits.Load() != 2 {
 		t.Errorf("docs hits after stale refresh = %d, want 2", docsHits.Load())
@@ -250,6 +252,7 @@ func TestHandleQuotaMonthlyModelUsage(t *testing.T) {
 	srv := quotaTestServer(t, upstream.URL, "sk-key")
 	srv.modelLimitsURL = []string{upstream.URL + "/docs"}
 	srv.storage = db
+	srv.ensureModelLimits(t.Context())
 
 	resp := getQuota(t, srv, "")
 	// Only models with ledger entries appear; the other plan models stay out.

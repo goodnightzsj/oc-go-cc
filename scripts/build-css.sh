@@ -22,10 +22,19 @@ if [[ ! -x "${TAILWIND}" ]]; then
   exit 1
 fi
 
-CSS_TEMP=$(mktemp "${OUTPUT}.tmp.XXXXXX")
+source "${ROOT_DIR}/scripts/go-common.sh"
+HASHER="$(hash_cmd)"
+INPUT_FINGERPRINT="$(source_fingerprint "${ROOT_DIR}" "${HASHER}" inputs)"
+# Stage beside assets on the same filesystem, outside go:embed assets/*.
+CSS_TEMP=$(mktemp "${ROOT_DIR}/internal/gui/.compiled-tailwind.XXXXXX")
 trap 'rm -f -- "${CSS_TEMP}"' EXIT
 "${TAILWIND}" -c "${CONFIG}" -i "${INPUT}" -o "${CSS_TEMP}" -m
 test -s "${CSS_TEMP}"
+POST_FINGERPRINT="$(source_fingerprint "${ROOT_DIR}" "${HASHER}" inputs)"
+if [[ "${POST_FINGERPRINT}" != "${INPUT_FINGERPRINT}" ]]; then
+  echo "[build-css] inputs changed during CSS compilation; retry from stable sources" >&2
+  exit 1
+fi
 chmod 644 "${CSS_TEMP}"
 mv -- "${CSS_TEMP}" "${OUTPUT}"
 

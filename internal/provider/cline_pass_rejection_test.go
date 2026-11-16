@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -69,7 +70,7 @@ func TestClineRoutingRejectionDoesNotCoolKeys(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 					t.Error(err)
 				}
-				if _, pinned := request["providerOptions"]; pinned {
+				if len(used) <= 2 {
 					w.WriteHeader(http.StatusForbidden)
 					_, _ = io.WriteString(w, clineRoutingRejectionFixture)
 					return
@@ -82,7 +83,7 @@ func TestClineRoutingRejectionDoesNotCoolKeys(t *testing.T) {
 			cfg := *p.atomic.Get()
 			cfg.ClinePass.APIKey = ""
 			cfg.ClinePass.APIKeys = []string{"synthetic-first", "synthetic-second"}
-			cfg.ClinePass.ChannelPinEnabled = true
+			cfg.ClinePass.ChannelPinEnabled = false
 			cfg.ClinePass.ChannelPin = "deepseek"
 			p.atomic.ApplyLoaded(&cfg)
 			model := config.ModelConfig{Provider: p.Name(), ModelID: "cline-pass/deepseek-v4.1-flash-1017"}
@@ -144,5 +145,36 @@ func TestClineRejectionStillCoolsRejectedCredentials(t *testing.T) {
 				t.Fatal("account rejections no longer cool keys")
 			}
 		})
+	}
+}
+
+func TestClineTruncatedRejectionPreservesMetadata(t *testing.T) {
+	for _, status := range []int{401, 429, 503} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("http=%d/stream=%t", status, stream), func(t *testing.T) {
+				const partial = `{"error":{"message":"synthetic refusal"`
+				p, _ := clinePassTestProvider(t, func(w http.ResponseWriter, r *http.Request) {
+					_, _ = io.Copy(io.Discard, r.Body)
+					w.Header().Set("Content-Length", "1000")
+					w.Header().Set("Retry-After", "19")
+					w.WriteHeader(status)
+					_, _ = io.WriteString(w, partial)
+				})
+				model := config.ModelConfig{Provider: p.Name(), ModelID: "synthetic"}
+				var err error
+				if stream {
+					_, err = p.Stream(t.Context(), clinePassRequest(), model)
+				} else {
+					_, err = p.Execute(t.Context(), clinePassRequest(), model)
+				}
+				var apiErr *client.APIError
+				if !errors.As(err, &apiErr) || apiErr.StatusCode != status || apiErr.RetryAfter != "19" || apiErr.Body != partial || !errors.Is(err, io.ErrUnexpectedEOF) {
+					t.Fatalf("truncated refusal lost HTTP/body/retry/read error: %v", err)
+				}
+				if p.keys.states["cline-key"].inFlight != 0 {
+					t.Fatal("rejection leaked key reservation")
+				}
+			})
+		}
 	}
 }

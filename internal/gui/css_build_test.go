@@ -13,7 +13,7 @@ func TestCSSBuildFailureStopsPackaging(t *testing.T) {
 	if err != nil {
 		t.Skip("make unavailable; CSS build contract not checked")
 	}
-	for _, target := range []string{"build", "build-ui", "dist"} {
+	for _, target := range []string{"build", "build-ui", "dist", "dist-binaries"} {
 		t.Run(target, func(t *testing.T) {
 			root := t.TempDir()
 			write := func(name, text string, mode os.FileMode) {
@@ -25,13 +25,15 @@ func TestCSSBuildFailureStopsPackaging(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			for _, name := range []string{"Makefile", "scripts/build-css.sh"} {
+			for _, name := range []string{"Makefile", "scripts/build-css.sh", "scripts/go-common.sh", "scripts/source-fingerprint.mjs"} {
 				data, err := os.ReadFile(filepath.Join("../..", name))
 				if err != nil {
 					t.Fatal(err)
 				}
 				write(name, string(data), 0755)
 			}
+			write("cmd/fixture.go", "package main\n", 0644)
+			write("pkg/fixture.go", "package fixture\n", 0644)
 			compiler := "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n if [ \"$1\" = '-o' ]; then shift; printf 'partial CSS' > \"$1\"; fi\n shift\ndone\necho 'synthetic compiler failure' >&2\nexit 7\n"
 			write("node_modules/.bin/tailwindcss", compiler, 0755)
 			write("fake-bin/npx", compiler, 0755)

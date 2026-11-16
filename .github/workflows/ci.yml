@@ -35,18 +35,19 @@ jobs:
           make check-css
 
       - name: Check formatting
-        run: |
-          if [ -n "$(gofmt -l .)" ]; then
-            echo "The following files are not formatted:"
-            gofmt -l .
-            exit 1
-          fi
+        run: bash scripts/check-go-format.sh
 
       - name: Vet
         run: go vet ./...
 
       - name: Test
         run: go test ./... -v -race
+
+      - name: Verify delivery failure handling
+        run: node scripts/delivery.test.mjs --dist
+
+      - name: Verify native WorkBuddy updater
+        run: WB2A_TEST_PORTABLE=0 bash ops/workbuddy/update.test.sh
 
       - name: Build
         run: go build ./cmd/routatic-proxy

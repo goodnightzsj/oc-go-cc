@@ -51,6 +51,7 @@ func TestQuotaLocalUsageKeepsUnknownCostsAndAccountScope(t *testing.T) {
 			}
 			srv := quotaTestServer(t, upstream.URL, keys...)
 			srv.modelLimitsURL = []string{upstream.URL + "/docs"}
+			srv.ensureModelLimits(t.Context())
 			srv.storage = db
 			rec := httptest.NewRecorder()
 			srv.handleQuota(rec, httptest.NewRequest(http.MethodGet, "/api/quota", nil))

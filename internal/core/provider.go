@@ -131,6 +131,12 @@ type Provider interface {
 	Stream(ctx context.Context, req *types.MessageRequest, model config.ModelConfig) (io.ReadCloser, error)
 }
 
+// RoutePolicyValidator rejects a required routing policy before capacity or
+// health filtering can skip its provider. Validation must not perform I/O.
+type RoutePolicyValidator interface {
+	ValidateRoute() error
+}
+
 // ModelWireFormat keeps the sender and stream decoder on the same protocol.
 // Explicit model configuration takes precedence over provider inference.
 //

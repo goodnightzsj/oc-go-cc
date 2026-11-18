@@ -668,7 +668,24 @@ func validateModelConfig(label string, mc ModelConfig) error {
 	if NormalizeProvider(mc.Provider) == "cline-pass" && mc.WireFormat != "" && mc.WireFormat != "auto" && mc.WireFormat != "openai" {
 		return invalid(label+".wire_format", "cline_wire_format", "%s: cline-pass supports only the openai upstream wire format", label)
 	}
+	// ClinePass takes its billing pool from the model id's first segment and
+	// answers a bare name with 400 "invalid model format. Expected format:
+	// modelType/model". The field is sent verbatim, so a config entry without
+	// the prefix is only discovered on the failure path that uses it - a
+	// fallback, i.e. after the primary already failed - where the 400 hides the
+	// real cause. Catch it at load time instead.
+	if NormalizeProvider(mc.Provider) == "cline-pass" && !hasModelTypePrefix(mc.ModelID) {
+		return invalid(label+".model_id", "cline_model_id", "%s: cline-pass model_id %q must be written as \"modelType/model\" (for example \"cline-pass/deepseek-v4.1-flash\"); a bare name is rejected upstream with HTTP 400", label, mc.ModelID)
+	}
 	return nil
+}
+
+// hasModelTypePrefix reports whether id has the "modelType/model" shape the
+// ClinePass gateway requires. Both segments must be non-empty: the gateway
+// rejects "/model" and "model/" for the same reason it rejects a bare name.
+func hasModelTypePrefix(id string) bool {
+	modelType, model, ok := strings.Cut(id, "/")
+	return ok && modelType != "" && model != ""
 }
 
 // applySiteDefaults fills every unset endpoint and timeout from the value its

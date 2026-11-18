@@ -1399,3 +1399,35 @@ func TestKeyStrategyValidation(t *testing.T) {
 		}
 	}
 }
+
+// A ClinePass model id is sent verbatim and its first segment selects the
+// billing pool, so a bare name is a live 400 rather than a load error. The
+// place that surfaces it is a fallback entry, which only runs after the primary
+// already failed - the 400 then hides the real cause. Load-time validation is
+// the only point where the mistake is still cheap to see.
+func TestClinePassModelIDRequiresModelTypePrefix(t *testing.T) {
+	for _, tc := range []struct {
+		id      string
+		wantErr bool
+	}{
+		{"cline-pass/deepseek-v4.1-flash", false},
+		{"deepseek/deepseek-v4-pro", false},
+		{"deepseek-v4.1-flash-1017", true},
+		{"/deepseek-v4.1-flash", true},
+		{"cline-pass/", true},
+	} {
+		err := validateModelConfig(`fallbacks["default"][0]`, ModelConfig{Provider: "cline-pass", ModelID: tc.id})
+		if (err != nil) != tc.wantErr {
+			t.Errorf("validateModelConfig(cline-pass, %q) err=%v, wantErr=%v", tc.id, err, tc.wantErr)
+		}
+	}
+
+	// Other platforms keep sending the bare name; only ClinePass treats the
+	// first segment as a pool selector.
+	if err := validateModelConfig("models[\"default\"]", ModelConfig{Provider: "opencode-go", ModelID: "glm-5.2"}); err != nil {
+		t.Errorf("opencode-go bare model_id rejected: %v", err)
+	}
+	if err := validateModelConfig("fallbacks[\"default\"][0]", ModelConfig{Provider: "workbuddy", ModelID: "global:deepseek-v4.1-flash"}); err != nil {
+		t.Errorf("workbuddy realm-prefixed model_id rejected: %v", err)
+	}
+}

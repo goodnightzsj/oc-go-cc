@@ -110,7 +110,7 @@ assert() { "$@" || { printf 'FAIL: %s\n' "$*" >&2; exit 1; }; }
 new_case() {
     export WB_TEST_CASE="$TEST_ROOT/$1"
     mkdir "$WB_TEST_CASE"
-    unset WB_TEST_FAIL_GO WB_TEST_FAIL_SERVICE WB_TEST_FAIL_HEALTH WB_TEST_BAD_IDENTITY WB_TEST_WAIT WB_TEST_SIGNAL WB_TEST_FAIL_LOG WB_TEST_FAIL_ROLLBACK WB2A_REF GOCACHE GOMODCACHE
+    unset WB_TEST_FAIL_GO WB_TEST_FAIL_SERVICE WB_TEST_FAIL_HEALTH WB_TEST_BAD_IDENTITY WB_TEST_WAIT WB_TEST_SIGNAL WB_TEST_FAIL_LOG WB_TEST_FAIL_ROLLBACK WB2A_REF GOCACHE GOMODCACHE WB2A_KEEP_RUNS
     export WB2A_REPO="$WB_TEST_CASE/production" WB2A_STATE_DIR="$WB_TEST_CASE/state" WB2A_PATCH_FILE="$WB_TEST_CASE/local.patch"
     git init -q -b main "$WB_TEST_CASE/upstream"
     git -C "$WB_TEST_CASE/upstream" config user.name synthetic
@@ -157,6 +157,14 @@ failed_update() {
     unchanged
     assert test ! -f "$WB2A_STATE_DIR/current.manifest"
     assert test -d "$WB2A_STATE_DIR/runs"
+    # A failed candidate keeps nothing but its log: the clone and build output are
+    # reproducible and cost ~15 MB per attempt.
+    assert test -f "$WB2A_STATE_DIR/last-failure.log"
+    leftover=0
+    for dir in "$WB2A_STATE_DIR"/runs/update.*; do
+        if [[ -d "$dir" ]]; then leftover=$((leftover + 1)); fi
+    done
+    assert test "$leftover" = 0
 }
 
 new_case no_home
@@ -216,6 +224,22 @@ printf 'binary changed outside updater\n' >> "$WB2A_REPO/bin/wb2api"
 update
 assert test "$(wc -l < "$WB_TEST_CASE/go.calls" | tr -d ' ')" = 12
 printf 'PASS: success, repeated version, patch-only/upstream updates and binary-hash verification\n'
+
+new_case keep_runs
+export WB2A_KEEP_RUNS=2
+for step in 1 2 3; do
+    printf 'release %s\n' "$step" > "$WB_TEST_CASE/upstream/release$step.txt"
+    git -C "$WB_TEST_CASE/upstream" add .
+    git -C "$WB_TEST_CASE/upstream" commit -qm "release $step"
+    update
+done
+kept=0
+for dir in "$WB2A_STATE_DIR"/runs/update.*; do
+    if [[ -f "$dir/wb2api" ]]; then kept=$((kept + 1)); fi
+done
+assert test "$kept" = 2
+assert test ! -e "$WB2A_STATE_DIR/last-failure.log"
+printf 'PASS: only the newest successful runs are kept\n'
 
 new_case conflict
 printf 'upstream changed\n' > "$WB_TEST_CASE/upstream/feature.txt"

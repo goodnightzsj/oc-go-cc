@@ -14,9 +14,11 @@ REF=${WB2A_REF:-main}
 BUILD_TIMEOUT=${WB2A_BUILD_TIMEOUT:-900}
 HEALTH_ATTEMPTS=${WB2A_HEALTH_ATTEMPTS:-30}
 HEALTH_INTERVAL=${WB2A_HEALTH_INTERVAL:-1}
+KEEP_RUNS=${WB2A_KEEP_RUNS:-3}
 RUN=""
 NEEDS_ROLLBACK=0
 HAD_MANIFEST=0
+ROLLBACK_FAILED=0
 
 log() {
     printf '[wb-update] %s\n' "$*" >&2
@@ -31,6 +33,39 @@ log() {
 fail() { log "ERROR: $*"; exit 1; }
 run() { "$@" >> "$RUN/update.log" 2>&1; }
 digest() { sha256sum "$1" | cut -d ' ' -f 1; }
+
+# Keep the newest KEEP_RUNS successful deployments and drop everything else.
+# A run directory holds a full source clone plus the Go build output (~15 MB),
+# so an hourly timer that keeps every attempt fills the disk: 494 runs reached
+# 7.2 GB in 22 days. Only deployments are worth keeping - the source is
+# reproducible and the new binary already lives in the repo. The run in progress
+# is skipped so a success never deletes its own evidence.
+prune_runs() {
+    local keep=$KEEP_RUNS n=0 dir
+    while IFS= read -r dir; do
+        if [[ -z "$dir" ]]; then continue; fi
+        if [[ -f "$dir/wb2api" ]]; then
+            n=$((n + 1))
+            if (( n <= keep )); then continue; fi
+        fi
+        # The run in progress counts toward the budget above but is never removed.
+        if [[ "$dir" == "$RUN" ]]; then continue; fi
+        rm -rf -- "$dir"
+    done < <(ls -1dt "$STATE_DIR"/runs/update.* 2>/dev/null || true)
+}
+
+# A failed candidate keeps nothing but its log: the clone and build output are
+# reproducible, and the log is what an operator reads. Never called when the
+# rollback itself failed - that case keeps every artifact for inspection.
+prune_failed_run() {
+    [[ -n "$RUN" && -d "$RUN" ]] || return 0
+    if ! cp "$RUN/update.log" "$STATE_DIR/last-failure.log" 2>/dev/null; then
+        printf '[wb-update] ERROR: cannot preserve the failure log; keeping %s\n' "$RUN" >&2
+        return 0
+    fi
+    rm -rf -- "$RUN"
+    RUN=""
+}
 
 wait_for_health() {
     local attempt code
@@ -75,11 +110,20 @@ on_exit() {
         if rollback; then
             log "rollback verified: previous binary is active and healthy"
         else
+            ROLLBACK_FAILED=1
             log "CRITICAL: rollback could not be verified; inspect $RUN before any retry"
         fi
     fi
     if (( status != 0 )); then
-        log "update stopped (exit $status); candidate and diagnostics retained at ${RUN:-not-created}"
+        if (( ROLLBACK_FAILED )) || [[ -z "$RUN" ]]; then
+            log "update stopped (exit $status); candidate and diagnostics retained at ${RUN:-not-created}"
+        else
+            # Failed candidates are not kept: only the log is worth reading, and
+            # the clone plus build output is what filled the disk. Retention here
+            # is a single overwritten file, so a repeated failure cannot grow.
+            prune_failed_run
+            log "update stopped (exit $status); candidate removed, last log at $STATE_DIR/last-failure.log"
+        fi
     fi
     exit "$status"
 }
@@ -91,7 +135,7 @@ trap 'exit 143' TERM
 
 [[ "$REPO" == /* && "$REPO" != / ]] || fail "WB2A_REPO must be an absolute checkout path"
 [[ "$STATE_DIR" == /* && "$STATE_DIR" != / ]] || fail "WB2A_STATE_DIR must be an absolute dedicated directory"
-[[ "$BUILD_TIMEOUT" =~ ^[1-9][0-9]*$ && "$HEALTH_ATTEMPTS" =~ ^[1-9][0-9]*$ && "$HEALTH_INTERVAL" =~ ^[0-9]+$ ]] || fail "timeouts/attempts must be positive integers (interval may be zero)"
+[[ "$BUILD_TIMEOUT" =~ ^[1-9][0-9]*$ && "$HEALTH_ATTEMPTS" =~ ^[1-9][0-9]*$ && "$HEALTH_INTERVAL" =~ ^[0-9]+$ && "$KEEP_RUNS" =~ ^[1-9][0-9]*$ ]] || fail "timeouts/attempts/keep-count must be positive integers (interval may be zero)"
 for command in git flock sha256sum cut systemctl curl timeout jq "$GO_BIN"; do
     command -v "$command" >/dev/null || fail "required executable not found: $command"
 done
@@ -115,6 +159,8 @@ printf 'source_sha=%s\npatch_sha256=%s\nbinary_sha256=%s\n' "$SHA" "$PATCH_HASH"
 if [[ -f "$STATE_DIR/current.manifest" ]] && cmp -s "$RUN/current.manifest" "$STATE_DIR/current.manifest"; then
     wait_for_health || fail "manifest matches, but the running service is not healthy"
     log "already deployed: source=$SHA patch=$PATCH_HASH binary=$PREVIOUS_HASH"
+    # Hourly no-op checks would otherwise leave one directory each, forever.
+    prune_runs
     exit 0
 fi
 
@@ -163,3 +209,4 @@ cp "$RUN/manifest" "$STATE_DIR/next.manifest"
 mv -f "$STATE_DIR/next.manifest" "$STATE_DIR/current.manifest"
 NEEDS_ROLLBACK=0
 log "deployed source=$SHA patch=$PATCH_HASH binary=$BINARY_HASH; previous version retained at $RUN/wb2api.previous"
+prune_runs

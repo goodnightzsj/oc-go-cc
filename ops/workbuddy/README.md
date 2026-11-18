@@ -28,7 +28,9 @@ bash /opt/workbuddy-ops/update.sh
 
 `WB2A_REPO` 必填，必须是已有 checkout 且 `bin/wb2api` 为普通可执行文件（不接受软链接）；所选 systemd unit 的 `ExecStart` 必须指向此文件，工作目录/配置路径必须保持原部署约定。脚本不重写 unit，也不从健康响应推断二进制路径；首次接入及修改 unit 后应核对 MainPID 实际 executable 的 hash。固定补丁必须非空。更新脚本、补丁、state 目录应仅由部署操作者写入；不要把真实配置或凭据放入补丁。
 
-其余参数：`WB2A_SERVICE` 默认 `workbuddy2api.service`，`WB2A_HEALTH_URL` 默认 `http://127.0.0.1:7863/healthz`，`WB2A_REF` 默认 `main`；`WB2A_BUILD_TIMEOUT` 为每项 Go 门禁的秒数（默认900），`WB2A_HEALTH_ATTEMPTS` 默认30、`WB2A_HEALTH_INTERVAL` 默认1秒，每次 HTTP 最多3秒。没有账号/容量而持续503时升级会停止，需先恢复健康，不应放宽门禁。
+其余参数：`WB2A_SERVICE` 默认 `workbuddy2api.service`，`WB2A_HEALTH_URL` 默认 `http://127.0.0.1:7863/healthz`，`WB2A_REF` 默认 `main`；`WB2A_BUILD_TIMEOUT` 为每项 Go 门禁的秒数（默认900），`WB2A_HEALTH_ATTEMPTS` 默认30、`WB2A_HEALTH_INTERVAL` 默认1秒，每次 HTTP 最多3秒；`WB2A_KEEP_RUNS` 默认3，表示成功后保留多少个**成功部署**的 run 目录。没有账号/容量而持续503时升级会停止，需先恢复健康，不应放宽门禁。
+
+**保留策略**：成功部署后只留最近 `WB2A_KEEP_RUNS` 个含 `wb2api` 的 run 目录（本次运行的目录永远不删）；没有 `wb2api` 的目录（重复检查、patch-only 之类的空跑）一律删除。失败候选只把 `update.log` 覆写到 `state/last-failure.log`，整个 run 目录删除——源码克隆与构建产物可复现，一次约15MB。回滚本身失败（`CRITICAL`）时相反：保留全部现场供排查。
 
 已有 timer/service 应改为调用这一入口并显式设置上述环境变量。不要再并行运行会自动捕获 patch 或强制 checkout 的旧脚本。
 
@@ -66,7 +68,7 @@ SG补丁已在`5373578`基线上通过Linux隔离与托管两轮vet/race/build�
 
 非流式聚合补丁保留上游明确错误与已观测用量：标准 `error` 和业务错误帧不会被合成为正常完成；主请求及空截断救援返回502，探测请求向既有调用方报告失败，不因明确错误额外换号。分帧用量按字段保留（显式零仍覆盖），失败计数与 token 观测分离；救援失败时两次执行分别记用量和耗时。未改变探测失败降级为普通对话、救援传输/解析失败保留原截断响应的既有策略。
 
-`state/runs/update.*` 保留候选源码、输入补丁、命令日志、新/旧二进制和 manifest，`state/cache/` 默认持久化 Go 构建与模块缓存，跨次升级复用。脚本不自动清理备份或缓存；需监控整个 state 目录磁盘占用，按独立备份策略处理已确认不再需要的版本。
+`state/runs/update.*` 保留候选源码、输入补丁、命令日志、新/旧二进制和 manifest，`state/cache/` 默认持久化 Go 构建与模块缓存，跨次升级复用。run 目录按上面的保留策略自动清理；`state/cache/` 不清理，需按备份策略处理已确认不再需要的缓存。
 
 ## 面板内置更新与托管更新的统一方案
 

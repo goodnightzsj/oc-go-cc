@@ -1,0 +1,10 @@
+[Unit]
+Description=Check workbuddy2api-panel upstream every hour
+
+[Timer]
+OnCalendar=*-*-* *:17:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

@@ -6,7 +6,7 @@
 
 1. `flock` 串行执行；复制固定 `local.patch`，不从生产工作树自动导出或覆盖补丁。
 2. fetch 上游，在独立临时 clone 中显式 fetch 已解析的目标 SHA，再检出并完整应用补丁；即使指定 SHA 只在生产 `FETCH_HEAD` 中、不被 branch/tag 引用，也不能依赖 clone 偶然带上对象。生产工作树不 checkout/reset。
-3. 检查 Resin、配置接线、DeepSeek max 和托管更新保护的四个测试存在，再依次执行 Go `vet`、全量 `test -race`、`build`。
+3. 检查 Resin、配置接线、DeepSeek max、Global SG目录和托管更新保护的五个测试存在，再依次执行 Go `vet`、全量 `test -race`、`build`。
 4. 只有候选通过且旧服务健康，才保留旧二进制/manifest，使用同目录原子 rename 安装 `bin/wb2api` 并重启。
 5. 只有 systemd active、`/healthz` 返回 HTTP **200** 且 JSON `service` 为 **`workbuddy2api`** 才提交新 manifest。503 表示目前不可服务，不算上线成功。
 
@@ -32,6 +32,8 @@ bash /opt/workbuddy-ops/update.sh
 
 已有 timer/service 应改为调用这一入口并显式设置上述环境变量。不要再并行运行会自动捕获 patch 或强制 checkout 的旧脚本。
 
+`wb2api-update.timer` 提供现有 `wb2api-update.service` 的每小时检查配置：每小时17分触发，保留最多300秒随机延迟及 `Persistent=true` 的停机补检。安装到 `/etc/systemd/system/wb2api-update.timer` 前备份原文件并执行 `systemd-analyze verify`；安装后 `daemon-reload` 并重启该 timer，以 `systemctl show` 核对实际日历表达式及下次触发时间。只重启 timer 不会直接重启桥；检测到新源码或补丁且通过全部门禁后才切换桥服务。
+
 systemd 环境即使没有 `HOME`/`GOPATH` 也可构建：未设置时，`GOCACHE` 默认使用 `$WB2A_STATE_DIR/cache/build`，`GOMODCACHE` 默认使用 `$WB2A_STATE_DIR/cache/mod`。操作者已有非空值保持不变，应是可写绝对路径；可在部署入口显式指向现有缓存以避免重复下载。脚本不设置或更改 `HOME`。
 
 ## 后续上游升级与补丁维护
@@ -39,6 +41,22 @@ systemd 环境即使没有 `HOME`/`GOPATH` 也可构建：未设置时，`GOCACH
 补丁是独立、版本化的输入，不会因一次失败或空工作树被覆写。上游重排补丁涉及代码时仍可能冲突：脚本应停止并保留旧服务；在新隔离源码上更新补丁及其测试，重新走全部门禁后再发布，不自动忽略冲突、不丢弃本地功能。
 
 2026-10-30补丁基线更新为 `9f70e00188c30d859505378ae5d9b9779029dc06`。上游已原生提供国际版DeepSeek/SG的low/high/max，删除对应旧目录hunk及过时注释补丁，保留max行为守卫；GLM守卫按现行菜单区分global glm-5.3与CN glm-5.2，不恢复已下架的global型号。此补丁不再用于旧9ca基线；回退使用此前保留的binary/manifest及对应旧patch。
+
+同日已验证并部署 `53735780d850c645d84c15f009324f4cc3153c65`：新增三个提交处理下架任务及移除夜猫子排程。固定补丁无需修改，Linux隔离候选及原托管入口均通过完整vet/race/build；生产timer已改为每小时检查。上游后续再次改动时仍须重新通过这些门禁。
+
+同日补丁新增Global目录SG例外：`global:deepseek-v4.1-flash-sg` 在真实调用中仍可用，但被上游客户端picker按`paidId`隐藏。仅在本次探测的原始目录确实包含该条目时追加，保留同源价格、上下文、能力与档位；不改CN、不放开其他内部型号、不创建别名或自动切付费渠道，操作者的hidden/allowed仍生效。上游移除该条目后不会靠静态名单继续展示。`global:deepseek-v4.1-flash-1017`与`global:deepseek-v4.1-flash-1017-sg`按顺序实测均HTTP400/上游11102（service info not found），不添加这两个日期入口。新守卫覆盖SG恢复、缺失、去重、非对话过滤、桌面目录权威及真实元数据保留；后续自动升级必须保留并通过。
+
+2026-11-19补丁基线更新为 `34120825e8deef18b1ec194dbb16eea6fe01a016`。上一基线 `96b816d` 之后上游前进 349 个提交，固定补丁自 10-31 起每小时在 `git apply` 处失败、无任何部署；生产 checkout 停在 `f9d190c` 与运行版本无关，运行版本以 manifest 为准。本轮按新源码逐个 hunk 收敛，共 22 文件 45 hunk：
+
+- `internal/updater/integration_test.go` 的 hunk **删除**：上游已自行改用 `binaryName := "wb2api"` 加 Windows 后缀，原补丁内容被取代。
+- `internal/upstream/webagent.go` 的四处 hunk 收敛为一条收尾改动：上游已把计数归还读取协程并由 `finish` 发布，但 `finish` 先 `<-done` 再关流，而读协程停在 `Read` 上等 `Close`——SSE 仍开着时（正常情形，完成状态来自状态端点而非流结束）不会返回。首轮按「先关流再 join」改，Linux 门禁的 `TestRunWebAgentTurnUsesSandboxToken` 因关流截断未读帧而 `Chunks=0`；改为先给 500ms 自然读尽窗口、超时才关流并 join，本地 `-count=5` 与 `-race -count=3` 通过，Linux 门禁随后全绿。
+- `cmd/server/main.go` 的 `restartRequiredFields` 重锚；`internal/server/handler.go` 的 `recordAttempt` 签名（新增 `latency`、`succeeded`）按上游现有 7 处调用点全部重放，非流式 `failAggregate` 与明确错误透传同新结构合并；`internal/upstream/local_max_test.go` 跟随 `prepareBody` 新增的 `convReqID` 参数补参。
+
+验证：干净 `3412082` checkout 上 `git apply --check`/`apply` 通过、`go vet ./...` 通过；服务器隔离候选跑完 `vet`/`test -race`/`build` 后部署（source `3412082`、patch `b1d189ab`、binary `839f307a`，健康 200、7/7 账号可用；旧版留在该次 run 目录）。升级后 `/panel/api/update` 返回 `update_available=false`——上游已把规则改成 `currentOK && …`，`dev` 版本不再恒定提示。上游每次再改动同一行为单元时仍需重新收敛，`WB2A_REF` 默认 `main` 仍会漂移。
+
+
+
+SG补丁已在`5373578`基线上通过Linux隔离与托管两轮vet/race/build并部署：patch `d9f4c60b`、binary `1d24ff8e`（完整值以manifest为准），旧版本保留在`state/runs/update.ZWEuk6`。当前上游目录SG倍率为`x0.03`；极短探针回执`credit=0`不代表入口免费。桥目录恢复后，本项目的站点目录缓存最多仍可能延迟10分钟；不需要为刷新目录重启主代理。
 
 此前阻止升级的两处竞争已修复：`RunWebAgentTurn` 的SSE读取协程独占计数，关闭流并等待协程结束后才发布结果，覆盖成功、状态失败、RPC失败、非致命set_model失败及取消；面板目录测试计数改用原子操作，不改变生产缓存或并发。新版非流式取消499与既有错误聚合处理合并，保留上游错误和用量记录，不将客户端取消重新记成502。
 
@@ -58,7 +76,7 @@ systemd 环境即使没有 `HOME`/`GOPATH` 也可构建：未设置时，`GOCACH
 | --- | --- | --- |
 | 来源 | GitHub 正式时间版本 Release，排除 draft/prerelease | `WB2A_REF` 指定的源码提交，默认 main |
 | 安装物 | 下载平台匹配 ZIP，验证 SHA-256 后替换官方二进制 | 固定 SHA 加本地 patch，依次 vet/race/build |
-| 周期 | 启动及每6小时检查；可按上海时间每日安装 | 外部 systemd timer 调用，当前部署每6小时 |
+| 周期 | 启动及每6小时检查；可按上海时间每日安装 | 外部 systemd timer 调用，本目录提供每1小时配置 |
 | 补丁 | 官方二进制不含本地 Resin/错误聚合修改；max已由上游提供 | 固定 patch 是构建输入，冲突不切换 |
 | 进程与回退 | helper 等旧进程退出、拉起新进程；观察短时存活并回退 | systemd 重启，检查 HTTP 200 与服务身份，失败恢复 binary/manifest |
 | 并发边界 | 单个 Manager 的安装锁 | 同一 state 目录的跨进程 flock |
@@ -84,6 +102,8 @@ bash -n ops/workbuddy/update.sh ops/workbuddy/update.test.sh
 bash ops/workbuddy/update.test.sh
 ```
 
-测试仅创建合成 Git 仓库，替换 Go、systemctl、curl，不触碰真实服务；Git clone 使用真实 Git 的 `--no-local` transport 路径，防止本地对象整包复制掩盖 FETCH_HEAD 引用缺口。Linux 上使用真实 `flock` 验证并发排他。覆盖无 HOME 的默认缓存及显式缓存保留、精确 SHA（生产 branch/tag 未前进）、patch 冲突、guard 缺失、vet/race/build 失败、重启失败、503/身份错误、信号回退、manifest 回退、重复版本、补丁变化、上游变化和二进制被改动。
+测试仅创建合成 Git 仓库，替换 Go、systemctl、curl，不触碰真实服务；Git clone 使用真实 Git 的 `--no-local` transport 路径，防止本地对象整包复制掩盖 FETCH_HEAD 引用缺口。Linux 上使用真实 `flock` 验证并发排他。覆盖无 HOME 的默认缓存及显式缓存保留、精确 SHA（生产 branch/tag 未前进）、patch 冲突、guard 缺失、vet/race/build 失败、重启失败、503/身份错误、信号回退、manifest 回退、重复版本、补丁变化、上游变化和二进制被改动；日志不可写叠加重启失败、TERM 或恢复服务失败时仍尝试回退，检查原退出码和明确失败报告。
 
 缺少 Linux 工具时测试退出77，不能当通过。`WB2A_TEST_PORTABLE=1 bash ops/workbuddy/update.test.sh` 只提供本地功能诊断，显式跳过 native flock/timeout，不能替代 Linux 门禁。测试产物保留在打印的独立临时目录。
+
+CI与共享release validate现显式运行 `WB2A_TEST_PORTABLE=0 bash ops/workbuddy/update.test.sh`，位于delivery故障测试之后。实际workflow命令经隔离夹具验证：外部portable=1不能弱化门禁，0/23/77逐一传播；本地macOS的native退出77与portable通过分别记录，不代表GitHub或Linux已运行成功。

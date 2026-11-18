@@ -119,6 +119,7 @@ new_case() {
         'internal/upstream:TestResinProxy' \
         'cmd/server:TestLocalResinConfiguration' \
         'internal/upstream:TestLocalDeepSeekMaxFallback' \
+        'internal/upstream:TestLocalGlobalDeepSeekSGCatalog' \
         'internal/updater:TestLocalManagedUpdateCannotInstall'; do
         mkdir -p "$WB_TEST_CASE/upstream/${guard%:*}"
         printf 'package fixture\nfunc %s(t *testing.T) {}\n' "${guard#*:}" > "$WB_TEST_CASE/upstream/${guard%:*}/${guard#*:}_test.go"
@@ -224,12 +225,14 @@ assert test ! -f "$WB_TEST_CASE/go.calls"
 assert test ! -f "$WB_TEST_CASE/service.calls"
 printf 'PASS: conflict preserves the fixed patch, checkout and running binary\n'
 
-new_case missing_guard
-rm "$WB_TEST_CASE/upstream/internal/upstream/TestResinProxy_test.go"
-git -C "$WB_TEST_CASE/upstream" add -u
-git -C "$WB_TEST_CASE/upstream" commit -qm removed-guard
-failed_update
-assert test ! -f "$WB_TEST_CASE/go.calls"
+for removed_guard in TestResinProxy TestLocalGlobalDeepSeekSGCatalog; do
+    new_case "missing_guard-$removed_guard"
+    rm "$WB_TEST_CASE/upstream/internal/upstream/${removed_guard}_test.go"
+    git -C "$WB_TEST_CASE/upstream" add -u
+    git -C "$WB_TEST_CASE/upstream" commit -qm removed-guard
+    failed_update
+    assert test ! -f "$WB_TEST_CASE/go.calls"
+done
 printf 'PASS: missing guard stops before build\n'
 
 for stage in vet test build; do

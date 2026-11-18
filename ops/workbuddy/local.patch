@@ -34,10 +34,10 @@ index b7af87b..349c75a 100644
  		t.Fatalf("横幅=%q want %q", got, want)
  	}
 diff --git a/cmd/server/config.go b/cmd/server/config.go
-index 0ef2c7a..a2de1f3 100644
+index 22c299f..aec049e 100644
 --- a/cmd/server/config.go
 +++ b/cmd/server/config.go
-@@ -195,6 +195,12 @@ type Config struct {
+@@ -254,6 +254,12 @@ type Config struct {
  		BillingBase string `json:"billing_base"`
  	} `json:"global"`
  
@@ -51,10 +51,10 @@ index 0ef2c7a..a2de1f3 100644
  		// ChatBase 国内版 chat/模型目录上游 base 覆盖；空 = 回落内置默认
  		// https://www.workbuddy.cn（internal/upstream.New 的 ChatBaseCN，官方桌面端
 diff --git a/cmd/server/main.go b/cmd/server/main.go
-index 0c961a5..a1e13e8 100644
+index 17c7e55..3860637 100644
 --- a/cmd/server/main.go
 +++ b/cmd/server/main.go
-@@ -105,8 +105,8 @@ func main() {
+@@ -107,8 +107,8 @@ func main() {
  		if errors.Is(err, fs.ErrNotExist) {
  			// 首次运行：目录下没有配置 → 自动落一份推荐配置（含随机 api_key）再加载。
  			// 双击 exe / 裸跑 docker 即开，无需先手工复制样例。
@@ -65,7 +65,7 @@ index 0c961a5..a1e13e8 100644
  				cfg, err = Load(*cfgPath)
  			}
  			if err != nil {
-@@ -248,6 +248,10 @@ func main() {
+@@ -294,6 +294,10 @@ func main() {
  	up.ChatBaseGlobal = cfg.Global.ChatBase
  	up.BillingBaseGlobal = cfg.Global.BillingBase
  	applyCNChatBase(up, cfg)
@@ -76,7 +76,7 @@ index 0c961a5..a1e13e8 100644
  	auth.SetGlobalEnabled(cfg.Global.Enabled)
  	// model.json 本地缓存接线（context_length/max_output_tokens 四级查找链第 3 级）：
  	// 数据目录与 state.json 同风格（Docker volume 持久化路径）。首次缺失/损坏自动
-@@ -691,16 +695,12 @@ func apiKeySource(path string) string {
+@@ -792,16 +796,12 @@ func apiKeySource(path string) string {
  	return "配置文件 " + path
  }
  
@@ -95,8 +95,8 @@ index 0c961a5..a1e13e8 100644
  }
  
  // panelListenPath 从 listen 地址提取 ":port" 形式，用于启动日志拼面板 URL
-@@ -942,6 +942,9 @@ func restartRequiredFields(current, next *Config) []string {
- 	changed("upstream.passthrough_ip", current.Upstream.PassthroughIP, next.Upstream.PassthroughIP)
+@@ -1093,6 +1093,9 @@ func restartRequiredFields(current, next *Config) []string {
+ 	changed("features.three_d_auto_token", current.Features.ThreeDAutoToken, next.Features.ThreeDAutoToken)
  	// cn.chat_base / cn.billing_base 同样只在装配期写进上游 client（请求路径并发读取，不做热改）。
  	changed("cn.chat_base", current.CN.ChatBase, next.CN.ChatBase)
 +	changed("resin.url", current.Resin.URL, next.Resin.URL)
@@ -224,10 +224,10 @@ index 28cc367..17a79af 100644
  	}
  }
 diff --git a/internal/scheduler/scheduler_test.go b/internal/scheduler/scheduler_test.go
-index e22142f..86d3d0c 100644
+index 115270e..fa2dbd1 100644
 --- a/internal/scheduler/scheduler_test.go
 +++ b/internal/scheduler/scheduler_test.go
-@@ -125,8 +125,13 @@ func TestRunCatchesUpMissedSlots(t *testing.T) {
+@@ -121,8 +121,13 @@ func TestRunCatchesUpMissedSlots(t *testing.T) {
  	defer func() { wakeupGraceDelay = old }()
  
  	ctx, cancel := context.WithCancel(context.Background())
@@ -244,10 +244,10 @@ index e22142f..86d3d0c 100644
  	// 补跑在 Run 进入主循环之前派发；命中即退出，不等固定时长。
  	deadline := time.Now().Add(10 * time.Second)
 diff --git a/internal/server/handler.go b/internal/server/handler.go
-index 801bf0b..6fbfcab 100644
+index 9c45a60..eb8fbe8 100644
 --- a/internal/server/handler.go
 +++ b/internal/server/handler.go
-@@ -1013,7 +1013,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+@@ -1286,7 +1286,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  	// ttfb 首 token 等待（仅流式有观测；非流式传 0 = 无观测，速率不扣减）。
  	// 显式入参而不是读 st.ttfb：后者在流式分支里是**调用之后**才赋值的，
  	// 靠顺序传递会让将来重排代码时静默把速率算回旧的错口径（吸收上游 8b18ab8）。
@@ -256,7 +256,7 @@ index 801bf0b..6fbfcab 100644
  		// 请求指标（PR #71）：每次尝试累加 retry 次数与 token 口径。
  		st.attempts++
  		if delta.HasPromptTokens {
-@@ -1031,7 +1031,6 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+@@ -1304,7 +1304,6 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  		if delta.Model == "" {
  			delta.Model = peek.Model
  		}
@@ -264,7 +264,7 @@ index 801bf0b..6fbfcab 100644
  		latencyMs := latency.Milliseconds()
  		if latencyMs < 1 {
  			latencyMs = 1
-@@ -1050,8 +1049,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+@@ -1323,8 +1322,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  		}
  		h.cfg.Pool.RecordTokenUsage(uid, delta)
  
@@ -274,7 +274,7 @@ index 801bf0b..6fbfcab 100644
  		// 失败也计入请求数——否则重试放大在「用量」视图里看不见。
  		if h.cfg.Usage != nil {
  			realm := "cn"
-@@ -1075,7 +1073,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+@@ -1348,7 +1346,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  				CacheHitTokens:   delta.CacheHitTokens,
  				CacheMissTokens:  delta.CacheMissTokens,
  				HasCache:         delta.HasCacheTokens,
@@ -283,7 +283,7 @@ index 801bf0b..6fbfcab 100644
  		}
  	}
  
-@@ -1302,7 +1300,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+@@ -1581,7 +1579,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  			// 连败兜底（issue #114）：喂连败计数——连不上上游是「不知道原因的失败」，
  			// 连败 N 次临时出池，单次/偶发不罚（NoteFailures 内部达阈才动作）。
  			// 上游 client 已打 transport error 日志。
@@ -291,8 +291,8 @@ index 801bf0b..6fbfcab 100644
 +			recordAttempt(acct.UID, pool.TokenUsageDelta{}, 0, false, time.Since(attemptStarted), 0, false)
  			st.status = http.StatusServiceUnavailable
  			lastErr = terr
- 			// 客户端已断连（人走了）例外：传输错误是断连的**结果**，不是这个号的
-@@ -1322,7 +1320,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+ 			if proxypool.IsError(terr) {
+@@ -1615,7 +1613,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  			continue
  		}
  		if status >= 400 {
@@ -301,25 +301,25 @@ index 801bf0b..6fbfcab 100644
  			st.status = status
  			var kind upstream.ErrKind
  			if uerr != nil {
-@@ -1571,7 +1569,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
- 			// 透给客户端（SSE 发过字节就改不了状态码，此前只能这么兜底）。
- 			var hv *upstream.HeadVetoError
- 			if errors.As(sErr, &hv) {
--				recordAttempt(acct.UID, pool.TokenUsageDelta{}, 0, false, attemptStarted, 0)
-+				recordAttempt(acct.UID, pool.TokenUsageDelta{}, 0, false, time.Since(attemptStarted), 0, false)
+@@ -1918,7 +1916,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+ 				// 客户端一个字节没收到，但续写层在首帧之前可能已经跑完过一段（零输出的首段
+ 				// 触发了救援重发、救援段才吐出 error 帧）：那一段已经计费，照实记账。
+ 				bd, bc, _, bhc := billedDelta(cont.billedUsage())
+-				recordAttempt(acct.UID, bd, bc, bhc, attemptStarted, 0)
++				recordAttempt(acct.UID, bd, bc, bhc, time.Since(attemptStarted), 0, false)
  				st.status = http.StatusServiceUnavailable
  				st.outcome = reqlog.OutcomeStreamError
  				// 上游 body 是活的（200 长流），随轮转立即关闭，不留给函数末尾的 defer 堆 fd。
-@@ -1619,7 +1617,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
- 			// credit 显式存在且有限非负、total 为正整数时计入成本账本/用量账；
- 			// 缺字段/NaN/负值不再被当成「免费」或脏数据污染台账（上游 PR #104）。
- 			hasCredit = validUsageCost(credit, hasCredit, total, hasTotal)
--			recordAttempt(acct.UID, stats.Usage(), credit, hasCredit, attemptStarted, stats.TTFB())
-+			recordAttempt(acct.UID, stats.Usage(), credit, hasCredit, time.Since(attemptStarted), stats.TTFB(), st.outcome == reqlog.OutcomeSuccess)
+@@ -1999,7 +1997,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+ 			if u := cont.billedUsage(); u != nil {
+ 				bill, credit, total, hasCredit = billedDelta(u)
+ 			}
+-			recordAttempt(acct.UID, bill, credit, hasCredit, attemptStarted, stats.TTFB())
++			recordAttempt(acct.UID, bill, credit, hasCredit, time.Since(attemptStarted), stats.TTFB(), st.outcome == reqlog.OutcomeSuccess)
  			if n, ok := stats.Thinking(); ok {
  				st.think = n
  			}
-@@ -1672,17 +1670,19 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+@@ -2068,17 +2066,19 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  			rc.Close()
  			return
  		}
@@ -350,7 +350,7 @@ index 801bf0b..6fbfcab 100644
  			if cerr := r.Context().Err(); cerr != nil {
  				log.Printf("WARN: [server] sync acct=%s model=%s: 调用方断开（%v），上游输出已丢弃（CDN 回源超时常见于 EdgeOne 默认 15s）",
  					logfmt.Label(acct.UID, acct.Nickname), bareModel, cerr)
-@@ -1694,15 +1694,26 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+@@ -2090,11 +2090,21 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  			// 与流式空流那条 WARN 对称——此前这条只写响应不落日志，运维侧只能看到
  			// 一行 sync 502，无从判断是上游空体还是别的（同一失败在流式路径有 WARN）。
  			log.Printf("WARN: [server] sync acct=%s model=%s: upstream parse failed: %v", logfmt.Label(acct.UID, acct.Nickname), bareModel, err)
@@ -362,23 +362,27 @@ index 801bf0b..6fbfcab 100644
 +			}
  			st.status = http.StatusBadGateway
  			st.outcome = reqlog.OutcomeHTTPError
-+		}
+ 			return
+ 		}
 +		resp, err := upstream.Aggregate(rc)
 +		rc.Close()
 +		if err != nil {
 +			failAggregate(resp, err, time.Since(attemptStarted))
- 			return
- 		}
++			return
++		}
  		// 空截断救援（见 starved.go）：额度被思考吃光、正文零字节。非流式这一侧
  		// 没有 continueReader，救援在这里做——同预算关思考重发一次、重新聚合。
+ 		// billUsage 救援重发成功时两次调用 usage 的纯求和（记账口径，与流式 continueReader.billed
+@@ -2102,6 +2112,8 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+ 		var billUsage map[string]any
  		if aggregateStarved(resp) && bodyHasOutputLimit(body) {
- 			if rb, ok := starvedRetryBody(body); ok {
+ 			if rb, ok := starvedRetryBodyWithFloor(body, h.cfg.Upstream.OutputBudgetFloor(acct.Realm(), curModel, hopTiming.Effort)); ok {
 +				firstLatency := time.Since(attemptStarted)
 +				rescueStarted := time.Now()
  				if rc2, st2, _, e2 := h.cfg.Upstream.ChatStreamContext(r.Context(), acct, rb, clientIP, chatMeta, nil); e2 == nil && st2 < 400 && rc2 != nil {
  					if resp2, e3 := upstream.Aggregate(rc2); e3 == nil {
  						rc2.Close()
-@@ -1711,6 +1722,13 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+@@ -2116,6 +2128,13 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
  							logfmt.Label(acct.UID, acct.Nickname), bareModel)
  					} else {
  						rc2.Close()
@@ -392,10 +396,10 @@ index 801bf0b..6fbfcab 100644
  						log.Printf("WARN: [starved] non-stream acct=%s model=%s: 重发聚合失败: %v",
  							logfmt.Label(acct.UID, acct.Nickname), bareModel, e3)
  					}
-@@ -1739,7 +1757,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
- 		st.toolCalls = toolCallCount(resp)
- 		ud := usageDeltaFromResponse(resp)
- 		credit, total, hasCredit := usageCreditTotal(resp)
+@@ -2147,7 +2166,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+ 		if billUsage != nil {
+ 			ud, credit, total, hasCredit = billedDelta(billUsage)
+ 		}
 -		recordAttempt(acct.UID, ud, credit, hasCredit, attemptStarted, 0)
 +		recordAttempt(acct.UID, ud, credit, hasCredit, time.Since(attemptStarted), 0, true)
  		// 模型名回显（issue #30，与流式 WithModelEcho 同语义）：聚合体的 model
@@ -501,10 +505,10 @@ index 0000000..b594154
 +	}
 +}
 diff --git a/internal/server/searchtool.go b/internal/server/searchtool.go
-index ee3e8b5..1941673 100644
+index 89775a8..6b1a470 100644
 --- a/internal/server/searchtool.go
 +++ b/internal/server/searchtool.go
-@@ -254,6 +254,9 @@ func (h *Handler) probeOnce(ctx context.Context, realm, model string, body []byt
+@@ -321,6 +321,9 @@ func (h *Handler) probeOnce(ctx context.Context, realm, model string, body []byt
  		obj, aerr := upstream.Aggregate(rc)
  		_ = rc.Close()
  		if aerr != nil {
@@ -515,23 +519,10 @@ index ee3e8b5..1941673 100644
  			continue
  		}
 diff --git a/internal/updater/integration_test.go b/internal/updater/integration_test.go
-index ab14020..77bf847 100644
+index c3c7705..c332bd6 100644
 --- a/internal/updater/integration_test.go
 +++ b/internal/updater/integration_test.go
-@@ -137,7 +137,11 @@ func TestInstallReplacesRestartsAndRecovers(t *testing.T) {
- 			// helper 是独立进程，观察窗口只能经环境变量注入（见 updater.childGrace）。
- 			// 缩到 400ms：真值 8s 会让这条用例每个分支多等 8 秒。
- 			t.Setenv("WB2API_UPDATE_GRACE_MS", strconv.Itoa(fixtureGraceMS))
--			target := filepath.Join(dir, "wb2api"+filepath.Ext(executable))
-+			name := "wb2api"
-+			if runtime.GOOS == "windows" {
-+				name += ".exe"
-+			}
-+			target := filepath.Join(dir, name)
- 			if err := os.WriteFile(target, original, 0700); err != nil {
- 				t.Fatal(err)
- 			}
-@@ -162,7 +166,7 @@ func TestInstallReplacesRestartsAndRecovers(t *testing.T) {
+@@ -172,7 +172,7 @@ func TestInstallReplacesRestartsAndRecovers(t *testing.T) {
  			}
  
  			// 夹具进程：调 Install 排好 helper 后退出（helper 等它退出才替换文件）。
@@ -562,6 +553,26 @@ index 0000000..7f64f22
 +		t.Fatal("managed install would discard local patches")
 +	}
 +}
+diff --git a/internal/upstream/global_models.go b/internal/upstream/global_models.go
+index d73f4f0..12d895e 100644
+--- a/internal/upstream/global_models.go
++++ b/internal/upstream/global_models.go
+@@ -260,10 +260,11 @@ func (c *Client) probeGlobalModels(a *auth.Auth) (names []string, infos []ModelI
+ 			ids := make([]string, 0, len(byID))
+ 			outInfos := make([]ModelInfo, 0, len(byID))
+ 			if vis := pick.ordered(byID); vis != nil {
+-				// 客户端 picker 口径（见 clientpick.go）：哪一族 UA 探测，就按那一族
+-				// 自己下发的 agents 名单裁剪——客户端用哪族 UA 就只显示那族的菜单项。
+-				// INTL 实测：目录 25 条，菜单 22 条（去掉 paidId deepseek-v4.1-flash-sg
+-				// 与 hy-image-3.5 / kling-video-v3 两个媒体模型）。
++				// Keep the callable SG route explicitly selectable without exposing other internal variants.
++				const sg = "deepseek-v4.1-flash-sg"
++				if _, exists := byID[sg]; exists && !pick.allows(sg) {
++					vis = append(vis, sg)
++				}
+ 				for _, id := range vis {
+ 					mi := byID[id]
+ 					if nonChatModel(mi.ID, mi.MaxTokens, mi.Tags) {
 diff --git a/internal/upstream/local_aggregate_error_test.go b/internal/upstream/local_aggregate_error_test.go
 new file mode 100644
 index 0000000..ae55c26
@@ -678,9 +689,102 @@ index 0000000..ae55c26
 +		}
 +	}
 +}
+diff --git a/internal/upstream/local_global_catalog_test.go b/internal/upstream/local_global_catalog_test.go
+new file mode 100644
+index 0000000..f95c87a
+--- /dev/null
++++ b/internal/upstream/local_global_catalog_test.go
+@@ -0,0 +1,87 @@
++package upstream
++
++import (
++	"encoding/json"
++	"net/http"
++	"net/http/httptest"
++	"reflect"
++	"strings"
++	"testing"
++
++	"github.com/misakano7545/workbuddy2api-panel/internal/auth"
++)
++
++func TestLocalGlobalDeepSeekSGCatalog(t *testing.T) {
++	prev := auth.GlobalEnabled()
++	auth.SetGlobalEnabled(true)
++	t.Cleanup(func() { auth.SetGlobalEnabled(prev) })
++	const sg = "deepseek-v4.1-flash-sg"
++	for _, tc := range []struct {
++		name                             string
++		present, visible, media, cliOnly bool
++		wantSG                           bool
++	}{
++		{name: "paid variant", present: true, wantSG: true},
++		{name: "already visible", present: true, visible: true, wantSG: true},
++		{name: "missing"},
++		{name: "not a chat model", present: true, media: true},
++		{name: "desktop authority", present: true, cliOnly: true},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++				if !strings.HasSuffix(r.URL.Path, "/v3/config") {
++					w.WriteHeader(500)
++					return
++				}
++				models := []map[string]any{
++					{"id": "deepseek-v4.1-flash", "maxOutputTokens": 8192},
++					{"id": "hy3-x", "maxOutputTokens": 8192},
++					{"id": "deepseek-v4.1-flash-1017", "maxOutputTokens": 8192},
++					{"id": "deepseek-v4.1-flash-1017-sg", "maxOutputTokens": 8192},
++				}
++				if tc.present && (!tc.cliOnly || !repeatedBrand(r.Header.Get("User-Agent"))) {
++					entry := map[string]any{"id": sg, "name": "DeepSeek SG", "credits": "x0.50", "maxInputTokens": 131072, "maxOutputTokens": 8192, "reasoning": map[string]any{"supportedEfforts": []string{"low", "high", "max"}, "defaultEffort": "max"}}
++					if tc.media {
++						entry["tags"] = []string{"text-to-image"}
++					}
++					models = append(models, entry)
++				}
++				menu := []string{"deepseek-v4.1-flash", "hy3-x"}
++				lines := []map[string]string{{"freeId": "hy3", "paidId": "hy3-x"}}
++				if tc.visible {
++					menu = append(menu, sg)
++				} else {
++					lines = append(lines, map[string]string{"freeId": "deepseek-v4.1-flash", "paidId": sg})
++				}
++				_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
++					"models": models, "agents": []map[string]any{{"name": "cli", "tags": []string{"default"}, "models": menu}},
++					"productFeaturesConfig": map[string]any{"ModelRateLimitCap": map[string]any{"lines": lines}},
++				}})
++			}))
++			defer srv.Close()
++			c := New()
++			c.HTTP, c.ChatBaseGlobal, c.GlobalEnabled = srv.Client(), srv.URL, true
++			a := &auth.Auth{UID: "g1", AccessToken: "synthetic", Domain: "www.workbuddy.ai"}
++			want := []string{"deepseek-v4.1-flash"}
++			if tc.wantSG {
++				want = append(want, sg)
++			}
++			if got := c.FetchGlobalModels(a); !reflect.DeepEqual(got, want) {
++				t.Fatalf("models=%v want=%v", got, want)
++			}
++			infos := c.FetchGlobalModelInfos(a)
++			if len(infos) != len(want) {
++				t.Fatalf("infos=%v", infos)
++			}
++			if tc.wantSG {
++				mi := infos[1]
++				if mi.ID != sg || mi.Name != "DeepSeek SG" || mi.Credits != "x0.50" || mi.ContextWindow != 131072 || mi.MaxTokens != 8192 || mi.DefaultEffort != "max" || !reflect.DeepEqual(mi.Efforts, []string{"low", "high", "max"}) {
++					t.Fatalf("SG metadata changed: %+v", mi)
++				}
++				if rate := c.ModelRate("global", sg); rate != "0.5" {
++					t.Fatalf("cached SG rate=%q", rate)
++				}
++			}
++		})
++	}
++}
 diff --git a/internal/upstream/local_max_test.go b/internal/upstream/local_max_test.go
 new file mode 100644
-index 0000000..14d8207
+index 0000000..d1d743f
 --- /dev/null
 +++ b/internal/upstream/local_max_test.go
 @@ -0,0 +1,65 @@
@@ -718,7 +822,7 @@ index 0000000..14d8207
 +				if err != nil {
 +					t.Fatal(err)
 +				}
-+				out, requested, effective := c.prepareBody(in, tc.realm, "", "")
++				out, requested, effective := c.prepareBody(in, tc.realm, "", "", "")
 +				var body map[string]any
 +				if err := json.Unmarshal(out, &body); err != nil {
 +					t.Fatal(err)
@@ -743,7 +847,7 @@ index 0000000..14d8207
 +		{`{"model":"global:deepseek-v4.1-flash","reasoning_effort":"medium"}`, "high"},
 +		{`{"model":"global:deepseek-v4.1-flash","reasoning_effort":"off"}`, ""},
 +	} {
-+		_, _, effective := (&Client{}).prepareBody([]byte(tc.input), "global", "", "")
++		_, _, effective := (&Client{}).prepareBody([]byte(tc.input), "global", "", "", "")
 +		if effective != tc.want {
 +			t.Errorf("input=%s effective=%q want=%q", tc.input, effective, tc.want)
 +		}
@@ -949,10 +1053,10 @@ index 0000000..2df88a8
 +	}
 +}
 diff --git a/internal/upstream/sse.go b/internal/upstream/sse.go
-index d552933..a66f19c 100644
+index 008d384..ad22d2c 100644
 --- a/internal/upstream/sse.go
 +++ b/internal/upstream/sse.go
-@@ -62,6 +62,7 @@ const TruncationFinishReason = "length"
+@@ -63,6 +63,7 @@ const TruncationFinishReason = "length"
  // Aggregate 读取完整 SSE 流，聚合 delta.content 为单个 OpenAI chat.completion 响应。
  // 分片/半行由 bufio.Reader.ReadString 处理；遇到 "data: [DONE]" 结束。
  // tool_calls 以流式 delta 到达（按 index 合并：首片带 id/type/name，后续只带 arguments 片段）。
@@ -960,7 +1064,7 @@ index d552933..a66f19c 100644
  func Aggregate(r io.Reader) (map[string]any, error) {
  	br := bufio.NewReaderSize(r, 64*1024)
  	var (
-@@ -181,8 +182,8 @@ func Aggregate(r io.Reader) (map[string]any, error) {
+@@ -182,8 +183,8 @@ func Aggregate(r io.Reader) (map[string]any, error) {
  			return nil, err
  		}
  		line = strings.TrimRight(line, "\r\n")
@@ -971,7 +1075,7 @@ index d552933..a66f19c 100644
  			if payload == "[DONE]" {
  				// 上游显式结束：停止读取，DONE 之后的任何数据一律忽略。
  				sawDone = true
-@@ -202,7 +203,19 @@ func Aggregate(r io.Reader) (map[string]any, error) {
+@@ -216,7 +217,19 @@ func Aggregate(r io.Reader) (map[string]any, error) {
  						created = v
  					}
  					if u, ok := chunk["usage"].(map[string]any); ok {
@@ -1077,61 +1181,36 @@ index 3b20a1f..b6d980d 100644
  		if path.section == "" {
  			value = usage[path.key]
 diff --git a/internal/upstream/webagent.go b/internal/upstream/webagent.go
-index 21239c6..4bba966 100644
+index 25d2928..ed1e8e9 100644
 --- a/internal/upstream/webagent.go
 +++ b/internal/upstream/webagent.go
-@@ -265,8 +265,8 @@ func (c *Client) DeleteWebConversation(ctx context.Context, a *auth.Auth, id str
- // 只有「status 变成 completed」才算成功——SSE 收到 session/endTurn 也在里面判一次
- // 提前收工的依据，但最终以 console 状态为准（hub 的判据同口径：只建会话不接沙箱、
- // 或接了沙箱没等它跑完，上游都不计为一次有效对话）。
--func (c *Client) RunWebAgentTurn(ctx context.Context, a *auth.Auth, id string, sess WebSession, prompt, model string) (WebTurnResult, error) {
--	res := WebTurnResult{Conversation: id}
-+func (c *Client) RunWebAgentTurn(ctx context.Context, a *auth.Auth, id string, sess WebSession, prompt, model string) (res WebTurnResult, retErr error) {
-+	res = WebTurnResult{Conversation: id}
- 	started := time.Now()
- 	if strings.TrimSpace(prompt) == "" {
- 		prompt = webDailyPrompt
-@@ -293,7 +293,15 @@ func (c *Client) RunWebAgentTurn(ctx context.Context, a *auth.Auth, id string, s
- 	if err != nil {
- 		return res, fmt.Errorf("acp sse: %w", err)
- 	}
--	defer stream.Body.Close()
-+	var events, chunks int
-+	var done chan struct{}
-+	defer func() {
-+		stream.Body.Close()
-+		if done != nil {
-+			<-done
-+			res.Events, res.Chunks = events, chunks
-+		}
-+	}()
- 	if stream.StatusCode != http.StatusOK {
- 		return res, fmt.Errorf("acp sse: HTTP %d", stream.StatusCode)
- 	}
-@@ -303,8 +311,8 @@ func (c *Client) RunWebAgentTurn(ctx context.Context, a *auth.Auth, id string, s
- 	}
- 
- 	// 读 SSE：只统计，不解析 update 内容（打卡不关心说了什么）。
--	// 流结束（或 ctx 取消）时 goroutine 自然退出，不阻塞主流程。
--	done := make(chan struct{})
-+	// 计数归读取协程所有；关闭流并等待退出后才发布到返回值。
-+	done = make(chan struct{})
- 	go func() {
- 		defer close(done)
- 		sc := bufio.NewScanner(stream.Body)
-@@ -331,12 +339,12 @@ func (c *Client) RunWebAgentTurn(ctx context.Context, a *auth.Auth, id string, s
- 			}
- 			switch msg.Method {
- 			case "session/update":
--				res.Events++
-+				events++
- 				if msg.Params.Update.SessionUpdate == "agent_message_chunk" {
--					res.Chunks++
-+					chunks++
- 				}
- 			case "session/endTurn":
--				res.Events++
-+				events++
- 			}
- 		}
+@@ -65,6 +65,10 @@ const (
+ 	webPollInterval = 3 * time.Second
+ 	// webTurnTimeout 单轮从建会话到 completed 的总预算。
+ 	webTurnTimeout = 120 * time.Second
++	// webJoinGrace 收尾时先给 SSE 读协程一个自然读尽的窗口。完成状态来自状态
++	// 端点而不是流结束，所以流通常还开着：直接关流会截掉尚未读出的帧（计数归零），
++	// 而一直等又会让停在 Read 上的协程永远不返回。半秒相对 3 秒轮询可忽略。
++	webJoinGrace = 500 * time.Millisecond
+ 	// webSessionWait 等沙箱 link/token 就绪的上限：刚建会话时会话状态可能还是
+ 	// CREATING，/session 偶尔先回空 link，重试几次比直接判失败更接近真实时序。
+ 	webSessionWait = 15 * time.Second
+@@ -433,7 +437,17 @@ func (c *Client) RunWebAgentTurn(ctx context.Context, a *auth.Auth, id string, s
  	}()
+ 
+ 	finish := func(result WebTurnResult, err error) (WebTurnResult, error) {
+-		<-done
++		// Join the reader before publishing its counters. Waiting alone is not
++		// enough: the stream is usually still open when the turn ends, and a
++		// reader parked in Read only returns once the body is closed - so give
++		// it a short window to drain naturally (which keeps the counts complete
++		// for a stream that does end), then close and join.
++		select {
++		case <-done:
++		case <-time.After(webJoinGrace):
++			stream.Body.Close()
++			<-done
++		}
+ 		result.Events, result.Chunks = events, chunks
+ 		return result, err
+ 	}

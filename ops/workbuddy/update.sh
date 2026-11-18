@@ -128,6 +128,7 @@ for guard in \
     'internal/upstream:TestResinProxy' \
     'cmd/server:TestLocalResinConfiguration' \
     'internal/upstream:TestLocalDeepSeekMaxFallback' \
+    'internal/upstream:TestLocalGlobalDeepSeekSGCatalog' \
     'internal/updater:TestLocalManagedUpdateCannotInstall'; do
     directory=${guard%:*}
     test_name=${guard#*:}

@@ -894,7 +894,8 @@ func (h *MessagesHandler) handleStreaming(
 
 		// Upstream context carries the streaming timeout configured for the model.
 		timeout := h.client.StreamingTimeout(model)
-		attemptCtx, cancelAttempt := context.WithTimeout(clientCtx, timeout)
+		attemptCtx, cancelAttempt := context.WithTimeoutCause(clientCtx, timeout,
+			fmt.Errorf("streaming timeout (%v) exceeded: %w", timeout, errAttemptTimeout))
 		attemptCtx, cancelAttempt = transformer.WithIdleCancellation(attemptCtx, cancelAttempt)
 		idleTimeout := h.client.StreamIdleTimeout(model)
 		var generation *metrics.GenerationObservation
@@ -1105,6 +1106,7 @@ func (h *MessagesHandler) handleStreaming(
 		attemptCtx, generation = metrics.WithGenerationObservation(attemptCtx, streamStart, wireFormat)
 		streamBody, err := prov.Stream(attemptCtx, anthropicReq, model)
 		if err != nil {
+			err = attemptFailure(attemptCtx, err)
 			cancelAttempt()
 			if complete(clientCtx, err) {
 				blockedProviders[providerName] = true
@@ -1150,10 +1152,14 @@ func (h *MessagesHandler) handleStreaming(
 			atomic.StoreInt32(&heartbeatPaused, 0)
 		}
 		if errProxy != nil {
-			// The body reader uses a cancellation sentinel; retain the attempt's
-			// deadline identity for health settlement without blaming parent cancellation.
-			if errors.Is(errProxy, transformer.ErrStreamReadCanceled) && attemptCtx.Err() == context.DeadlineExceeded {
-				errProxy = fmt.Errorf("streaming timeout (%v) exceeded: %w: %w", timeout, attemptCtx.Err(), errProxy)
+			errProxy = attemptFailure(attemptCtx, errProxy)
+			// The attempt retains its first cause even if Close later cancels the
+			// caller. Restore it before classifying the transport's generic sentinel.
+			var sourceFailure *core.ResponseError
+			if !errors.As(errProxy, &sourceFailure) && (errors.Is(errProxy, transformer.ErrStreamReadCanceled) || errors.Is(errProxy, transformer.ErrClientDisconnected) || errors.Is(errProxy, context.Canceled)) {
+				if context.Cause(attemptCtx) == transformer.ErrStreamIdle {
+					errProxy = transformer.ErrStreamIdle
+				}
 			}
 			if errProxy == transformer.ErrClientDisconnected {
 				if clientCtx.Err() != nil {
@@ -1299,7 +1305,7 @@ func (h *MessagesHandler) handleNonStreaming(
 				}
 			}()
 			timeout := h.client.RequestTimeout(model)
-			attemptCtx, cancel := context.WithTimeout(ctx, timeout)
+			attemptCtx, cancel := context.WithTimeoutCause(ctx, timeout, errAttemptTimeout)
 			defer cancel()
 
 			prov, ok := h.providerRegistry.Get(client.Provider(model))
@@ -1310,6 +1316,7 @@ func (h *MessagesHandler) handleNonStreaming(
 			metadata.TargetFormat = core.ModelWireFormat(prov, model)
 			attemptCtx = core.WithRequestMetadata(attemptCtx, metadata)
 			execResult, execErr := prov.Execute(attemptCtx, anthropicReq, model)
+			execErr = attemptFailure(attemptCtx, execErr)
 			native = len(metadata.ResponsesBody) > 0 && metadata.TargetFormat == core.WireFormatOpenAIResponses
 			var final *core.NativeResponseError
 			if errors.As(execErr, &final) {

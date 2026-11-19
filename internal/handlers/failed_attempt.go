@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,6 +12,26 @@ import (
 	"github.com/routatic/proxy/internal/transformer"
 	"github.com/routatic/proxy/pkg/types"
 )
+
+var errAttemptTimeout = fmt.Errorf("upstream attempt timeout: %w", context.DeadlineExceeded)
+
+// Keep the attempt's own deadline distinct from a later caller deadline.
+func attemptFailure(ctx context.Context, err error) error {
+	cause := context.Cause(ctx)
+	if !errors.Is(cause, errAttemptTimeout) {
+		return err
+	}
+	original := err
+	var source *core.ResponseError
+	if errors.As(err, &source) {
+		original = source.Err
+	}
+	if errors.Is(original, context.DeadlineExceeded) || errors.Is(original, context.Canceled) ||
+		errors.Is(original, transformer.ErrStreamReadCanceled) || errors.Is(original, transformer.ErrClientDisconnected) {
+		return errors.Join(cause, err)
+	}
+	return err
+}
 
 // A refusal before a response body opens is still an observed failed attempt.
 func (h *MessagesHandler) recordFailedAttempt(ctx context.Context, rec history.RequestRecord, err error) {
@@ -40,7 +61,7 @@ func (h *MessagesHandler) recordFailedAttempt(ctx context.Context, rec history.R
 }
 
 func isCallerCancellation(ctx context.Context, err error) bool {
-	if ctx.Err() == nil {
+	if ctx.Err() == nil || errors.Is(err, errAttemptTimeout) {
 		return false
 	}
 	var source *core.ResponseError

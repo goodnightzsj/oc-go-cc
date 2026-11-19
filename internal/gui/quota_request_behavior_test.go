@@ -56,7 +56,9 @@ async function checks() {
   let now=1000000;
   Date.now=()=>now;
   const pending=[];
-  fetch=(url,options)=>new Promise((resolve,reject)=>{
+  fetch=(url,options)=>url==='/api/sites'
+    ? Promise.resolve({ok:false,status:503,text:async()=> 'synthetic site lookup unavailable'})
+    : new Promise((resolve,reject)=>{
     pending.push({url,options,resolve:data=>resolve({ok:true,json:async()=>data})});
     options.signal.addEventListener('abort',()=>reject(new Error('aborted')));
   });

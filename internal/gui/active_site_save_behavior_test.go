@@ -49,8 +49,16 @@ async function checks() {
     assert.equal(get(id).value, 'opencode-go', 'views open on the stored platform: ' + id);
   }
 
+  const freshFetch = fetch;
+  let releaseOld, oldSignal;
+  fetch=(raw,options)=>raw==='/api/sites' ? new Promise(resolve=>{releaseOld=resolve;oldSignal=options?.signal}) : freshFetch(raw,options);
+  const older=applyActiveSite();
+  fetch=freshFetch;
   get('cfg-active-site').value = 'commandcode';
   await saveProxyConfig();
+  assert.equal(oldSignal?.aborted,true,'saving must cancel a pre-save poll');
+  releaseOld({ok:true,json:async()=>({active:'opencode-go'})});
+  await older;
 
   assert.equal(stored.active_site, 'commandcode', 'the save must reach the server');
   for (const id of views) {

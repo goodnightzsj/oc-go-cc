@@ -242,7 +242,9 @@ async function checks() {
   document.hidden = false;
   handleVisibilityChange();
   assert.equal(pending.at(-1).signal.aborted,false,'returning to visible tab did not refresh');
-  cancelTabRequests('performance');
+  assert.ok(pending.some(p=>p.url==='/api/sites' && !p.signal.aborted),'resume must also refresh the active site');
+  document.hidden = true;
+  handleVisibilityChange();
   for (let i=0;i<20;i++) await Promise.resolve();
   assert.equal(timers.size,0);
 }

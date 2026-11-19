@@ -106,7 +106,7 @@ const TRANSLATIONS = {
     'quota.localTitle': 'Local ledger',
     'quota.localNote': '{provider} · Last {days} days (UTC), as recorded by this instance. Includes estimates; not an account bill or balance.',
     'quota.localLoadFail': 'Could not load the local ledger. Refresh to retry. ',
-    'quota.unknownCosts': 'Requests with unknown cost',
+    'quota.unknownCosts': 'Attempts with unknown cost',
     'quota.status.available': 'Account data retrieved',
     'quota.status.partial': 'Some account data could not be retrieved',
     'quota.status.not_configured': 'Account credentials not configured',
@@ -170,13 +170,13 @@ const TRANSLATIONS = {
     'analytics.autoRefresh5s': 'Auto-refresh: 5s',
     'analytics.autoRefresh30s': 'Auto-refresh: 30s',
     'analytics.autoRefresh60s': 'Auto-refresh: 60s',
-    'analytics.totalRequests': 'Total Requests',
-    'analytics.requestsUnit': 'requests',
+    'analytics.totalRequests': 'Upstream attempts',
+    'analytics.requestsUnit': 'attempts',
     'analytics.totalTokens': 'Total Tokens',
     'analytics.inout': 'in / out',
     'analytics.cost': 'Cost',
     'analytics.currencyUSD': 'USD',
-    'analytics.unknownCosts': '{n} requests with unknown cost; totals include known costs only',
+    'analytics.unknownCosts': '{n} attempts with unknown cost; totals include known costs only',
     'analytics.otherSeries': 'Other',
     'analytics.seriesTotal': 'Total',
     'analytics.utc': 'Analytics dates and time buckets use UTC',
@@ -213,7 +213,8 @@ const TRANSLATIONS = {
     'commandcode.usageCredits': 'Usage credits consumed',
     'commandcode.officialCost': 'Official cost',
     'commandcode.ledger': 'Recorded by this instance',
-    'commandcode.ledgerRequests': 'Requests recorded here',
+    'commandcode.requests': 'Requests',
+    'commandcode.ledgerRequests': 'Upstream attempts recorded here',
     'commandcode.ledgerCost': 'Cost recorded here',
     'commandcode.ledgerGap': 'Not seen by this proxy',
     'commandcode.ledgerHint': 'The official figures cover every request on the account, including other clients and modes. This instance only records what passed through it, so a gap is traffic that did not.',
@@ -243,7 +244,7 @@ const TRANSLATIONS = {
     'history.costProvider': 'Synced platform bill',
     'history.loadFail': 'History could not be refreshed; displayed data may be outdated. ',
     'analytics.p95Latency': 'p95 Latency',
-    'analytics.latencyUnit': 'request-weighted',
+    'analytics.latencyUnit': 'attempt-weighted',
     'analytics.cacheHitShort': 'cache hit',
     'analytics.cacheHitTitle': 'Cache read as a share of all prompt tokens (input + cache read + cache write)',
     'analytics.byModel': 'Model distribution',
@@ -255,7 +256,7 @@ const TRANSLATIONS = {
     'data.invalid': 'Invalid data response',
     'analytics.singleDay': '(single-day data)',
     'analytics.dailyTrend': 'Daily Token Trend',
-    'analytics.requestTrend': 'Request trend',
+    'analytics.requestTrend': 'Upstream attempt trend',
     'analytics.tokenTrend': 'Token trend',
     'analytics.lastMinuteRate': 'Last-minute throughput',
     'analytics.granularity': 'Granularity',
@@ -269,7 +270,7 @@ const TRANSLATIONS = {
     'analytics.period': 'Period',
     'analytics.knownErrors': 'Known errors',
     'analytics.modelDetails': 'Model details',
-    'analytics.knownRecords': '{n} records with details',
+    'analytics.knownRecords': '{n} attempts with known outcomes',
     'analytics.retainedRange': 'Query range {from} - {to} (UTC) · limited to retained records',
     'analytics.last7d': 'Last 7 days',
     'analytics.last30d': 'Last 30 days',
@@ -279,7 +280,7 @@ const TRANSLATIONS = {
     'analytics.cacheTokens': 'Cache tokens',
     'analytics.reasoningTokens': 'Reasoning Tokens',
     'analytics.reasoningNote': 'included in output',
-    'analytics.requests': 'Requests',
+    'analytics.requests': 'Upstream attempts',
     'analytics.avgLatency': 'Average latency',
     'analytics.priceTables': 'Price sources',
     'analytics.priceTablesNote': 'Estimates use the rate tables below. Snapshots may be out of date. WorkBuddy uses static model reference prices, not actual account charges.',
@@ -305,7 +306,7 @@ const TRANSLATIONS = {
     'analytics.dailySpendSingle': 'One day in this range: {date} cost {amount}.',
     'analytics.dailySpendNote': '{n} day(s) in this range have no recorded cost; those columns are drawn empty rather than as zero.',
     'analytics.dailySpendComplete': 'Every day in this range has a recorded cost.',
-    'analytics.platformHealthNote': 'Success rate and latency cover requests this instance recorded with a known outcome. Breaker state comes from the live fallback circuit, not from history.',
+    'analytics.platformHealthNote': 'Each model execution is counted separately: one failed attempt followed by a successful fallback is 2 attempts with 50% success. Success rate uses known outcomes. Breaker state is live.',
     'health.breakerClosed': 'Circuit closed',
     'health.breakerHalf': 'Circuit half-open',
     'health.breakerOpen': 'Circuit open',
@@ -314,8 +315,8 @@ const TRANSLATIONS = {
     'health.fallbackShare': '{v}% fallback',
     'analytics.successRate': 'Success rate',
     'analytics.fallbackRate': 'Fallback rate',
-    'history.filteredRequests': 'Filtered requests',
-    'history.successRate': 'Success rate',
+    'history.filteredRequests': 'Filtered attempts',
+    'history.successRate': 'Attempt success rate',
     'history.filteredTokens': 'Tokens',
     'history.filteredCost': 'Recorded cost',
     'history.modelDistribution': 'Models',
@@ -363,7 +364,10 @@ const TRANSLATIONS = {
     'detail.requestType': 'Request type',
     'detail.streaming': 'Streaming',
     'detail.nonStreaming': 'Non-streaming',
-    'detail.attempt': 'Attempt',
+    'detail.attempt': 'Execution number',
+    'detail.attemptHint': 'Execution order within this downstream request. Health and circuit skips do not count; key selection failures do. This is not the HTTP send count.',
+    'detail.candidatePosition': 'Candidate position',
+    'detail.candidatePositionHint': 'Position after routing and capacity filtering, before health or circuit skips. Missing for older records.',
     'detail.inputTokens': 'Input (raw)',
     'detail.promptTokens': 'Prompt (raw + cache)',
     'detail.cacheRead': 'Cache read',
@@ -395,9 +399,9 @@ const TRANSLATIONS = {
     'cmd.gotoAnalytics': 'Go to Analytics',
     'cmd.gotoSettings': 'Go to Settings',
     'cmd.refreshData': 'Refresh Data',
-    'metric.total': 'Total Requests',
-    'metric.avgPerRequest': 'avg {v}/req',
-    'metric.perMinute': '{v}/min',
+    'metric.total': 'Upstream attempts',
+    'metric.avgPerRequest': 'avg {v}/attempt',
+    'metric.perMinute': '{v} attempts/min',
     'metric.success': 'Success',
     'metric.failed': 'Failed',
     'metric.streamed': 'Streamed',
@@ -612,9 +616,9 @@ const TRANSLATIONS = {
     'perf.allTime': 'All Time',
     'perf.th.model': 'Model',
     'perf.th.count': 'Samples',
-    'perf.sampleHint': 'Samples count requests with measured latency. Success % uses known outcomes. P50 / P90 / P99 show the latency at each percentile; small samples can be misleading.',
+    'perf.sampleHint': 'Samples count upstream attempts with measured latency. Success % uses known attempt outcomes, not final downstream results. P50 / P90 / P99 show latency percentiles; small samples can be misleading.',
     'perf.knownSamples': '{n} requests with known outcomes',
-    'perf.th.successRate': 'Success %',
+    'perf.th.successRate': 'Attempt success %',
     'perf.th.avg': 'Avg (ms)',
     'perf.th.p50': 'P50',
     'perf.th.p90': 'P90',
@@ -771,7 +775,7 @@ const TRANSLATIONS = {
     'quota.localTitle': '本实例账本',
     'quota.localNote': '{provider} · 最近 {days} 天（UTC）的本实例记录，包含估算；不等同于账户账单或余额。',
     'quota.localLoadFail': '本实例账本加载失败，请刷新重试。',
-    'quota.unknownCosts': '费用未知的请求数',
+    'quota.unknownCosts': '费用未知的尝试数',
     'quota.status.available': '账户数据已获取',
     'quota.status.partial': '部分账户数据获取失败',
     'quota.status.not_configured': '尚未配置账户凭证',
@@ -835,13 +839,13 @@ const TRANSLATIONS = {
     'analytics.autoRefresh5s': '自动刷新：5 秒',
     'analytics.autoRefresh30s': '自动刷新：30 秒',
     'analytics.autoRefresh60s': '自动刷新：60 秒',
-    'analytics.totalRequests': '总请求数',
-    'analytics.requestsUnit': '次',
+    'analytics.totalRequests': '上游尝试数',
+    'analytics.requestsUnit': '次尝试',
     'analytics.totalTokens': '总 Token',
     'analytics.inout': '输入 / 输出',
     'analytics.cost': '费用',
     'analytics.currencyUSD': '美元（USD）',
-    'analytics.unknownCosts': '{n} 条请求费用未知；合计只包含已知费用',
+    'analytics.unknownCosts': '{n} 次尝试费用未知；合计只包含已知费用',
     'analytics.otherSeries': '其他',
     'analytics.seriesTotal': '合计',
     'analytics.utc': '用量分析的日期与时间桶统一使用 UTC',
@@ -878,7 +882,8 @@ const TRANSLATIONS = {
     'commandcode.usageCredits': '已消耗用量点数',
     'commandcode.officialCost': '官方费用',
     'commandcode.ledger': '本实例记录',
-    'commandcode.ledgerRequests': '本实例记录的请求数',
+    'commandcode.requests': '请求数',
+    'commandcode.ledgerRequests': '本实例记录的上游尝试数',
     'commandcode.ledgerCost': '本实例记录的费用',
     'commandcode.ledgerGap': '未经本代理',
     'commandcode.ledgerHint': '官方口径覆盖该账户的全部请求，含其他客户端与其他 mode；本实例只记录经过它的流量，差额即未经过本代理的部分。',
@@ -908,7 +913,7 @@ const TRANSLATIONS = {
     'history.costProvider': '已同步平台账单',
     'history.loadFail': '历史请求刷新失败，已显示的数据可能过期。',
     'analytics.p95Latency': 'p95 延迟',
-    'analytics.latencyUnit': '按请求数加权',
+    'analytics.latencyUnit': '按尝试数加权',
     'analytics.cacheHitShort': '缓存命中',
     'analytics.cacheHitTitle': '缓存读取占全部输入 Token 的比例（输入 + 缓存读 + 缓存写）',
     'analytics.byModel': '模型分布',
@@ -920,7 +925,7 @@ const TRANSLATIONS = {
     'data.invalid': '数据响应格式无效',
     'analytics.singleDay': '（仅单日数据）',
     'analytics.dailyTrend': '每日 Token 趋势',
-    'analytics.requestTrend': '请求趋势',
+    'analytics.requestTrend': '上游尝试趋势',
     'analytics.tokenTrend': 'Token 趋势',
     'analytics.lastMinuteRate': '近一分钟吞吐',
     'analytics.granularity': '粒度',
@@ -934,7 +939,7 @@ const TRANSLATIONS = {
     'analytics.period': '时段',
     'analytics.knownErrors': '已知错误',
     'analytics.modelDetails': '模型明细',
-    'analytics.knownRecords': '{n} 条有详情记录',
+    'analytics.knownRecords': '{n} 次尝试结果已知',
     'analytics.retainedRange': '查询范围 {from} - {to}（UTC）· 仅含仍保留的记录',
     'analytics.last7d': '最近 7 天',
     'analytics.last30d': '最近 30 天',
@@ -944,7 +949,7 @@ const TRANSLATIONS = {
     'analytics.cacheTokens': '缓存 Token',
     'analytics.reasoningTokens': '推理 Token',
     'analytics.reasoningNote': '已包含在输出 Token 中',
-    'analytics.requests': '请求数',
+    'analytics.requests': '上游尝试',
     'analytics.avgLatency': '平均延迟',
     'analytics.priceTables': '价格来源',
     'analytics.priceTablesNote': '估算费用采用下表价格，快照可能已经过时。WorkBuddy 使用静态模型参考价，不代表账户实际扣款。',
@@ -970,7 +975,7 @@ const TRANSLATIONS = {
     'analytics.dailySpendSingle': '区间内只有一天：{date} 花费 {amount}。',
     'analytics.dailySpendNote': '区间内有 {n} 天没有记录到费用，这些列画成空列而不是零。',
     'analytics.dailySpendComplete': '区间内每一天都有费用记录。',
-    'analytics.platformHealthNote': '成功率与延迟只统计本实例记录了明确结果的请求。断路器状态来自实时降级电路，不是历史数据。',
+    'analytics.platformHealthNote': '同一下游请求的各次模型执行分别计数：一次失败后回退成功是 2 次尝试，成功率 50%。成功率按已知结果计算，断路器状态实时读取。',
     'health.breakerClosed': '电路正常',
     'health.breakerHalf': '电路半开',
     'health.breakerOpen': '电路断开',
@@ -979,8 +984,8 @@ const TRANSLATIONS = {
     'health.fallbackShare': '{v}% 降级',
     'analytics.successRate': '成功率',
     'analytics.fallbackRate': '降级率',
-    'history.filteredRequests': '筛选请求数',
-    'history.successRate': '成功率',
+    'history.filteredRequests': '筛选尝试数',
+    'history.successRate': '尝试成功率',
     'history.filteredTokens': 'Token 总量',
     'history.filteredCost': '已记录费用',
     'history.modelDistribution': '模型分布',
@@ -1028,7 +1033,10 @@ const TRANSLATIONS = {
     'detail.requestType': '请求类型',
     'detail.streaming': '流式请求',
     'detail.nonStreaming': '非流式请求',
-    'detail.attempt': '尝试次数',
+    'detail.attempt': '执行序号',
+    'detail.attemptHint': '本次下游请求内的实际执行顺序。健康检查或熔断跳过不计，key 选择失败计入；不等于 HTTP 发送次数。',
+    'detail.candidatePosition': '候选位置',
+    'detail.candidatePositionHint': '路由和容量筛选后、健康检查或熔断跳过前的链中位置。旧记录可能未记录。',
     'detail.inputTokens': '输入（原始）',
     'detail.promptTokens': 'Prompt（原始+缓存）',
     'detail.cacheRead': '缓存读取',
@@ -1060,9 +1068,9 @@ const TRANSLATIONS = {
     'cmd.gotoAnalytics': '前往用量分析',
     'cmd.gotoSettings': '前往设置',
     'cmd.refreshData': '刷新数据',
-    'metric.total': '总请求数',
-    'metric.avgPerRequest': '均 {v}/次',
-    'metric.perMinute': '{v}/分',
+    'metric.total': '上游尝试数',
+    'metric.avgPerRequest': '均 {v}/次尝试',
+    'metric.perMinute': '{v} 次尝试/分',
     'metric.success': '成功',
     'metric.failed': '失败',
     'metric.streamed': '流式请求',
@@ -1302,9 +1310,9 @@ const TRANSLATIONS = {
     'perf.allTime': '全部时间',
     'perf.th.model': '模型',
     'perf.th.count': '耗时样本',
-    'perf.sampleHint': '样本数仅计入有耗时记录的请求；成功率按已知结果计算。P50 / P90 / P99 表示相应分位的耗时，样本较少时不宜据此判断稳定性能。',
+    'perf.sampleHint': '样本数仅计入有耗时记录的上游尝试；成功率按尝试的已知结果计算，不代表下游请求的最终成功率。P50 / P90 / P99 表示相应分位的耗时，样本较少时不宜据此判断稳定性能。',
     'perf.knownSamples': '{n} 条已知结果的请求',
-    'perf.th.successRate': '成功率',
+    'perf.th.successRate': '尝试成功率',
     'perf.th.avg': '平均延迟',
     'perf.th.p50': 'P50',
     'perf.th.p90': 'P90',
@@ -2283,8 +2291,10 @@ function cancelTabRequests(name) {
 function handleVisibilityChange() {
   if (document.hidden) {
     for (const tab of ['overview', 'performance', 'analytics', 'quota', 'history', 'settings']) cancelTabRequests(tab);
+    cancelActiveSiteRequest();
     return;
   }
+  applyActiveSite();
   refreshVisibleTab();
 }
 document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -2297,7 +2307,7 @@ window.addEventListener('pagehide', () => {
   catalogAgeRequest = null;
   channelCatalogRequest?.abort();
   channelCatalogRequest = null;
-  activeSiteLoadSeq++;
+  cancelActiveSiteRequest();
 });
 window.addEventListener('pageshow', event => {
   // BFCache restores this JS heap without boot or a hashchange event.
@@ -2557,7 +2567,7 @@ function renderOverviewUsage(data, trend, latency) {
     costNotes.push(`${currentLang === 'zh' ? '今日' : 'Today'} (UTC) ${windowCost(today)} · ${t('data.retained')} ${windowCost(retained)}`);
   }
   set('m-cost-note', costNotes.join(' · ') || t('analytics.currencyUSD'));
-  set('m-throughput', lastMinute.total_requests != null ? `${fmt(lastMinute.total_requests)} RPM` : '—');
+  set('m-throughput', lastMinute.total_requests != null ? t('metric.perMinute').replace('{v}', fmt(lastMinute.total_requests)) : '—');
   set('m-throughput-note', hasUsageTokens(lastMinute) ? `${compactTotal(lastMinute)} TPM` : '');
   const known = Number(summary.known_requests || 0);
   set('m-success', known > 0 && summary.success_rate != null ? `${(Number(summary.success_rate) * 100).toFixed(1)}%` : '—');
@@ -3462,6 +3472,7 @@ const HISTORY_CSV_COLUMNS = [
   ['response_model', r => r.response_model || ''],
   ['upstream_model', r => r.upstream_model || ''],
   ['upstream_channel', r => r.upstream_channel || ''],
+  ['candidate_position', r => r.candidate_position ?? null],
 ];
 
 // Export walks the API rather than the rendered page so the file covers the
@@ -4766,26 +4777,36 @@ document.addEventListener('DOMContentLoaded', () => {
 // moved, so an unchanged site causes no work.
 const ACTIVE_SITE_POLL_MS = 30000;
 let lastActiveSite = null;
-let activeSiteLoadSeq = 0;
+let activeSiteRequest = null;
 
-async function applyActiveSite() {
-  const seq = ++activeSiteLoadSeq;
-  let active;
+function cancelActiveSiteRequest() {
+  activeSiteRequest?.abort();
+  activeSiteRequest = null;
+}
+
+async function applyActiveSite(force = false) {
+  if (force) cancelActiveSiteRequest();
+  if (document.hidden || activeSiteRequest) return false;
+  const controller = activeSiteRequest = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), DISPLAY_REQUEST_TIMEOUT_MS);
   try {
-    active = (await fetchJSON('/api/sites')).active || '';
+    const active = (await fetchJSON('/api/sites', {signal: controller.signal})).active || '';
+    if (activeSiteRequest !== controller || controller.signal.aborted) return false;
+    lastActiveSite = active;
+    setViewPlatform(viewPlatformPinned);
+    const offered = VIEW_CONTROLS.platform.some(id => {
+      const select = document.getElementById(id);
+      return select && [...select.options].some(option => option.value === active && !option.disabled);
+    });
+    renderActiveSiteNote(offered ? '' : active);
+    syncViewState({replace: true});
+    return true;
   } catch (_) {
     return false; // leave the selectors as rendered rather than guessing
+  } finally {
+    clearTimeout(deadline);
+    if (activeSiteRequest === controller) activeSiteRequest = null;
   }
-  if (seq !== activeSiteLoadSeq) return true;
-  lastActiveSite = active;
-  setViewPlatform(viewPlatformPinned);
-  const offered = VIEW_CONTROLS.platform.some(id => {
-    const select = document.getElementById(id);
-    return select && [...select.options].some(option => option.value === active && !option.disabled);
-  });
-  renderActiveSiteNote(offered ? '' : active);
-  syncViewState({replace: true});
-  return true;
 }
 
 // renderActiveSiteNote shows why the views cannot open on the active platform.
@@ -4868,6 +4889,7 @@ async function saveProxyConfig() {
       body: JSON.stringify(patch)
     }, true);
     confirmed = true;
+    cancelActiveSiteRequest();
     if (Object.hasOwn(patch, 'cline_pass')) loadChannelCatalog();
     // Record exactly what was acknowledged, even if the follow-up GET fails.
     // Key pools are deliberately left out: the saved form is an instruction to
@@ -4883,7 +4905,7 @@ async function saveProxyConfig() {
     const loaded = await loadProxyConfig({preserveInputs: submittedInputs, quiet: true});
     if (Object.hasOwn(patch, 'active_site')) viewPlatformPinned = null;
     const selectable = await applySelectableSites();
-    const active = await applyActiveSite();
+    const active = await applyActiveSite(true);
     updateConfigChangeCount();
     const refreshed = loaded && selectable && active;
     const success = Object.hasOwn(patch, 'host') || Object.hasOwn(patch, 'port') ? t('save.restart') : t('status.saveOk');
@@ -5125,7 +5147,8 @@ function showHistoryDetail(record) {
       ${record.reasoning_effort ? `<div class="detail-row"><span class="detail-label">${t('detail.effort')}</span><span class="detail-value" title="${escapeHtml(t('th.effortHint'))}">${escapeHtml(record.reasoning_effort)}</span></div>` : ''}
       ${record.key_hint ? `<div class="detail-row"><span class="detail-label">${t('detail.keyHint')}</span><span class="detail-value" title="${escapeHtml(t('th.keyHintTooltip'))}"><code>${escapeHtml(record.key_hint)}</code></span></div>` : ''}
       ${record.first_byte_ms ? `<div class="detail-row"><span class="detail-label">${t('detail.firstByte')}</span><span class="detail-value">${fmtDuration(record.first_byte_ms)}</span></div>` : ''}
-      <div class="detail-row"><span class="detail-label">${t('detail.attempt')}</span><span class="detail-value">${outcomeKnown ? (record.attempt || 1) : t('detail.unavailable')}</span></div>
+      <div class="detail-row"><span class="detail-label">${t('detail.attempt')}</span><span class="detail-value" title="${escapeHtml(t('detail.attemptHint'))}">${outcomeKnown ? (record.attempt || 1) : t('detail.unavailable')}</span></div>
+      <div class="detail-row"><span class="detail-label">${t('detail.candidatePosition')}</span><span class="detail-value" title="${escapeHtml(t('detail.candidatePositionHint'))}">${record.candidate_position ?? t('detail.unavailable')}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.duration')}</span><span class="detail-value">${outcomeKnown ? gradeDuration(record, fmtDuration(record.duration_ms)) : t('detail.unavailable')}</span></div>
       <div class="detail-row"><span class="detail-label">${t('analytics.generationThroughput')}</span><span class="detail-value" title="${escapeHtml(t('analytics.generationThroughputHint'))}">${fmtGenerationThroughput(record.generation_tokens_per_second)}</span></div>
       ${tpsOfRow == null ? '' : `<div class="detail-row"><span class="detail-label">${t('analytics.throughput')}</span><span class="detail-value" title="${escapeHtml(t('analytics.throughputHint'))}">${fmtGenerationThroughput(tpsOfRow)}</span></div>`}
@@ -5447,6 +5470,7 @@ async function handleConfigImport(file) {
           body: JSON.stringify({ config: config, apply: true })
         }, true);
         confirmed = true;
+        cancelActiveSiteRequest();
 
         // The user may have closed this preview and opened another dialog
         // while the request was in flight. Do not close that newer dialog.
@@ -5455,7 +5479,7 @@ async function handleConfigImport(file) {
         const loaded = await loadProxyConfig({preserveInputs: submittedInputs, quiet: true});
         if (Object.hasOwn(config, 'active_site')) viewPlatformPinned = null;
         const selectable = await applySelectableSites();
-        const active = await applyActiveSite();
+        const active = await applyActiveSite(true);
         const refreshed = loaded && selectable && active;
         showSaveStatus(refreshed ? t('status.importOk') : t('save.refreshFailed'), refreshed ? 'success' : 'error');
       } catch (e) {
@@ -7758,7 +7782,7 @@ const QuotaModule = {
     const usage = data.usage;
     const summary = data.usage_error ? error(data.usage_error) : usage ? figures([
       ['commandcode.usagePeriod', usage.periodBasis === 'billing-period' ? t('commandcode.billingPeriodScope') : usage.periodBasis || '—'],
-      ['analytics.requests', fmt(usage.totalCount)], ['metric.success', fmt(usage.completedCount)], ['metric.failed', fmt(usage.failedCount)],
+      ['commandcode.requests', fmt(usage.totalCount)], ['metric.success', fmt(usage.completedCount)], ['metric.failed', fmt(usage.failedCount)],
       ['analytics.inputTokens', fmt(usage.totalTokensIn)], ['analytics.outputTokens', fmt(usage.totalTokensOut)],
       ['analytics.totalTokens', fmt(usage.totalTokens)], ['commandcode.usageCredits', fmtCost(usage.totalCredits)],
       ['commandcode.officialCost', fmtCost(usage.totalCost)],

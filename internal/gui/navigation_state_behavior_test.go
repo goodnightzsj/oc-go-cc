@@ -94,7 +94,7 @@ async function checks() {
   const older = applyActiveSite();
   fetch = originalFetch;
   syntheticSite.active = 'opencode-go';
-  await applyActiveSite();
+  await applyActiveSite(true);
   release({ok:true, json:async()=>({active:'commandcode'})});
   await older;
   for (const id of VIEW_CONTROLS.platform) assert.equal(document.getElementById(id).value, 'opencode-go', 'an older poll cannot undo a newer site: ' + id);

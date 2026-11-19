@@ -212,7 +212,7 @@ async function checks() {
     for (const path of ['/api/analytics/summary','/api/analytics/tokens/trend','/api/perf/aggregate']) assertScope(path, provider);
     assertScope('/api/metrics', '');
     assert.equal(get('m-total').textContent, String(provider ? providers.indexOf(provider) + 1 : 15), 'global process count must not overwrite selected usage');
-    assert.equal(get('m-throughput').textContent, String(provider ? providers.indexOf(provider) + 1 : 15) + ' RPM');
+    assert.equal(get('m-throughput').textContent, t('metric.perMinute').replace('{v}', String(provider ? providers.indexOf(provider) + 1 : 15)));
 
     calls = [];
     activeTab = 'analytics';

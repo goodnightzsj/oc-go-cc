@@ -78,7 +78,7 @@
     <p id="overview-error" hidden role="alert" style="color:var(--ui-red)"></p>
     <div class="metric-band metric-grid overview-metrics reference-metrics">
       <div class="metric-cell overview-metric">
-        <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="metric.total">Total Requests</div>
+        <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="metric.total">Upstream attempts</div>
         <div class="metric-value-row"><div class="metric-value" id="m-total">--</div><span class="metric-avg" id="m-total-avg"></span></div>
         <div class="metric-note" id="m-total-note"></div>
       </div>
@@ -88,7 +88,7 @@
         <div class="metric-note" id="m-tokens-note"></div>
       </div>
       <div class="metric-cell overview-metric">
-        <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="history.successRate">Success rate</div>
+        <div class="text-[11px] text-[#98989d] mb-1.5" data-i18n="history.successRate">Attempt success rate</div>
         <div class="metric-value-row"><div class="metric-value" id="m-success">--</div><span class="metric-avg" id="m-success-avg"></span></div>
         <div class="metric-note" id="m-success-note"></div>
       </div>
@@ -105,7 +105,7 @@
     <section class="analytics-section platform-health" id="platform-health" hidden>
       <div class="section-heading" data-i18n="analytics.platformHealth">Platform health</div>
       <div class="platform-health-rows" id="platform-health-rows"></div>
-      <p class="page-meta" data-i18n="analytics.platformHealthNote">Success rate and latency cover requests this instance recorded with a known outcome. Breaker state comes from the live fallback circuit, not from history.</p>
+      <p class="page-meta" data-i18n="analytics.platformHealthNote">Each model execution is counted separately: one failed attempt followed by a successful fallback is 2 attempts with 50% success. Success rate uses known outcomes. Breaker state is live.</p>
     </section>
     <div class="empty-state ledger-empty" id="overview-empty" hidden><strong data-i18n="data.localEmpty">No retained requests in this view</strong><p data-i18n="data.localEmptyHint">Check the filters and retention policy. An empty local ledger does not mean no platform usage.</p></div>
     <div id="overview-insights">
@@ -115,13 +115,13 @@
       <p class="page-meta" id="daily-spend-note"></p>
     </section>
     <div class="analytics-chart-grid">
-      <section class="analytics-section analytics-trend-section"><div class="section-heading" data-i18n="analytics.requestTrend">Request trend</div><div class="analytics-chart analytics-trend" id="overview-request-trend"></div></section>
+      <section class="analytics-section analytics-trend-section"><div class="section-heading" data-i18n="analytics.requestTrend">Upstream attempt trend</div><div class="analytics-chart analytics-trend" id="overview-request-trend"></div></section>
       <section class="analytics-section analytics-trend-section"><div class="section-heading" data-i18n="analytics.tokenTrend">Token trend</div><div class="analytics-chart analytics-trend" id="overview-token-trend"></div></section>
     </div>
     <div class="insight-toolbar analytics-breakdown-toolbar">
       <span data-i18n="history.distribution">Distribution details</span>
       <div class="metric-segment" id="overview-breakdown-metric" role="group" aria-label="Dashboard distribution metric">
-        <button type="button" data-metric="requests" class="active" data-i18n="analytics.requests">Requests</button>
+        <button type="button" data-metric="requests" class="active" data-i18n="analytics.requests">Upstream attempts</button>
         <button type="button" data-metric="tokens" data-i18n="analytics.totalTokens">Tokens</button>
         <button type="button" data-metric="cost" data-i18n="analytics.cost">Cost</button>
       </div>
@@ -213,8 +213,8 @@
       </details>
       <div class="history-summary-band" aria-label="Filtered history summary">
         <div class="history-summary-metrics">
-          <div><span data-i18n="history.filteredRequests">Filtered requests</span><strong id="history-summary-requests">--</strong></div>
-          <div><span data-i18n="history.successRate">Success rate</span><strong id="history-summary-success">--</strong></div>
+          <div><span data-i18n="history.filteredRequests">Filtered attempts</span><strong id="history-summary-requests">--</strong></div>
+          <div><span data-i18n="history.successRate">Attempt success rate</span><strong id="history-summary-success">--</strong></div>
           <div><span data-i18n="history.filteredTokens">Tokens</span><strong id="history-summary-tokens">--</strong><small class="history-summary-note" id="history-summary-token-note"></small></div>
           <div><span data-i18n="history.filteredCost">Recorded cost</span><strong id="history-summary-cost">--</strong><small class="history-summary-note" id="history-summary-cost-note"></small></div>
         </div>
@@ -255,7 +255,7 @@
           <div class="metric-segment" id="history-breakdown-metric" role="group" aria-label="History distribution metric">
             <button type="button" data-metric="tokens" class="active" data-i18n="analytics.totalTokens">Tokens</button>
             <button type="button" data-metric="cost" data-i18n="analytics.cost">Cost</button>
-            <button type="button" data-metric="requests" data-i18n="analytics.requests">Requests</button>
+            <button type="button" data-metric="requests" data-i18n="analytics.requests">Upstream attempts</button>
           </div>
         </div>
         <div class="history-breakdown-grid">
@@ -433,7 +433,7 @@
           <tr>
             <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="model" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.model">Model</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
             <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="count" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.count">Count</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
-            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="success_rate" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.successRate">Success %</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="success_rate" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.successRate">Attempt success %</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
             <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="avg_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.avg">Avg (ms)</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
             <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="p50_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.p50">P50</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
             <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="p90_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.p90">P90</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
@@ -446,7 +446,7 @@
         </tbody>
       </table>
     </div>
-    <p class="page-meta" data-i18n="perf.sampleHint">Only measured requests contribute latency samples. Small samples can be misleading.</p>
+    <p class="page-meta" data-i18n="perf.sampleHint">Samples count upstream attempts with measured latency. Success % uses known attempt outcomes, not final downstream results. P50 / P90 / P99 show latency percentiles; small samples can be misleading.</p>
     </div>
   </div>
 
@@ -565,9 +565,9 @@
 
       <div class="metric-band metric-grid analytics-metrics usage-metrics">
         <div class="metric-cell">
-          <div class="metric-label" data-i18n="analytics.totalRequests">Total Requests</div>
+          <div class="metric-label" data-i18n="analytics.totalRequests">Upstream attempts</div>
           <div class="metric-value" id="kpi-requests">--</div>
-          <div class="metric-note" data-i18n="analytics.requestsUnit">requests</div>
+          <div class="metric-note" data-i18n="analytics.requestsUnit">attempts</div>
         </div>
         <div class="metric-cell">
           <div class="metric-label" data-i18n="analytics.totalTokens">Total Tokens</div><div class="metric-value" id="kpi-tokens">--</div><div class="metric-note" id="kpi-tokens-note"></div>
@@ -588,13 +588,13 @@
       <div class="empty-state ledger-empty" id="analytics-empty" hidden><strong data-i18n="data.localEmpty">No retained requests in this view</strong><p data-i18n="data.localEmptyHint">Check the filters and retention policy. An empty local ledger does not mean no platform usage.</p></div>
       <div id="analytics-insights">
       <div class="analytics-chart-grid">
-        <section class="analytics-section analytics-trend-section"><h2 class="section-heading" data-i18n="analytics.requestTrend">Request trend</h2><div class="analytics-chart analytics-trend" id="analytics-request-trend"></div></section>
+        <section class="analytics-section analytics-trend-section"><h2 class="section-heading" data-i18n="analytics.requestTrend">Upstream attempt trend</h2><div class="analytics-chart analytics-trend" id="analytics-request-trend"></div></section>
         <section class="analytics-section analytics-trend-section"><h2 class="section-heading" data-i18n="analytics.tokenTrend">Token trend</h2><div class="analytics-chart analytics-trend" id="analytics-token-trend"></div></section>
       </div>
       <section class="analytics-section">
         <div class="section-heading"><span data-i18n="analytics.periodDetails">Period details</span><span class="section-meta" id="analytics-period-count"></span></div>
         <div class="analytics-table-scroll"><table class="analytics-table usage-detail-table"><thead><tr>
-          <th data-i18n="analytics.period">Period</th><th data-i18n="analytics.requests">Requests</th><th data-i18n="analytics.knownErrors">Known errors</th><th data-i18n="analytics.inputTokens">Input</th><th data-i18n="analytics.outputTokens">Output</th><th data-i18n="detail.cacheRead">Cache read</th><th data-i18n="detail.cacheCreation">Cache write</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="analytics.cost">Cost</th>
+          <th data-i18n="analytics.period">Period</th><th data-i18n="analytics.requests">Upstream attempts</th><th data-i18n="analytics.knownErrors">Known errors</th><th data-i18n="analytics.inputTokens">Input</th><th data-i18n="analytics.outputTokens">Output</th><th data-i18n="detail.cacheRead">Cache read</th><th data-i18n="detail.cacheCreation">Cache write</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="analytics.cost">Cost</th>
         </tr></thead><tbody id="analytics-period-tbody"></tbody></table></div>
       </section>
 
@@ -603,13 +603,13 @@
         <div class="metric-segment" id="analytics-breakdown-metric" role="group" aria-label="Analytics distribution metric">
           <button type="button" data-metric="tokens" class="active" data-i18n="analytics.totalTokens">Tokens</button>
           <button type="button" data-metric="cost" data-i18n="analytics.cost">Cost</button>
-          <button type="button" data-metric="requests" data-i18n="analytics.requests">Requests</button>
+          <button type="button" data-metric="requests" data-i18n="analytics.requests">Upstream attempts</button>
         </div>
       </div>
       <div class="analytics-comparison-grid">
         <section class="analytics-section">
           <div class="section-heading" data-i18n="analytics.modelDetails">Model details</div>
-          <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th data-i18n="filter.model">Model</th><th data-i18n="analytics.requests">Requests</th><th data-i18n="analytics.cacheHitShort">Cache hit</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="th.tokensPerSecond">Tok/s</th><th data-i18n="analytics.cost">Cost</th></tr></thead><tbody id="analytics-model-tbody"></tbody></table></div>
+          <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th data-i18n="filter.model">Model</th><th data-i18n="analytics.requests">Upstream attempts</th><th data-i18n="analytics.cacheHitShort">Cache hit</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="th.tokensPerSecond">Tok/s</th><th data-i18n="analytics.cost">Cost</th></tr></thead><tbody id="analytics-model-tbody"></tbody></table></div>
           <p class="page-meta" data-i18n="analytics.timingNote">Tok/s uses the source stream from first output to successful terminal. Missing samples and intervals under 100 ms show —; average throughput is in the tooltip.</p>
         </section>
         <section class="analytics-section">
@@ -732,12 +732,12 @@
         <p class="page-meta" id="quota-local-note"></p>
         <p id="quota-local-error" hidden role="alert" style="color:var(--ui-red)"></p>
         <div class="metric-band metric-grid usage-metrics">
-          <div class="metric-cell"><div class="metric-label" data-i18n="analytics.totalRequests">Total Requests</div><div class="metric-value" id="quota-local-requests">--</div></div>
+          <div class="metric-cell"><div class="metric-label" data-i18n="analytics.totalRequests">Upstream attempts</div><div class="metric-value" id="quota-local-requests">--</div></div>
           <div class="metric-cell"><div class="metric-label" data-i18n="analytics.totalTokens">Total Tokens</div><div class="metric-value" id="quota-local-tokens">--</div></div>
           <div class="metric-cell"><div class="metric-label" id="quota-local-cost-label" data-i18n="history.filteredCost">Recorded cost</div><div class="metric-value" id="quota-local-cost">--</div><div class="metric-note" id="quota-local-cost-note"></div></div>
-          <div class="metric-cell"><div class="metric-label" data-i18n="quota.unknownCosts">Requests with unknown cost</div><div class="metric-value" id="quota-local-unknown">--</div></div>
+          <div class="metric-cell"><div class="metric-label" data-i18n="quota.unknownCosts">Attempts with unknown cost</div><div class="metric-value" id="quota-local-unknown">--</div></div>
         </div>
-        <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th data-i18n="th.modelPlatform">Model / Platform</th><th data-i18n="analytics.requests">Requests</th><th data-i18n="analytics.cacheHitShort">Cache hit</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="th.tokensPerSecond">Tok/s</th><th data-i18n="analytics.cost">Cost</th></tr></thead><tbody id="quota-local-model-tbody"></tbody></table></div>
+        <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th data-i18n="th.modelPlatform">Model / Platform</th><th data-i18n="analytics.requests">Upstream attempts</th><th data-i18n="analytics.cacheHitShort">Cache hit</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="th.tokensPerSecond">Tok/s</th><th data-i18n="analytics.cost">Cost</th></tr></thead><tbody id="quota-local-model-tbody"></tbody></table></div>
         <p class="page-meta" data-i18n="analytics.timingNote">Tok/s uses the source stream from first output to successful terminal. Missing samples and intervals under 100 ms show —; average throughput is in the tooltip.</p>
       </section>
     </div>

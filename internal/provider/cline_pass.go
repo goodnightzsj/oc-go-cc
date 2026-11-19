@@ -34,6 +34,10 @@ type ClinePassProvider struct {
 	// cline_pass_health.go.
 	healthProbeMu sync.Mutex
 	healthProbeAt map[string]time.Time
+	// healthScopeMu guards healthEndpoint, the account endpoint the gate's
+	// verdicts were recorded against; a changed endpoint resets them.
+	healthScopeMu  sync.Mutex
+	healthEndpoint string
 }
 
 func NewClinePassProvider(atomic *config.AtomicConfig, capture *debug.CaptureLogger) *ClinePassProvider {

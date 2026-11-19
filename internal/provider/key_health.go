@@ -4,9 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
-	"time"
 
-	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/quota"
 )
 
@@ -42,7 +40,6 @@ type keyHealthGate struct {
 type healthVerdict struct {
 	unhealthy bool
 	reason    string
-	checkedAt time.Time
 }
 
 func newKeyHealthGate() *keyHealthGate {
@@ -105,7 +102,18 @@ func (g *keyHealthGate) Record(key string, err error) {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.state[key] = healthVerdict{unhealthy: unhealthy, reason: reason, checkedAt: time.Now()}
+	g.state[key] = healthVerdict{unhealthy: unhealthy, reason: reason}
+}
+
+// Reset discards every verdict. Verdicts are about one account authority, so a
+// different endpoint makes the old ones meaningless rather than merely stale.
+func (g *keyHealthGate) Reset() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.state = map[string]healthVerdict{}
 }
 
 // probeStatusOf extracts the HTTP status from a quota fetch error. Errors that
@@ -120,7 +128,7 @@ func probeStatusOf(err error) (int, bool) {
 
 // logKeyExclusion reports a rotation-membership change. The hint is the same
 // masked label the history column uses, so no line carries a credential.
-func logKeyExclusion(key string, excluded bool, err error) {
+func logKeyExclusion(provider, key string, excluded bool, err error) {
 	hint := KeyMaskHint(key)
 	switch {
 	case excluded:
@@ -128,8 +136,8 @@ func logKeyExclusion(key string, excluded bool, err error) {
 		if err != nil {
 			detail = err.Error()
 		}
-		slog.Warn("key held out of rotation: subscription probe rejected it", "provider", client.ProviderClinePass, "key_hint", hint, "error", detail)
+		slog.Warn("key held out of rotation: subscription probe rejected it", "provider", provider, "key_hint", hint, "error", detail)
 	default:
-		slog.Info("key returned to rotation: subscription probe succeeded", "provider", client.ProviderClinePass, "key_hint", hint)
+		slog.Info("key returned to rotation: subscription probe succeeded", "provider", provider, "key_hint", hint)
 	}
 }

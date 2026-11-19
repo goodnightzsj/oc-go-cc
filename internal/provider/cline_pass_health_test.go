@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -197,5 +198,37 @@ func TestAuthVerdictTriggersImmediateProbe(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 	if after := atomic.LoadInt32(&hits); after != before {
 		t.Fatalf("probes=%d want %d: repeated rejections must respect the floor", after, before)
+	}
+}
+
+// A hot-reloaded base_url names a different account authority: verdicts from
+// the old endpoint must not survive the switch.
+func TestHealthScopeResetsVerdictsOnEndpointChange(t *testing.T) {
+	key := "synthetic-credential-mirror-0002"
+	rejecting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"error":"no plan history found for user"}`)
+	}))
+	t.Cleanup(rejecting.Close)
+	accepting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"success":true,"data":{"limits":[{"type":"five_hour","percentUsed":10}]}}`)
+	}))
+	t.Cleanup(accepting.Close)
+
+	p, _ := clinePassTestProvider(t, func(http.ResponseWriter, *http.Request) {})
+	cfg := p.atomic.Get()
+	cfg.ClinePass.APIKey = ""
+	cfg.ClinePass.APIKeys = []string{key}
+	cfg.ClinePass.BaseURL = rejecting.URL + "/api/v1/chat/completions"
+
+	p.probeKeyHealth(t.Context())
+	if !p.health.Excluded(key) {
+		t.Fatal("the rejecting endpoint must exclude the key")
+	}
+
+	cfg.ClinePass.BaseURL = accepting.URL + "/api/v1/chat/completions"
+	p.probeKeyHealth(t.Context())
+	if p.health.Excluded(key) {
+		t.Fatal("a verdict recorded against the old endpoint must not survive the switch")
 	}
 }

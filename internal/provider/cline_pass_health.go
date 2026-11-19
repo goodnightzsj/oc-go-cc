@@ -59,6 +59,27 @@ func (p *ClinePassProvider) StartHealthLoop(ctx context.Context) {
 	}()
 }
 
+// healthScope derives the account endpoint for the configured base URL and
+// discards gate verdicts recorded against a different one. Verdicts are about
+// one account authority: a hot-reloaded base_url naming a mirror or a moved
+// gateway makes the old verdicts meaningless, and keeping them would exclude
+// healthy keys (or admit dead ones) at the new endpoint for up to one pass.
+func (p *ClinePassProvider) healthScope(baseURL string) (string, error) {
+	endpoint, err := quota.ClinePassUsageURL(baseURL)
+	if err != nil {
+		return "", err
+	}
+	p.healthScopeMu.Lock()
+	defer p.healthScopeMu.Unlock()
+	if p.healthEndpoint != "" && p.healthEndpoint != endpoint {
+		p.health.Reset()
+		slog.Info("cline-pass key health verdicts reset: account endpoint changed",
+			"provider", client.ProviderClinePass, "previous", p.healthEndpoint, "current", endpoint)
+	}
+	p.healthEndpoint = endpoint
+	return endpoint, nil
+}
+
 // probeKeyHealth reads each configured credential's subscription endpoint once
 // and records the verdict with the rotation gate. The endpoint is the same one
 // the Quota tab reads - a 404 there is "no plan history found for user", which
@@ -73,7 +94,7 @@ func (p *ClinePassProvider) probeKeyHealth(ctx context.Context) (probed, exclude
 	if len(keys) == 0 {
 		return 0, 0
 	}
-	endpoint, err := quota.ClinePassUsageURL(cfg.ClinePass.BaseURL)
+	endpoint, err := p.healthScope(cfg.ClinePass.BaseURL)
 	if err != nil {
 		// An unusable base_url disables the panel's fetch too; the pool's own
 		// quarantine still bounds bad-key damage in the meantime.
@@ -99,7 +120,7 @@ func (p *ClinePassProvider) probeOneKey(ctx context.Context, endpoint, key strin
 	_, ferr := quota.FetchClinePass(ctx, nil, endpoint, key)
 	p.health.Record(key, ferr)
 	if now := p.health.Excluded(key); now != prev {
-		logKeyExclusion(key, now, ferr)
+		logKeyExclusion(p.Name(), key, now, ferr)
 	}
 }
 
@@ -130,7 +151,7 @@ func (p *ClinePassProvider) probeKeyAsync(key string) {
 		if cfg == nil {
 			return
 		}
-		endpoint, err := quota.ClinePassUsageURL(cfg.ClinePass.BaseURL)
+		endpoint, err := p.healthScope(cfg.ClinePass.BaseURL)
 		if err != nil {
 			return
 		}

@@ -6135,10 +6135,23 @@ loadProxyConfig();
 // to overview when no hash is present. Deferred to a microtask so any
 // const modules (e.g. AnalyticsModule) defined later in this script have
 // been initialized — otherwise accessing them here hits a TDZ error.
-queueMicrotask(() => {
+queueMicrotask(async () => {
   // The defaults are read before the URL is applied, so a link cannot become
   // the baseline its own parameters are measured against.
   captureViewDefaults();
+  // Every platform select defaults to the active site (defaultControlValue),
+  // and lastActiveSite is only known after the first /api/sites answer. Seed it
+  // before the view state is applied, or the first tab load renders the
+  // fallback platform and is corrected afterwards - a visible flash on every
+  // reload. The wait is bounded so an unreachable endpoint cannot hold boot;
+  // the write-back is suppressed because syncViewState would otherwise persist
+  // these not-yet-restored defaults over the saved view.
+  suppressViewStateSync = true;
+  try {
+    await Promise.race([applyActiveSite(), new Promise(resolve => setTimeout(resolve, 1500))]);
+  } finally {
+    suppressViewStateSync = false;
+  }
   // The tab comes from the hash (navigation); the filters come from localStorage
   // (the reader's own choices). A legacy link may still carry query parameters,
   // so those are honoured once - that keeps an old bookmark working without

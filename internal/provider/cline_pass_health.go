@@ -73,11 +73,25 @@ func (p *ClinePassProvider) healthScope(baseURL string) (string, error) {
 	defer p.healthScopeMu.Unlock()
 	if p.healthEndpoint != "" && p.healthEndpoint != endpoint {
 		p.health.Reset()
+		// The floor only exists to pace probes of one endpoint; a new endpoint
+		// deserves an immediate verdict.
+		p.healthProbeMu.Lock()
+		p.healthProbeAt = nil
+		p.healthProbeMu.Unlock()
 		slog.Info("cline-pass key health verdicts reset: account endpoint changed",
 			"provider", client.ProviderClinePass, "previous", p.healthEndpoint, "current", endpoint)
 	}
 	p.healthEndpoint = endpoint
 	return endpoint, nil
+}
+
+// scopeCurrent reports whether endpoint is still the account endpoint the gate
+// is scoped to. A probe that started before a base_url change must not record
+// its verdict into the new scope.
+func (p *ClinePassProvider) scopeCurrent(endpoint string) bool {
+	p.healthScopeMu.Lock()
+	defer p.healthScopeMu.Unlock()
+	return p.healthEndpoint == endpoint
 }
 
 // probeKeyHealth reads each configured credential's subscription endpoint once
@@ -114,10 +128,15 @@ func (p *ClinePassProvider) probeKeyHealth(ctx context.Context) (probed, exclude
 }
 
 // probeOneKey reads one credential's subscription endpoint and records the
-// verdict, logging a membership change. Callers bound ctx.
+// verdict, logging a membership change. A result that arrives after the account
+// endpoint changed is discarded: it describes a different authority. Callers
+// bound ctx.
 func (p *ClinePassProvider) probeOneKey(ctx context.Context, endpoint, key string) {
 	prev := p.health.Excluded(key)
 	_, ferr := quota.FetchClinePass(ctx, nil, endpoint, key)
+	if !p.scopeCurrent(endpoint) {
+		return
+	}
 	p.health.Record(key, ferr)
 	if now := p.health.Excluded(key); now != prev {
 		logKeyExclusion(p.Name(), key, now, ferr)

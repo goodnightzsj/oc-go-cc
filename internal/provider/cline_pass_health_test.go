@@ -232,3 +232,40 @@ func TestHealthScopeResetsVerdictsOnEndpointChange(t *testing.T) {
 		t.Fatal("a verdict recorded against the old endpoint must not survive the switch")
 	}
 }
+
+// A probe that started before the account endpoint changed describes a
+// different authority; its result must be discarded rather than recorded into
+// the new scope.
+func TestProbeResultFromOldEndpointIsDiscarded(t *testing.T) {
+	key := "synthetic-credential-scope-0003"
+	rejecting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"error":"no plan history found for user"}`)
+	}))
+	t.Cleanup(rejecting.Close)
+	accepting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"success":true,"data":{"limits":[{"type":"five_hour","percentUsed":10}]}}`)
+	}))
+	t.Cleanup(accepting.Close)
+
+	p, _ := clinePassTestProvider(t, func(http.ResponseWriter, *http.Request) {})
+	cfg := p.atomic.Get()
+	cfg.ClinePass.APIKey = ""
+	cfg.ClinePass.APIKeys = []string{key}
+	cfg.ClinePass.BaseURL = rejecting.URL + "/api/v1/chat/completions"
+	oldEndpoint, err := p.healthScope(cfg.ClinePass.BaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ClinePass.BaseURL = accepting.URL + "/api/v1/chat/completions"
+	if _, err := p.healthScope(cfg.ClinePass.BaseURL); err != nil {
+		t.Fatal(err)
+	}
+
+	// A stale probe against the old endpoint rejects the key; the verdict must
+	// not land in the new scope.
+	p.probeOneKey(t.Context(), oldEndpoint, key)
+	if p.health.Excluded(key) {
+		t.Fatal("a stale-endpoint verdict must be discarded")
+	}
+}

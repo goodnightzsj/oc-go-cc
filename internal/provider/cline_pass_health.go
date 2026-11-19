@@ -85,15 +85,6 @@ func (p *ClinePassProvider) healthScope(baseURL string) (string, error) {
 	return endpoint, nil
 }
 
-// scopeCurrent reports whether endpoint is still the account endpoint the gate
-// is scoped to. A probe that started before a base_url change must not record
-// its verdict into the new scope.
-func (p *ClinePassProvider) scopeCurrent(endpoint string) bool {
-	p.healthScopeMu.Lock()
-	defer p.healthScopeMu.Unlock()
-	return p.healthEndpoint == endpoint
-}
-
 // probeKeyHealth reads each configured credential's subscription endpoint once
 // and records the verdict with the rotation gate. The endpoint is the same one
 // the Quota tab reads - a 404 there is "no plan history found for user", which
@@ -128,17 +119,22 @@ func (p *ClinePassProvider) probeKeyHealth(ctx context.Context) (probed, exclude
 }
 
 // probeOneKey reads one credential's subscription endpoint and records the
-// verdict, logging a membership change. A result that arrives after the account
-// endpoint changed is discarded: it describes a different authority. Callers
-// bound ctx.
+// verdict, logging a membership change. The scope check and the record are one
+// critical section: a result that arrives after the account endpoint changed
+// describes a different authority and is discarded rather than recorded into
+// the new scope. Callers bound ctx.
 func (p *ClinePassProvider) probeOneKey(ctx context.Context, endpoint, key string) {
 	prev := p.health.Excluded(key)
 	_, ferr := quota.FetchClinePass(ctx, nil, endpoint, key)
-	if !p.scopeCurrent(endpoint) {
+	p.healthScopeMu.Lock()
+	if p.healthEndpoint != endpoint {
+		p.healthScopeMu.Unlock()
 		return
 	}
 	p.health.Record(key, ferr)
-	if now := p.health.Excluded(key); now != prev {
+	now := p.health.Excluded(key)
+	p.healthScopeMu.Unlock()
+	if now != prev {
 		logKeyExclusion(p.Name(), key, now, ferr)
 	}
 }

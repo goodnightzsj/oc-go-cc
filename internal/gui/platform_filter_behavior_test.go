@@ -366,6 +366,10 @@ const platformBehaviorRunScript = behaviorDeadlineScript + `
   // Defined inside the vm so it closes over the panel's own readSavedView: the
   // Node side and the page run in separate scopes.
   vm.runInContext('globalThis.savedView = () => readSavedView();',context);
+  // The harness stubs queueMicrotask, so the real boot microtask never runs.
+  // Declare the post-boot state the checks exercise: applyActiveSite only
+  // mutates the platform selects once the boot has applied the view state.
+  vm.runInContext('bootComplete = true;',context);
   await new Promise(setImmediate);
   await vm.runInContext('(' + checks.toString() + ')()',context,{timeout:3000});
 })().catch(error=>{console.error(error);process.exitCode=1}).finally(()=>clearTimeout(behaviorDeadline));

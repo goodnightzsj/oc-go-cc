@@ -57,3 +57,27 @@ async function checks() {
   }
 }
 ` + platformBehaviorRunScript
+
+// applyActiveSite must not move the platform selects before the boot microtask
+// has applied the view state: an early re-sync would fire change events and
+// start loads for a platform the view state is about to replace.
+func TestActiveSiteDoesNotMoveSelectsBeforeBoot(t *testing.T) {
+	runPlatformBehavior(t, platformBehaviorDOMScript+`
+async function checks() {
+  const get = id => document.getElementById(id);
+  const option = value => ({value, disabled:false});
+  const choices = [option(''), option('opencode-go'), option('commandcode')];
+  for (const id of ['overview-provider','provider-filter','perf-provider','analytics-provider','quota-provider']) {
+    get(id).options = choices;
+    get(id).value = 'commandcode';
+  }
+  fetch = async () => ({ok:true, json:async()=>({sites:[{id:'opencode-go',selectable:true}], active:'opencode-go'})});
+  bootComplete = false;
+  assert.equal(await applyActiveSite(), false, 'pre-boot applyActiveSite must be a no-op');
+  assert.equal(get('overview-provider').value, 'commandcode', 'pre-boot applyActiveSite must not move the selects');
+  bootComplete = true;
+  assert.equal(await applyActiveSite(), true, 'post-boot applyActiveSite runs');
+  assert.equal(get('overview-provider').value, 'opencode-go', 'post-boot applyActiveSite follows the server');
+}
+`+platformBehaviorRunScript)
+}

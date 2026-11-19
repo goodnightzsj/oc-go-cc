@@ -4777,6 +4777,12 @@ document.addEventListener('DOMContentLoaded', () => {
 // moved, so an unchanged site causes no work.
 const ACTIVE_SITE_POLL_MS = 30000;
 let lastActiveSite = null;
+// bootComplete gates applyActiveSite's select mutations until the boot
+// microtask has applied the saved view state. Before that, the seed has
+// resolved the active site and applyViewState is the only writer the selects
+// should see; an early re-sync would change them and fire change events that
+// start loads for a platform the view state is about to replace.
+let bootComplete = false;
 let activeSiteRequest = null;
 
 // seedActiveSite resolves the active site before the first tab load without
@@ -4804,7 +4810,7 @@ function cancelActiveSiteRequest() {
 
 async function applyActiveSite(force = false) {
   if (force) cancelActiveSiteRequest();
-  if (document.hidden || activeSiteRequest) return false;
+  if (!bootComplete || document.hidden || activeSiteRequest) return false;
   const controller = activeSiteRequest = new AbortController();
   const deadline = setTimeout(() => controller.abort(), DISPLAY_REQUEST_TIMEOUT_MS);
   try {
@@ -6172,6 +6178,11 @@ queueMicrotask(async () => {
   const {name, params} = parseViewHash(location.hash);
   applyViewState(params.toString() ? params : readSavedView());
   activateTab(name);
+  // The view state now owns the selects; the active-site note and the poll's
+  // re-sync can run without racing the boot defaults. The seed already made
+  // this call's select write a no-op in the common case.
+  bootComplete = true;
+  applyActiveSite();
 });
 
 // History pagination controls.

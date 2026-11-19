@@ -69,7 +69,10 @@ type RequestRecord struct {
 
 	Success  bool   // whether it completed successfully
 	ErrorMsg string // error message if failed
-	Attempt  int    // attempt number in fallback chain (1 = primary, >1 = fallback)
+	Attempt  int    // one-based execution attempt; skipped candidates do not count
+	// CandidatePosition is the one-based execution-chain position, independent
+	// of skipped candidates. Zero means unrecorded (including legacy history).
+	CandidatePosition int `json:"candidate_position,omitempty"`
 
 	// PeakMultiplier is the billing multiplier applied by the upstream
 	// (1 = off-peak base rate; 2 = the DeepSeek weekday peak the three

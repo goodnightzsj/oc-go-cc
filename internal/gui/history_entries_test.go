@@ -18,6 +18,7 @@ func TestHistoryEntriesExposeRawAndPromptTokens(t *testing.T) {
 		OutcomeKnown:        true,
 		OutputTokens:        40,
 		Attempt:             2,
+		CandidatePosition:   3,
 		ErrorMsg:            "upstream failed",
 		Model:               "cline-pass/route",
 		Provider:            "cline-pass",
@@ -53,7 +54,7 @@ func TestHistoryEntriesExposeRawAndPromptTokens(t *testing.T) {
 	if entries[1].CostUSD != nil {
 		t.Errorf("unknown cost_usd = %v, want nil", entries[1].CostUSD)
 	}
-	if got.ID != "request-1" || got.Attempt != 2 || got.ErrorMsg != "upstream failed" {
+	if got.ID != "request-1" || got.Attempt != 2 || got.CandidatePosition != 3 || entries[1].CandidatePosition != 0 || got.ErrorMsg != "upstream failed" {
 		t.Errorf("request detail fields = %+v, want id/attempt/error preserved", got)
 	}
 	if !got.OutcomeKnown || entries[1].OutcomeKnown {

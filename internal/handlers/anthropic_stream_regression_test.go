@@ -78,7 +78,7 @@ func TestAnthropicLocalErrorSeparatesPartialFrame(t *testing.T) {
 		t.Fatal("fixture must fail parsing")
 	}
 	h := &MessagesHandler{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	h.sendStreamError(w, "synthetic terminal failure")
+	h.sendStreamError(w, "synthetic terminal failure", nil)
 	var decoder sse.Decoder
 	validErrors := 0
 	err := decoder.Feed(out.Body.Bytes(), func(name string, data []byte) error {
@@ -100,7 +100,7 @@ func TestLocalStreamErrorHonorsShortWrite(t *testing.T) {
 	defer cancel()
 	w := &responseWriter{ResponseWriter: &timingFailWriter{ResponseRecorder: httptest.NewRecorder(), short: true}, cancelWrites: cancel}
 	h := &MessagesHandler{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	h.sendStreamError(w, "synthetic terminal failure")
+	h.sendStreamError(w, "synthetic terminal failure", nil)
 	if !errors.Is(w.finish(), io.ErrShortWrite) || ctx.Err() == nil {
 		t.Fatalf("short error delivery was accepted: finish=%v context=%v", w.finish(), ctx.Err())
 	}

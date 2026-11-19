@@ -530,6 +530,7 @@ type historyEntry struct {
 	OutcomeKnown        bool     `json:"outcome_known"`
 	Streaming           bool     `json:"streaming"`
 	Attempt             int      `json:"attempt"`
+	CandidatePosition   int      `json:"candidate_position,omitempty"`
 	Success             bool     `json:"success"`
 	ErrorMsg            string   `json:"error_msg,omitempty"`
 }
@@ -725,6 +726,7 @@ func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 			OutcomeKnown:              rec.OutcomeKnown,
 			Streaming:                 rec.Streaming,
 			Attempt:                   rec.Attempt,
+			CandidatePosition:         rec.CandidatePosition,
 			Success:                   rec.Success,
 			ErrorMsg:                  rec.ErrorMsg,
 			PeakMultiplier:            rec.PeakMultiplier,

@@ -59,8 +59,8 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 			cost_usd, cost_source, details_known, outcome_known, usage_trusted, streaming, success, error_msg, attempt,
 			peak_multiplier, upstream_channel, upstream_model, response_model, first_byte_ms, reasoning_effort,
 			key_hint, first_event_ms, first_content_ms, message_end_ms,
-			generation_first_output_ms, generation_duration_ms, generation_output_tokens
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			generation_first_output_ms, generation_duration_ms, generation_output_tokens, candidate_position
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		rec.ID,
 		rec.Model,
@@ -92,6 +92,7 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 		rec.FirstContentMs,
 		rec.MessageEndMs,
 		generationStart, generationDuration, generationOutput,
+		nullIfZero(int64(rec.CandidatePosition)),
 	)
 
 	return err
@@ -489,7 +490,7 @@ func (r *Requests) Query(ctx context.Context, q RequestQuery) ([]history.Request
 		       cost_usd, cost_source, details_known, `+observedOutcome+`, streaming, success, error_msg, attempt,
 		       peak_multiplier, upstream_channel, upstream_model, response_model, first_byte_ms, reasoning_effort,
 		       key_hint, first_event_ms, first_content_ms, message_end_ms,
-		       generation_first_output_ms, generation_duration_ms, generation_output_tokens
+		       generation_first_output_ms, generation_duration_ms, generation_output_tokens, candidate_position
 		FROM requests`+where+`
 		ORDER BY `+orderBy+`
 		LIMIT ? OFFSET ?
@@ -718,7 +719,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		// scan them as nullable booleans instead of failing on NULL.
 		var detailsKnown, streaming, success sql.NullInt64
 
-		var attempt sql.NullInt64
+		var attempt, candidatePosition sql.NullInt64
 		var costUSD sql.NullFloat64
 		var costSource sql.NullString
 		var errorMsg sql.NullString
@@ -760,6 +761,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 			&rec.FirstContentMs,
 			&rec.MessageEndMs,
 			&generationStart, &generationDuration, &generationOutput,
+			&candidatePosition,
 		)
 		if err != nil {
 			return nil, err
@@ -774,6 +776,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		rec.ReasoningEffort = reasoningEffort.String
 		rec.KeyHint = keyHint.String
 		rec.PeakMultiplier = peakMul
+		rec.CandidatePosition = int(candidatePosition.Int64)
 		if attempt.Valid {
 			rec.Attempt = int(attempt.Int64)
 		} else {

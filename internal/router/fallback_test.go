@@ -72,7 +72,7 @@ func TestExecuteWithFallback_NonRetryableDoesNotOpenCircuit(t *testing.T) {
 	_, _, err := h.ExecuteWithFallback(
 		context.Background(),
 		models,
-		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 			attempts++
 			// A 400 says the request is wrong. Every model would refuse it the
 			// same way, so the chain stops here instead of spending the second
@@ -108,7 +108,7 @@ func TestExecuteWithFallback_RetryableOpensCircuit(t *testing.T) {
 	_, _, err := h.ExecuteWithFallback(
 		context.Background(),
 		models,
-		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 			// Retryable 500 error — should open circuit breaker
 			return nil, &client.APIError{StatusCode: 500, Body: "internal error"}
 		},
@@ -137,7 +137,7 @@ func TestExecuteWithFallback_NonRetryableThenRetryable(t *testing.T) {
 	_, _, err := h.ExecuteWithFallback(
 		context.Background(),
 		models,
-		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 			callCount++
 			if callCount == 1 {
 				// A 5xx is about this attempt, so the chain moves on.
@@ -179,7 +179,7 @@ func TestExecuteWithFallback_StopsOnCanceledContext(t *testing.T) {
 
 	callCount := 0
 	_, _, err := handler.ExecuteWithFallback(ctx, models,
-		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 			callCount++
 			return []byte("ok"), nil
 		},
@@ -211,7 +211,7 @@ func TestExecuteWithFallback_StopsOnCanceledAfterFirstModel(t *testing.T) {
 
 	callCount := 0
 	_, _, err := handler.ExecuteWithFallback(ctx, models,
-		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 			callCount++
 			if callCount == 1 {
 				cancel()
@@ -248,7 +248,7 @@ func TestExecuteWithFallback_PerModelTimeoutFallback(t *testing.T) {
 
 	callCount := 0
 	result, body, err := handler.ExecuteWithFallback(parentCtx, models,
-		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 			callCount++
 			if callCount == 1 {
 				return nil, context.DeadlineExceeded
@@ -279,7 +279,7 @@ func TestExecuteWithFallback_UsageLimitSkipsProvider(t *testing.T) {
 		{Provider: "opencode-zen", ModelID: "nemotron-3-ultra-free"},
 	}
 	var attempted []string
-	result, body, err := h.ExecuteWithFallback(context.Background(), models, func(_ context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+	result, body, err := h.ExecuteWithFallback(context.Background(), models, func(_ context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 		attempted = append(attempted, model.ModelID)
 		if model.Provider == "opencode-go" {
 			return nil, &client.APIError{StatusCode: 429, Body: `{"type":"GoUsageLimitError"}`}
@@ -304,7 +304,7 @@ func TestExecuteWithFallback_UsageLimitWithoutAlternateProviderIsPreserved(t *te
 		{Provider: "opencode-go", ModelID: "b"},
 	}
 	calls := 0
-	_, _, err := h.ExecuteWithFallback(context.Background(), models, func(_ context.Context, _ config.ModelConfig, _ int) ([]byte, error) {
+	_, _, err := h.ExecuteWithFallback(context.Background(), models, func(_ context.Context, _ config.ModelConfig, _ int, _ int) ([]byte, error) {
 		calls++
 		return nil, &client.APIError{StatusCode: 429, Body: `{"type":"GoUsageLimitError"}`}
 	})
@@ -327,7 +327,7 @@ func TestExecuteWithFallback_RealPerModelTimeout(t *testing.T) {
 
 	callCount := 0
 	result, body, err := handler.ExecuteWithFallback(parentCtx, models,
-		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 			callCount++
 			if callCount == 1 {
 				attemptCtx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
@@ -365,7 +365,7 @@ func TestExecuteWithFallback_CircuitBreakerDoesNotCountClientCancellation(t *tes
 
 	callCount := 0
 	_, _, err := handler.ExecuteWithFallback(ctx, models,
-		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 			callCount++
 			cancel()
 			return nil, context.Canceled
@@ -398,7 +398,7 @@ func TestExecuteWithFallback_RealModelFailurePenalizesCircuitBreaker(t *testing.
 	}
 
 	_, _, _ = handler.ExecuteWithFallback(ctx, models,
-		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 			return nil, errors.New("upstream 500 internal server error")
 		},
 	)
@@ -427,7 +427,7 @@ func TestExecuteWithFallback_ParentDeadlineExceededNotPenalized(t *testing.T) {
 	}
 
 	_, _, err := handler.ExecuteWithFallback(ctx, models,
-		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 			return nil, nil
 		},
 	)
@@ -454,7 +454,7 @@ func TestExecuteWithFallback_AllModelsFailRecordsFailures(t *testing.T) {
 	}
 
 	_, _, err := handler.ExecuteWithFallback(ctx, models,
-		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 			return nil, errors.New("upstream error")
 		},
 	)
@@ -537,7 +537,7 @@ func TestExecuteWithFallback_UsageLimitErrorStopsFallback(t *testing.T) {
 	}
 
 	_, _, err := handler.ExecuteWithFallback(ctx, models,
-		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 			callCount++
 			return nil, usageLimitErr
 		},
@@ -634,7 +634,7 @@ func TestExecuteWithFallback_AuthErrorShortCircuits(t *testing.T) {
 	}
 
 	_, _, err := handler.ExecuteWithFallback(ctx, models,
-		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 			callCount++
 			return nil, authErr
 		},
@@ -684,7 +684,7 @@ func TestExecuteWithFallback_AuthErrorWithMultipleProviders(t *testing.T) {
 
 	callCount := 0
 	_, _, err := handler.ExecuteWithFallback(ctx, models,
-		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 			callCount++
 			if model.Provider == "opencode-go" {
 				return nil, &client.APIError{StatusCode: 401, Body: `{"error": "Invalid API key"}`}
@@ -722,7 +722,7 @@ func TestExecuteWithFallback_403ForbiddenShortCircuits(t *testing.T) {
 	}
 
 	_, _, err := handler.ExecuteWithFallback(ctx, models,
-		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 			callCount++
 			return nil, forbiddenErr
 		},
@@ -836,7 +836,7 @@ func TestExecuteWithFallback_AuthErrorMultiKeyContinues(t *testing.T) {
 
 	callCount := 0
 	_, _, err := handler.ExecuteWithFallback(ctx, models,
-		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 			callCount++
 			return nil, &client.APIError{StatusCode: 401, Body: `{"error": "Invalid API key"}`}
 		},
@@ -885,7 +885,7 @@ func TestExecuteWithFallback_AuthErrorSingleKeyShortCircuits(t *testing.T) {
 
 	callCount := 0
 	_, _, err := handler.ExecuteWithFallback(ctx, models,
-		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 			callCount++
 			return nil, &client.APIError{StatusCode: 401, Body: `{"error": "Invalid API key"}`}
 		},
@@ -920,7 +920,7 @@ func TestExecuteWithFallback_AuthErrorNoConfigShortCircuits(t *testing.T) {
 
 	callCount := 0
 	_, _, err := handler.ExecuteWithFallback(ctx, models,
-		func(ctx context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 			callCount++
 			return nil, &client.APIError{StatusCode: 401, Body: `{"error": "Invalid API key"}`}
 		},

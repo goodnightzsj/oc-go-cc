@@ -268,9 +268,14 @@ func TestHandleResponsesUpstreamFailureNeverCompletes(t *testing.T) {
 			t.Fatalf("failed upstream looks complete: %s", w.Body.String())
 		}
 	}
-	_, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
-	if err != nil || total != 0 {
-		t.Fatalf("failed unauthenticated request billed: total=%d err=%v", total, err)
+	rows, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
+	if err != nil || total != 2 {
+		t.Fatalf("unauthenticated failures missing: total=%d err=%v", total, err)
+	}
+	for _, row := range rows {
+		if row.Success || !row.OutcomeKnown || row.CostKnown || row.DetailsKnown || !strings.Contains(row.ErrorMsg, "synthetic auth rejection") {
+			t.Fatalf("failure billed or cause lost: %+v", row)
+		}
 	}
 }
 

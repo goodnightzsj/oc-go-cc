@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/storage"
 )
 
 func TestKeyCoolingReachesBothProtocols(t *testing.T) {
@@ -50,9 +51,18 @@ func TestKeyCoolingReachesBothProtocols(t *testing.T) {
 						if !strings.Contains(body, "synthetic rate limit") || (!stream && w.Code != 429) {
 							t.Fatalf("upstream refusal lost: status=%d body=%s", w.Code, body)
 						}
+						if !stream && w.Header().Get("Retry-After") != "42" {
+							t.Fatalf("source retry hint lost: %v", w.Header())
+						}
+						if stream && (!strings.Contains(body, `"status_code":429`) || !strings.Contains(body, `"retry_after":"42"`)) {
+							t.Fatalf("source stream retry hint lost: %s", body)
+						}
 						continue
 					}
 					if stream {
+						if !strings.Contains(body, `"status_code":503`) || !strings.Contains(body, `"retry_at":`) || !strings.Contains(body, `"retry_after":`) {
+							t.Fatalf("structured cooling metadata lost: %s", body)
+						}
 						// Headers and heartbeat were already committed; failure must be an SSE event.
 						failure := "event: error"
 						if path == "/v1/responses" {
@@ -73,6 +83,15 @@ func TestKeyCoolingReachesBothProtocols(t *testing.T) {
 				}
 				if got := calls.Load(); got != 2 {
 					t.Fatalf("cooling pool sent extra requests: %d", got)
+				}
+				rows, total, err := storage.NewRequests(srv.Storage()).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
+				if err != nil || total != 3 {
+					t.Fatalf("early failures lost: rows=%d err=%v", total, err)
+				}
+				for _, row := range rows {
+					if row.Success || !row.OutcomeKnown || row.DetailsKnown || row.CostKnown || row.OutputTokens != 0 || row.Attempt != 1 {
+						t.Fatalf("invalid early failure accounting: %+v", row)
+					}
 				}
 			})
 		}

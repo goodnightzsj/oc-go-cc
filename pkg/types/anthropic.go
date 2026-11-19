@@ -310,6 +310,10 @@ type MessageEvent struct {
 type APIError struct {
 	Type    string `json:"type"`
 	Message string `json:"message"`
+	// Proxy diagnostics for failures after HTTP headers have been committed.
+	StatusCode int    `json:"status_code,omitempty"`
+	RetryAfter string `json:"retry_after,omitempty"`
+	RetryAt    string `json:"retry_at,omitempty"`
 }
 
 // Validate checks that the MessageRequest has required fields.

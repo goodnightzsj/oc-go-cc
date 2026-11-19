@@ -443,6 +443,8 @@ type columnMigration struct {
 func (d *Database) migrateColumns(ctx context.Context) error {
 	migrations := []columnMigration{
 		{"requests", "attempt", `ALTER TABLE requests ADD COLUMN attempt INTEGER DEFAULT 1`},
+		// Legacy rows retain NULL and their existing attempt-based fallback identity.
+		{"requests", "candidate_position", `ALTER TABLE requests ADD COLUMN candidate_position INTEGER CHECK(candidate_position >= 1)`},
 		{"requests", "cache_read_tokens", `ALTER TABLE requests ADD COLUMN cache_read_tokens INTEGER DEFAULT 0`},
 		{"requests", "cache_creation_tokens", `ALTER TABLE requests ADD COLUMN cache_creation_tokens INTEGER DEFAULT 0`},
 		{"requests", "cost_usd", `ALTER TABLE requests ADD COLUMN cost_usd REAL`},

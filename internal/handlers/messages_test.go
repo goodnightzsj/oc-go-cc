@@ -1163,7 +1163,7 @@ func TestHandleStreaming_ConfigurableTimeout(t *testing.T) {
 	}
 
 	body := recorder.Body.String()
-	if !strings.Contains(body, "all streaming models failed") && !strings.Contains(body, "all upstream models failed") {
+	if !strings.Contains(body, "event: error") || !strings.Contains(body, "streaming timeout (100ms) exceeded") || strings.Contains(body, "event: message_stop") {
 		t.Errorf("unexpected output on streaming timeout: %s", body)
 	}
 }
@@ -1798,9 +1798,9 @@ func TestHandleStreaming_FailedStreamWithUsage_RecordsFailure(t *testing.T) {
 	}
 }
 
-func TestHandleStreaming_FailedBeforeUsage_DoesNotRecord(t *testing.T) {
-	// Connection dies before any chunk (and thus any usage) — the platform
-	// bills nothing for it, so the proxy must not create a matching row.
+func TestHandleStreaming_FailedBeforeUsage_RecordsUnpricedFailure(t *testing.T) {
+	// A connection failure is observable even before usage arrives; record the
+	// failure without assuming either zero consumption or an observed bill.
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
@@ -1831,11 +1831,14 @@ func TestHandleStreaming_FailedBeforeUsage_DoesNotRecord(t *testing.T) {
 		router.ScenarioDefault,
 		"",
 	)
-	_, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
+	rows, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatalf("query requests: %v", err)
 	}
-	if total != 0 {
-		t.Fatalf("stored rows = %d, want 0 (no usage → platform bills nothing)", total)
+	if total != 1 {
+		t.Fatalf("stored rows = %d, want one observed failure", total)
+	}
+	if rows[0].Success || !rows[0].OutcomeKnown || rows[0].DetailsKnown || rows[0].CostKnown || rows[0].ErrorMsg == "" {
+		t.Fatalf("failure or unknown usage lost: %+v", rows[0])
 	}
 }

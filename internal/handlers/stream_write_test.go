@@ -143,7 +143,7 @@ func TestStreamWriteDirectCopyAndNativeError(t *testing.T) {
 	out.flushErr = failure
 	rw := &responseWriter{ResponseWriter: out}
 	rw.setSourceFormat(core.WireFormatOpenAIResponses, true)
-	if err := rw.writeNativeError("synthetic upstream failure"); !errors.Is(err, failure) {
+	if err := rw.writeNativeError("synthetic upstream failure", nil); !errors.Is(err, failure) {
 		t.Fatalf("native error delivery failure lost: %v", err)
 	}
 	if _, err := rw.Write([]byte("ignored")); !errors.Is(err, failure) {

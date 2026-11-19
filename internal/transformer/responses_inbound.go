@@ -572,7 +572,9 @@ func (w *ResponsesStreamWriter) fail(err error) error {
 		if w.usageSeen {
 			w.response["usage"] = responsesUsage(w.usage)
 		}
-		w.response["error"] = map[string]string{"code": "server_error", "message": err.Error()}
+		if w.response["error"] == nil {
+			w.response["error"] = map[string]string{"code": "server_error", "message": err.Error()}
+		}
 		w.err = errors.Join(w.err, w.emit("response.failed", map[string]any{"response": w.response}))
 	}
 	return w.err
@@ -618,7 +620,19 @@ func (w *ResponsesStreamWriter) event(name string, data []byte) error {
 		if event.Error == nil {
 			return fmt.Errorf("upstream error without details")
 		}
-		return fmt.Errorf("upstream %s: %s", event.Error.Type, event.Error.Message)
+		cause := fmt.Errorf("upstream %s: %s", event.Error.Type, event.Error.Message)
+		details := map[string]any{"code": "server_error", "message": cause.Error()}
+		if event.Error.StatusCode != 0 {
+			details["status_code"] = event.Error.StatusCode
+		}
+		if event.Error.RetryAfter != "" {
+			details["retry_after"] = event.Error.RetryAfter
+		}
+		if event.Error.RetryAt != "" {
+			details["retry_at"] = event.Error.RetryAt
+		}
+		w.response["error"] = details
+		return cause
 	}
 	if event.Type == "message_start" {
 		if w.started || event.Message == nil {

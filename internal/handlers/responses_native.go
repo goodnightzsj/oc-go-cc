@@ -117,13 +117,19 @@ func (w *responseWriter) observeNativeResponses(data []byte) (streamMilestones, 
 	return observed, err
 }
 
-func (w *responseWriter) writeNativeError(message string) error {
+func (w *responseWriter) writeNativeError(message string, cause error) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.nativeResponses.ErrorReported {
 		return nil
 	}
-	data, _ := json.Marshal(map[string]any{"type": "error", "code": "upstream_error", "message": message, "param": nil})
+	details := streamErrorDetails(message, cause)
+	details.Type = "error"
+	data, _ := json.Marshal(struct {
+		types.APIError
+		Code  string `json:"code"`
+		Param any    `json:"param"`
+	}{APIError: details, Code: "upstream_error"})
 	return w.writeErrorEvent(data)
 }
 

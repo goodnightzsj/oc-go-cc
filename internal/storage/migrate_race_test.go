@@ -92,7 +92,7 @@ func checkConcurrentOpenOfAnOldDatabase(t *testing.T, wal bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"cost_usd", "cost_source", "first_byte_ms", "reasoning_effort", "upstream_model"} {
+	for _, want := range []string{"cost_usd", "cost_source", "first_byte_ms", "reasoning_effort", "upstream_model", "candidate_position"} {
 		if !cols[want] {
 			t.Errorf("column %q missing after concurrent migration: %v", want, cols)
 		}

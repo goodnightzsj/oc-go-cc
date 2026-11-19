@@ -11,7 +11,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -861,8 +860,9 @@ func (h *MessagesHandler) handleStreaming(
 	// its last frame, so this is only ever read after the stream has stopped -
 	// which is exactly when a failure is recorded.
 	var currentStream io.ReadCloser
+	attempted := 0
 
-	for attempt, model := range modelChain {
+	for candidateIndex, model := range modelChain {
 		select {
 		case <-clientCtx.Done():
 			h.logger.Debug("client disconnected, stopping streaming fallbacks")
@@ -878,6 +878,16 @@ func (h *MessagesHandler) handleStreaming(
 		if complete == nil {
 			h.logger.Info("circuit breaker open, skipping streaming model", "provider", providerName, "model", model.ModelID)
 			continue
+		}
+		attempted++
+		attemptStart := time.Now()
+		recordID = uuid.NewString()
+		currentStream = nil
+		earlyRecord := history.RequestRecord{
+			Model: model.ModelID, RequestedModel: requestedModel, Provider: providerName,
+			Scenario: string(scenario), StartTime: attemptStart, Streaming: true,
+			Attempt: attempted, ReasoningEffort: clientEffort,
+			CandidatePosition: candidateIndex + 1,
 		}
 
 		h.logger.Info("attempting streaming model", "model", model.ModelID, "provider", model.Provider)
@@ -926,7 +936,8 @@ func (h *MessagesHandler) handleStreaming(
 				ReasoningTokens:     rw.usage.reasoningTokens,
 				Streaming:           true,
 				Success:             true,
-				Attempt:             attempt + 1,
+				Attempt:             attempted,
+				CandidatePosition:   candidateIndex + 1,
 				PeakMultiplier:      history.ProviderPeakMultiplier(providerName, model.ModelID, streamStart),
 				UpstreamChannel:     upstreamChannel,
 				UpstreamModel:       upstreamModel,
@@ -945,11 +956,8 @@ func (h *MessagesHandler) handleStreaming(
 			}
 		}
 
-		// recordStreamFailure persists an interrupted stream that produced
-		// usage. The platform bills partially produced streams by the tokens
-		// actually consumed, so a failure after SSE payload started leaves a
-		// permanent one-sided gap unless the proxy records it too. Streams
-		// without reported usage cannot be assigned synthetic token counts.
+		// Persist known attempt failures even before payload; only the final
+		// request result changes metrics. Missing usage remains unpriced.
 		recordStreamFailure := func(model config.ModelConfig, err error, action string, failed bool) {
 			cancelAttempt()
 			rw.mu.Lock()
@@ -957,32 +965,15 @@ func (h *MessagesHandler) handleStreaming(
 			// A client may disconnect after receiving an upstream error frame.
 			// Preserve that observed failure even if cancellation wins the read loop.
 			failed = failed || rw.streamErr != nil
-			// payloadWritten is the fact that separates "the client saw a broken
-			// answer" from "the client hung up on its own". Once bytes are on the
-			// wire, every failure here is visible to the caller as a truncated
-			// response; before that, the client was still waiting and chose to
-			// leave. Read under the same lock as usage so the two agree.
+			// Payload/usage retain the existing cancellation accounting; a known
+			// source failure does not need either to be recorded.
 			payloadWritten := rw.ssePayloadWritten
 			rw.mu.Unlock()
-			// Count the known outcome independently of billing. Preserve the
-			// existing accounting for cancellations with reported usage.
-			if failed || hasUsage {
-				h.metrics.RecordFailureForModel(model.ModelID)
-			}
 			if h.storage == nil {
 				return
 			}
-			// A failure the client could see is recorded even when the upstream
-			// reported no usage. Those are exactly the requests a reader most
-			// needs to find: the answer died before producing anything, so the
-			// success rate on the dashboard was reporting 100% while the journal
-			// carried the failure. Missing usage stays unpriced, while the
-			// observed failure and duration still enter outcome/latency statistics.
-			//
-			// A cancellation the client made before any payload is not a failure
-			// of anything: nothing broke, the caller simply stopped waiting.
-			// Writing it would turn every interrupted prompt into a red row.
-			if !hasUsage && !payloadWritten {
+			// A caller that canceled before payload/usage did not observe failure.
+			if !failed && !hasUsage && !payloadWritten {
 				h.logger.Warn(action+" streaming failed, no usage reported", "model", model.ModelID, "error", err)
 				return
 			}
@@ -1011,7 +1002,8 @@ func (h *MessagesHandler) handleStreaming(
 				Streaming:           true,
 				Success:             false,
 				ErrorMsg:            err.Error(),
-				Attempt:             attempt + 1,
+				Attempt:             attempted,
+				CandidatePosition:   candidateIndex + 1,
 				PeakMultiplier:      history.ProviderPeakMultiplier(providerName, model.ModelID, streamStart),
 				UpstreamChannel:     client.UpstreamChannelOf(currentStream),
 				UpstreamModel:       rw.recordedUpstreamModel(currentStream, model.ModelID),
@@ -1041,14 +1033,18 @@ func (h *MessagesHandler) handleStreaming(
 			if clientCtx.Err() != nil {
 				h.logger.Debug("client disconnected during " + action + " stream")
 				recordStreamFailure(model, err, action, false)
+				if rw.usage.observed || rw.streamErr != nil {
+					h.metrics.RecordFailureForModel(model.ModelID)
+				}
 				return false // abort
 			}
+			recordStreamFailure(model, err, action, true)
 			if err == transformer.ErrStreamIdle {
 				h.logger.Warn("upstream "+action+" stream idle, trying next model",
 					"model", model.ModelID, "idle_timeout", idleTimeout)
 				if rw.ssePayloadWritten {
-					h.sendStreamError(rw, "stream idle after SSE payload started")
-					recordStreamFailure(model, err, action, true)
+					h.sendStreamError(rw, "stream idle after SSE payload started", err)
+					h.metrics.RecordFailureForModel(model.ModelID)
 					return false // abort
 				}
 				return true // continue to next model
@@ -1057,8 +1053,8 @@ func (h *MessagesHandler) handleStreaming(
 				h.logger.Warn("upstream "+action+" stream empty, trying next model",
 					"model", model.ModelID)
 				if rw.ssePayloadWritten {
-					h.sendStreamError(rw, "empty stream after SSE payload started")
-					recordStreamFailure(model, err, action, true)
+					h.sendStreamError(rw, "empty stream after SSE payload started", err)
+					h.metrics.RecordFailureForModel(model.ModelID)
 					return false // abort
 				}
 				return true // continue to next model
@@ -1070,17 +1066,14 @@ func (h *MessagesHandler) handleStreaming(
 				h.logger.Warn("request rejected as invalid, not falling back",
 					"model", model.ModelID, "error", err)
 				lastStreamErr = err
-				if rw.ssePayloadWritten {
-					h.sendStreamError(rw, streamFailureMessage(err))
-					recordStreamFailure(model, err, action, true)
-					return false
-				}
+				h.sendStreamError(rw, streamFailureMessage(err), err)
+				h.metrics.RecordFailureForModel(model.ModelID)
 				return false
 			}
 			h.logger.Warn(action+" streaming failed", "model", model.ModelID, "error", err)
 			if rw.ssePayloadWritten {
-				h.sendStreamError(rw, "all upstream models failed after SSE payload started")
-				recordStreamFailure(model, err, action, true)
+				h.sendStreamError(rw, streamFailureMessage(err), err)
+				h.metrics.RecordFailureForModel(model.ModelID)
 				return false // abort — cannot fallback after SSE payload started
 			}
 			return true // continue to next model
@@ -1098,6 +1091,7 @@ func (h *MessagesHandler) handleStreaming(
 			cancelAttempt()
 			lastStreamErr = fmt.Errorf("provider %q is not registered", providerName)
 			complete(clientCtx, lastStreamErr)
+			h.recordFailedAttempt(clientCtx, earlyRecord, lastStreamErr)
 			continue
 		}
 		wireFormat := core.ModelWireFormat(prov, model)
@@ -1111,6 +1105,7 @@ func (h *MessagesHandler) handleStreaming(
 			if complete(clientCtx, err) {
 				blockedProviders[providerName] = true
 			}
+			h.recordFailedAttempt(clientCtx, earlyRecord, err)
 			if clientCtx.Err() != nil {
 				h.logger.Debug("client disconnected during upstream request")
 				return
@@ -1161,6 +1156,9 @@ func (h *MessagesHandler) handleStreaming(
 					complete(clientCtx, errProxy)
 					h.logger.Debug("client disconnected during stream")
 					recordStreamFailure(model, errProxy, wireFormat.String(), false)
+					if rw.usage.observed || rw.streamErr != nil {
+						h.metrics.RecordFailureForModel(model.ModelID)
+					}
 					return
 				}
 				errProxy = fmt.Errorf("streaming timeout (%v) exceeded", timeout)
@@ -1198,13 +1196,12 @@ func (h *MessagesHandler) handleStreaming(
 	if !rw.wroteHeader {
 		h.sendError(w, http.StatusBadGateway, "all streaming models failed", lastStreamErr)
 	} else {
-		h.sendStreamError(rw, streamFailureMessage(lastStreamErr))
+		h.sendStreamError(rw, streamFailureMessage(lastStreamErr), lastStreamErr)
 	}
 }
 
 // streamFailureMessage names the cause of an exhausted streaming chain for the
-// SSE error event. The event carries a message and no status, so the upstream
-// text is the only detail the client can get.
+// SSE error event. Known status/retry metadata is also carried separately.
 func streamFailureMessage(err error) string {
 	if err == nil {
 		return "all upstream models failed"
@@ -1220,21 +1217,18 @@ func streamFailureMessage(err error) string {
 }
 
 // sendStreamError sends an error event in the SSE stream.
-func (h *MessagesHandler) sendStreamError(w http.ResponseWriter, message string) {
+func (h *MessagesHandler) sendStreamError(w http.ResponseWriter, message string, cause error) {
 	h.logger.Error("sending stream error", "message", message)
 	if rw, ok := w.(*responseWriter); ok && rw.nativeResponses != nil {
-		if err := rw.writeNativeError(message); err != nil {
+		if err := rw.writeNativeError(message, cause); err != nil {
 			h.logger.Debug("failed to write native stream error event", "error", err)
 		}
 		return
 	}
 
 	errorEvent := map[string]interface{}{
-		"type": "error",
-		"error": map[string]interface{}{
-			"type":    "api_error",
-			"message": message,
-		},
+		"type":  "error",
+		"error": streamErrorDetails(message, cause),
 	}
 
 	data, _ := json.Marshal(errorEvent)
@@ -1289,8 +1283,17 @@ func (h *MessagesHandler) handleNonStreaming(
 	result, responseBody, err := h.fallbackHandler.ExecuteWithFallback(
 		ctx,
 		modelChain,
-		func(ctx context.Context, model config.ModelConfig, attempt int) ([]byte, error) {
+		func(ctx context.Context, model config.ModelConfig, attempt, candidatePosition int) (body []byte, execErr error) {
 			attemptStart := time.Now()
+			defer func() {
+				if execErr != nil && len(body) == 0 {
+					h.recordFailedAttempt(ctx, history.RequestRecord{
+						Model: model.ModelID, RequestedModel: requestedModel, Provider: client.Provider(model),
+						Scenario: string(scenario), StartTime: attemptStart, Attempt: attempt, ReasoningEffort: clientEffort,
+						CandidatePosition: candidatePosition,
+					}, execErr)
+				}
+			}()
 			timeout := h.client.RequestTimeout(model)
 			attemptCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
@@ -1311,29 +1314,6 @@ func (h *MessagesHandler) handleNonStreaming(
 				return final.Response.Body, execErr
 			}
 			if execErr != nil {
-				// Record each reported failure before fallback can replace it with
-				// another execution. Missing usage is not an observed zero.
-				var failure interface{ ReportedUsage() *types.Usage }
-				if errors.As(execErr, &failure) && h.storage != nil {
-					reported := failure.ReportedUsage()
-					var usage types.Usage
-					if reported != nil {
-						usage = *reported
-					}
-					rec := history.RequestRecord{
-						ID: uuid.NewString(), Model: model.ModelID, RequestedModel: requestedModel,
-						Provider: client.Provider(model), Scenario: string(scenario),
-						StartTime: attemptStart, Duration: time.Since(attemptStart),
-						InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
-						CacheReadTokens: usage.CacheReadInputTokens, CacheCreationTokens: usage.CacheCreationInputTokens,
-						ReasoningTokens: usage.ReasoningTokens,
-						UsageUnobserved: reported == nil,
-						Success:         false, ErrorMsg: execErr.Error(), Attempt: attempt,
-					}
-					if err := h.storage.InsertRequest(rec); err != nil {
-						h.logger.Warn("failed to insert request into storage", "error", err)
-					}
-				}
 				return nil, execErr
 			}
 			// The upstream body has been drained by Execute, so the channel the
@@ -1375,22 +1355,31 @@ func (h *MessagesHandler) handleNonStreaming(
 	if reported != nil {
 		usage = *reported
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	n, writeErr := w.Write(responseBody)
-	if writeErr == nil && n != len(responseBody) {
-		writeErr = io.ErrShortWrite
-	}
-	if writeErr == nil {
-		if finisher, ok := w.(interface{ Finish() error }); ok {
-			writeErr = finisher.Finish()
+	var writeErr error
+	if err != nil && ctx.Err() != nil {
+		// A confirmed source failure still needs its final record, not delivery.
+		writeErr = ctx.Err()
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		var n int
+		n, writeErr = w.Write(responseBody)
+		if writeErr == nil && n != len(responseBody) {
+			writeErr = io.ErrShortWrite
+		}
+		if writeErr == nil {
+			if finisher, ok := w.(interface{ Finish() error }); ok {
+				writeErr = finisher.Finish()
+			}
 		}
 	}
 	latency := time.Since(startTime)
 	if err != nil {
 		writeErr = errors.Join(err, writeErr)
 	}
-	if writeErr != nil {
+	if err != nil && ctx.Err() != nil {
+		h.logger.Info("request canceled after source failure", "model", result.ModelID, "request_id", requestID, "record_id", recordID, "error", writeErr)
+	} else if writeErr != nil {
 		h.metrics.RecordFailureForModel(result.ModelID)
 		h.logger.Warn("response delivery failed", "model", result.ModelID, "request_id", requestID, "record_id", recordID, "error", writeErr)
 	} else {
@@ -1414,6 +1403,7 @@ func (h *MessagesHandler) handleNonStreaming(
 		Streaming:           false,
 		Success:             writeErr == nil,
 		Attempt:             result.Attempted,
+		CandidatePosition:   result.CandidatePosition,
 		PeakMultiplier:      history.ProviderPeakMultiplier(result.Provider, result.ModelID, startTime),
 		UpstreamChannel:     upstreamChannel,
 		UpstreamModel:       upstreamModel,
@@ -1540,15 +1530,8 @@ func (h *MessagesHandler) sendError(w http.ResponseWriter, statusCode int, messa
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	var cooling *core.KeysCoolingError
-	if errors.As(err, &cooling) {
-		// Round up: a fractional second must not tell the caller to retry early.
-		remaining := time.Until(cooling.RetryAt)
-		seconds := max(int64(1), int64(remaining/time.Second))
-		if remaining > time.Second && remaining%time.Second != 0 {
-			seconds++
-		}
-		w.Header().Set("Retry-After", strconv.FormatInt(seconds, 10))
+	if retry := streamErrorDetails(clientMessage, err).RetryAfter; retry != "" {
+		w.Header().Set("Retry-After", retry)
 	}
 	w.WriteHeader(clientStatus)
 

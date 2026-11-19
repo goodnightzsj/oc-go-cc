@@ -1956,13 +1956,7 @@ function activateTab(name) {
   // keep the URL truthful too. syncViewHash is a no-op when the hash already
   // names this tab, so the hashchange handler cannot loop through it.
   syncViewHash();
-  if (name === 'overview') refreshOverviewUsage();
-  if (name === 'performance') PerfModule.refresh();
-  if (name === 'analytics' && AnalyticsModule && AnalyticsModule.load) {
-    AnalyticsModule.load(true);
-  }
-  if (name === 'quota') QuotaModule.load(true);
-  refreshCurrentTab();
+  refreshVisibleTab();
 }
 
 document.querySelectorAll('.tab').forEach(tab => {
@@ -2270,20 +2264,55 @@ function cancelTabRequests(name) {
     overviewRequest?.abort();
     overviewRequest = null;
   }
+  if (name === 'history') {
+    clearTimeout(historyRefreshTimer);
+    historyRefreshTimer = null;
+    historyLoadSeq++;
+    historyRequest?.abort();
+    historyRequest = null;
+    channelSyncSeq++;
+    channelRequest?.abort();
+    channelRequest = null;
+  }
 }
 
 function handleVisibilityChange() {
   if (document.hidden) {
-    for (const tab of ['overview', 'performance', 'analytics', 'quota']) cancelTabRequests(tab);
+    for (const tab of ['overview', 'performance', 'analytics', 'quota', 'history']) cancelTabRequests(tab);
     return;
   }
-  if (activeTab === 'overview') refreshOverviewUsage();
-  if (activeTab === 'performance') PerfModule.refresh();
-  if (activeTab === 'analytics') AnalyticsModule.load(true);
-  if (activeTab === 'quota') QuotaModule.tickCountdowns();
-  refreshCurrentTab();
+  refreshVisibleTab();
 }
 document.addEventListener('visibilitychange', handleVisibilityChange);
+
+window.addEventListener('pagehide', () => {
+  for (const tab of ['overview', 'performance', 'analytics', 'quota', 'history']) cancelTabRequests(tab);
+  serviceStatusRequest?.abort();
+  serviceStatusRequest = null;
+  catalogAgeRequest?.abort();
+  catalogAgeRequest = null;
+  channelCatalogRequest?.abort();
+  channelCatalogRequest = null;
+  activeSiteLoadSeq++;
+});
+window.addEventListener('pageshow', event => {
+  // BFCache restores this JS heap without boot or a hashchange event.
+  if (!event.persisted) return;
+  activateTab(parseViewHash(location.hash).name);
+  refreshCore();
+  applyActiveSite();
+  if (activeTab === 'settings') loadChannelCatalog();
+});
+
+// Automatic entry/resume is not a manual refresh that bypasses account caches.
+function refreshVisibleTab() {
+  if (document.hidden) return;
+  if (activeTab === 'overview') return refreshOverviewUsage();
+  if (activeTab === 'performance') return PerfModule.refresh();
+  if (activeTab === 'analytics') return AnalyticsModule.load();
+  if (activeTab === 'quota') QuotaModule.tickCountdowns();
+  return refreshCurrentTab();
+}
 
 function startPolling() {
   refreshAll();
@@ -2358,6 +2387,7 @@ async function refreshServiceStatus() {
   try {
     // Process health remains global; usage failures must not mark the proxy down.
     const d = await fetchJSON('/api/metrics', {signal: controller.signal});
+    if (serviceStatusRequest !== controller) return;
     if (controller.signal.aborted) throw new Error('metrics request timed out');
     markPollOk();
 
@@ -2395,10 +2425,10 @@ async function refreshServiceStatus() {
   } catch (e) {
     // Startup races are expected, so the first failures stay quiet; markPollFail
     // only surfaces the stale badge once several polls in a row have failed.
-    markPollFail();
+    if (serviceStatusRequest === controller) markPollFail();
   } finally {
     clearTimeout(deadline);
-    serviceStatusRequest = null;
+    if (serviceStatusRequest === controller) serviceStatusRequest = null;
   }
 }
 
@@ -2708,6 +2738,7 @@ async function syncChannelFilter() {
   // answer decides the rest, so nothing here names a platform.
   if (!provider) return;
   const controller = channelRequest = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), DISPLAY_REQUEST_TIMEOUT_MS);
   try {
     const r = await fetch(`/api/history/channels?provider=${encodeURIComponent(provider)}`, {signal: controller.signal});
     if (seq !== channelSyncSeq) return;
@@ -2748,6 +2779,7 @@ async function syncChannelFilter() {
   } catch (_) {
     // Nothing to offer; the control stays hidden and no channel is sent.
   } finally {
+    clearTimeout(deadline);
     controller.abort();
     if (seq === channelSyncSeq) channelRequest = null;
   }
@@ -2796,6 +2828,7 @@ async function refreshHistory() {
   const seq = ++historyLoadSeq;
   historyRequest?.abort();
   const controller = historyRequest = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), DISPLAY_REQUEST_TIMEOUT_MS);
   const errorEl = document.getElementById('history-error');
   try {
     if (historyQuery !== params.toString()) {
@@ -2835,6 +2868,7 @@ async function refreshHistory() {
       errorEl.hidden = false;
     }
   } finally {
+    clearTimeout(deadline);
     controller.abort();
     if (seq === historyLoadSeq) historyRequest = null;
   }
@@ -4970,7 +5004,7 @@ function scheduleHistoryRefresh(event) {
   if (historyRefreshTimer) clearTimeout(historyRefreshTimer);
   historyRefreshTimer = setTimeout(() => {
     historyRefreshTimer = null;
-    refreshHistory();
+    if (!document.hidden && activeTab === 'history') refreshHistory();
   }, 250);
 }
 

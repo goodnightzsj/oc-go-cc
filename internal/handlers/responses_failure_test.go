@@ -105,10 +105,10 @@ func TestNonStreamingResponsesFailureRetainsEachAttemptUsage(t *testing.T) {
 								t.Errorf("execution ID reused: %s", row.ID)
 							}
 							ids[row.ID] = true
-							wantAttempt := 2
+							wantAttempt := 1
 							wantProvider := name
 							if row.Model == "fallback" {
-								wantAttempt = 3
+								wantAttempt = 2
 								wantProvider = fallbackProvider
 							}
 							if row.Streaming || row.Provider != wantProvider || row.RequestedModel != "requested" {

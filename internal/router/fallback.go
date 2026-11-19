@@ -136,9 +136,10 @@ func (cb *CircuitBreaker) State() CircuitState {
 
 // FallbackResult contains the result of a fallback attempt.
 type FallbackResult struct {
-	ModelID   string
-	Provider  string
-	Attempted int
+	ModelID           string
+	Provider          string
+	Attempted         int
+	CandidatePosition int // one-based position in the execution chain; zero when no result was served
 }
 
 // FallbackHandler manages model fallback with circuit breaker protection.
@@ -295,12 +296,13 @@ func (h *FallbackHandler) recordAttempt(ctx context.Context, model config.ModelC
 
 // ExecuteWithFallback tries models in sequence until one succeeds.
 // Respects circuit breaker state to skip models that are failing repeatedly.
-// The executor receives the one-based chain position, including skipped models,
-// so per-attempt accounting agrees with FallbackResult.Attempted.
+// The executor receives the one-based execution count; skipped candidates do
+// not execute. The separate one-based candidate position identifies fallbacks.
+// This is not an HTTP count: key selection can fail before sending.
 func (h *FallbackHandler) ExecuteWithFallback(
 	ctx context.Context,
 	models []config.ModelConfig,
-	executor func(context.Context, config.ModelConfig, int) ([]byte, error),
+	executor func(ctx context.Context, model config.ModelConfig, attempt, candidatePosition int) ([]byte, error),
 ) (*FallbackResult, []byte, error) {
 	totalModels := len(models)
 	if totalModels == 0 {
@@ -314,7 +316,7 @@ func (h *FallbackHandler) ExecuteWithFallback(
 	// upstream refusals to the client, so discarding this turned every
 	// deterministic failure into an opaque 502.
 	var lastErr error
-	authAttempted := 0
+	attempted := 0
 
 	for i, model := range models {
 		if err := ctx.Err(); err != nil {
@@ -335,44 +337,47 @@ func (h *FallbackHandler) ExecuteWithFallback(
 		if complete == nil {
 			h.logger.Info("circuit breaker open, skipping model",
 				"model", model.ModelID,
-				"attempt", i+1,
+				"candidate", i+1,
 				"total", totalModels,
 			)
 			continue
 		}
 
+		attempted++
 		h.logger.Info("attempting model",
 			"model", model.ModelID,
-			"attempt", i+1,
+			"attempt", attempted,
+			"candidate", i+1,
 			"total", totalModels,
 		)
 
-		body, err := executor(ctx, model, i+1)
+		body, err := executor(ctx, model, attempted, i+1)
 		blockProvider := complete(ctx, err)
 		if err == nil {
 			h.logger.Info("model succeeded",
 				"model", model.ModelID,
-				"attempt", i+1,
+				"attempt", attempted,
 			)
 			return &FallbackResult{
-				ModelID:   model.ModelID,
-				Provider:  provider,
-				Attempted: i + 1,
+				ModelID:           model.ModelID,
+				Provider:          provider,
+				Attempted:         attempted,
+				CandidatePosition: i + 1,
 			}, body, nil
 		}
 
+		// A complete native response (including a failed one) is the result,
+		// not a transport failure; late cancellation must not erase its accounting.
+		var final interface{ FinalResponse() []byte }
+		if errors.As(err, &final) && len(final.FinalResponse()) > 0 {
+			return &FallbackResult{ModelID: model.ModelID, Provider: provider, Attempted: attempted, CandidatePosition: i + 1}, final.FinalResponse(), err
+		}
 		if errCtx := ctx.Err(); errCtx != nil {
 			h.logger.Info("request context canceled after model attempt, stopping fallback",
 				"model", model.ModelID,
 				"error", errCtx,
 			)
 			return nil, nil, errCtx
-		}
-		// A complete native response (including a failed one) is the result,
-		// not a transport failure eligible for another execution.
-		var final interface{ FinalResponse() []byte }
-		if errors.As(err, &final) && len(final.FinalResponse()) > 0 {
-			return &FallbackResult{ModelID: model.ModelID, Provider: provider, Attempted: i + 1}, final.FinalResponse(), err
 		}
 
 		// The request itself is unacceptable. Every model in the chain would
@@ -384,9 +389,10 @@ func (h *FallbackHandler) ExecuteWithFallback(
 				"error", err,
 			)
 			return &FallbackResult{
-				ModelID:   model.ModelID,
-				Provider:  provider,
-				Attempted: i + 1,
+				ModelID:           model.ModelID,
+				Provider:          provider,
+				Attempted:         attempted,
+				CandidatePosition: i + 1,
 			}, nil, err
 		}
 
@@ -418,7 +424,6 @@ func (h *FallbackHandler) ExecuteWithFallback(
 					"error", err,
 				)
 				authErr = err
-				authAttempted = i + 1
 				continue
 			}
 			h.logger.Warn("authentication error, but provider has multiple keys, trying next",
@@ -448,7 +453,7 @@ func (h *FallbackHandler) ExecuteWithFallback(
 		return &FallbackResult{
 			ModelID:   models[0].ModelID,
 			Provider:  client.Provider(models[0]),
-			Attempted: authAttempted,
+			Attempted: attempted,
 		}, nil, authErr
 	}
 
@@ -456,7 +461,7 @@ func (h *FallbackHandler) ExecuteWithFallback(
 		return &FallbackResult{
 			ModelID:   models[0].ModelID,
 			Provider:  client.Provider(models[0]),
-			Attempted: totalModels,
+			Attempted: attempted,
 		}, nil, usageLimitErr
 	}
 
@@ -467,15 +472,15 @@ func (h *FallbackHandler) ExecuteWithFallback(
 		return &FallbackResult{
 			ModelID:   models[0].ModelID,
 			Provider:  client.Provider(models[0]),
-			Attempted: totalModels,
-		}, nil, fmt.Errorf("%w (%d attempts): no candidate was attempted", ErrAllModelsFailed, totalModels)
+			Attempted: attempted,
+		}, nil, fmt.Errorf("%w (%d execution attempts, %d candidates): no candidate was attempted", ErrAllModelsFailed, attempted, totalModels)
 	}
 
 	return &FallbackResult{
 		ModelID:   models[0].ModelID,
 		Provider:  client.Provider(models[0]),
-		Attempted: totalModels,
-	}, nil, fmt.Errorf("%w (%d attempts): %w", ErrAllModelsFailed, totalModels, lastErr)
+		Attempted: attempted,
+	}, nil, fmt.Errorf("%w (%d execution attempts, %d candidates): %w", ErrAllModelsFailed, attempted, totalModels, lastErr)
 }
 
 // ErrAllModelsFailed marks an exhausted chain. Callers classify it with

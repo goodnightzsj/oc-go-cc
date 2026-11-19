@@ -98,7 +98,7 @@ func TestKeyCoolingSkipsSameProviderInFallback(t *testing.T) {
 		}
 		cooling := &core.KeysCoolingError{RetryAt: time.Now().Add(time.Minute)}
 		var calls []string
-		_, _, err := h.ExecuteWithFallback(t.Context(), models, func(_ context.Context, model config.ModelConfig, _ int) ([]byte, error) {
+		_, _, err := h.ExecuteWithFallback(t.Context(), models, func(_ context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
 			calls = append(calls, model.ModelID)
 			if model.Provider == "cline-pass" {
 				return nil, cooling

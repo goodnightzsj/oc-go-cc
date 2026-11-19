@@ -393,7 +393,7 @@ func (a *Analytics) snapshot(ctx context.Context, window Window) (*AnalyticsSnap
 		       COALESCE(SUM(r.cost_usd), 0),
 		       COUNT(r.cost_usd),
 		       COALESCE(SUM(CASE WHEN `+observedOutcome+` AND r.success IN (0, 1)
-		                         THEN COALESCE(r.attempt, 1) > 1 END), 0),
+		                         THEN COALESCE(r.candidate_position, r.attempt, 1) > 1 END), 0),
 		       COALESCE(SUM(CASE WHEN `+measuredLatency+` THEN r.duration_ms ELSE 0 END), 0),
 		       COUNT(CASE WHEN `+measuredLatency+` THEN 1 END),
 		       COALESCE(SUM(CASE WHEN `+measuredThroughput+` THEN r.output_tokens ELSE 0 END), 0),

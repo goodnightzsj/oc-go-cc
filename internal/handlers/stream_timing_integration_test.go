@@ -145,10 +145,14 @@ func TestStreamTimingFallbackAndInterruptedHistory(t *testing.T) {
 					&types.MessageRequest{Stream: boolPtr(true), MaxTokens: 1000},
 					[]config.ModelConfig{{Provider: provider.Name(), ModelID: "refused"}, {Provider: provider.Name(), ModelID: "served"}},
 					nil, router.ScenarioDefault, "synthetic")
-				if provider.calls != 2 || len(records.rows) != 1 {
+				if provider.calls != 2 || len(records.rows) != 2 {
 					t.Fatalf("calls=%d rows=%+v", provider.calls, records.rows)
 				}
-				r := records.rows[0]
+				first := records.rows[0]
+				if first.Success || first.Attempt != 1 || !first.UsageUnobserved || first.ID == records.rows[1].ID || first.GenerationSample != nil {
+					t.Fatalf("early refusal lost or mixed with successful attempt: %+v", first)
+				}
+				r := records.rows[1]
 				if r.Attempt != 2 || r.FirstEventMs == nil || *r.FirstEventMs != 3000 ||
 					r.FirstContentMs == nil || *r.FirstContentMs != 5000 {
 					t.Fatalf("fallback reset execution origin: %+v", r)

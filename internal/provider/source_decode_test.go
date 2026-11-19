@@ -69,7 +69,7 @@ func TestMalformedSourceJSONContinuesFallback(t *testing.T) {
 				next.ModelID = "synthetic-next"
 				h := router.NewFallbackHandler(slog.New(slog.NewTextHandler(io.Discard, nil)), 3, time.Minute)
 				calls := 0
-				_, body, err := h.ExecuteWithFallback(ctx, []config.ModelConfig{model, next}, func(ctx context.Context, candidate config.ModelConfig, _ int) ([]byte, error) {
+				_, body, err := h.ExecuteWithFallback(ctx, []config.ModelConfig{model, next}, func(ctx context.Context, candidate config.ModelConfig, _ int, _ int) ([]byte, error) {
 					calls++
 					result, failure := p.Execute(ctx, req, candidate)
 					if calls == 1 {
@@ -116,7 +116,7 @@ func TestMalformedChatArgumentsContinueFallback(t *testing.T) {
 			next.ModelID = "synthetic-next"
 			h := router.NewFallbackHandler(slog.New(slog.NewTextHandler(io.Discard, nil)), 3, time.Minute)
 			attempts := 0
-			_, body, err := h.ExecuteWithFallback(t.Context(), []config.ModelConfig{model, next}, func(ctx context.Context, candidate config.ModelConfig, _ int) ([]byte, error) {
+			_, body, err := h.ExecuteWithFallback(t.Context(), []config.ModelConfig{model, next}, func(ctx context.Context, candidate config.ModelConfig, _ int, _ int) ([]byte, error) {
 				attempts++
 				result, failure := p.Execute(ctx, req, candidate)
 				if attempts == 1 {

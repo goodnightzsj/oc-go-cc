@@ -54,13 +54,24 @@ type Store struct {
 	updated  time.Time
 	snapshot Snapshot
 	ttl      time.Duration
+	// proxy is process identity: it cannot change while this process runs, and
+	// computing it (os.Executable + Abs) on every routed request would put a
+	// syscall on the hot path for a value that never changes.
+	proxy ProxySnapshot
 }
 
 func NewStore(ttl time.Duration) *Store {
 	if ttl <= 0 {
 		ttl = 10 * time.Second
 	}
-	return &Store{ttl: ttl}
+	return &Store{
+		ttl: ttl,
+		proxy: ProxySnapshot{
+			Version: buildinfo.Version,
+			PID:     os.Getpid(),
+			Binary:  buildinfo.BinaryPath(),
+		},
+	}
 }
 
 func (s *Store) Update(seq uint64, snap Snapshot) {
@@ -69,18 +80,27 @@ func (s *Store) Update(seq uint64, snap Snapshot) {
 	if seq < s.seq {
 		return
 	}
-	now := time.Now().UTC()
 	s.seq = seq
+	s.applyLocked(snap)
+}
+
+// Publish records a snapshot from the in-process request path, which has a
+// single writer and therefore does not need to supply a sequence number.
+func (s *Store) Publish(snap Snapshot) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.seq++
+	s.applyLocked(snap)
+}
+
+func (s *Store) applyLocked(snap Snapshot) {
+	now := time.Now().UTC()
 	s.updated = now
 	snap.SchemaVersion = 1
 	snap.UpdatedAt = now.Format(time.RFC3339Nano)
 	snap.AgeMS = 0
 	snap.Source = "proxy"
-	snap.Proxy = ProxySnapshot{
-		Version: buildinfo.Version,
-		PID:     os.Getpid(),
-		Binary:  buildinfo.BinaryPath(),
-	}
+	snap.Proxy = s.proxy
 	s.snapshot = snap
 }
 
@@ -101,11 +121,7 @@ func (s *Store) Snapshot() Snapshot {
 		snap.SchemaVersion = 1
 		snap.Source = "empty"
 		snap.Stale = true
-		snap.Proxy = ProxySnapshot{
-			Version: buildinfo.Version,
-			PID:     os.Getpid(),
-			Binary:  buildinfo.BinaryPath(),
-		}
+		snap.Proxy = s.proxy
 		return snap
 	}
 	age := time.Since(s.updated)

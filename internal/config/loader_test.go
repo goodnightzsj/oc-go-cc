@@ -85,6 +85,35 @@ func TestAnthropicFirstDefaultsAndValidation(t *testing.T) {
 	if _, err := LoadFromPath(cfgPath); err == nil {
 		t.Fatal("expected invalid anthropic_first.base_url to fail validation")
 	}
+
+	// The two switches are opposite routing authorities; accepting both let
+	// the dashboard's active-site selector claim traffic it never saw.
+	if err := os.WriteFile(cfgPath, []byte(`{"api_key":"test-key","active_site":"cline-pass","anthropic_first":{"enabled":true}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadFromPath(cfgPath); err == nil {
+		t.Fatal("expected active_site with anthropic_first.enabled to fail validation")
+	}
+}
+
+func TestWorkBuddyOnlyConfigLoads(t *testing.T) {
+	cfg, err := LoadJSON([]byte(`{"workbuddy":{"base_url":"http://127.0.0.1:7863","api_key":"test-key"}}`))
+	if err != nil {
+		t.Fatalf("a WorkBuddy-only config must load: %v", err)
+	}
+	if cfg.WorkBuddy.TimeoutMs <= 0 || cfg.WorkBuddy.StreamTimeoutMs <= 0 || cfg.WorkBuddy.StreamingTimeoutMs <= 0 {
+		t.Fatalf("WorkBuddy timeouts were not defaulted: %+v", cfg.WorkBuddy)
+	}
+
+	if _, err := LoadJSON([]byte(`{"workbuddy":{"api_key":"test-key"}}`)); err == nil {
+		t.Fatal("expected a WorkBuddy key without base_url to fail validation")
+	}
+	if _, err := LoadJSON([]byte(`{"workbuddy":{"base_url":"http://127.0.0.1:7863","api_key":"test-key","timeout_ms":-1}}`)); err == nil {
+		t.Fatal("expected a negative WorkBuddy timeout to fail validation")
+	}
+	if _, err := LoadJSON([]byte(`{"workbuddy":{"base_url":"http://127.0.0.1:7863","api_key":"test-key"},"models":{"default":{"provider":"workbuddy","model_id":"global:x","wire_format":"anthropic"}}}`)); err == nil {
+		t.Fatal("expected an unsupported WorkBuddy wire_format to fail validation")
+	}
 }
 
 func TestLoadJSON_WithModelOverrides(t *testing.T) {
@@ -1429,5 +1458,17 @@ func TestClinePassModelIDRequiresModelTypePrefix(t *testing.T) {
 	}
 	if err := validateModelConfig("fallbacks[\"default\"][0]", ModelConfig{Provider: "workbuddy", ModelID: "global:deepseek-v4.1-flash"}); err != nil {
 		t.Errorf("workbuddy realm-prefixed model_id rejected: %v", err)
+	}
+}
+
+func TestTrustedProxiesValidation(t *testing.T) {
+	if _, err := LoadJSON([]byte(`{"api_key":"k","trust_forwarded_for":true,"trusted_proxies":["10.0.0.0/8","127.0.0.1"]}`)); err != nil {
+		t.Fatalf("valid CIDRs and bare IPs must load: %v", err)
+	}
+	if _, err := LoadJSON([]byte(`{"api_key":"k","trusted_proxies":["not-a-cidr"]}`)); err == nil {
+		t.Fatal("expected an invalid trusted_proxies entry to fail validation")
+	}
+	if _, err := LoadJSON([]byte(`{"api_key":"k","trusted_proxies":[""]}`)); err == nil {
+		t.Fatal("expected an empty trusted_proxies entry to fail validation")
 	}
 }

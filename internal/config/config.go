@@ -3,6 +3,7 @@ package config
 
 import (
 	"encoding/json"
+	"net"
 	"strings"
 
 	"github.com/routatic/proxy/internal/site"
@@ -14,11 +15,19 @@ import (
 // supports environment variable interpolation via ${VAR} syntax and hot-reloading
 // when hot_reload is enabled.
 type Config struct {
-	APIKey                         string   `json:"api_key"`
-	APIKeys                        []string `json:"api_keys"`
-	Host                           string   `json:"host"`
-	Port                           int      `json:"port"`
-	HotReload                      bool     `json:"hot_reload"`
+	APIKey    string   `json:"api_key"`
+	APIKeys   []string `json:"api_keys"`
+	Host      string   `json:"host"`
+	Port      int      `json:"port"`
+	HotReload bool     `json:"hot_reload"`
+	// TrustForwardedFor makes the rate limiter key on X-Forwarded-For. Only
+	// enable it when a reverse proxy in front of this one overwrites the
+	// header; otherwise any client can choose its own bucket per request.
+	TrustForwardedFor bool `json:"trust_forwarded_for,omitempty"`
+	// TrustedProxies lists the proxy addresses whose X-Forwarded-For may be
+	// trusted, as CIDRs or bare IPs. Empty means "any direct peer", which is
+	// only safe when the listener is not reachable except through the proxy.
+	TrustedProxies                 []string `json:"trusted_proxies,omitempty"`
 	EnableStreamingScenarioRouting bool     `json:"enable_streaming_scenario_routing"`
 	EnableCostBasedRouting         bool     `json:"enable_cost_based_routing"`
 	// EnableCrossPlatformFallback lets a fallback run on a platform other than
@@ -798,6 +807,34 @@ func (c *Config) ProviderModelEndpoint(provider string) string {
 	default:
 		return ""
 	}
+}
+
+// TrustedProxyNets parses TrustedProxies. A bare IP becomes a single-host
+// network. Entries that do not parse are skipped here; validate() rejects them
+// at load time, so this only has to stay safe for hand-built configs.
+func (c *Config) TrustedProxyNets() []*net.IPNet {
+	if c == nil || len(c.TrustedProxies) == 0 {
+		return nil
+	}
+	nets := make([]*net.IPNet, 0, len(c.TrustedProxies))
+	for _, raw := range c.TrustedProxies {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		if ip := net.ParseIP(raw); ip != nil {
+			bits := 128
+			if ip.To4() != nil {
+				bits = 32
+			}
+			nets = append(nets, &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
+			continue
+		}
+		if _, network, err := net.ParseCIDR(raw); err == nil {
+			nets = append(nets, network)
+		}
+	}
+	return nets
 }
 
 // ProviderAPIKeys is the credential source shared by sending and fallback logic.

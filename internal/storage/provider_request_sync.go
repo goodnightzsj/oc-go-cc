@@ -342,7 +342,10 @@ func applyProviderRequestSync(ctx context.Context, tx *sql.Tx, providerRows []pr
 			requestIDs[providerIndex], row.Model, providerUsageTarget, row.Time.UTC().Format(time.RFC3339Nano),
 			row.InputTokens, row.OutputTokens, row.CacheReadTokens,
 			row.CacheWrite5mTokens+row.CacheWrite1hTokens, row.costUSD(), CostSourceProvider,
-			row.snapshotAt.UTC().Format(time.RFC3339Nano),
+			// The column's own spelling (CURRENT_TIMESTAMP format). A mixed
+			// table forced retention into a full-table julianday() scan; one
+			// format keeps the created_at index usable.
+			row.snapshotAt.UTC().Format("2006-01-02 15:04:05"),
 			// The column's DEFAULT is 1, which would book a peak-billed request at
 			// the off-peak rate until the next service start ran the backfill -
 			// and then quietly change the number. This path had been the one

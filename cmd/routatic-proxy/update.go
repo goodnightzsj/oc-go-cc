@@ -37,8 +37,9 @@ Examples:
 			return fmt.Errorf("failed to check for updates: %w", err)
 		}
 
-		// Check if update is available
-		if release.TagName == currentVersion || release.TagName <= currentVersion {
+		// Check if update is available. A string comparison said v0.6.10 <=
+		// v0.6.9, reporting an available update as already current.
+		if !update.IsNewerVersion(currentVersion, release.TagName) {
 			fmt.Printf("You are already on the latest version (%s).\n", currentVersion)
 			return nil
 		}
@@ -56,11 +57,15 @@ Examples:
 		if err != nil {
 			return fmt.Errorf("failed to find download for your platform: %w", err)
 		}
+		checksumURL, err := update.GetChecksumsURL(release)
+		if err != nil {
+			return err
+		}
 
 		fmt.Printf("Downloading %s...\n", filename)
 
-		// Download and install
-		if err := update.DownloadAndInstall(url, filename); err != nil {
+		// Download, verify and install
+		if err := update.DownloadAndInstall(url, filename, checksumURL); err != nil {
 			return fmt.Errorf("failed to install update: %w", err)
 		}
 

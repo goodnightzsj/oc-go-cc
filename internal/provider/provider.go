@@ -214,11 +214,21 @@ func (b *baseProvider) HasUsableKey(keys []string) bool {
 	if b.keys == nil {
 		return false
 	}
+	// A pool whose every key the probe rejected has nothing to offer even
+	// though Filter, being fail-open, still returns those keys. Reporting
+	// "usable" here is what made a dead single-key platform spend one doomed
+	// request per fallback model.
+	if b.health.ExcludesAll(keys) {
+		return false
+	}
 	// Gate first, so "usable" means the same set of keys Reserve would pick
 	// from. A pool whose remaining keys are all cooling is not usable just
 	// because the probe-dead keys are idle.
 	keys = b.health.Filter(keys)
-	return len(keys) > 0 && b.keys.HasUsable(keys)
+	// HasUsableForFallback, not HasUsable: a lone key that just earned an auth
+	// quarantine is still allowed one attempt by Reserve, but the fallback
+	// handler must not spend the platform's remaining models on it.
+	return b.keys.HasUsableForFallback(keys)
 }
 
 // HasUsable reports whether any of the given keys is not resting.
@@ -226,6 +236,17 @@ func (p *keyPool) HasUsable(keys []string) bool {
 	// A lone key is never withheld, so it is always usable.
 	if len(keys) <= 1 {
 		return len(keys) == 1
+	}
+	return p.HasUsableForFallback(keys)
+}
+
+// HasUsableForFallback answers the fallback handler's question - is another
+// attempt on this platform worth making - without the lone-key exemption.
+// Reserve still lets a single key through once, but after an auth rejection
+// quarantines it every remaining model would spend the same doomed request.
+func (p *keyPool) HasUsableForFallback(keys []string) bool {
+	if len(keys) == 0 {
+		return false
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -266,6 +287,12 @@ func (k *KeyAvailability) HasUsableKey(provider string) bool {
 	}
 	// The gate is consulted so "cannot serve" agrees with what Reserve would
 	// actually pick: probe-dead keys are not candidates, and keys they crowded
-	// out are back in the usable set.
-	return pool.HasUsable(gateFor(provider).Filter(cfg.ProviderAPIKeys(provider)))
+	// out are back in the usable set. A pool the probe rejected entirely is
+	// unusable even when Filter's fail-open path returns it unchanged.
+	keys := cfg.ProviderAPIKeys(provider)
+	gate := gateFor(provider)
+	if gate.ExcludesAll(keys) {
+		return false
+	}
+	return pool.HasUsableForFallback(gate.Filter(keys))
 }

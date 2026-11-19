@@ -68,7 +68,12 @@ func (r *Retention) runOnce() {
 		requestsDeleted int64
 	}{}
 
-	if requests, err := r.db.DB().ExecContext(ctx, `DELETE FROM requests WHERE created_at < ?`, before.Format(time.RFC3339Nano)); err == nil {
+	// One spelling, so this is a plain indexed comparison. The column's DEFAULT
+	// (CURRENT_TIMESTAMP) and every writer use "YYYY-MM-DD HH:MM:SS" UTC; the
+	// one-time migration in Open normalizes rows written by older versions in
+	// RFC3339Nano. A mixed table made a text comparison delete up to a day
+	// more than configured (' ' sorts before 'T'), and forced a full scan.
+	if requests, err := r.db.DB().ExecContext(ctx, `DELETE FROM requests WHERE created_at < ?`, before.UTC().Format("2006-01-02 15:04:05")); err == nil {
 		stats.requestsDeleted, _ = requests.RowsAffected()
 	} else {
 		slog.Warn("retention cleanup failed", "table", "requests", "error", err)

@@ -5,7 +5,12 @@ import "testing"
 func TestCorePollingSingleFlightAndDeadline(t *testing.T) {
 	runPlatformBehavior(t, platformBehaviorDOMScript+`
 async function checks() {
-  document.hidden=true;
+  // The poller pauses while the tab is hidden; this test is about coalescing
+  // and deadlines, so it runs as a visible tab. It also stays off the overview
+  // tab: that tab's usage fetch rides on refreshMetrics and would add requests
+  // this test is not counting.
+  document.hidden=false;
+  activeTab='settings';
   const get=id=>document.getElementById(id);
   const requests=[], timers=new Map(); let timerID=0;
   setTimeout=(callback,ms)=>{assert.equal(ms,15000);timers.set(++timerID,callback);return timerID};
@@ -133,6 +138,21 @@ async function checks() {
   channels[0].resolve({ok:true,json:async()=>({channels:['stale']})});
   await old;
   assert.equal(get('channel-filter').children[1].value,'current');
+}
+`+platformBehaviorRunScript)
+}
+
+func TestCorePollingPausesWhileHidden(t *testing.T) {
+	runPlatformBehavior(t, platformBehaviorDOMScript+`
+async function checks() {
+  let calls = 0;
+  fetch = async () => { calls++; return {ok:true,json:async()=>({proxy_running:true,port:1,model_counts:{}})} };
+  document.hidden = true;
+  await refreshCore();
+  assert.equal(calls, 0, 'a hidden tab must not poll core metrics');
+  document.hidden = false;
+  await refreshCore();
+  assert.ok(calls >= 2, 'a visible tab polls the core endpoints');
 }
 `+platformBehaviorRunScript)
 }

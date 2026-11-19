@@ -375,6 +375,33 @@ func (r *CatalogRepo) LastSync(ctx context.Context) (time.Time, error) {
 	return time.Parse(time.RFC3339, syncedAt.String)
 }
 
+// ImportedSHA returns the SHA-256 of the catalog file last imported into
+// SQLite, or "" when no hash was recorded (an import predating this column).
+func (r *CatalogRepo) ImportedSHA(ctx context.Context) (string, error) {
+	var sha sql.NullString
+	err := r.db.DB().QueryRowContext(ctx, `
+		SELECT value FROM schema_info WHERE key = 'catalog_import_sha'
+	`).Scan(&sha)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return sha.String, nil
+}
+
+// SetImportedSHA records which catalog file the current SQLite snapshot came
+// from. mtime alone is not identity: a file restored with rsync -t, or a
+// second config sharing this database, can be newer content with an older
+// timestamp.
+func (r *CatalogRepo) SetImportedSHA(ctx context.Context, sha string) error {
+	_, err := r.db.DB().ExecContext(ctx, `
+		INSERT OR REPLACE INTO schema_info (key, value) VALUES ('catalog_import_sha', ?)
+	`, sha)
+	return err
+}
+
 func providerFromModelKey(key string) string {
 	provider, _, ok := strings.Cut(key, "/")
 	if !ok {

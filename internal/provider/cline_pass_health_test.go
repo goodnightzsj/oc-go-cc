@@ -269,3 +269,44 @@ func TestProbeResultFromOldEndpointIsDiscarded(t *testing.T) {
 		t.Fatal("a stale-endpoint verdict must be discarded")
 	}
 }
+
+// A single configured key is the case Filter deliberately passes through, so
+// the probe's verdict reached nothing: a dead lone key kept taking traffic and
+// every fallback model on that platform was spent on a guaranteed rejection.
+// Availability must report the platform unusable even though scheduling still
+// makes its one attempt.
+func TestLoneProbeDeadKeyIsNotUsable(t *testing.T) {
+	p, _ := clinePassTestProvider(t, func(http.ResponseWriter, *http.Request) {})
+	const lone = "synthetic-lone-dead"
+	cfg := p.atomic.Get()
+	cfg.ClinePass.APIKey = lone
+	cfg.ClinePass.APIKeys = nil
+	p.health.Record(lone, &quota.HTTPStatusError{Status: 404, Err: errors.New("HTTP 404: no plan history found for user")})
+
+	if !p.keys.HasUsable(cfg.ProviderAPIKeys(client.ProviderClinePass)) {
+		t.Fatal("control: the scheduler still passes a lone key through")
+	}
+	if NewKeyAvailability(p.atomic).HasUsableKey(client.ProviderClinePass) {
+		t.Fatal("a lone probe-dead key must leave the platform with nothing usable")
+	}
+}
+
+// A lone key that just earned an auth quarantine is still tried once by
+// Reserve, but the fallback handler must not spend every remaining model on
+// it. Availability therefore ignores the lone-key exemption.
+func TestLoneQuarantinedKeyIsNotUsableForFallback(t *testing.T) {
+	p, _ := clinePassTestProvider(t, func(http.ResponseWriter, *http.Request) {})
+	const lone = "synthetic-lone-401"
+	cfg := p.atomic.Get()
+	cfg.ClinePass.APIKey = lone
+	cfg.ClinePass.APIKeys = nil
+	p.keys.Reserve([]string{lone}).Settle(&client.APIError{StatusCode: 401})
+
+	keys := cfg.ProviderAPIKeys(client.ProviderClinePass)
+	if !p.keys.HasUsable(keys) {
+		t.Fatal("control: Reserve's lone-key rule still makes the key usable for one attempt")
+	}
+	if NewKeyAvailability(p.atomic).HasUsableKey(client.ProviderClinePass) {
+		t.Fatal("a quarantined lone key must not keep the platform's remaining models alive")
+	}
+}

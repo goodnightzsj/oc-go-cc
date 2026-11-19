@@ -4,6 +4,7 @@ package middleware
 import (
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -12,11 +13,12 @@ import (
 
 // RateLimiter provides per-client IP rate limiting.
 type RateLimiter struct {
-	tokens map[string]*clientTokenBucket
-	mu     sync.RWMutex
-	rate   int // tokens per window
-	window time.Duration
-	logger *slog.Logger
+	tokens    map[string]*clientTokenBucket
+	mu        sync.RWMutex
+	rate      int // tokens per window
+	window    time.Duration
+	logger    *slog.Logger
+	lastSweep time.Time
 }
 
 // clientTokenBucket holds rate limit state for a single client.
@@ -51,6 +53,7 @@ func (rl *RateLimiter) Allow(clientIP string) bool {
 	bucket, exists := rl.tokens[clientIP]
 
 	if !exists {
+		rl.sweepLocked(now)
 		rl.tokens[clientIP] = &clientTokenBucket{
 			tokens:   rl.rate - 1,
 			lastFill: now,
@@ -74,18 +77,103 @@ func (rl *RateLimiter) Allow(clientIP string) bool {
 	return false
 }
 
-// GetClientIP extracts the client IP from an HTTP request.
-func GetClientIP(r *http.Request) string {
-	// Check X-Forwarded-For first (if behind a proxy)
-	// X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
-	// We want the first (leftmost) IP which is the original client.
-	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-		first, _, _ := strings.Cut(forwarded, ",")
-		return strings.TrimSpace(first)
+// sweepLocked drops buckets that have been idle for a full window, so a client
+// that never returns cannot grow the map without bound. It runs at most once
+// per window, on the first new client seen in that window.
+func (rl *RateLimiter) sweepLocked(now time.Time) {
+	if now.Sub(rl.lastSweep) < rl.window {
+		return
 	}
-	// Fall back to RemoteAddr
-	return r.RemoteAddr
+	rl.lastSweep = now
+	for ip, bucket := range rl.tokens {
+		if now.Sub(bucket.lastFill) >= 2*rl.window {
+			delete(rl.tokens, ip)
+		}
+	}
 }
+
+// ClientIPOptions controls how the rate-limit bucket's client is identified.
+type ClientIPOptions struct {
+	// TrustForwardedFor makes X-Forwarded-For authoritative.
+	TrustForwardedFor bool
+	// TrustedProxies are the direct peers allowed to speak for a client. Empty
+	// means any peer, which is only safe when the listener is reachable only
+	// through the proxy.
+	TrustedProxies []*net.IPNet
+}
+
+// GetClientIP extracts the client IP from an HTTP request.
+//
+// X-Forwarded-For is client-supplied, so it is ignored unless the operator
+// declares a trusted reverse proxy. When it is trusted, the header is walked
+// from the right: the first hop that is not itself a trusted proxy is the
+// client. The leftmost entry is whatever the client sent, so a proxy that
+// appends ($proxy_add_x_forwarded_for) would otherwise let a client choose its
+// own bucket.
+func GetClientIP(r *http.Request, opts ClientIPOptions) string {
+	remoteHost, remoteIP := splitHost(r.RemoteAddr)
+	forwarded := r.Header.Get("X-Forwarded-For")
+	if !opts.TrustForwardedFor {
+		if forwarded != "" {
+			forwardedForWarning.Do(func() {
+				slog.Warn("X-Forwarded-For present but trust_forwarded_for is off; rate limiting keys on the direct peer",
+					"remote_addr", r.RemoteAddr)
+			})
+		}
+		return remoteHost
+	}
+	// Only a trusted direct peer may speak for the client.
+	if len(opts.TrustedProxies) > 0 && !ipInNets(remoteIP, opts.TrustedProxies) {
+		return remoteHost
+	}
+	entries := make([]string, 0, 4)
+	for _, raw := range strings.Split(forwarded, ",") {
+		if entry := strings.TrimSpace(raw); entry != "" {
+			entries = append(entries, entry)
+		}
+	}
+	for i := len(entries) - 1; i >= 0; i-- {
+		ip := net.ParseIP(entries[i])
+		if ip == nil {
+			// An unparseable hop cannot be a trusted proxy; treat it as the
+			// client label rather than silently skipping past it.
+			return entries[i]
+		}
+		if !ipInNets(ip, opts.TrustedProxies) {
+			return entries[i]
+		}
+	}
+	if len(entries) > 0 {
+		return entries[0]
+	}
+	return remoteHost
+}
+
+// splitHost separates RemoteAddr's host from its connection port. The port is
+// part of the connection, not the client: bucketing on it would give every new
+// TCP connection its own bucket.
+func splitHost(remoteAddr string) (string, net.IP) {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	return host, net.ParseIP(host)
+}
+
+func ipInNets(ip net.IP, nets []*net.IPNet) bool {
+	if ip == nil {
+		return false
+	}
+	for _, network := range nets {
+		if network != nil && network.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// forwardedForWarning keeps the discovery hint to one line per process.
+var forwardedForWarning sync.Once
 
 // RequestIDGenerator generates unique request IDs.
 type RequestIDGenerator struct {

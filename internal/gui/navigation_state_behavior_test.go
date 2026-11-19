@@ -58,9 +58,15 @@ async function checks() {
   get('nav-history').click();
   await settleView();
   assert.equal(('platform' in savedView()), true);
-  assert.equal((savedView().platform ?? null), '');
+  assert.equal((savedView().platform ?? null), 'all');
   for (const id of VIEW_CONTROLS.platform.filter(id => id !== 'quota-provider')) assert.equal(get(id).value, '', id);
   assert.equal(get('quota-provider').value, 'commandcode');
+
+  // The explicit all-platforms choice must survive a reload. An empty value is
+  // dropped when the store is read back, so it is persisted as a sentinel.
+  if (applyViewState(readSavedView())) refreshCurrentTab();
+  await settleView();
+  assert.equal(get('provider-filter').value, '', 'the all-platforms choice must be restored, not re-defaulted');
 
   // Deep links and back/forward must update the pin, not keep the boot choice.
   // A stored choice is restored on the next load; clearing the store puts the

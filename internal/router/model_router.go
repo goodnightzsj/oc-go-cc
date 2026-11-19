@@ -34,6 +34,13 @@ type ModelRouter struct {
 
 	siteMu    sync.Mutex
 	siteCache map[string]siteModelCache
+	// siteFetchMu guards siteFetch, one lock per platform. A roster fetch is
+	// network I/O with a 10s budget and it runs on the request path whenever
+	// active_site is set, so holding siteMu across it serialized every request
+	// behind one slow platform. The per-platform lock keeps same-platform
+	// callers coalesced without blocking the others.
+	siteFetchMu sync.Mutex
+	siteFetch   map[string]*sync.Mutex
 }
 
 type siteModelCache struct {
@@ -105,14 +112,28 @@ func (r *ModelRouter) siteModelsFor(ctx context.Context, cfg *config.Config, pro
 	}
 	key := modelListKey(cfg, provider)
 	keyHash := sha256.Sum256([]byte(key))
-	r.siteMu.Lock()
-	defer r.siteMu.Unlock()
-	if cached, ok := r.siteCache[provider]; ok && cached.endpoint == endpoint && cached.keyHash == keyHash && time.Now().Before(cached.expires) {
-		return cached.models
+
+	// Fast path: a cached roster needs no network and no fetch lock.
+	if models, ok := r.cachedSiteModels(provider, endpoint, keyHash); ok {
+		return models
 	}
 	if ctx.Err() != nil {
 		return nil
 	}
+
+	// One fetch per platform at a time. Callers that arrive while a fetch is
+	// running wait for it, then find its result in the cache instead of
+	// issuing a duplicate request.
+	fetchMu := r.siteFetchLock(provider)
+	fetchMu.Lock()
+	defer fetchMu.Unlock()
+	if models, ok := r.cachedSiteModels(provider, endpoint, keyHash); ok {
+		return models
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+
 	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	models, err := catalog.FetchSiteModelsWithKey(fetchCtx, siteModelsClient, provider, endpoint, key)
 	cancel()
@@ -124,11 +145,41 @@ func (r *ModelRouter) siteModelsFor(ctx context.Context, cfg *config.Config, pro
 		}
 		ttl = siteModelsFailureTTL
 	}
+	r.siteMu.Lock()
 	if r.siteCache == nil {
 		r.siteCache = make(map[string]siteModelCache)
 	}
 	r.siteCache[provider] = siteModelCache{endpoint: endpoint, keyHash: keyHash, models: models, expires: time.Now().Add(ttl)}
+	r.siteMu.Unlock()
 	return models
+}
+
+// cachedSiteModels returns a roster that is still fresh for this endpoint and
+// credential.
+func (r *ModelRouter) cachedSiteModels(provider, endpoint string, keyHash [sha256.Size]byte) ([]catalog.SiteModel, bool) {
+	r.siteMu.Lock()
+	defer r.siteMu.Unlock()
+	cached, ok := r.siteCache[provider]
+	if !ok || cached.endpoint != endpoint || cached.keyHash != keyHash || !time.Now().Before(cached.expires) {
+		return nil, false
+	}
+	return cached.models, true
+}
+
+// siteFetchLock returns the fetch mutex for one platform, creating it on first
+// use. The map is bounded by the number of platforms.
+func (r *ModelRouter) siteFetchLock(provider string) *sync.Mutex {
+	r.siteFetchMu.Lock()
+	defer r.siteFetchMu.Unlock()
+	if r.siteFetch == nil {
+		r.siteFetch = make(map[string]*sync.Mutex)
+	}
+	mu, ok := r.siteFetch[provider]
+	if !ok {
+		mu = &sync.Mutex{}
+		r.siteFetch[provider] = mu
+	}
+	return mu
 }
 
 // ApplyPublishedReasoning enriches the final chain, including configured

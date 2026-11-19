@@ -236,7 +236,7 @@
             </tr>
           </thead>
           <tbody id="history-tbody">
-            <tr><td colspan="8" class="empty-state text-center text-[#98989d] py-6 text-[13px]" data-i18n="empty.noHistory">No history yet</td></tr>
+            <tr><td colspan="10" class="empty-state text-center text-[#98989d] py-6 text-[13px]" data-i18n="empty.noHistory">No history yet</td></tr>
           </tbody>
         </table>
       </div>
@@ -1021,6 +1021,12 @@
         <div class="checkbox-group mb-0">
           <label class="flex items-center gap-1.5 text-xs text-[#f5f5f7] font-normal cursor-pointer">
             <input type="checkbox" id="cfg-hot-reload"> Hot Reload
+          </label>
+        </div>
+        <div class="checkbox-group mb-0">
+          <label class="flex items-center gap-1.5 text-xs text-[#f5f5f7] font-normal cursor-pointer"
+                 title="Only enable behind a reverse proxy that overwrites X-Forwarded-For; otherwise clients can choose their own rate-limit bucket.">
+            <input type="checkbox" id="cfg-trust-forwarded-for"> <span data-i18n="setting.trustForwardedFor">Trust X-Forwarded-For</span>
           </label>
         </div>
         </div>

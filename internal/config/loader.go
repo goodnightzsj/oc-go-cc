@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -301,13 +302,34 @@ func validate(cfg *Config) error {
 	if len(cfg.EffectiveAPIKeys()) == 0 && len(cfg.OpenCodeGo.EffectiveAPIKeys()) == 0 &&
 		len(cfg.OpenCodeZen.EffectiveAPIKeys()) == 0 && len(cfg.AWSBedrock.EffectiveAPIKeys()) == 0 &&
 		len(cfg.OpenRouter.EffectiveAPIKeys()) == 0 && len(cfg.CommandCode.EffectiveAPIKeys()) == 0 &&
-		len(cfg.ClinePass.EffectiveAPIKeys()) == 0 {
+		len(cfg.ClinePass.EffectiveAPIKeys()) == 0 && len(cfg.WorkBuddy.EffectiveAPIKeys()) == 0 {
 		return invalid("", "missing_api_key", "api_key or api_keys is required (set via config file or ROUTATIC_PROXY_API_KEY env var; OC_GO_CC_API_KEY is still supported)")
 	}
+	for _, raw := range cfg.TrustedProxies {
+		entry := strings.TrimSpace(raw)
+		if entry == "" {
+			return invalid("trusted_proxies", "empty_entry", "trusted_proxies entries must not be empty")
+		}
+		if net.ParseIP(entry) != nil {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(entry); err != nil {
+			return invalid("trusted_proxies", "invalid_cidr", "trusted_proxies entry %q is not an IP address or CIDR", entry)
+		}
+	}
+
 	if cfg.AnthropicFirst.Enabled {
 		u, err := url.Parse(cfg.AnthropicFirst.BaseURL)
 		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 			return invalid("anthropic_first.base_url", "absolute_url", "anthropic_first.base_url must be an absolute http or https URL")
+		}
+		// Two routing authorities with opposite intents: anthropic_first sends
+		// every /v1/messages request straight to Anthropic, while active_site
+		// promises the dashboard that every request goes through the selected
+		// platform. Both cannot hold, and silently letting one win made the
+		// selector lie about where traffic went.
+		if cfg.ActiveSite != "" {
+			return invalid("active_site", "routing_conflict", "active_site cannot be combined with anthropic_first.enabled: the first routes every request to one platform, the second sends it to Anthropic before any platform is considered")
 		}
 	}
 
@@ -419,6 +441,30 @@ func validate(cfg *Config) error {
 	// an unknown value must be caught here rather than on the live path.
 	if err := ValidateChannelCapabilities(cfg.ClinePass.ChannelPinCapabilities); err != nil {
 		return invalid("cline_pass.channel_pin_capabilities", "unknown_capability", "%s", err.Error())
+	}
+
+	if err := validateSingleAPIKey(cfg.WorkBuddy.APIKey); err != nil {
+		return AtField("workbuddy", err)
+	}
+	if err := validateAPIKeys(cfg.WorkBuddy.APIKeys); err != nil {
+		return AtField("workbuddy", err)
+	}
+	if err := validateKeyStrategy("workbuddy.key_strategy", cfg.WorkBuddy.KeyStrategy); err != nil {
+		return AtField("workbuddy", err)
+	}
+	// The gateway is operator-run, so there is no public default to fall back
+	// to: a key without an endpoint would only fail on the first request.
+	if endpoint := cfg.WorkBuddy.BaseURL; endpoint != "" || len(cfg.WorkBuddy.EffectiveAPIKeys()) > 0 {
+		if endpoint == "" {
+			return invalid("workbuddy.base_url", "required", "workbuddy.base_url is required when a WorkBuddy key is configured")
+		}
+		u, err := url.Parse(endpoint)
+		if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return invalid("workbuddy.base_url", "plain_url", "workbuddy.base_url must be an absolute http or https URL without credentials or fragment")
+		}
+	}
+	if err := validateTimeouts("workbuddy", cfg.WorkBuddy.TimeoutMs, cfg.WorkBuddy.StreamTimeoutMs, cfg.WorkBuddy.StreamingTimeoutMs); err != nil {
+		return err
 	}
 
 	if err := validateOverrideMap("models", cfg.Models); err != nil {
@@ -668,6 +714,13 @@ func validateModelConfig(label string, mc ModelConfig) error {
 	if NormalizeProvider(mc.Provider) == "cline-pass" && mc.WireFormat != "" && mc.WireFormat != "auto" && mc.WireFormat != "openai" {
 		return invalid(label+".wire_format", "cline_wire_format", "%s: cline-pass supports only the openai upstream wire format", label)
 	}
+	// WorkBuddy's provider always speaks Chat Completions. An explicit
+	// anthropic/responses/gemini value is not a request the gateway can honour;
+	// it only desynchronizes the handler's response path from the bytes the
+	// gateway actually sends.
+	if NormalizeProvider(mc.Provider) == "workbuddy" && mc.WireFormat != "" && mc.WireFormat != "auto" && mc.WireFormat != "openai" {
+		return invalid(label+".wire_format", "workbuddy_wire_format", "%s: workbuddy supports only the openai upstream wire format", label)
+	}
 	// ClinePass takes its billing pool from the model id's first segment and
 	// answers a bare name with 400 "invalid model format. Expected format:
 	// modelType/model". The field is sent verbatim, so a config entry without
@@ -729,6 +782,7 @@ func applySiteDefaults(cfg *Config) {
 		{&cfg.OpenRouter.TimeoutMs, &cfg.OpenRouter.StreamTimeoutMs, &cfg.OpenRouter.StreamingTimeoutMs},
 		{&cfg.CommandCode.TimeoutMs, &cfg.CommandCode.StreamTimeoutMs, &cfg.CommandCode.StreamingTimeoutMs},
 		{&cfg.ClinePass.TimeoutMs, &cfg.ClinePass.StreamTimeoutMs, &cfg.ClinePass.StreamingTimeoutMs},
+		{&cfg.WorkBuddy.TimeoutMs, &cfg.WorkBuddy.StreamTimeoutMs, &cfg.WorkBuddy.StreamingTimeoutMs},
 	} {
 		if *row.timeout == 0 {
 			*row.timeout = defaultTimeoutMs

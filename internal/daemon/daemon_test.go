@@ -82,3 +82,23 @@ func TestIsProcessRunning_NonexistentPID(t *testing.T) {
 		t.Error("non-existent PID should not be reported as running")
 	}
 }
+
+func TestProcessMatches(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want bool
+	}{
+		{"/usr/local/bin/routatic-proxy", true},
+		{"/Users/x/bin/routatic-proxy-beta", true},
+		{"/bin/zsh", false},
+		{"routatic-proxy-helper", true}, // the app-name prefix rule covers versioned binaries
+		// After an in-place update the running daemon's exe is the renamed,
+		// unlinked old binary; stop must still recognize it.
+		{"/usr/local/bin/routatic-proxy.old (deleted)", true},
+		{"routatic-proxy.old", true},
+	} {
+		if got := processMatches(tc.name, AppName); got != tc.want {
+			t.Errorf("processMatches(%q) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

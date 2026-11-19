@@ -310,13 +310,23 @@ func (h *FallbackHandler) ExecuteWithFallback(
 	}
 	blockedProviders := make(map[string]bool)
 	var usageLimitErr error
+	var usageLimitModel config.ModelConfig
+	var usageLimitProvider string
 	var authErr error
+	var authModel config.ModelConfig
+	var authProvider string
 	// lastErr keeps the most recent attempt's error so the caller can report
 	// why the request failed instead of only that it did. The proxy forwards
 	// upstream refusals to the client, so discarding this turned every
 	// deterministic failure into an opaque 502.
 	var lastErr error
 	attempted := 0
+	// lastModel is the model the executor actually ran most recently. An
+	// exhausted chain used to report models[0], which names a candidate that
+	// may have been skipped by an open circuit breaker - the failure row and
+	// the model counter then blamed a model that never saw the request.
+	var lastModel config.ModelConfig
+	lastProvider := ""
 
 	for i, model := range models {
 		if err := ctx.Err(); err != nil {
@@ -344,6 +354,7 @@ func (h *FallbackHandler) ExecuteWithFallback(
 		}
 
 		attempted++
+		lastModel, lastProvider = model, provider
 		h.logger.Info("attempting model",
 			"model", model.ModelID,
 			"attempt", attempted,
@@ -403,7 +414,7 @@ func (h *FallbackHandler) ExecuteWithFallback(
 			blockedProviders[provider] = true
 		}
 		if IsUsageLimitError(err) {
-			usageLimitErr = err
+			usageLimitErr, usageLimitModel, usageLimitProvider = err, model, provider
 			h.logger.Warn("provider usage limit reached, trying another provider",
 				"provider", provider,
 				"model", model.ModelID,
@@ -423,7 +434,7 @@ func (h *FallbackHandler) ExecuteWithFallback(
 					"model", model.ModelID,
 					"error", err,
 				)
-				authErr = err
+				authErr, authModel, authProvider = err, model, provider
 				continue
 			}
 			h.logger.Warn("authentication error, but provider has multiple keys, trying next",
@@ -449,18 +460,21 @@ func (h *FallbackHandler) ExecuteWithFallback(
 		}
 	}
 
+	// A retained auth or usage-limit error names the attempt that produced it,
+	// not the last one: a later model on another platform may have failed for
+	// an unrelated reason, and the client is shown the retained error.
 	if authErr != nil {
 		return &FallbackResult{
-			ModelID:   models[0].ModelID,
-			Provider:  client.Provider(models[0]),
+			ModelID:   authModel.ModelID,
+			Provider:  authProvider,
 			Attempted: attempted,
 		}, nil, authErr
 	}
 
 	if usageLimitErr != nil {
 		return &FallbackResult{
-			ModelID:   models[0].ModelID,
-			Provider:  client.Provider(models[0]),
+			ModelID:   usageLimitModel.ModelID,
+			Provider:  usageLimitProvider,
 			Attempted: attempted,
 		}, nil, usageLimitErr
 	}
@@ -470,15 +484,15 @@ func (h *FallbackHandler) ExecuteWithFallback(
 	// then no upstream error to report, and %w would render a nil operand.
 	if lastErr == nil {
 		return &FallbackResult{
-			ModelID:   models[0].ModelID,
-			Provider:  client.Provider(models[0]),
+			ModelID:   lastModel.ModelID,
+			Provider:  lastProvider,
 			Attempted: attempted,
 		}, nil, fmt.Errorf("%w (%d execution attempts, %d candidates): no candidate was attempted", ErrAllModelsFailed, attempted, totalModels)
 	}
 
 	return &FallbackResult{
-		ModelID:   models[0].ModelID,
-		Provider:  client.Provider(models[0]),
+		ModelID:   lastModel.ModelID,
+		Provider:  lastProvider,
 		Attempted: attempted,
 	}, nil, fmt.Errorf("%w (%d execution attempts, %d candidates): %w", ErrAllModelsFailed, attempted, totalModels, lastErr)
 }
@@ -574,6 +588,14 @@ func IsNonRetryableRequestError(err error) bool {
 	var responseErr *core.ResponseError
 	if errors.As(err, &responseErr) {
 		return false
+	}
+	// A request this proxy rejected on its own terms - an effort outside the
+	// ladder, a malformed output_config - will be rejected the same way by
+	// every candidate. This must stay narrower than RequestConversionError:
+	// that type also covers model-specific conversion failures (cache
+	// breakpoints, thinking history), which another target may accept.
+	if errors.Is(err, core.ErrInvalidRequest) {
+		return true
 	}
 	// An unclassified local body parse failure still rejects the request.
 	var syntaxErr *json.SyntaxError

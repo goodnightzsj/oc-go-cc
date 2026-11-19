@@ -28,8 +28,12 @@ func TestRetentionPolicy(t *testing.T) {
 			}
 			defer func() { _ = db.Close() }()
 			for _, age := range []int{0, 2, 10} {
-				when := time.Now().AddDate(0, 0, -age).UTC().Format(time.RFC3339Nano)
-				if _, err := db.DB().Exec(`INSERT INTO requests (id, model, start_time, created_at) VALUES (?, ?, ?, ?)`, fmt.Sprint(age), "test-model", when, when); err != nil {
+				// The one spelling the table carries: InsertRequest leaves
+				// created_at to the column DEFAULT, and Open normalizes any
+				// legacy RFC3339 row once. Retention is then a plain indexed
+				// comparison.
+				stamp := time.Now().AddDate(0, 0, -age).UTC().Format("2006-01-02 15:04:05")
+				if _, err := db.DB().Exec(`INSERT INTO requests (id, model, start_time, created_at) VALUES (?, ?, ?, ?)`, fmt.Sprint(age), "test-model", stamp, stamp); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -58,5 +62,39 @@ func TestRetentionPolicy(t *testing.T) {
 				time.Sleep(time.Millisecond)
 			}
 		})
+	}
+}
+
+// Older versions let the provider usage sync write RFC3339Nano into
+// created_at. Open normalizes those rows once, so the retention comparison is
+// correct and can use the index again.
+func TestOpenNormalizesLegacyRequestTimestamps(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	cfg := DefaultConfig.WithOverlay(Overlay{DatabasePath: path})
+
+	db, err := Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DB().Exec(`INSERT INTO requests (id, model, start_time, created_at) VALUES ('legacy','m','2026-01-02T03:04:05.123456789Z','2026-01-02T03:04:05.123456789Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reopened.Close() }()
+	// Compare in SQL: scanning a TIMESTAMP column into a Go string goes
+	// through the driver's time formatting and would not show the stored text.
+	var normalized bool
+	if err := reopened.DB().QueryRow(`SELECT created_at = ? FROM requests WHERE id = 'legacy'`, "2026-01-02 03:04:05").Scan(&normalized); err != nil {
+		t.Fatal(err)
+	}
+	if !normalized {
+		t.Fatal("legacy RFC3339 timestamp was not normalized to the column's UTC spelling")
 	}
 }

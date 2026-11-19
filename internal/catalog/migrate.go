@@ -3,9 +3,73 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/routatic/proxy/internal/storage"
 )
+
+// DirForConfig returns the catalog directory that belongs to a config file.
+// The proxy, the CLI and the dashboard resolve it here so a catalog downloaded
+// by one of them is the one the others read.
+func DirForConfig(configPath string) string {
+	if configPath != "" {
+		return filepath.Join(filepath.Dir(configPath), "catalog")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".config", "routatic-proxy", "catalog")
+	}
+	return filepath.Join(home, ".config", "routatic-proxy", "catalog")
+}
+
+// EnsureImported brings the SQLite catalog up to date with a catalog.json that
+// was downloaded after the last import. Startup and the dashboard both
+// download the file; without this step routing and cost selection kept reading
+// the previous snapshot until someone happened to run `catalog sync`.
+func EnsureImported(ctx context.Context, db *storage.Database, jsonPath string) error {
+	info, err := os.Stat(jsonPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // no downloaded catalog; nothing to import
+		}
+		return err
+	}
+	repo := storage.NewCatalogRepo(db)
+	last, err := repo.LastSync(ctx)
+	if err != nil {
+		return err
+	}
+
+	// The sync lock records the hash of the file it wrote. That is the file's
+	// identity: mtime alone can be older for newer content (an rsync -t
+	// restore, or a second config sharing this database), which would skip a
+	// real update forever.
+	sha := ""
+	if lock, err := ReadLock(filepath.Dir(jsonPath)); err == nil {
+		sha = lock.SHA256
+	}
+	if sha != "" {
+		if stored, err := repo.ImportedSHA(ctx); err == nil && stored == sha {
+			return nil
+		}
+	} else if !last.IsZero() && !info.ModTime().Truncate(time.Second).After(last) {
+		// Without a hash, fall back to the import timestamp at the stored
+		// precision, so sub-second mtime digits do not force a re-import.
+		return nil
+	}
+
+	if _, _, err := ImportFromJSON(ctx, db, jsonPath); err != nil {
+		return err
+	}
+	if sha != "" {
+		// A failed hash write only means the next start imports once more; it
+		// must not turn a successful import into an error.
+		_ = repo.SetImportedSHA(ctx, sha)
+	}
+	return nil
+}
 
 // ImportFromJSON reads catalog.json and replaces the SQLite catalog with its
 // contents, returning the number of providers and models imported.

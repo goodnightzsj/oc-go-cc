@@ -184,3 +184,101 @@ func TestImportFromJSON_RefreshesAnExistingCatalog(t *testing.T) {
 		t.Errorf("stale provider survived replacement: %v", slices.Sorted(maps.Keys(idx.Providers)))
 	}
 }
+
+// The startup sync downloads catalog.json; without the import the router kept
+// reading the previous SQLite snapshot. EnsureImported closes that gap and
+// re-imports only when the file is newer than the last import.
+func TestEnsureImportedFollowsTheDownloadedFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "catalog.json")
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(`{"providers":{"p":{"name":"p","enabled":true}},"models":{"p/one":{"name":"One"}}}`)
+
+	db, err := storage.Open(storage.Config{DatabasePath: filepath.Join(dir, "d.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	ctx := context.Background()
+	if err := EnsureImported(ctx, db, path); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := LoadFromSQLite(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := idx.Models["p/one"]; !ok {
+		t.Fatal("the downloaded catalog was not imported")
+	}
+
+	// Rewriting the file after the import makes it newer, so the next call
+	// replaces the SQLite snapshot.
+	write(`{"providers":{"p":{"name":"p","enabled":true}},"models":{"p/two":{"name":"Two"}}}`)
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureImported(ctx, db, path); err != nil {
+		t.Fatal(err)
+	}
+	idx, err = LoadFromSQLite(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := idx.Models["p/two"]; !ok {
+		t.Fatal("a newer catalog.json was not imported")
+	}
+	if _, ok := idx.Models["p/one"]; ok {
+		t.Fatal("import must replace the previous snapshot, not merge into it")
+	}
+}
+
+// mtime is not file identity: a restored catalog can carry newer content with
+// an older timestamp. The sync lock's hash decides in that case.
+func TestEnsureImportedUsesTheContentHash(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "catalog.json")
+	write := func(body, sha string, when time.Time) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, when, when); err != nil {
+			t.Fatal(err)
+		}
+		if err := WriteLock(dir, &Lock{SourceURL: "test", SyncedAt: when, SHA256: sha, Bytes: int64(len(body)), TTLHours: 24}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	db, err := storage.Open(storage.Config{DatabasePath: filepath.Join(dir, "d.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+
+	write(`{"providers":{"p":{"name":"p","enabled":true}},"models":{"p/one":{"name":"One"}}}`, "sha-a", time.Now())
+	if err := EnsureImported(ctx, db, path); err != nil {
+		t.Fatal(err)
+	}
+
+	// Different content, older mtime: only the hash can tell.
+	write(`{"providers":{"p":{"name":"p","enabled":true}},"models":{"p/two":{"name":"Two"}}}`, "sha-b", time.Now().Add(-time.Hour))
+	if err := EnsureImported(ctx, db, path); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := LoadFromSQLite(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := idx.Models["p/two"]; !ok {
+		t.Fatal("a catalog with the same age but different content must still be imported")
+	}
+}

@@ -89,6 +89,12 @@ func UsageURL(baseURL string) (string, error) {
 			return strings.TrimSuffix(base, suffix) + "/usage", nil
 		}
 	}
+	// An OpenAI-conventional base ends at the API root. The usage endpoint is a
+	// sibling of the chat path, so /v1 + /usage is the same address the longer
+	// spellings above derive.
+	if strings.HasSuffix(base, "/v1") {
+		return base + "/usage", nil
+	}
 	return "", fmt.Errorf("cannot derive the usage endpoint from the configured Go base_url")
 }
 

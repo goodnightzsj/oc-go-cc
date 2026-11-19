@@ -106,6 +106,9 @@ func TestUsageURL(t *testing.T) {
 		{"https://opencode.ai/zen/go/v1/chat/completions", "https://opencode.ai/zen/go/v1/usage", false},
 		{"https://mirror.example/zen/go/v1/messages", "https://mirror.example/zen/go/v1/usage", false},
 		{"https://mirror.example/zen/go/v1/usage", "https://mirror.example/zen/go/v1/usage", false},
+		// An OpenAI-conventional base ends at /v1; the usage endpoint is its
+		// sibling, the same address the longer spellings above derive.
+		{"https://mirror.example/zen/go/v1", "https://mirror.example/zen/go/v1/usage", false},
 		{"https://mirror.example/custom", "", true},
 		{"https://user:secret@mirror.example/v1/usage", "", true},
 		{"https://mirror.example/v1/usage?secret=key", "", true},

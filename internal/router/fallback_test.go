@@ -13,6 +13,7 @@ import (
 
 	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/core"
 )
 
 func TestIsRetryableError_ClientsErrorsNotRetryable(t *testing.T) {
@@ -937,5 +938,74 @@ func TestExecuteWithFallback_AuthErrorNoConfigShortCircuits(t *testing.T) {
 
 	if !IsAuthError(err) {
 		t.Errorf("expected auth error, got: %v", err)
+	}
+}
+
+func TestAllFailReportsTheLastAttemptedModel(t *testing.T) {
+	h := NewFallbackHandler(slog.Default(), 1, time.Minute)
+	models := []config.ModelConfig{
+		{Provider: "opencode-go", ModelID: "model-a"},
+		{Provider: "opencode-go", ModelID: "model-b"},
+	}
+
+	// Open model-a's breaker so the chain skips it. The old code still named
+	// model-a in the result, which attributed the failure to a model that was
+	// never executed.
+	complete := h.AllowAttempt(models[0])
+	if complete == nil {
+		t.Fatal("model-a must be allowed to attempt once")
+	}
+	complete(context.Background(), &client.APIError{StatusCode: 500, Body: "boom"})
+
+	result, _, err := h.ExecuteWithFallback(context.Background(), models,
+		func(_ context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
+			if model.ModelID != "model-b" {
+				t.Fatalf("executor ran %s, want model-b", model.ModelID)
+			}
+			return nil, &client.APIError{StatusCode: 500, Body: "boom"}
+		},
+	)
+	if err == nil {
+		t.Fatal("expected the chain to fail")
+	}
+	if result == nil || result.ModelID != "model-b" || result.Provider != "opencode-go" {
+		t.Fatalf("result = %+v, want the last attempted model-b", result)
+	}
+}
+
+func TestInvalidRequestErrorsAreNotRetried(t *testing.T) {
+	// A request-shape rejection (effort outside the ladder) is the same for
+	// every target, so the chain must stop after the first one.
+	err := &core.RequestConversionError{Err: fmt.Errorf("%w: unsupported output_config.effort", core.ErrInvalidRequest)}
+	if !IsNonRetryableRequestError(err) {
+		t.Fatal("a request-shape rejection must stop the chain, not fan out over every model")
+	}
+	// A model-specific conversion failure is different: another target may
+	// accept the same request, so it must stay retryable.
+	modelSpecific := &core.RequestConversionError{Err: errors.New("OpenRouter cache breakpoint on \"tool_result\" has no supported Chat mapping")}
+	if IsNonRetryableRequestError(modelSpecific) {
+		t.Fatal("a model-specific conversion failure must still fall back to another target")
+	}
+}
+
+func TestAuthFailureReportsTheModelThatFailed(t *testing.T) {
+	h := NewFallbackHandler(slog.Default(), 3, time.Minute)
+	models := []config.ModelConfig{
+		{Provider: "opencode-go", ModelID: "go-a"},
+		{Provider: "commandcode", ModelID: "cc-b"},
+	}
+	result, _, err := h.ExecuteWithFallback(context.Background(), models,
+		func(_ context.Context, model config.ModelConfig, _ int, _ int) ([]byte, error) {
+			if model.Provider == "opencode-go" {
+				return nil, &client.APIError{StatusCode: 401, Body: "unauthorized"}
+			}
+			return nil, &client.APIError{StatusCode: 500, Body: "boom"}
+		},
+	)
+	if err == nil || !IsAuthError(err) {
+		t.Fatalf("expected the retained auth error, got %v", err)
+	}
+	if result == nil || result.ModelID != "go-a" || result.Provider != "opencode-go" {
+		t.Fatalf("result = %+v, want the model whose 401 the client is shown", result)
 	}
 }

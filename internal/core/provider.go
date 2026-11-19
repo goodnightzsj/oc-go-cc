@@ -71,6 +71,16 @@ func (e *RequestConversionError) Unwrap() error { return e.Err }
 
 var ErrAllKeysCooling = errors.New("every API key is resting after an upstream rejection")
 
+// ErrInvalidRequest marks a request this proxy rejects on its own terms. The
+// rejection is about the request itself - an effort level outside the ladder, a
+// malformed output_config - so every target in the chain would refuse it the
+// same way and the fallback handler must stop after the first one.
+//
+// This is deliberately narrower than RequestConversionError: that type also
+// covers model-specific conversion failures, whose own contract says another
+// target may accept the same request.
+var ErrInvalidRequest = errors.New("invalid request")
+
 // KeysCoolingError is local unavailability, not a new upstream HTTP failure.
 type KeysCoolingError struct {
 	RetryAt time.Time

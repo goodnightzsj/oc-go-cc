@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -14,7 +15,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/history"
+	"github.com/routatic/proxy/internal/metrics"
 )
 
 const (
@@ -25,12 +29,20 @@ const (
 
 // AnthropicFirstHandler sends inference to Anthropic and uses the existing
 // OpenCode handler only while Anthropic is unavailable.
+//
+// The direct path is a passthrough: it forwards the caller's own Anthropic
+// credentials and bytes, so it does not run admission, rate limiting, metrics
+// or history recording - those describe traffic this proxy routed, and this
+// traffic it did not. The config loader refuses to combine it with active_site,
+// whose promise is that every request goes through the selected platform.
 type AnthropicFirstHandler struct {
 	atomic   *config.AtomicConfig
 	fallback http.Handler
 	client   *http.Client
 	logger   *slog.Logger
 	gate     availabilityGate
+	storage  StorageWriter    // optional: history rows for traffic served here
+	metrics  *metrics.Metrics // optional: in-process counters
 }
 
 type availabilityGate struct {
@@ -167,6 +179,50 @@ func NewAnthropicFirstHandler(atomic *config.AtomicConfig, fallback http.Handler
 	}
 }
 
+// SetAccounting wires history and metrics for traffic this handler serves
+// itself. Optional: without them the direct path still routes, just unrecorded.
+func (h *AnthropicFirstHandler) SetAccounting(storage StorageWriter, met *metrics.Metrics) {
+	h.storage = storage
+	h.metrics = met
+}
+
+// recordDirect accounts for one response this handler delivered. The row
+// carries no usage: the passthrough never parses the caller's body, so tokens
+// and cost stay unknown (details_known=0) rather than invented. Success follows
+// the upstream status, which is all this layer can observe.
+func (h *AnthropicFirstHandler) recordDirect(requestID, model string, streaming bool, start time.Time, status int) {
+	if h.metrics != nil {
+		h.metrics.RecordRequest(streaming)
+		if status < 400 {
+			h.metrics.RecordSuccess(model, time.Since(start))
+		} else {
+			h.metrics.RecordFailureForModel(model)
+		}
+	}
+	if h.storage == nil {
+		return
+	}
+	if requestID == "" {
+		requestID = uuid.NewString()
+	}
+	rec := history.RequestRecord{
+		ID:              requestID,
+		Model:           model,
+		RequestedModel:  model,
+		Provider:        "anthropic",
+		Scenario:        "anthropic-first",
+		StartTime:       start,
+		Duration:        time.Since(start),
+		Streaming:       streaming,
+		Success:         status < 400,
+		UsageUnobserved: true,
+	}
+	if status >= 400 {
+		rec.ErrorMsg = fmt.Sprintf("anthropic returned HTTP %d", status)
+	}
+	_ = h.storage.InsertRequest(rec)
+}
+
 func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cfg := h.atomic.Get().AnthropicFirst
 	if !cfg.Enabled || r.Method != http.MethodPost {
@@ -186,6 +242,24 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		h.writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
 		return
 	}
+
+	// The direct path does not run admission, so it owns its request id and
+	// its accounting. The id also reaches the fallback chain, which reuses it.
+	requestID := strings.TrimSpace(r.Header.Get("X-Request-ID"))
+	if len(requestID) > 256 {
+		requestID = requestID[:256]
+	}
+	if requestID == "" {
+		requestID = uuid.NewString()
+	}
+	w.Header().Set("X-Request-ID", requestID)
+	var meta struct {
+		Model  string `json:"model"`
+		Stream *bool  `json:"stream"`
+	}
+	_ = json.Unmarshal(body, &meta)
+	streaming := meta.Stream != nil && *meta.Stream
+	start := time.Now()
 
 	attempt, allowed := h.gate.allow(time.Now(), cfg.BaseURL)
 	if !allowed {
@@ -230,6 +304,7 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 	copyStreamingResponse(r.Context(), w, resp.Body)
+	h.recordDirect(requestID, meta.Model, streaming, start, resp.StatusCode)
 }
 
 func newAnthropicRequest(in *http.Request, baseURL string, body []byte) (*http.Request, error) {

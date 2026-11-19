@@ -135,8 +135,17 @@ Press Ctrl+C to stop the server.`,
 				return fmt.Errorf("failed to load config: %w", err)
 			}
 
-			if err := ensureCatalogSynced(cmd.Context(), cfg, configPath, time.Now().UTC()); err != nil {
-				return fmt.Errorf("failed to sync catalog: %w", err)
+			// A catalog outage must not keep the proxy down: routing falls back
+			// to the configured models, and the previous catalog (or the
+			// embedded seeds) still serves the pickers and price tables. The
+			// price-refresh loop already treats the same call as best-effort.
+			// The wait is bounded so a hung models.dev delays start by at most
+			// this budget rather than indefinitely.
+			syncCtx, cancelSync := context.WithTimeout(cmd.Context(), 30*time.Second)
+			err = ensureCatalogSynced(syncCtx, cfg, configPath, time.Now().UTC())
+			cancelSync()
+			if err != nil {
+				slog.Warn("catalog sync failed; continuing with the cached catalog", "error", err)
 			}
 
 			// Debug request/response capture, when enabled in config.
@@ -241,7 +250,7 @@ Press Ctrl+C to stop the server.`,
 			pricesDone := make(chan struct{})
 			go func() {
 				defer close(pricesDone)
-				storage.PriceRefreshLoop(ctx, priceRefreshConfig(atomicCfg), nil, logPriceRefresh)
+				storage.PriceRefreshLoop(ctx, priceRefreshConfig(atomicCfg, srv.Storage()), nil, logPriceRefresh)
 			}()
 			// The holiday calendar decides peak pricing on Chinese public
 			// holidays, so it has to be current before the first request is
@@ -366,7 +375,7 @@ func stopCmd() *cobra.Command {
 				return fmt.Errorf("server is not running (no PID file)")
 			}
 
-			if err := daemon.StopProcess(pid); err != nil {
+			if err := daemon.StopProcess(pid, daemon.AppName); err != nil {
 				return fmt.Errorf("failed to stop server: %w", err)
 			}
 
@@ -755,6 +764,35 @@ func storageConfig(cfg *config.Config) storage.Config {
 		WALEnabled:        cfg.Storage.WALEnabled,
 		AnalyticsBaseline: cfg.Storage.AnalyticsBaseline,
 	})
+}
+
+// storageConfigFromFile reads only the storage block. Maintenance commands must
+// find the configured database without requiring a complete valid config - a
+// catalog import should not fail because an unrelated API key is missing.
+// allowMissing treats an absent file as "no storage override": the catalog
+// commands use --config only as a location hint, so the file need not exist.
+func storageConfigFromFile(configPath string, allowMissing bool) (storage.Config, error) {
+	explicit := configPath != ""
+	if !explicit {
+		configPath = config.ResolveConfigPath()
+	}
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) && (allowMissing || !explicit) {
+			return storage.DefaultConfig, nil
+		}
+		return storage.DefaultConfig, fmt.Errorf("read config: %w", err)
+	}
+	var file struct {
+		Storage *config.StorageConfig `json:"storage"`
+	}
+	if err := json.Unmarshal(raw, &file); err != nil {
+		return storage.DefaultConfig, fmt.Errorf("decode storage config: %w", err)
+	}
+	if file.Storage == nil {
+		return storage.DefaultConfig, nil
+	}
+	return storageConfig(&config.Config{Storage: file.Storage}), nil
 }
 
 // catalogProviders returns all provider names from the catalog that have at

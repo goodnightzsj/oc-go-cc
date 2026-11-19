@@ -382,6 +382,7 @@ const TRANSLATIONS = {
     'setting.activeSite': 'Active platform',
     'setting.activeSiteUnrestricted': 'Not restricted',
     'setting.activeSiteHint': 'Routes every request through the selected platform.',
+    'setting.trustForwardedFor': 'Trust X-Forwarded-For',
     'setting.activeSiteUnavailable': 'Add an API key in Settings first.',
     'setting.activeSiteNotShown': 'Active platform "{site}" is not offered here, so these views show all platforms.',
     'detail.status': 'Status',
@@ -651,6 +652,7 @@ const TRANSLATIONS = {
     'test.selectModel': 'Select a model...',
     'test.platform': 'Platform',
     'test.noModels': 'No models available for this platform',
+    'test.modelsUnavailable': 'Model list unavailable - check the proxy connection',
     'test.send': 'Send',
     'test.promptPlaceholder': 'Enter your prompt...',
     'test.latency': 'Latency:',
@@ -1051,6 +1053,7 @@ const TRANSLATIONS = {
     'setting.activeSite': '当前平台',
     'setting.activeSiteUnrestricted': '不限制',
     'setting.activeSiteHint': '所有请求都走选中的平台。',
+    'setting.trustForwardedFor': '信任 X-Forwarded-For',
     'setting.activeSiteUnavailable': '请先在设置里填写 API 密钥。',
     'setting.activeSiteNotShown': '当前平台「{site}」未在此列出，各视图按全部平台展示。',
     'detail.status': '状态',
@@ -1261,6 +1264,7 @@ const TRANSLATIONS = {
     'test.selectModel': '选择模型...',
     'test.platform': '平台',
     'test.noModels': '该平台没有可用模型',
+    'test.modelsUnavailable': '模型列表获取失败，请检查代理连接',
     'test.send': '发送',
     'test.promptPlaceholder': '输入测试提示词...',
     'test.latency': '延迟：',
@@ -1342,7 +1346,23 @@ const TRANSLATIONS = {
   }
 };
 
-let currentLang = localStorage.getItem('routatic-proxy-lang') || 'en';
+// A blocked or unavailable store must not stop the panel from loading. These
+// first reads run before any module initializes, so an uncaught SecurityError
+// here leaves a blank page rather than a degraded one. Every later storage use
+// follows the same best-effort rule.
+function readStorage(key) {
+  try { return localStorage.getItem(key); } catch (_) { return null; }
+}
+
+function writeStorage(key, value) {
+  try { localStorage.setItem(key, value); } catch (_) {}
+}
+
+function removeStorage(key) {
+  try { localStorage.removeItem(key); } catch (_) {}
+}
+
+let currentLang = readStorage('routatic-proxy-lang') || 'en';
 
 function t(key) {
   return (TRANSLATIONS[currentLang] && TRANSLATIONS[currentLang][key]) || key;
@@ -1379,7 +1399,7 @@ function applyTranslations() {
 
 function toggleLanguage() {
   currentLang = currentLang === 'en' ? 'zh' : 'en';
-  localStorage.setItem('routatic-proxy-lang', currentLang);
+  writeStorage('routatic-proxy-lang', currentLang);
   document.documentElement.lang = currentLang;
   applyTranslations();
   // Re-render dynamic content
@@ -1421,9 +1441,15 @@ document.addEventListener('DOMContentLoaded', () => {
 const THEME_KEY = 'routatic-proxy-theme';
 const THEME_SYSTEM = 'system';
 
+// The last choice made in this page. With storage blocked the write below is
+// a no-op, and without this the button would recompute the same "next" mode
+// on every click and appear inert.
+let themeChoice = null;
+
 function themeMode() {
-  const saved = localStorage.getItem(THEME_KEY);
-  return saved === 'light' || saved === 'dark' ? saved : THEME_SYSTEM;
+  const saved = readStorage(THEME_KEY);
+  if (saved === 'light' || saved === 'dark') return saved;
+  return themeChoice || THEME_SYSTEM;
 }
 
 // What the page is actually showing. In system mode there is deliberately no
@@ -1439,8 +1465,9 @@ function applyThemeMode() {
 function cycleTheme() {
   const mode = themeMode();
   const next = mode === THEME_SYSTEM ? 'light' : (mode === 'light' ? 'dark' : THEME_SYSTEM);
-  if (next === THEME_SYSTEM) localStorage.removeItem(THEME_KEY);
-  else localStorage.setItem(THEME_KEY, next);
+  themeChoice = next === THEME_SYSTEM ? null : next;
+  if (next === THEME_SYSTEM) removeStorage(THEME_KEY);
+  else writeStorage(THEME_KEY, next);
   applyThemeMode();
 }
 
@@ -2133,7 +2160,10 @@ function buildViewState() {
   const state = {};
   for (const [key, ids] of Object.entries(VIEW_CONTROLS)) {
     if (key === 'platform' && viewPlatformPinned !== null) {
-      state[key] = viewPlatformPinned;
+      // An empty pinned value is a real choice ("all platforms"), not an
+      // absent one. Persist it as a sentinel: the empty string is dropped by
+      // viewStateParams and would read back as "follow the active site".
+      state[key] = viewPlatformPinned === '' ? 'all' : viewPlatformPinned;
       continue;
     }
     for (const id of ids) {
@@ -2193,7 +2223,11 @@ function applyViewState(saved) {
   const before = historyQueryParams().toString();
   suppressViewStateSync = true;
   try {
-    setViewPlatform(params.has('platform') ? params.get('platform') : null);
+    // 'all' is the persisted sentinel for the explicit "all platforms" choice;
+    // absent means "follow the active site".
+    setViewPlatform(params.has('platform')
+      ? (params.get('platform') === 'all' ? '' : params.get('platform'))
+      : null);
     // Restored here rather than in FallbackModule.loadConfig: the hash is read
     // once at boot, and the listing may not have arrived yet, so the module
     // decides when it can act on the value.
@@ -2324,7 +2358,12 @@ function refreshVisibleTab() {
   if (activeTab === 'overview') return refreshOverviewUsage();
   if (activeTab === 'performance') return PerfModule.refresh();
   if (activeTab === 'analytics') return AnalyticsModule.load();
-  if (activeTab === 'quota') QuotaModule.tickCountdowns();
+  if (activeTab === 'quota') {
+    // The account cache throttles itself, so opening the tab loads now instead
+    // of showing placeholders until the next 3s poll.
+    QuotaModule.tickCountdowns();
+    return QuotaModule.load();
+  }
   return refreshCurrentTab();
 }
 
@@ -2347,8 +2386,11 @@ function startPolling() {
   }, 6000);
 }
 
-// Lightweight poll: metrics + catalog age only, always on.
+// Lightweight poll: metrics + catalog age only. Paused while the tab is
+// hidden; the next tick after the tab becomes visible resumes it (the
+// visibility handler refreshes the visible tab's own data immediately).
 async function refreshCore() {
+  if (document.hidden) return;
   await Promise.all([refreshMetrics(), refreshCatalogAge()]);
 }
 
@@ -2899,7 +2941,7 @@ function clearHistoryView(loading = false) {
   if (tip) tip.style.display = 'none';
   if (loading) document.getElementById('history-error').hidden = true;
   const message = t(loading ? 'data.loading' : 'detail.unavailable');
-  document.getElementById('history-tbody').innerHTML = `<tr><td colspan="8" class="empty-state">${message}</td></tr>`;
+  document.getElementById('history-tbody').innerHTML = `<tr><td colspan="10" class="empty-state">${message}</td></tr>`;
   ['history-summary-requests', 'history-summary-success', 'history-summary-tokens', 'history-summary-cost'].forEach(id => {
     document.getElementById(id).textContent = loading ? '…' : '—';
   });
@@ -2991,10 +3033,8 @@ function renderHistoryPager() {
   if (prev) prev.disabled = historyPage <= 1;
   if (next) next.disabled = historyPage >= max;
   // The loaded page can differ from the one asked for (a shrinking result set
-  // clamps it), so settle the URL on what is actually shown. replaceState, not
-  // the hash setter: this runs during a load and must not push an entry or
-  // fire a hashchange back into the loader.
-  syncViewState({replace: true});
+  // clamps it), so persist what is actually shown.
+  syncViewState();
 }
 
 // The peak multiplier as billed, read from the record the backend wrote.
@@ -3028,7 +3068,7 @@ function renderHistory() {
     historyTotal + t('status.count') + (historyHasFilters() ? t('status.filtered') : '');
 
   if (allHistory.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">' + (historyHasFilters()
+    tbody.innerHTML = '<tr><td colspan="10" class="empty-state">' + (historyHasFilters()
       ? emptyStateContent('history.noMatches', 'history.emptyFiltersHint')
       : emptyStateContent('empty.noHistory', 'data.localEmptyHint')) + '</td></tr>';
     return;
@@ -3248,26 +3288,56 @@ async function refreshCatalog() {
 const CatalogModule = {
   models: [],
   scope: '',
+  previousFocus: null,
 
   init() {
     document.getElementById('btn-view-catalog')?.addEventListener('click', () => this.open());
     document.getElementById('catalog-modal-close')?.addEventListener('click', () => this.close());
-    document.getElementById('catalog-modal')?.addEventListener('click', e => {
-      if (e.target === document.getElementById('catalog-modal')) this.close();
+    const modal = document.getElementById('catalog-modal');
+    modal?.addEventListener('click', e => {
+      if (e.target === modal) this.close();
+    });
+    // The dialog is aria-modal, so keyboard focus must stay inside it and the
+    // Escape key must close it like every other overlay on this page.
+    modal?.addEventListener('keydown', e => {
+      if (e.key !== 'Tab') return;
+      const focusables = [...modal.querySelectorAll('button, input, select, [tabindex]:not([tabindex="-1"])')]
+        .filter(el => !el.disabled && el.offsetParent !== null);
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     });
     document.getElementById('catalog-platform-filter')?.addEventListener('change', () => this.render());
     document.getElementById('catalog-search')?.addEventListener('input', () => this.render());
-    document.getElementById('btn-catalog-resync')?.addEventListener('click', () => refreshCatalog());
+    document.getElementById('btn-catalog-resync')?.addEventListener('click', () => {
+      // The handler disables the button, which drops focus to <body> and lets
+      // Tab escape the aria-modal dialog. Move focus to the search box first.
+      document.getElementById('catalog-search')?.focus();
+      refreshCatalog();
+    });
   },
 
   async open() {
+    this.previousFocus = document.activeElement;
     document.getElementById('catalog-modal')?.classList.add('visible');
+    document.getElementById('catalog-search')?.focus();
     await refreshCatalogAge();
     await this.load();
   },
 
   close() {
     document.getElementById('catalog-modal')?.classList.remove('visible');
+    if (this.previousFocus && typeof this.previousFocus.focus === 'function') {
+      this.previousFocus.focus();
+    }
+    this.previousFocus = null;
   },
 
   async load(force = false) {
@@ -4147,6 +4217,7 @@ const CONFIG_FIELDS = [
   // them this deployment can actually use comes from /api/sites, because the
   // credential rule lives in config and must not be restated here.
   ['active_site', 'cfg-active-site', 'string'],
+  ['trust_forwarded_for', 'cfg-trust-forwarded-for', 'bool'],
 
   ['logging.level', 'cfg-log-level', 'string'],
 ];
@@ -4823,7 +4894,7 @@ async function applyActiveSite(force = false) {
       return select && [...select.options].some(option => option.value === active && !option.disabled);
     });
     renderActiveSiteNote(offered ? '' : active);
-    syncViewState({replace: true});
+    syncViewState();
     return true;
   } catch (_) {
     return false; // leave the selectors as rendered rather than guessing
@@ -5043,15 +5114,6 @@ function toast(message, type) {
   }, 3000);
 }
 
-function togglePasswordVisibility(id) {
-  const input = document.getElementById(id);
-  if (input.type === 'password') {
-    input.type = 'text';
-  } else {
-    input.type = 'password';
-  }
-}
-
 /* ── History Search ────────────────────────────────────────────── */
 let historyRefreshTimer = null;
 
@@ -5062,7 +5124,7 @@ function scheduleHistoryRefresh(event) {
   historyRequest = null;
   historyPage = 1;
   clearHistoryView(true);
-  if (event?.type === 'input') syncViewState({replace: true});
+  if (event?.type === 'input') syncViewState();
   if (historyRefreshTimer) clearTimeout(historyRefreshTimer);
   historyRefreshTimer = setTimeout(() => {
     historyRefreshTimer = null;
@@ -5363,10 +5425,15 @@ document.addEventListener('keydown', function(e) {
   }
   // Escape to close modals (use if-else to ensure only one action)
   if (e.key === 'Escape') {
+    // A nested control (CustomSelect, date popover) already handled Escape;
+    // closing the dialog behind it too would dismiss two layers at once.
+    if (e.defaultPrevented) return;
     if (commandPaletteOpen) {
       closeCommandPalette();
     } else if (TestModule.testModal?.classList.contains('visible')) {
       TestModule.close();
+    } else if (document.getElementById('catalog-modal')?.classList.contains('visible')) {
+      CatalogModule.close();
     } else if (modal.classList.contains('visible')) {
       closeHistoryModal();
     }
@@ -5548,6 +5615,13 @@ const FallbackModule = {
   persisting: null,
 
   init() {
+    // Row clicks are delegated through data-key, never written into an inline
+    // handler: HTML entities in an attribute are decoded before the handler is
+    // compiled, so a quote in a model id would have escaped the string literal.
+    document.getElementById('fallback-add-list')?.addEventListener('click', event => {
+      const row = event.target.closest('.picker-row');
+      if (row && row.dataset.key) this.chooseModel(row.dataset.key);
+    });
     this.loadConfig();
   },
 
@@ -5632,7 +5706,7 @@ const FallbackModule = {
       this.populatePlatformFilter(scenarioKeys);
       // A restored platform has to reach the URL even when nothing else changed,
       // or a reload of a link that named one would drop it on the next sync.
-      if (activeTab === 'fallback') syncViewState({replace: true});
+      if (activeTab === 'fallback') syncViewState();
 
       this.populateAddSelect();
       const crossBox = document.getElementById('fallback-cross-platform');
@@ -5737,7 +5811,7 @@ const FallbackModule = {
     // The choice is view state, not configuration: it belongs in the URL so a
     // reload or a shared link lands on the same platform, and nothing is
     // written to the config file.
-    syncViewState({replace: true});
+    syncViewState();
   },
 
   // The add-model picker: a searchable popover rather than a native select.
@@ -5848,8 +5922,7 @@ const FallbackModule = {
     if (model.reasoning) badges.push(t('catalog.reasoning'));
     return `
       <li class="picker-row" role="option" tabindex="-1"
-          data-key="${escapeHtml(key)}"
-          onclick="FallbackModule.chooseModel('${escapeHtml(key).replace(/'/g, "&#39;")}')">
+          data-key="${escapeHtml(key)}">
         <span class="picker-model">${escapeHtml(model.model_id)}</span>
         ${ctx ? `<span class="picker-ctx">${escapeHtml(ctx)}</span>` : ''}
         ${price
@@ -6287,8 +6360,13 @@ const TestModule = {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
       this.catalogModels = Array.isArray(data.models) ? data.models : [];
-    } catch (_) {
+      this.catalogError = null;
+    } catch (err) {
+      // A failed lookup is not an empty list. Reporting it as "no models"
+      // would read as "this instance serves nothing", which is a different
+      // and alarming claim.
       this.catalogModels = [];
+      this.catalogError = err;
     }
     this.renderPlatforms();
     this.renderModels();
@@ -6328,7 +6406,7 @@ const TestModule = {
       return item;
     };
     if (!models.length) {
-      select.replaceChildren(option(t('test.noModels'), ''));
+      select.replaceChildren(option(this.catalogError ? t('test.modelsUnavailable') : t('test.noModels'), ''));
       window.CustomSelect?.sync(select);
       return;
     }
@@ -6446,7 +6524,7 @@ const TestModule = {
           .join('');
         this.testHistoryHint.querySelectorAll('span').forEach((el, i) => {
           el.addEventListener('click', () => {
-            const history = JSON.parse(localStorage.getItem(this.STORAGE_KEY) || '[]');
+            const history = JSON.parse(readStorage(this.STORAGE_KEY) || '[]');
             if (history[i]) {
               this.testPrompt.value = history[i];
               this.testPrompt.focus();
@@ -6889,10 +6967,10 @@ const AnalyticsModule = {
       const cost = costs[index];
       const pct = max > 0 ? Math.max(cost > 0 ? 3 : 0, cost / max * 100) : 0;
       const label = String(point.date || '').slice(5);
-      return `<div class="daily-bar${cost > 0 ? '' : ' is-empty'}" title="${this.escapeHtml(this.trendLabel(point.date))}: ${this.escapeHtml(fmtAggregateCost(point))} · ${this.escapeHtml(costCoverageNote(point))}">
-        <span class="daily-bar-value">${cost > 0 ? this.escapeHtml(fmtCost(cost)) : ''}</span>
+      return `<div class="daily-bar${cost > 0 ? '' : ' is-empty'}" title="${escapeHtml(this.trendLabel(point.date))}: ${escapeHtml(fmtAggregateCost(point))} · ${escapeHtml(costCoverageNote(point))}">
+        <span class="daily-bar-value">${cost > 0 ? escapeHtml(fmtCost(cost)) : ''}</span>
         <span class="daily-bar-fill" style="height:${pct.toFixed(1)}%"></span>
-        <span class="daily-bar-label">${this.escapeHtml(label)}</span>
+        <span class="daily-bar-label">${escapeHtml(label)}</span>
       </div>`;
     }).join('');
     // A single recorded day has no shape to read - one bar is just a block. The
@@ -6975,14 +7053,14 @@ const AnalyticsModule = {
       const fallback = Number(item.fallback_rate || 0);
       if (known > 0 && fallback > 0) meta.push(t('health.fallbackShare').replace('{v}', fallback.toFixed(0)));
       if (!hasRate) meta.push(t('health.noKnownOutcome'));
-      return `<div class="platform-health-row" data-provider="${this.escapeHtml(provider)}">
+      return `<div class="platform-health-row" data-provider="${escapeHtml(provider)}">
         <div class="platform-health-name">
-          <span class="status-dot platform-health-breaker ${breaker.className}" title="${this.escapeHtml(breaker.label)}" role="img" aria-label="${this.escapeHtml(breaker.label)}"></span>
-          <span title="${this.escapeHtml(providerLabel(provider))}">${this.escapeHtml(providerLabel(provider))}</span>
+          <span class="status-dot platform-health-breaker ${breaker.className}" title="${escapeHtml(breaker.label)}" role="img" aria-label="${escapeHtml(breaker.label)}"></span>
+          <span title="${escapeHtml(providerLabel(provider))}">${escapeHtml(providerLabel(provider))}</span>
         </div>
         <div class="platform-health-track"><span style="width:${pct == null ? 0 : Math.max(pct > 0 ? 2 : 0, pct).toFixed(1)}%;--platform-health-color:${successColor(level)}"></span></div>
         <div class="platform-health-value" style="color:${successColor(level)}">${pct == null ? '—' : pct.toFixed(1) + '%'}</div>
-        <div class="platform-health-meta" title="${this.escapeHtml(generationThroughputHint(item, item.tokens_per_second))}">${this.escapeHtml(meta.join(' · '))}</div>
+        <div class="platform-health-meta" title="${escapeHtml(generationThroughputHint(item, item.tokens_per_second))}">${escapeHtml(meta.join(' · '))}</div>
       </div>`;
     }).join('');
   },
@@ -7030,10 +7108,10 @@ const AnalyticsModule = {
       const value = Number(item[valueKey] || 0);
       const share = value / total * 100;
       const meta = `${Number(item.requests || 0).toLocaleString('en-US')} ${t('analytics.requests')} · ${fmtTok(item.total_tokens)} Token · ${fmtAggregateCost(item)}`;
-      return `<div class="analytics-distribution-row" data-provider="${this.escapeHtml(item.provider || '')}">
-        <div class="analytics-distribution-label"><span title="${this.escapeHtml(label)}">${this.escapeHtml(label)}</span><strong>${valueKey === 'cost_usd' ? fmtAggregateCost(item) : formatValue(value)}</strong></div>
+      return `<div class="analytics-distribution-row" data-provider="${escapeHtml(item.provider || '')}">
+        <div class="analytics-distribution-label"><span title="${escapeHtml(label)}">${escapeHtml(label)}</span><strong>${valueKey === 'cost_usd' ? fmtAggregateCost(item) : formatValue(value)}</strong></div>
         <div class="analytics-distribution-track"><span style="width:${Math.max(value > 0 ? 2 : 0, value / max * 100).toFixed(1)}%;--distribution-color:${providerColor(item.provider)}"></span></div>
-        <small title="${this.escapeHtml(costCoverageNote(item))}">${meta}${incompleteCost ? '' : ` · ${share.toFixed(1)}%`}</small>
+        <small title="${escapeHtml(costCoverageNote(item))}">${meta}${incompleteCost ? '' : ` · ${share.toFixed(1)}%`}</small>
       </div>`;
     }).join('');
   },
@@ -7113,12 +7191,12 @@ const AnalyticsModule = {
       const value = max * step / 4;
       const yy = y(value);
       markup += `<line class="usage-grid-line" x1="${inset.left}" x2="${width-inset.right}" y1="${yy}" y2="${yy}"></line>`;
-      markup += `<text class="usage-axis-label" x="${inset.left-8}" y="${yy+3}" text-anchor="end">${this.escapeHtml(formatValue(value))}</text>`;
+      markup += `<text class="usage-axis-label" x="${inset.left-8}" y="${yy+3}" text-anchor="end">${escapeHtml(formatValue(value))}</text>`;
     }
     const stride = Math.max(1, Math.ceil(points.length / 5));
     points.forEach((point, index) => {
       if (index % stride !== 0 && index !== points.length - 1) return;
-      markup += `<text class="usage-axis-label" x="${x(index)}" y="${height-7}" text-anchor="middle">${this.escapeHtml(this.trendLabel(point.date))}</text>`;
+      markup += `<text class="usage-axis-label" x="${x(index)}" y="${height-7}" text-anchor="middle">${escapeHtml(this.trendLabel(point.date))}</text>`;
     });
     return {markup, x, y, plotW, plotH};
   },
@@ -7168,7 +7246,7 @@ const AnalyticsModule = {
     const chart = this.chartGrid(points, width, height, inset, max, value => fmtTok(Math.round(value)));
     const lines = visible.map(item => `<polyline class="usage-chart-line ${item.className}" points="${points.map((point,index) => `${chart.x(index)},${chart.y(point[item.key])}`).join(' ')}"></polyline>`).join('');
     const dots = visible.map(item => points.map((point,index) => item.key === 'requests' || Number(point[item.key] || 0) > 0 ? `<circle class="usage-chart-point ${item.className}" cx="${chart.x(index)}" cy="${chart.y(point[item.key])}" r="${item.key === 'requests' ? 3 : 2.6}"></circle>` : '').join('')).join('');
-    root.innerHTML = `<div class="usage-chart-stage"><div class="usage-chart-legend">${this.chartLegend(series, visible)}</div><svg viewBox="0 0 ${width} ${height}" role="img">${chart.markup}${lines}${dots}<g class="usage-chart-cursor" aria-hidden="true"><line class="usage-chart-crosshair" y1="${inset.top}" y2="${inset.top+chart.plotH}"></line>${visible.map(item=>`<circle class="usage-chart-cursor-point ${item.className}" r="4"></circle>`).join('')}</g><rect class="usage-chart-scrub" x="${inset.left}" y="${inset.top}" width="${chart.plotW}" height="${chart.plotH}" tabindex="0" role="slider" aria-label="${this.escapeHtml(t('analytics.requests'))}" aria-valuemin="1" aria-valuemax="${points.length}" aria-valuenow="1"></rect></svg><div class="chart-tip" id="${containerId}-tip"></div></div>`;
+    root.innerHTML = `<div class="usage-chart-stage"><div class="usage-chart-legend">${this.chartLegend(series, visible)}</div><svg viewBox="0 0 ${width} ${height}" role="img">${chart.markup}${lines}${dots}<g class="usage-chart-cursor" aria-hidden="true"><line class="usage-chart-crosshair" y1="${inset.top}" y2="${inset.top+chart.plotH}"></line>${visible.map(item=>`<circle class="usage-chart-cursor-point ${item.className}" r="4"></circle>`).join('')}</g><rect class="usage-chart-scrub" x="${inset.left}" y="${inset.top}" width="${chart.plotW}" height="${chart.plotH}" tabindex="0" role="slider" aria-label="${escapeHtml(t('analytics.requests'))}" aria-valuemin="1" aria-valuemax="${points.length}" aria-valuenow="1"></rect></svg><div class="chart-tip" id="${containerId}-tip"></div></div>`;
     this.bindChartLegend(root, containerId, series, () => this.renderRequestTrend(points, containerId));
     bindPlotTooltip(root.querySelector('.usage-chart-stage'), root.querySelector('.chart-tip'), {
       pointCount: points.length,
@@ -7223,7 +7301,7 @@ const AnalyticsModule = {
     const rateLine = showRate ? `<polyline class="usage-chart-line is-cache-rate" points="${points.map((point,index)=>`${chart.x(index)},${rateY(rate(point))}`).join(' ')}"></polyline>` : '';
     const dots = visibleTokens.map(item => points.map((point,index)=>Number(point[item.key]||0)>0?`<circle class="usage-chart-point ${item.className}" cx="${chart.x(index)}" cy="${chart.y(point[item.key])}" r="2.6"></circle>`:'').join('')).join('');
     const rightAxis = showRate ? [0,25,50,75,100].map(value=>`<text class="usage-axis-label is-rate" x="${width-inset.right+8}" y="${rateY(value)+3}">${value}%</text>`).join('') : '';
-    root.innerHTML=`<div class="usage-chart-stage"><div class="usage-chart-legend">${this.chartLegend(series, visible)}</div><svg viewBox="0 0 ${width} ${height}" role="img">${chart.markup}${rightAxis}${lines}${rateLine}${dots}<g class="usage-chart-cursor" aria-hidden="true"><line class="usage-chart-crosshair" y1="${inset.top}" y2="${inset.top+chart.plotH}"></line>${visible.map(item=>`<circle class="usage-chart-cursor-point ${item.className}" r="4"></circle>`).join('')}</g><rect class="usage-chart-scrub" x="${inset.left}" y="${inset.top}" width="${chart.plotW}" height="${chart.plotH}" tabindex="0" role="slider" aria-label="${this.escapeHtml(t('analytics.totalTokens'))}" aria-valuemin="1" aria-valuemax="${points.length}" aria-valuenow="1"></rect></svg><div class="chart-tip" id="${containerId}-tip"></div></div>`;
+    root.innerHTML=`<div class="usage-chart-stage"><div class="usage-chart-legend">${this.chartLegend(series, visible)}</div><svg viewBox="0 0 ${width} ${height}" role="img">${chart.markup}${rightAxis}${lines}${rateLine}${dots}<g class="usage-chart-cursor" aria-hidden="true"><line class="usage-chart-crosshair" y1="${inset.top}" y2="${inset.top+chart.plotH}"></line>${visible.map(item=>`<circle class="usage-chart-cursor-point ${item.className}" r="4"></circle>`).join('')}</g><rect class="usage-chart-scrub" x="${inset.left}" y="${inset.top}" width="${chart.plotW}" height="${chart.plotH}" tabindex="0" role="slider" aria-label="${escapeHtml(t('analytics.totalTokens'))}" aria-valuemin="1" aria-valuemax="${points.length}" aria-valuenow="1"></rect></svg><div class="chart-tip" id="${containerId}-tip"></div></div>`;
     this.bindChartLegend(root, containerId, series, () => this.renderTokenLines(points, containerId));
     bindPlotTooltip(root.querySelector('.usage-chart-stage'),root.querySelector('.chart-tip'),{
       pointCount: points.length,
@@ -7254,7 +7332,7 @@ const AnalyticsModule = {
   renderPeriodTable(points) {
     const body=document.getElementById('analytics-period-tbody');
     if (!body) return;
-    body.innerHTML=points.map(point=>`<tr><td>${this.escapeHtml(this.trendLabel(point.date))}</td><td>${Number(point.requests||0).toLocaleString('en-US')}</td><td>${Number(point.known_requests||0)>0?Number(point.error_requests||0).toLocaleString('en-US'):'—'}</td><td>${Number(point.input_tokens||0).toLocaleString('en-US')}</td><td>${Number(point.output_tokens||0).toLocaleString('en-US')}</td><td>${Number(point.cache_read_tokens||0).toLocaleString('en-US')}</td><td>${Number(point.cache_creation_tokens||0).toLocaleString('en-US')}</td><td><strong>${totalUsageTokens(point).toLocaleString('en-US')}</strong></td><td title="${this.escapeHtml(costCoverageNote(point))}">${fmtAggregateCost(point)}</td></tr>`).join('');
+    body.innerHTML=points.map(point=>`<tr><td>${escapeHtml(this.trendLabel(point.date))}</td><td>${Number(point.requests||0).toLocaleString('en-US')}</td><td>${Number(point.known_requests||0)>0?Number(point.error_requests||0).toLocaleString('en-US'):'—'}</td><td>${Number(point.input_tokens||0).toLocaleString('en-US')}</td><td>${Number(point.output_tokens||0).toLocaleString('en-US')}</td><td>${Number(point.cache_read_tokens||0).toLocaleString('en-US')}</td><td>${Number(point.cache_creation_tokens||0).toLocaleString('en-US')}</td><td><strong>${totalUsageTokens(point).toLocaleString('en-US')}</strong></td><td title="${escapeHtml(costCoverageNote(point))}">${fmtAggregateCost(point)}</td></tr>`).join('');
     const count=document.getElementById('analytics-period-count');
     if (count) count.textContent=`${points.length} ${this.granularity==='hour'?t('analytics.hour'):t('analytics.day')}`;
   },
@@ -7266,7 +7344,7 @@ const AnalyticsModule = {
       const prompt=Number(item.input_tokens||0)+Number(item.cache_read_tokens||0)+Number(item.cache_creation_tokens||0);
       const rate=prompt>0?Number(item.cache_read_tokens||0)/prompt*100:0;
       const tps=fmtGenerationThroughput(item.generation_tokens_per_second);
-      return `<tr data-provider="${this.escapeHtml(item.provider || '')}"><td><code title="${this.escapeHtml(item.model || '')}">${this.escapeHtml(item.model||t('detail.unknown'))}</code><br><small>${this.escapeHtml(providerLabel(item.provider))}</small></td><td>${Number(item.requests||0).toLocaleString('en-US')}</td><td>${prompt>0?rate.toFixed(1)+'%':'—'}</td><td>${totalUsageTokens(item).toLocaleString('en-US')}</td><td title="${this.escapeHtml(generationThroughputHint(item, item.tokens_per_second))}">${tps}</td><td title="${this.escapeHtml(costCoverageNote(item))}">${fmtAggregateCost(item)}</td></tr>`;
+      return `<tr data-provider="${escapeHtml(item.provider || '')}"><td><code title="${escapeHtml(item.model || '')}">${escapeHtml(item.model||t('detail.unknown'))}</code><br><small>${escapeHtml(providerLabel(item.provider))}</small></td><td>${Number(item.requests||0).toLocaleString('en-US')}</td><td>${prompt>0?rate.toFixed(1)+'%':'—'}</td><td>${totalUsageTokens(item).toLocaleString('en-US')}</td><td title="${escapeHtml(generationThroughputHint(item, item.tokens_per_second))}">${tps}</td><td title="${escapeHtml(costCoverageNote(item))}">${fmtAggregateCost(item)}</td></tr>`;
     }).join('') || `<tr><td colspan="6" class="empty-state">${t('analytics.noData')}</td></tr>`;
   },
 
@@ -7296,11 +7374,11 @@ const AnalyticsModule = {
       const live = !!state.live && state.refreshed_at;
       const source = state.reference_only ? 'priceReference' : (live ? 'priceLive' : 'priceSeed');
       const hint = state.reference_only ? t('analytics.priceReferenceHint') : (live ? '' : t('analytics.priceSeedHint'));
-      return `<tr data-provider="${this.escapeHtml(name)}">
-        <td>${this.escapeHtml(label)}</td>
+      return `<tr data-provider="${escapeHtml(name)}">
+        <td>${escapeHtml(label)}</td>
         <td>${Number(state.rules || 0).toLocaleString('en-US')}</td>
-        <td><span class="${live ? 'price-live' : 'price-seed'}" title="${this.escapeHtml(hint)}">${this.escapeHtml(t('analytics.' + source))}</span></td>
-        <td>${live ? this.escapeHtml(fmtAge(Math.max(0, (Date.now() - new Date(state.refreshed_at).getTime()) / 1000))) : '—'}</td>
+        <td><span class="${live ? 'price-live' : 'price-seed'}" title="${escapeHtml(hint)}">${escapeHtml(t('analytics.' + source))}</span></td>
+        <td>${live ? escapeHtml(fmtAge(Math.max(0, (Date.now() - new Date(state.refreshed_at).getTime()) / 1000))) : '—'}</td>
       </tr>`;
     }).join('');
     tbody.innerHTML = rows;
@@ -7343,9 +7421,6 @@ const AnalyticsModule = {
     root.textContent=t('analytics.retainedRange').replace('{from}',from).replace('{to}',to);
   },
 
-  escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-  }
 };
 
 // Initialize dates and listeners before the queued hash activation runs.

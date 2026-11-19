@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -28,6 +29,7 @@ import (
 	"github.com/routatic/proxy/internal/middleware"
 	"github.com/routatic/proxy/internal/router"
 	"github.com/routatic/proxy/internal/sse"
+	"github.com/routatic/proxy/internal/status"
 	"github.com/routatic/proxy/internal/token"
 	"github.com/routatic/proxy/internal/transformer"
 	"github.com/routatic/proxy/pkg/types"
@@ -47,6 +49,14 @@ type MessagesHandler struct {
 	metrics          *metrics.Metrics
 	captureLogger    *debug.CaptureLogger
 	storage          StorageWriter // optional: SQLite persistence for requests/latency
+	statusStore      *status.Store // optional: /statusline feed
+
+	// Parsed trusted-proxy CIDRs, rebuilt only when the configured list
+	// changes. Parsing on every request would put allocation on the hot path
+	// for a value that changes when an operator edits the config.
+	proxyNetsMu  sync.Mutex
+	proxyNetsKey string
+	proxyNets    []*net.IPNet
 }
 
 // responseWriter wraps http.ResponseWriter to track if headers were written.
@@ -448,6 +458,55 @@ func NewMessagesHandler(
 
 type admittedRequestKey struct{}
 
+// SetStatusStore wires the /statusline feed. Optional: a handler without one
+// simply never publishes.
+func (h *MessagesHandler) SetStatusStore(store *status.Store) { h.statusStore = store }
+
+// publishStatus records this request's routing decision for the status line.
+// It reads the first entry of the final chain, not the pre-filter primary:
+// capacity filtering can drop that primary, and the status line would then
+// name a model that never runs.
+func (h *MessagesHandler) publishStatus(requestID string, streaming bool, scenario router.Scenario, chain []config.ModelConfig, inputTokens int) {
+	if h.statusStore == nil || len(chain) == 0 {
+		return
+	}
+	primary := chain[0]
+	percent := 0
+	if primary.ContextWindow > 0 {
+		percent = inputTokens * 100 / primary.ContextWindow
+	}
+	h.statusStore.Publish(status.Snapshot{
+		Request: status.RequestSnapshot{RequestID: requestID, Streaming: streaming},
+		Routing: status.RoutingSnapshot{Scenario: string(scenario), ModelID: primary.ModelID},
+		Context: status.ContextSnapshot{InputTokens: inputTokens, MaxTokens: primary.ContextWindow, Percent: percent},
+	})
+}
+
+// clientIPOptions reads the live config so a hot reload can turn the trusted
+// reverse-proxy mode on or off without a restart.
+func (h *MessagesHandler) clientIPOptions() middleware.ClientIPOptions {
+	if h.modelRouter == nil {
+		return middleware.ClientIPOptions{}
+	}
+	cfg := h.modelRouter.Config()
+	if cfg == nil {
+		return middleware.ClientIPOptions{}
+	}
+	opts := middleware.ClientIPOptions{TrustForwardedFor: cfg.TrustForwardedFor}
+	if !cfg.TrustForwardedFor || len(cfg.TrustedProxies) == 0 {
+		return opts
+	}
+	key := strings.Join(cfg.TrustedProxies, ",")
+	h.proxyNetsMu.Lock()
+	if h.proxyNetsKey != key {
+		h.proxyNets = cfg.TrustedProxyNets()
+		h.proxyNetsKey = key
+	}
+	opts.TrustedProxies = h.proxyNets
+	h.proxyNetsMu.Unlock()
+	return opts
+}
+
 // admitRequest is shared by protocol entry points. Only the internal adapter
 // can carry this marker, so a Responses request consumes the same bucket once.
 func (h *MessagesHandler) admitRequest(w http.ResponseWriter, r *http.Request) (*http.Request, bool) {
@@ -468,7 +527,7 @@ func (h *MessagesHandler) admitRequest(w http.ResponseWriter, r *http.Request) (
 	w.Header().Set("X-Request-ID", requestID)
 
 	// Rate limiting
-	clientIP := middleware.GetClientIP(r)
+	clientIP := middleware.GetClientIP(r, h.clientIPOptions())
 	if !h.rateLimiter.Allow(clientIP) {
 		h.metrics.RecordRateLimited()
 		h.logger.Warn("rate limited", "client", clientIP, "request_id", requestID)
@@ -609,6 +668,9 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 		h.sendError(w, http.StatusBadRequest, err.Error(), nil)
 		return
 	}
+	// Re-publish after the Responses adapter may have replaced the chain, so
+	// the status line names the model this request will actually try first.
+	h.publishStatus(requestID, isStreaming, routeResult.Scenario, modelChain, tokenCount)
 
 	// The normalized form exists only for the debug capture; providers consume
 	// the Anthropic request directly.
@@ -1350,7 +1412,12 @@ func (h *MessagesHandler) handleNonStreaming(
 			h.logger.Info("request context canceled during non-streaming fallback", "error", err)
 			return
 		}
-		h.metrics.RecordFailureForModel(result.ModelID)
+		// With every candidate skipped before execution there is no model to
+		// blame; an empty key would add a phantom row to the per-model
+		// distribution.
+		if result.Attempted > 0 {
+			h.metrics.RecordFailureForModel(result.ModelID)
+		}
 		h.sendError(w, http.StatusBadGateway, "all models failed", err)
 		return
 	}

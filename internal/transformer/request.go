@@ -170,12 +170,12 @@ func (t *RequestTransformer) transformParameters(anthropicReq *types.MessageRequ
 			Format json.RawMessage `json:"format"`
 		}
 		if err := json.Unmarshal(anthropicReq.OutputConfig, &output); err != nil {
-			return nil, fmt.Errorf("invalid output_config: %w", err)
+			return nil, fmt.Errorf("%w: invalid output_config: %w", core.ErrInvalidRequest, err)
 		}
 		if len(output.Format) > 0 && string(output.Format) != "null" {
 			responseFormat, err := openAIResponseFormat(output.Format)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%w: %w", core.ErrInvalidRequest, err)
 			}
 			openaiReq.ResponseFormat = responseFormat
 		}
@@ -192,7 +192,7 @@ func (t *RequestTransformer) transformParameters(anthropicReq *types.MessageRequ
 		} else {
 			effort, ok := core.NormalizeEffort(output.Effort)
 			if !ok {
-				return nil, fmt.Errorf("unsupported output_config.effort %q", output.Effort)
+				return nil, fmt.Errorf("%w: unsupported output_config.effort %q", core.ErrInvalidRequest, output.Effort)
 			}
 			statedEffort = effort
 		}

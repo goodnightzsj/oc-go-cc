@@ -5,9 +5,8 @@ package daemon
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -27,21 +26,23 @@ func IsProcessRunning(pid int) bool {
 }
 
 func IsAppProcess(pid int, appName string) bool {
+	name, ok := processIdentity(pid)
+	return ok && processMatches(name, appName)
+}
+
+func processIdentity(pid int) (string, bool) {
 	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
-		return false
+		return "", false
 	}
 	defer func() { _ = windows.CloseHandle(handle) }()
 
 	buf := make([]uint16, windows.MAX_PATH)
 	size := uint32(len(buf))
 	if err := windows.QueryFullProcessImageName(handle, 0, &buf[0], &size); err != nil {
-		return false
+		return "", false
 	}
-
-	base := strings.TrimSuffix(strings.ToLower(filepath.Base(windows.UTF16ToString(buf[:size]))), ".exe")
-	app := strings.TrimSuffix(strings.ToLower(appName), ".exe")
-	return base == app || strings.HasPrefix(base, app+"-")
+	return windows.UTF16ToString(buf[:size]), true
 }
 
 // StopProcess terminates a process on Windows.
@@ -50,7 +51,12 @@ func IsAppProcess(pid int, appName string) bool {
 // process without cleanup. In-flight requests are dropped and deferred functions
 // do not run. A future improvement could use a named pipe or event for graceful
 // shutdown.
-func StopProcess(pid int) error {
+func StopProcess(pid int, appName string) error {
+	if appName != "" {
+		if name, ok := processIdentity(pid); ok && !processMatches(name, appName) {
+			return fmt.Errorf("refusing to stop PID %d: it is %q, not %s", pid, name, appName)
+		}
+	}
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return fmt.Errorf("cannot find process: %w", err)
@@ -60,6 +66,5 @@ func StopProcess(pid int) error {
 		return fmt.Errorf("cannot terminate process: %w", err)
 	}
 
-	_, _ = process.Wait()
-	return nil
+	return waitForExit(pid, 10*time.Second)
 }

@@ -1,11 +1,15 @@
 package update
 
 import (
+	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -53,9 +57,11 @@ func GetLatestRelease(channel string) (*GitHubRelease, error) {
 			return nil, fmt.Errorf("failed to parse releases: %w", err)
 		}
 
-		// Find the latest beta release (first prerelease with -beta- in tag)
+		// Find the latest beta release. Real tags are v0.6.6-beta.19, so the
+		// separator is a dot; matching "-beta-" found nothing and left the beta
+		// channel permanently dark. Any prerelease counts as a beta.
 		for _, release := range releases {
-			if release.Prerelease && strings.Contains(release.TagName, "-beta-") {
+			if release.Prerelease && semver.Prerelease(release.TagName) != "" {
 				return &release, nil
 			}
 		}
@@ -105,8 +111,57 @@ func GetAssetURL(release *GitHubRelease) (string, string, error) {
 	return "", "", fmt.Errorf("no matching asset found for %s-%s", goos, goarch)
 }
 
-// DownloadAndInstall downloads the binary and replaces the current executable
-func DownloadAndInstall(url, filename string) error {
+// GetChecksumsURL returns the release's checksums asset. It is required: an
+// installer that downloads and runs a binary without verifying it trusts
+// whatever the network and the release account happen to serve.
+func GetChecksumsURL(release *GitHubRelease) (string, error) {
+	for _, asset := range release.Assets {
+		if asset.Name == "checksums.txt" {
+			return asset.BrowserDownloadURL, nil
+		}
+	}
+	return "", fmt.Errorf("release %s does not publish checksums.txt; refusing an unverifiable update", release.TagName)
+}
+
+// fetchChecksum reads checksums.txt and returns the SHA-256 recorded for
+// filename.
+func fetchChecksum(checksumURL, filename string) (string, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(checksumURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to download checksums: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("checksums download failed with status %d", resp.StatusCode)
+	}
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 2 {
+			continue
+		}
+		name := strings.TrimPrefix(fields[1], "*")
+		if name == filename {
+			return strings.ToLower(fields[0]), nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("failed to read checksums: %w", err)
+	}
+	return "", fmt.Errorf("checksums.txt has no entry for %s", filename)
+}
+
+// DownloadAndInstall downloads the binary, verifies it against the release's
+// checksums, and replaces the current executable. The temp file is created
+// beside the executable: a rename across filesystems fails with EXDEV, which
+// made the update impossible whenever TMPDIR lived on another mount.
+func DownloadAndInstall(url, filename, checksumURL string) error {
+	want, err := fetchChecksum(checksumURL, filename)
+	if err != nil {
+		return err
+	}
+
 	client := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -118,20 +173,30 @@ func DownloadAndInstall(url, filename string) error {
 		return fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
 
-	// Create temp file
-	tmpFile, err := os.CreateTemp("", "routatic-proxy-update-*")
+	// Get current executable path first: the temp file belongs in its
+	// directory so the final rename stays on one filesystem.
+	execPath, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
+		return fmt.Errorf("failed to get executable path: %w", err)
+	}
+	tmpFile, err := os.CreateTemp(filepath.Dir(execPath), ".routatic-proxy-update-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file next to the executable: %w", err)
 	}
 	tmpPath := tmpFile.Name()
 	defer func() { _ = os.Remove(tmpPath) }()
 
-	// Copy downloaded content to temp file
-	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+	hasher := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(tmpFile, hasher), resp.Body); err != nil {
 		_ = tmpFile.Close()
 		return fmt.Errorf("failed to write temp file: %w", err)
 	}
-	_ = tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
+	if got := hex.EncodeToString(hasher.Sum(nil)); got != want {
+		return fmt.Errorf("checksum mismatch for %s: got %s, want %s", filename, got, want)
+	}
 
 	// Make executable on Unix
 	if runtime.GOOS != "windows" {
@@ -140,36 +205,19 @@ func DownloadAndInstall(url, filename string) error {
 		}
 	}
 
-	// Get current executable path
-	execPath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("failed to get executable path: %w", err)
+	// Keep the old binary until the new one is in place, so a failed install
+	// restores it instead of leaving the installation without a working
+	// executable.
+	oldPath := execPath + ".old"
+	_ = os.Remove(oldPath)
+	if err := os.Rename(execPath, oldPath); err != nil {
+		return fmt.Errorf("failed to move the current executable aside: %w", err)
 	}
-
-	// On Windows, we can't replace a running executable directly
-	// So we rename the old one and move the new one in place
-	if runtime.GOOS == "windows" {
-		oldPath := execPath + ".old"
-		// Remove any previous .old file
-		_ = os.Remove(oldPath)
-		// Rename current executable
-		if err := os.Rename(execPath, oldPath); err != nil {
-			return fmt.Errorf("failed to rename current executable: %w", err)
-		}
-		// Move new executable into place
-		if err := os.Rename(tmpPath, execPath); err != nil {
-			// Try to restore old executable
-			_ = os.Rename(oldPath, execPath)
-			return fmt.Errorf("failed to install new executable: %w", err)
-		}
-		// Clean up old executable
-		_ = os.Remove(oldPath)
-	} else {
-		// On Unix, we can directly replace
-		if err := os.Rename(tmpPath, execPath); err != nil {
-			return fmt.Errorf("failed to replace executable: %w", err)
-		}
+	if err := os.Rename(tmpPath, execPath); err != nil {
+		_ = os.Rename(oldPath, execPath)
+		return fmt.Errorf("failed to install new executable: %w", err)
 	}
+	_ = os.Remove(oldPath)
 
 	return nil
 }

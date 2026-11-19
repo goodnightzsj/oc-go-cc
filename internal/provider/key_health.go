@@ -78,6 +78,27 @@ func (g *keyHealthGate) Excluded(key string) bool {
 	return ok && v.unhealthy
 }
 
+// ExcludesAll reports whether the probe holds every one of keys out of
+// rotation. It is the question Filter cannot answer: Filter is fail-open and
+// returns its input when nothing is left, which is right for scheduling (one
+// attempt beats none) but wrong for deciding whether a failed platform's
+// remaining models are worth trying. A single-key platform is exactly this
+// case - without this check the probe's verdict never affects anything.
+func (g *keyHealthGate) ExcludesAll(keys []string) bool {
+	if g == nil || len(keys) == 0 {
+		return false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, key := range keys {
+		v, ok := g.state[key]
+		if !ok || !v.unhealthy {
+			return false
+		}
+	}
+	return true
+}
+
 // Record stores one probe outcome. A nil error means the account answered, so
 // any exclusion is lifted; a rejected status (401/402/403/404 - invalid,
 // unpaid, forbidden, or no subscription) marks the key dead; every other

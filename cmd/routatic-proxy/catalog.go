@@ -57,7 +57,11 @@ By default exports to the catalog directory as catalog-export.json.`,
 				outputPath = filepath.Join(catalogDir, "catalog-export.json")
 			}
 
-			db, err := storage.Open(storage.DefaultConfig)
+			dbCfg, err := storageConfigFromFile(configPath, true)
+			if err != nil {
+				return err
+			}
+			db, err := storage.Open(dbCfg)
 			if err != nil {
 				return fmt.Errorf("open database: %w", err)
 			}
@@ -104,7 +108,11 @@ func catalogSyncCmd() *cobra.Command {
 			// what 'routatic-proxy models list', the dashboard, and cost-based
 			// routing all read.
 			jsonPath := filepath.Join(catalogDir, "catalog.json")
-			db, err := storage.Open(storage.DefaultConfig)
+			dbCfg, err := storageConfigFromFile(configPath, true)
+			if err != nil {
+				return err
+			}
+			db, err := storage.Open(dbCfg)
 			if err != nil {
 				return fmt.Errorf("open database: %w", err)
 			}
@@ -117,6 +125,9 @@ func catalogSyncCmd() *cobra.Command {
 			}
 
 			cmd.Printf("  SQLite: %d providers, %d models imported\n", providers, models)
+			// Stamp the imported file's identity, so the startup/refresh import
+			// check does not repeat this import.
+			_ = storage.NewCatalogRepo(db).SetImportedSHA(ctx, lock.SHA256)
 
 			if syncedAt, err := storage.NewCatalogRepo(db).LastSync(ctx); err == nil && !syncedAt.IsZero() {
 				cmd.Printf("  Last refresh: %s\n", syncedAt.Format(time.RFC3339))
@@ -129,17 +140,11 @@ func catalogSyncCmd() *cobra.Command {
 
 // resolveCatalogDir returns the directory where the catalog should be stored.
 // If configPath is provided, the catalog is stored alongside that config file.
-// Otherwise the default config directory is used.
+// Otherwise the default config directory is used. The rule lives in the
+// catalog package so the proxy, the CLI and the dashboard cannot disagree
+// about where the file is.
 func resolveCatalogDir(configPath string) string {
-	if configPath != "" {
-		return filepath.Join(filepath.Dir(configPath), "catalog")
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".config", "routatic-proxy", "catalog")
-	}
-	return filepath.Join(home, ".config", "routatic-proxy", "catalog")
+	return catalog.DirForConfig(configPath)
 }
 
 // ensureCatalogSynced checks whether the local models.dev catalog is present
@@ -178,11 +183,22 @@ func ensureCatalogSynced(ctx context.Context, cfg *config.Config, configPath str
 
 // The proxy owns price refreshes, including headless serve. Read the live
 // catalog policy on every refresh so hot-reloaded settings take effect.
-func priceRefreshConfig(atomicCfg *config.AtomicConfig) storage.PriceRefreshConfig {
+func priceRefreshConfig(atomicCfg *config.AtomicConfig, db *storage.Database) storage.PriceRefreshConfig {
+	jsonPath := filepath.Join(resolveCatalogDir(atomicCfg.Path()), "catalog.json")
 	return storage.PriceRefreshConfig{
-		CatalogPath: filepath.Join(resolveCatalogDir(atomicCfg.Path()), "catalog.json"),
+		CatalogPath: jsonPath,
 		RefreshCatalog: func(ctx context.Context) error {
-			return ensureCatalogSynced(ctx, atomicCfg.Get(), atomicCfg.Path(), time.Now().UTC())
+			if err := ensureCatalogSynced(ctx, atomicCfg.Get(), atomicCfg.Path(), time.Now().UTC()); err != nil {
+				return err
+			}
+			// A long-running process downloaded a new file every hour but only
+			// imported it at startup, so routing and cost selection kept the
+			// snapshot from boot. Import here too, through the same
+			// newer-than-last-import check.
+			if db == nil {
+				return nil
+			}
+			return catalog.EnsureImported(ctx, db, jsonPath)
 		},
 	}
 }

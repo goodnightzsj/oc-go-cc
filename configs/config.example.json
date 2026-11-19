@@ -3,8 +3,13 @@
   "host": "127.0.0.1",
   "port": 3456,
   "hot_reload": false,
+  "//_trust_forwarded_for": "Set true only when a reverse proxy in front of this one overwrites X-Forwarded-For; otherwise any client can spoof a fresh rate-limit bucket per request.",
+  "trust_forwarded_for": false,
+  "//_trusted_proxies": "With trust_forwarded_for on, only these direct peers may speak for a client (CIDRs or bare IPs). Empty means any peer; keep it empty only when the listener is reachable exclusively through the proxy.",
+  "trusted_proxies": [],
   "enable_streaming_scenario_routing": false,
   "respect_requested_model": false,
+  "//_active_site": "Restricts routing to one platform. Cannot be combined with anthropic_first.enabled: the first routes every request to a platform, the second sends it to Anthropic before any platform is considered.",
   "active_site": "",
   "enable_cost_based_routing": false,
   "cost_routing": {
@@ -39,6 +44,7 @@
     }
   },
   "anthropic_first": {
+    "//": "Direct Anthropic passthrough with the OpenCode chain as fallback. This path forwards the caller's own credentials and bytes and is not recorded in History/Analytics. enabled cannot be combined with a non-empty active_site.",
     "enabled": false,
     "base_url": "https://api.anthropic.com"
   },
@@ -553,7 +559,7 @@
     "zero_data_retention": false
   },
   "workbuddy": {
-    "//": "Points at a local workbuddy2api-panel gateway, which owns the WorkBuddy sign-in and refreshes it. This proxy only needs its address and key.",
+    "//": "Points at a local workbuddy2api-panel gateway, which owns the WorkBuddy sign-in and refreshes it. This proxy only needs its address and key. base_url is required whenever a WorkBuddy key is configured.",
     "base_url": "http://127.0.0.1:7863",
     "api_keys": [],
     "timeout_ms": 120000,

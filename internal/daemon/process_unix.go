@@ -5,9 +5,8 @@ package daemon
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 	"syscall"
+	"time"
 )
 
 // IsProcessRunning checks if a process with the given PID is running.
@@ -21,18 +20,15 @@ func IsProcessRunning(pid int) bool {
 	return err == nil
 }
 
-func IsAppProcess(pid int, appName string) bool {
-	exe, err := os.Readlink(filepath.Join("/proc", fmt.Sprintf("%d", pid), "exe"))
-	if err != nil {
-		return false
+// StopProcess sends SIGTERM to a process and waits for it to exit. appName
+// guards against a recycled PID: after a crash the PID file can name a process
+// that now belongs to something else entirely.
+func StopProcess(pid int, appName string) error {
+	if appName != "" {
+		if name, ok := processIdentity(pid); ok && !processMatches(name, appName) {
+			return fmt.Errorf("refusing to stop PID %d: it is %q, not %s", pid, name, appName)
+		}
 	}
-	base := strings.ToLower(filepath.Base(exe))
-	app := strings.ToLower(appName)
-	return base == app || strings.HasPrefix(base, app+"-")
-}
-
-// StopProcess sends SIGTERM to a process and waits for it to exit.
-func StopProcess(pid int) error {
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return fmt.Errorf("cannot find process: %w", err)
@@ -42,7 +38,6 @@ func StopProcess(pid int) error {
 		return fmt.Errorf("cannot send SIGTERM: %w", err)
 	}
 
-	// Wait for the process to exit.
-	_, _ = process.Wait()
-	return nil
+	// Wait for the process to exit. process.Wait only works for children.
+	return waitForExit(pid, 10*time.Second)
 }

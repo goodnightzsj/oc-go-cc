@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/routatic/proxy/internal/catalog"
 	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/core"
@@ -111,9 +113,24 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 		}
 	}
 
-	// Create model router with SQLite catalog support.
+	// Create model router with SQLite catalog support. The JSON the startup
+	// sync downloaded is imported here, once, so the router's view and the
+	// dashboard's file view cannot disagree about which models exist.
 	var modelRouter *router.ModelRouter
 	if db != nil {
+		// Only a server with a real config file has a catalog directory it can
+		// claim. Falling back to the home directory here made every test that
+		// constructs a server import the developer's 5MB catalog into its temp
+		// database - slow, and a hidden dependency on the machine's state.
+		if configPath := atomic.Path(); configPath != "" {
+			jsonPath := filepath.Join(catalog.DirForConfig(configPath), "catalog.json")
+			importCtx, cancelImport := context.WithTimeout(context.Background(), 30*time.Second)
+			err := catalog.EnsureImported(importCtx, db, jsonPath)
+			cancelImport()
+			if err != nil {
+				logger.Warn("catalog import skipped; routing keeps the previous snapshot", "path", jsonPath, "error", err)
+			}
+		}
 		modelRouter = router.NewModelRouterWithDB(atomic, db)
 	} else {
 		modelRouter = router.NewModelRouter(atomic)
@@ -137,12 +154,19 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 	)
 	healthHandler := handlers.NewHealthHandler(tokenCounter, fallbackHandler, metrics, statusStore)
 	modelsHandler := handlers.NewModelsHandler(modelRouter)
+	// The statusline endpoint was wired but never fed; publish the routing
+	// decision from the request path so it reports live data.
+	messagesHandler.SetStatusStore(statusStore)
 
 	// Setup router.
 	mux := http.NewServeMux()
 
 	// API routes.
-	mux.Handle("/v1/messages", handlers.NewAnthropicFirstHandler(atomic, http.HandlerFunc(messagesHandler.HandleMessages)))
+	anthropicFirst := handlers.NewAnthropicFirstHandler(atomic, http.HandlerFunc(messagesHandler.HandleMessages))
+	// The direct path is a passthrough; give it the same history and counters
+	// the platform path uses, so its traffic is not invisible in the dashboard.
+	anthropicFirst.SetAccounting(storageWriter, metrics)
+	mux.Handle("/v1/messages", anthropicFirst)
 	mux.HandleFunc("/v1/responses", messagesHandler.HandleResponses)
 	mux.HandleFunc("/v1/messages/count_tokens", healthHandler.HandleCountTokens)
 	mux.HandleFunc("/v1/models", modelsHandler.HandleListModels)

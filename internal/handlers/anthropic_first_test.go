@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/history"
+	"github.com/routatic/proxy/internal/metrics"
 )
 
 func newAnthropicFirstTestHandler(baseURL string, enabled bool, fallback http.Handler) *AnthropicFirstHandler {
@@ -227,5 +229,80 @@ func TestParseRetryAfterHTTPDate(t *testing.T) {
 	delay, ok := parseRetryAfter(now.Add(90*time.Second).Format(http.TimeFormat), now)
 	if !ok || delay != 90*time.Second {
 		t.Fatalf("delay=%v ok=%v, want 90s", delay, ok)
+	}
+}
+
+type captureRequestStorage struct {
+	mu   sync.Mutex
+	recs []history.RequestRecord
+}
+
+func (c *captureRequestStorage) InsertRequest(rec history.RequestRecord) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.recs = append(c.recs, rec)
+	return nil
+}
+
+func (c *captureRequestStorage) records() []history.RequestRecord {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]history.RequestRecord(nil), c.recs...)
+}
+
+// Traffic served by the direct path used to be invisible: no history row, no
+// counters. It now records what this layer can observe, with usage explicitly
+// unknown rather than fabricated.
+func TestAnthropicFirstRecordsDirectTraffic(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"msg_1","type":"message"}`)
+	}))
+	defer upstream.Close()
+
+	store := &captureRequestStorage{}
+	h := newAnthropicFirstTestHandler(upstream.URL, true, http.NotFoundHandler())
+	h.SetAccounting(store, metrics.New())
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-6","stream":false}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	recs := store.records()
+	if len(recs) != 1 {
+		t.Fatalf("recorded %d rows, want 1", len(recs))
+	}
+	got := recs[0]
+	if got.Provider != "anthropic" || got.Model != "claude-sonnet-4-6" || !got.Success || !got.UsageUnobserved {
+		t.Fatalf("record = %+v, want an unobserved-usage success attributed to anthropic", got)
+	}
+	if got.ID == "" || rec.Header().Get("X-Request-ID") == "" || got.ID != rec.Header().Get("X-Request-ID") {
+		t.Fatalf("request id must be shared with the response header: row=%q header=%q", got.ID, rec.Header().Get("X-Request-ID"))
+	}
+}
+
+func TestAnthropicFirstRecordsDirectFailures(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+	}))
+	defer upstream.Close()
+
+	store := &captureRequestStorage{}
+	h := newAnthropicFirstTestHandler(upstream.URL, true, http.NotFoundHandler())
+	h.SetAccounting(store, metrics.New())
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-6"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	recs := store.records()
+	if len(recs) != 1 {
+		t.Fatalf("recorded %d rows, want 1", len(recs))
+	}
+	if recs[0].Success || recs[0].ErrorMsg == "" {
+		t.Fatalf("record = %+v, want a failed row with the upstream status", recs[0])
 	}
 }

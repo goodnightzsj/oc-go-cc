@@ -177,7 +177,7 @@ async function checks() {
   assert.ok(rows.includes('$0.15'), 'priced rows must show the rate');
   assert.ok(!rows.includes('picker-price-none'), 'a priced model must not render as unpriced');
 }
-`)
+`+platformBehaviorRunScript)
 }
 
 // The platform choice is view state, not configuration: it belongs in the URL
@@ -196,11 +196,12 @@ async function checks() {
   FallbackModule.currentScenario = 'default';
   activeTab = 'fallback';
 
-  // Choosing a platform writes it into the hash under its own key.
+  // Choosing a platform persists it under its own key. It must not use the
+  // global platform key, which narrows history and analytics instead.
   FallbackModule.platformFilter = 'cline-pass';
-  syncViewState({replace: true});
-  assert.ok(location.hash.includes('fplatform=cline-pass'), 'platform must be in the hash: ' + location.hash);
-  assert.ok(!/(^|[?&])platform=/.test(location.hash), 'the fallback filter must not use the global platform key');
+  syncViewState();
+  assert.equal(savedView().fplatform, 'cline-pass', 'the fallback filter must be persisted');
+  assert.ok(!('platform' in savedView()), 'the fallback filter must not use the global platform key');
 
   // A reload restores it. Reset first: leaving the previous selection in place
   // would make this pass whether or not the hash is read at all.
@@ -218,5 +219,35 @@ async function checks() {
   applyViewState(parseViewHash('./#fallback?fplatform=gone-platform').params);
   assert.equal(FallbackModule.platformFilter, '', 'an unknown platform must fall back to all');
 }
-`)
+`+platformBehaviorRunScript)
+}
+
+// A model id is upstream data. It must reach the row as a data attribute, never
+// inside an inline handler: HTML entities in an attribute are decoded before
+// the handler is compiled, so an escaped quote would still break out.
+func TestPickerRowsCarryModelIDsAsDataOnly(t *testing.T) {
+	runPlatformBehavior(t, platformBehaviorDOMScript+`
+async function checks() {
+  FallbackModule.init(); // binds the delegated row listener; the harness never fires DOMContentLoaded
+  const hostile = {provider:'cline-pass', model_id:"x');alert(1)//", input_per_m:1, output_per_m:2};
+  FallbackModule.availableModels = [hostile];
+  FallbackModule.chains = {default:[]};
+  FallbackModule.currentScenario = 'default';
+  FallbackModule.platformFilter = '';
+  FallbackModule.populateAddSelect();
+  FallbackModule.renderPickerList('');
+  const html = document.getElementById('fallback-add-list').innerHTML;
+  assert.ok(!html.includes('onclick='), 'picker rows must not carry inline handlers');
+  assert.ok(html.includes('data-key='), 'the row must carry its key as data');
+  assert.ok(!html.includes("chooseModel('"), 'no model id may be interpolated into a handler');
+  // The row must actually select through the delegated listener: markup alone
+  // would stay green if the listener were deleted.
+  const list = document.getElementById('fallback-add-list');
+  const listener = (list.listeners.click || [])[0];
+  assert.ok(listener, 'the list must carry a delegated click listener');
+  const row = {dataset:{key: configModelKey(hostile)}};
+  listener({target:{closest: selector => selector === '.picker-row' ? row : null}});
+  assert.equal(FallbackModule.chains.default.length, 1, 'a row click must add the model to the chain');
+}
+`+platformBehaviorRunScript)
 }

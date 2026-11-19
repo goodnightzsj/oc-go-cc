@@ -401,7 +401,7 @@ func TestPriceRefreshConfigSyncsWithoutGUIAndFollowsReload(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	cfg := &config.Config{Catalog: config.CatalogConfig{SourceURL: upstream.URL, MaxAgeHours: 24}}
 	atomicCfg := config.NewAtomicConfig(cfg, path)
-	refresh := priceRefreshConfig(atomicCfg)
+	refresh := priceRefreshConfig(atomicCfg, nil)
 	if refresh.CatalogPath != filepath.Join(filepath.Dir(path), "catalog", "catalog.json") {
 		t.Fatalf("prices must follow the actual config directory: %s", refresh.CatalogPath)
 	}

@@ -217,6 +217,10 @@ func Open(cfg Config) (*Database, error) {
 		_ = database.Close()
 		return nil, fmt.Errorf("migrate request columns: %w", err)
 	}
+	if err := database.normalizeRequestCreatedAt(ctx); err != nil {
+		_ = database.Close()
+		return nil, fmt.Errorf("normalize request timestamps: %w", err)
+	}
 	if err := database.initHistoryRevision(ctx); err != nil {
 		_ = database.Close()
 		return nil, fmt.Errorf("init history revision: %w", err)
@@ -593,6 +597,29 @@ func (d *Database) tableColumns(ctx context.Context, table string) (map[string]b
 		out[name] = true
 	}
 	return out, rows.Err()
+}
+
+// normalizeRequestCreatedAt rewrites the RFC3339 spelling older versions wrote
+// through the provider usage sync into the column's own "YYYY-MM-DD HH:MM:SS"
+// form (UTC). One spelling keeps the created_at index usable and makes the
+// retention comparison correct; datetime() also handles any offset a
+// hand-imported row may carry.
+func (d *Database) normalizeRequestCreatedAt(ctx context.Context) error {
+	return d.runOnce(ctx, "requests_created_at_v2", func() (bool, error) {
+		res, err := d.db.ExecContext(ctx, `
+			UPDATE requests
+			SET created_at = datetime(created_at)
+			WHERE created_at LIKE '%T%' AND datetime(created_at) IS NOT NULL
+		`)
+		if err != nil {
+			return false, err
+		}
+		changed, err := res.RowsAffected()
+		if err != nil {
+			return false, err
+		}
+		return changed > 0, nil
+	})
 }
 
 // runOnce runs a data migration at most once per database, remembering it in

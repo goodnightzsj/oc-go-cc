@@ -170,29 +170,9 @@ func runCostsSyncRequests(cmd *cobra.Command, configPath string, apply bool) err
 // would unnecessarily require API-key environment variables for an offline
 // database maintenance command.
 func openSyncRequestStorage(configPath string) (*storage.Database, error) {
-	if configPath == "" {
-		configPath = config.ResolveConfigPath()
-	}
-	input, err := os.Open(configPath)
+	cfg, err := storageConfigFromFile(configPath, false)
 	if err != nil {
-		return nil, fmt.Errorf("open config: %w", err)
-	}
-	defer func() { _ = input.Close() }()
-	var file struct {
-		Storage *config.StorageConfig `json:"storage"`
-	}
-	if err := json.NewDecoder(input).Decode(&file); err != nil {
-		return nil, fmt.Errorf("decode storage config: %w", err)
-	}
-	cfg := storage.DefaultConfig
-	if file.Storage != nil {
-		cfg = cfg.WithOverlay(storage.Overlay{
-			DatabasePath:      file.Storage.DatabasePath,
-			RetentionDays:     file.Storage.RetentionDays,
-			VacuumOnStartup:   file.Storage.VacuumOnStartup,
-			WALEnabled:        file.Storage.WALEnabled,
-			AnalyticsBaseline: file.Storage.AnalyticsBaseline,
-		})
+		return nil, err
 	}
 	db, err := storage.Open(cfg)
 	if err != nil {

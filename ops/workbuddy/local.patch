@@ -163,6 +163,163 @@ index 0000000..792ead0
 +		t.Fatal("invalid proxy silently bypassed")
 +	}
 +}
+diff --git a/internal/panel/app.js b/internal/panel/app.js
+index 41bedf0..8d170ea 100644
+--- a/internal/panel/app.js
++++ b/internal/panel/app.js
+@@ -789,9 +789,40 @@ function renderUpdateStatus(update) {
+   $('btnUpdateInstall').disabled = updateBusy || !!update.installing;
+   $('btnUpdateRelease').hidden = (!update.update_available && !unknown) || !!update.can_install || !update.release_url;
+   $('btnUpdateCheck').disabled = updateBusy || !!update.installing;
++  if (update.managed) {
++    note.textContent = '官方 Release：' + note.textContent;
++    $('navUpdate').textContent = '官方有更新';
++  }
++  $('btnUpdateCheck').textContent = update.managed ? '检查官方 Release' : '检查更新';
++  renderManagedUpdate(update.managed);
+   renderUpdateChannel(update);
+ }
+ 
++function renderManagedUpdate(managed) {
++  const el = $('managedUpdateStatus');
++  if (!el) return;
++  el.hidden = !managed;
++  if (!managed) return;
++  const rows = ['托管更新 · 由外部服务管理安装与回退', '上方自动更新设置仅适用于官方安装器，不控制托管检查定时器。'];
++  const installed = managed.installed;
++  rows.push(installed ? '已部署源码：' + installed.source_sha + '\n补丁：' + installed.patch_sha256 + '\n二进制：' + installed.binary_sha256 : '已部署版本：未知');
++  const check = managed.check;
++  const stages = {prepare:'准备',fetch:'获取源码',checkout:'检出源码',patch:'应用补丁',vet:'静态检查',test:'测试',build:'构建',health:'健康检查',activate:'切换服务',commit:'记录部署',cleanup:'清理旧记录'};
++  if (check) {
++    rows.push('最近检查：' + new Date(check.checked_at).toLocaleString());
++    rows.push('目标源码：' + (check.target_source_sha || '未知'));
++    rows.push('状态：' + ({running:'执行中',succeeded:'检查通过',failed:'失败'}[check.result] || '未知') + ' · ' + (stages[check.stage] || '未知阶段') + (check.result === 'failed' ? ' · 退出码 ' + check.exit_code : ''));
++    if (check.rollback_failed) rows.push('回退未验证，请检查服务与托管更新日志。');
++  } else {
++    rows.push('最近检查：未知');
++  }
++  if (managed.stale) rows.push('检查记录已超过两小时，当前状态未知。请检查托管更新定时器。');
++  if (managed.error) rows.push('部分托管记录不可用，请检查状态目录和读取权限。');
++  if (check?.result === 'failed') rows.push('请查看托管更新日志；本页不会启动或重试安装。');
++  el.textContent = rows.join('\n');
++  el.style.color = managed.stale || managed.error || check?.result === 'failed' ? 'var(--warn)' : '';
++}
++
+ // renderUpdateChannel 展示「更新走哪条通道」与上次失败的归因（issue #198）。
+ //
+ // 现场痛点：api.github.com 通、release-assets 被拦时，面板只显示一句原始超时文本，
+@@ -871,6 +902,7 @@ async function checkForUpdates() {
+     let message = '当前已是最新版本';
+     if (update.current_known === false) message = unknownVersionNote(update);
+     else if (update.update_available) message = '发现新版本 v' + update.latest_version;
++    if (update.managed) message = '官方 Release：' + message;
+     toast(message, update.update_available ? 'ok' : '');
+   } catch (e) {
+     try { renderUpdateStatus(await api('update')); } catch (_) {}
+@@ -878,7 +910,7 @@ async function checkForUpdates() {
+   } finally {
+     updateBusy = false;
+     if (updateData) renderUpdateStatus(updateData);
+-    button.textContent = '检查更新';
++    button.textContent = updateData?.managed ? '检查官方 Release' : '检查更新';
+   }
+ }
+ 
+diff --git a/internal/panel/index.html b/internal/panel/index.html
+index 6b501b4..4daa78f 100644
+--- a/internal/panel/index.html
++++ b/internal/panel/index.html
+@@ -1602,6 +1602,7 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
+               <button type="button" class="primary" id="btnUpdateInstall" hidden>立即更新</button>
+             </div>
+             <div id="updateProbeOut" class="hint" style="margin-top:6px" hidden></div>
++            <div id="managedUpdateStatus" class="hint" role="status" style="margin-top:8px;white-space:pre-wrap;overflow-wrap:anywhere" hidden></div>
+           </div>
+         </div>
+ 
+diff --git a/internal/panel/local_managed_status_test.go b/internal/panel/local_managed_status_test.go
+new file mode 100644
+index 0000000..91903cb
+--- /dev/null
++++ b/internal/panel/local_managed_status_test.go
+@@ -0,0 +1,77 @@
++package panel
++
++import (
++	"encoding/json"
++	"net/http/httptest"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"testing"
++
++	"github.com/misakano7545/workbuddy2api-panel/internal/updater"
++)
++
++func TestLocalManagedStatusRequiresPanelAuthentication(t *testing.T) {
++	t.Setenv("WB2A_STATE_DIR", t.TempDir())
++	p := New(Config{APIKey: "test-key", Updater: updater.New("dev", "", "", updater.Settings{})})
++	for _, authenticated := range []bool{false, true} {
++		r := httptest.NewRequest("GET", "/panel/api/update", nil)
++		if authenticated {
++			r.Header.Set("Authorization", "Bearer test-key")
++		}
++		w := httptest.NewRecorder()
++		p.ServeHTTP(w, r)
++		if !authenticated {
++			if w.Code != 401 {
++				t.Fatalf("unauthenticated status=%d", w.Code)
++			}
++			continue
++		}
++		var st updater.Status
++		if err := json.Unmarshal(w.Body.Bytes(), &st); err != nil {
++			t.Fatal(err)
++		}
++		if w.Code != 200 || st.Managed == nil || st.Managed.Check != nil || st.CanInstall {
++			t.Fatalf("managed unknown: %+v", st)
++		}
++		b, _ := json.Marshal(p.updateSnapshot())
++		if err := json.Unmarshal(b, &st); err != nil || st.Managed == nil {
++			t.Fatal("overview lost managed status")
++		}
++	}
++}
++
++func TestLocalManagedUpdateFrontend(t *testing.T) {
++	node, err := exec.LookPath("node")
++	if err != nil {
++		t.Skip("node unavailable")
++	}
++	script := `
++const fs=require('fs'),vm=require('vm'),assert=require('assert');
++const src=fs.readFileSync(process.argv[2],'utf8'), nodes=new Map();
++const ctx={$:id=>{if(!nodes.has(id)) nodes.set(id,{textContent:'',style:{}});return nodes.get(id)}};
++vm.createContext(ctx);
++vm.runInContext('let updateData=null,updateBusy=false;\n'+src.slice(src.indexOf('function displayVersion('),src.indexOf('async function loadOverview(')),ctx);
++const managed={installed:{source_sha:'deployed-source',patch_sha256:'patched',binary_sha256:'binary'},check:{checked_at:'2026-11-19T00:00:00Z',target_source_sha:'candidate',stage:'patch',result:'failed',exit_code:1}};
++ctx.renderUpdateStatus({current_version:'dev',current_known:false,latest_version:'2026.11.19.1000',update_available:false,can_install:false,managed});
++const text=nodes.get('managedUpdateStatus').textContent;
++assert(text.includes('deployed-source')&&text.includes('candidate')&&text.includes('应用补丁')&&text.includes('失败'));
++assert(!text.includes('已是最新'));
++assert(nodes.get('updateNote').textContent.startsWith('官方 Release：'));
++assert.equal(nodes.get('btnUpdateCheck').textContent,'检查官方 Release');
++ctx.renderManagedUpdate({...managed,stale:true});
++assert(nodes.get('managedUpdateStatus').textContent.includes('当前状态未知'));
++ctx.renderManagedUpdate({error:'check_unavailable'});
++assert(nodes.get('managedUpdateStatus').textContent.includes('最近检查：未知'));
++ctx.renderManagedUpdate({...managed,check:{...managed.check,rollback_failed:true}});
++assert(nodes.get('managedUpdateStatus').textContent.includes('回退未验证'));
++ctx.renderManagedUpdate(null);assert.equal(nodes.get('managedUpdateStatus').hidden,true);
++`
++	path := filepath.Join(t.TempDir(), "managed.cjs")
++	if err := os.WriteFile(path, []byte(script), 0600); err != nil {
++		t.Fatal(err)
++	}
++	if out, err := exec.Command(node, path, "app.js").CombinedOutput(); err != nil {
++		t.Fatalf("node: %v\n%s", err, out)
++	}
++}
 diff --git a/internal/panel/models_busy_cache_test.go b/internal/panel/models_busy_cache_test.go
 index 28cc367..17a79af 100644
 --- a/internal/panel/models_busy_cache_test.go
@@ -531,6 +688,231 @@ index c3c7705..c332bd6 100644
  			cmd.Dir = dir
  			cmd.Env = append(os.Environ(),
  				"WB2API_UPDATE_FIXTURE="+dir,
+diff --git a/internal/updater/local_managed_status.go b/internal/updater/local_managed_status.go
+new file mode 100644
+index 0000000..96adecf
+--- /dev/null
++++ b/internal/updater/local_managed_status.go
+@@ -0,0 +1,133 @@
++package updater
++
++import (
++	"encoding/hex"
++	"encoding/json"
++	"fmt"
++	"io"
++	"os"
++	"path/filepath"
++	"runtime"
++	"strings"
++	"time"
++)
++
++type ManagedDeployment struct {
++	SourceSHA string `json:"source_sha"`
++	PatchSHA  string `json:"patch_sha256"`
++	BinarySHA string `json:"binary_sha256"`
++}
++
++type ManagedCheck struct {
++	CheckedAt       string `json:"checked_at"`
++	UpdatedAt       string `json:"updated_at"`
++	Stage           string `json:"stage"`
++	Result          string `json:"result"`
++	TargetSourceSHA string `json:"target_source_sha"`
++	TargetPatchSHA  string `json:"target_patch_sha256"`
++	ExitCode        int    `json:"exit_code"`
++	RollbackFailed  bool   `json:"rollback_failed"`
++}
++
++// Installed is the last committed deployment, independently of the latest check.
++type ManagedStatus struct {
++	Installed *ManagedDeployment `json:"installed,omitempty"`
++	Check     *ManagedCheck      `json:"check,omitempty"`
++	Stale     bool               `json:"stale"`
++	Error     string             `json:"error,omitempty"`
++}
++
++func managedStateDir() string {
++	if dir := os.Getenv("WB2A_STATE_DIR"); dir != "" {
++		return dir
++	}
++	if runtime.GOOS == "linux" && processSupervised() {
++		return "/var/lib/workbuddy-updater"
++	}
++	return ""
++}
++
++func readManagedStatus() *ManagedStatus {
++	dir := managedStateDir()
++	if dir == "" {
++		return nil
++	}
++	st := &ManagedStatus{}
++	if !filepath.IsAbs(dir) {
++		st.Error = "invalid_directory"
++		return st
++	}
++	manifest, err := managedFile(filepath.Join(dir, "current.manifest"))
++	if err == nil {
++		values := make(map[string]string)
++		for _, line := range strings.Split(strings.TrimSpace(string(manifest)), "\n") {
++			key, value, _ := strings.Cut(line, "=")
++			values[key] = value
++		}
++		if validManagedHash(values["source_sha"], 40) && validManagedHash(values["patch_sha256"], 64) && validManagedHash(values["binary_sha256"], 64) {
++			st.Installed = &ManagedDeployment{values["source_sha"], values["patch_sha256"], values["binary_sha256"]}
++		}
++	}
++	if st.Installed == nil {
++		st.Error = "manifest_unavailable"
++	}
++	data, err := managedFile(filepath.Join(dir, "last-check.json"))
++	var check ManagedCheck
++	if err != nil || json.Unmarshal(data, &check) != nil || !validManagedCheck(check) {
++		st.Error = "check_unavailable"
++		return st
++	}
++	st.Check = &check
++	updated, _ := time.Parse(time.RFC3339, check.UpdatedAt)
++	st.Stale = time.Since(updated) > 2*time.Hour
++	return st
++}
++
++func managedFile(path string) ([]byte, error) {
++	f, err := os.Open(path)
++	if err != nil {
++		return nil, err
++	}
++	defer f.Close()
++	data, err := io.ReadAll(io.LimitReader(f, 16385))
++	if err == nil && len(data) > 16384 {
++		err = fmt.Errorf("managed status exceeds size limit")
++	}
++	return data, err
++}
++
++func validManagedHash(value string, length int) bool {
++	_, err := hex.DecodeString(value)
++	return len(value) == length && err == nil
++}
++
++func validManagedCheck(c ManagedCheck) bool {
++	if _, err := time.Parse(time.RFC3339, c.CheckedAt); err != nil {
++		return false
++	}
++	if _, err := time.Parse(time.RFC3339, c.UpdatedAt); err != nil {
++		return false
++	}
++	if c.ExitCode < 0 || c.ExitCode > 255 {
++		return false
++	}
++	switch c.Result {
++	case "running", "succeeded":
++		if c.ExitCode != 0 {
++			return false
++		}
++	case "failed":
++		if c.ExitCode == 0 {
++			return false
++		}
++	default:
++		return false
++	}
++	switch c.Stage {
++	case "prepare", "fetch", "checkout", "patch", "vet", "test", "build", "health", "activate", "commit", "cleanup":
++	default:
++		return false
++	}
++	return (c.TargetSourceSHA == "" || validManagedHash(c.TargetSourceSHA, 40)) &&
++		(c.TargetPatchSHA == "" || validManagedHash(c.TargetPatchSHA, 64))
++}
+diff --git a/internal/updater/local_managed_status_test.go b/internal/updater/local_managed_status_test.go
+new file mode 100644
+index 0000000..f47829b
+--- /dev/null
++++ b/internal/updater/local_managed_status_test.go
+@@ -0,0 +1,80 @@
++package updater
++
++import (
++	"encoding/json"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++)
++
++func TestLocalManagedStatus(t *testing.T) {
++	dir := t.TempDir()
++	t.Setenv("WB2A_STATE_DIR", dir)
++	m := New("dev", "", "", Settings{})
++	read := func() map[string]any {
++		b, err := json.Marshal(m.Status())
++		if err != nil {
++			t.Fatal(err)
++		}
++		var st map[string]any
++		if err := json.Unmarshal(b, &st); err != nil {
++			t.Fatal(err)
++		}
++		managed, ok := st["managed"].(map[string]any)
++		if !ok {
++			t.Fatal("configured managed status is missing")
++		}
++		if st["can_install"] != false {
++			t.Fatal("managed installation must remain external")
++		}
++		return managed
++	}
++	write := func(name, text string) {
++		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0600); err != nil {
++			t.Fatal(err)
++		}
++	}
++	missing := read()
++	if missing["installed"] != nil || missing["check"] != nil || missing["error"] == "" {
++		t.Fatalf("missing is not current: %+v", missing)
++	}
++	sha, patch, binary := strings.Repeat("a", 40), strings.Repeat("b", 64), strings.Repeat("c", 64)
++	write("current.manifest", "source_sha="+sha+"\npatch_sha256="+patch+"\nbinary_sha256="+binary+"\n")
++	stamp := time.Now().UTC().Format(time.RFC3339)
++	write("last-check.json", `{"checked_at":"`+stamp+`","updated_at":"`+stamp+`","stage":"patch","result":"failed","target_source_sha":"`+strings.Repeat("d", 40)+`","target_patch_sha256":"`+patch+`","exit_code":1,"private_error":"secret-sentinel"}`)
++	st := read()
++	if st["installed"].(map[string]any)["source_sha"] != sha || st["check"].(map[string]any)["stage"] != "patch" || st["stale"] != false {
++		t.Fatalf("failed candidate must retain installed identity: %+v", st)
++	}
++	b, _ := json.Marshal(st)
++	if strings.Contains(string(b), "secret-sentinel") {
++		t.Fatal("raw diagnostics leaked")
++	}
++	old := time.Now().Add(-3 * time.Hour).UTC().Format(time.RFC3339)
++	write("last-check.json", strings.ReplaceAll(string(mustJSON(t, st["check"])), stamp, old))
++	if read()["stale"] != true {
++		t.Fatal("old check must not advertise current state")
++	}
++	for _, invalid := range []string{"{}", "not-json", strings.Repeat("x", 17000), `{"result":"secret-sentinel","stage":"secret-sentinel"}`} {
++		write("last-check.json", invalid)
++		st = read()
++		if st["check"] != nil || st["error"] == "" {
++			t.Fatalf("invalid check accepted: %+v", st)
++		}
++	}
++	write("current.manifest", "source_sha=secret-sentinel\n")
++	if read()["installed"] != nil {
++		t.Fatal("malformed manifest exposed")
++	}
++}
++
++func mustJSON(t *testing.T, v any) []byte {
++	t.Helper()
++	b, err := json.Marshal(v)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return b
++}
 diff --git a/internal/updater/local_supervised_test.go b/internal/updater/local_supervised_test.go
 new file mode 100644
 index 0000000..7f64f22
@@ -553,6 +935,64 @@ index 0000000..7f64f22
 +		t.Fatal("managed install would discard local patches")
 +	}
 +}
+diff --git a/internal/updater/updater.go b/internal/updater/updater.go
+index 3ddf3c1..32c4d39 100644
+--- a/internal/updater/updater.go
++++ b/internal/updater/updater.go
+@@ -85,18 +85,19 @@ type Settings struct {
+ 
+ // Status is safe to expose through the authenticated panel API.
+ type Status struct {
+-	CurrentVersion  string `json:"current_version"`
+-	CurrentKnown    bool   `json:"current_known"` // Whether the current version can be compared with Releases.
+-	LatestVersion   string `json:"latest_version"`
+-	ReleaseURL      string `json:"release_url"`
+-	ReleaseNotes    string `json:"release_notes"`
+-	CheckedAt       string `json:"checked_at"`
+-	LastError       string `json:"last_error"`
+-	UpdateAvailable bool   `json:"update_available"`
+-	CanInstall      bool   `json:"can_install"`
+-	Installing      bool   `json:"installing"`
+-	AutoEnabled     bool   `json:"auto_enabled"`
+-	AutoTime        string `json:"auto_time"`
++	Managed         *ManagedStatus `json:"managed,omitempty"`
++	CurrentVersion  string         `json:"current_version"`
++	CurrentKnown    bool           `json:"current_known"` // Whether the current version can be compared with Releases.
++	LatestVersion   string         `json:"latest_version"`
++	ReleaseURL      string         `json:"release_url"`
++	ReleaseNotes    string         `json:"release_notes"`
++	CheckedAt       string         `json:"checked_at"`
++	LastError       string         `json:"last_error"`
++	UpdateAvailable bool           `json:"update_available"`
++	CanInstall      bool           `json:"can_install"`
++	Installing      bool           `json:"installing"`
++	AutoEnabled     bool           `json:"auto_enabled"`
++	AutoTime        string         `json:"auto_time"`
+ 	// 当前生效的下载通道（面板展示 + 排障第一眼）：direct / proxy / mirror+proxy。
+ 	Channel string `json:"channel"`
+ 	// ProxyHost 生效代理的主机:端口（不含凭据）；空 = 未用代理。
+@@ -307,8 +308,10 @@ func (m *Manager) applyChannelStatusLocked() {
+ // Status returns a consistent snapshot for the panel.
+ func (m *Manager) Status() Status {
+ 	m.mu.RLock()
+-	defer m.mu.RUnlock()
+-	return m.status
++	status := m.status
++	m.mu.RUnlock()
++	status.Managed = readManagedStatus()
++	return status
+ }
+ 
+ // Check fetches timestamped, non-prerelease Releases and selects the newest one.
+@@ -1140,7 +1143,7 @@ func (m *Manager) canInstallLocked() bool {
+ 	return versioned &&
+ 		(runtime.GOOS == "linux" || runtime.GOOS == "windows") &&
+ 		(runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64") &&
+-		m.executable != "" && !isContainer() && !processSupervised()
++		m.executable != "" && !isContainer() && !processSupervised() && managedStateDir() == ""
+ }
+ 
+ func parseVersion(tag string) (parsedVersion, bool) {
 diff --git a/internal/upstream/global_models.go b/internal/upstream/global_models.go
 index d73f4f0..12d895e 100644
 --- a/internal/upstream/global_models.go

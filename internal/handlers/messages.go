@@ -965,6 +965,10 @@ func (h *MessagesHandler) handleStreaming(
 			// A client may disconnect after receiving an upstream error frame.
 			// Preserve that observed failure even if cancellation wins the read loop.
 			failed = failed || rw.streamErr != nil
+			var source *core.ResponseError
+			if !isCallerCancellation(clientCtx, err) && (rw.writeErr == nil || errors.As(err, &source)) {
+				failed = true
+			}
 			// Payload/usage retain the existing cancellation accounting; a known
 			// source failure does not need either to be recorded.
 			payloadWritten := rw.ssePayloadWritten

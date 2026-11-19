@@ -77,11 +77,15 @@ Concurrent opens of an older SQLite ledger reserve the history-revision migratio
 
 Slow dashboard polling reuses an in-flight request for the same filters; changing filters cancels stale work. Clearing a view also clears chart data so resizing cannot redraw old results. Request outcome and token observation are independent: missing usage is unknown, not free usage; explicitly reported zero remains zero.
 
+Restoring a page from the browser's back/forward cache resumes global channel diagnostics even when Settings is not the active tab. Runtime settings reads are single-flight, have a 15-second deadline, and stop on navigation or backgrounding; saving a switch invalidates older reads so a late response cannot revert an acknowledged save. `/api/metrics` counts logical requests for the current process and resets on restart; it never backfills these counters from historical attempt rows. Persisted history and analytics remain available separately.
+
 Usage Analytics manages statistics and prices independently, cancels stale requests on filter changes or navigation, and reuses identical in-flight queries. Valid price tables are cached for 60 seconds; manual refresh invalidates this cache even while statistics are loading. Usage & Billing has separate 15-second account and local-ledger requests, canceled on navigation or backgrounding; paid Bedrock queries still require a manual action and are never automatically retried. Layout and animations are unchanged.
 
 SSE writes and flushes have a five-second per-operation deadline, including Responses finalization and Anthropic-first forwarding. Delivery failure cancels upstream reading and cannot be recorded as successful delivery. Key health is settled after response consumption, not HTTP 200 headers: source failures and idle timeouts affect scheduling, while client cancellation and downstream write failure do not. Reservations remain in flight until completion or close, and late successes cannot clear a newer rejection's quarantine. Protocol bytes, usage and model/channel identities are unchanged.
 
 When an already observed source failure and downstream write/flush failure occur together, both errors remain in diagnostics and history; native Responses is included. A downstream-only failure still cancels source reads without blaming a healthy upstream.
+
+A source read failure also remains in history if closing the response body triggers caller cancellation afterward, including failures before the first payload or usage report. Cancellation alone stays neutral; unreported usage and cost remain unknown.
 
 Protocol conversion rejects malformed or unterminated source streams instead of inventing completion, and preserves reported partial usage on failure. Public reasoning and refusal text are retained. Tool-result images are supported through Responses targets but rejected where the target bridge cannot represent them. Gemini system instructions, roles, images, function calls and generation controls are preserved; opaque Gemini thought signatures and encrypted Responses replay still require a native, source-bound path. Local protocol tests do not establish model-quality parity with official APIs.
 
@@ -108,6 +112,8 @@ The **Price sources** panel lists embedded tables even before any refresh, disti
 The **Usage & Billing** tab separates each provider's local request/token/cost ledger from account data. OpenCode Go retains its 5-hour, weekly, and monthly windows. OpenRouter shows each inference key's cap and UTC usage, with BYOK usage separate; account Credits require the independent `openrouter.management_api_key`. CommandCode uses its own key to query official Alpha credits, subscriptions and usage summary, without browser cookies. ClinePass reads its plan windows with its own key and reports them as percentages of each window against reference rates, not as an amount owed. Only masked key hints reach the browser; these account results are cached per provider for 30 seconds.
 
 WorkBuddy reads its gateway's read-only panel API with the configured instance key. It shows pool health, anonymous account credit snapshots, and attempts/tokens/observed credits by model and hour for the latest 24 hourly buckets, including the current hour. This covers the whole gateway, not just this proxy; attempts include retries. Credits without observed samples remain unknown, unlimited accounts are labelled explicitly, and partial endpoint failures remain visible. No OAuth credentials or account identities reach the dashboard. Credit observations are not converted to USD; the local ledger's dollar amounts remain **reference estimates**. Hourly labels retain the gateway's local time, and missing buckets are not filled with zeros.
+
+The optional [WorkBuddy managed updater patch](ops/workbuddy/README.md) adds read-only deployment and check status to the gateway's own authenticated panel. Installed source/patch/binary records are separate from the latest candidate and official Release checks; missing or stale records remain unknown. Installation still belongs to the external updater.
 
 AWS Bedrock has a separate [Cost Explorer billing integration](docs/aws-bedrock-billing.md), disabled by default. It requires an explicit account ID and the service's AWS SDK identity. Only the manual billing button initiates paid queries; ordinary refresh reads the same-account, same-UTC-day snapshot. Reported costs cover the listed services over 30 complete UTC days, with currency and estimate flags, not remaining credit.
 
@@ -253,6 +259,8 @@ This project uses a dual release channel system. See [RELEASE_PROCESS.md](RELEAS
 ## Contributing
 
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, architecture overview, and how to submit pull requests.
+
+Handler and server tests prime the real tokenizer from a checksum-pinned, complete [test vocabulary](internal/testutil/tokenfixture/README.md) in an isolated temporary cache. These tests need no tokenizer download and do not modify the production tokenizer or the user's cache.
 
 ## Acknowledgements
 

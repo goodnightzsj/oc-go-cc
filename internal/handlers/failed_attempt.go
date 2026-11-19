@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/internal/history"
+	"github.com/routatic/proxy/internal/transformer"
 	"github.com/routatic/proxy/pkg/types"
 )
 
@@ -21,12 +22,7 @@ func (h *MessagesHandler) recordFailedAttempt(ctx context.Context, rec history.R
 	if errors.As(err, &failure) {
 		reported = failure.ReportedUsage()
 	}
-	cause := err
-	var source *core.ResponseError
-	if errors.As(err, &source) {
-		cause = source.Err // A joined delivery cancellation does not erase the source failure.
-	}
-	if ctx.Err() != nil && reported == nil && errors.Is(cause, ctx.Err()) {
+	if reported == nil && isCallerCancellation(ctx, err) {
 		return // A caller that stopped waiting is not an observed source failure.
 	}
 	if reported != nil {
@@ -41,4 +37,15 @@ func (h *MessagesHandler) recordFailedAttempt(ctx context.Context, rec history.R
 	if err := h.storage.InsertRequest(rec); err != nil {
 		h.logger.Warn("failed to insert failed attempt into storage", "error", err)
 	}
+}
+
+func isCallerCancellation(ctx context.Context, err error) bool {
+	if ctx.Err() == nil {
+		return false
+	}
+	var source *core.ResponseError
+	if errors.As(err, &source) {
+		err = source.Err // A joined delivery cancellation does not erase the source failure.
+	}
+	return errors.Is(err, ctx.Err()) || errors.Is(err, transformer.ErrClientDisconnected) || errors.Is(err, transformer.ErrStreamReadCanceled)
 }

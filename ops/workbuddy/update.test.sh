@@ -74,6 +74,17 @@ case "${0##*/}" in
     flock) exit 0 ;;
     sha256sum) exec shasum -a 256 "$@" ;;
     timeout) shift; exec "$@" ;;
+    rm)
+        if [[ -n "${WB_TEST_CHECK_PRUNE:-}" && "${*: -1}" != "$WB2A_STATE_DIR"/runs/update.* ]]; then
+            printf 'FAIL: cleanup escaped the owned run directory\n' >&2
+            exit 24
+        fi
+        if [[ -n "${WB_TEST_FAIL_PRUNE:-}" && "${*: -1}" == "$WB2A_STATE_DIR/runs/update.prune-block" ]]; then
+            printf 'synthetic prune failure\n' >&2
+            exit 23
+        fi
+        exec "$WB_TEST_REAL_RM" "$@"
+        ;;
 esac
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -81,7 +92,8 @@ TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/wb-updater-test.XXXXXX")
 printf 'Test artifacts: %s\n' "$TEST_ROOT"
 REAL_PATH=$PATH
 WB_TEST_REAL_GIT=$(command -v git)
-export WB_TEST_REAL_GIT
+WB_TEST_REAL_RM=$(command -v rm)
+export WB_TEST_REAL_GIT WB_TEST_REAL_RM
 PORTABLE=${WB2A_TEST_PORTABLE:-0}
 for command in git jq; do command -v "$command" >/dev/null; done
 if [[ "$PORTABLE" != 1 ]]; then
@@ -95,7 +107,7 @@ else
     printf 'SKIP: portable mode does not validate native flock or timeout\n' >&2
 fi
 mkdir "$TEST_ROOT/commands"
-for command in git go systemctl curl; do ln -s "$SCRIPT_DIR/update.test.sh" "$TEST_ROOT/commands/$command"; done
+for command in git go systemctl curl rm; do ln -s "$SCRIPT_DIR/update.test.sh" "$TEST_ROOT/commands/$command"; done
 if [[ "$PORTABLE" == 1 ]]; then
     for command in flock sha256sum timeout; do ln -s "$SCRIPT_DIR/update.test.sh" "$TEST_ROOT/commands/$command"; done
 fi
@@ -111,6 +123,7 @@ new_case() {
     export WB_TEST_CASE="$TEST_ROOT/$1"
     mkdir "$WB_TEST_CASE"
     unset WB_TEST_FAIL_GO WB_TEST_FAIL_SERVICE WB_TEST_FAIL_HEALTH WB_TEST_BAD_IDENTITY WB_TEST_WAIT WB_TEST_SIGNAL WB_TEST_FAIL_LOG WB_TEST_FAIL_ROLLBACK WB2A_REF GOCACHE GOMODCACHE WB2A_KEEP_RUNS
+    unset WB_TEST_FAIL_PRUNE WB_TEST_CHECK_PRUNE
     export WB2A_REPO="$WB_TEST_CASE/production" WB2A_STATE_DIR="$WB_TEST_CASE/state" WB2A_PATCH_FILE="$WB_TEST_CASE/local.patch"
     git init -q -b main "$WB_TEST_CASE/upstream"
     git -C "$WB_TEST_CASE/upstream" config user.name synthetic
@@ -120,6 +133,7 @@ new_case() {
         'cmd/server:TestLocalResinConfiguration' \
         'internal/upstream:TestLocalDeepSeekMaxFallback' \
         'internal/upstream:TestLocalGlobalDeepSeekSGCatalog' \
+        'internal/updater:TestLocalManagedStatus' \
         'internal/updater:TestLocalManagedUpdateCannotInstall'; do
         mkdir -p "$WB_TEST_CASE/upstream/${guard%:*}"
         printf 'package fixture\nfunc %s(t *testing.T) {}\n' "${guard#*:}" > "$WB_TEST_CASE/upstream/${guard%:*}/${guard#*:}_test.go"
@@ -224,6 +238,7 @@ printf 'binary changed outside updater\n' >> "$WB2A_REPO/bin/wb2api"
 update
 assert test "$(wc -l < "$WB_TEST_CASE/go.calls" | tr -d ' ')" = 12
 printf 'PASS: success, repeated version, patch-only/upstream updates and binary-hash verification\n'
+assert jq -e '.result == "succeeded" and .stage == "cleanup" and .exit_code == 0 and (.checked_at | length > 0)' "$WB2A_STATE_DIR/last-check.json"
 
 new_case keep_runs
 export WB2A_KEEP_RUNS=2
@@ -241,12 +256,40 @@ assert test "$kept" = 2
 assert test ! -e "$WB2A_STATE_DIR/last-failure.log"
 printf 'PASS: only the newest successful runs are kept\n'
 
+new_case committed_prune_failure
+mkdir -p "$WB2A_STATE_DIR/runs/update.prune-block"
+export WB_TEST_FAIL_PRUNE=1
+code=0
+update || code=$?
+assert test "$code" = 23
+assert test -f "$WB2A_STATE_DIR/current.manifest"
+assert grep -qx "binary_sha256=$(sha256sum "$WB2A_REPO/bin/wb2api" | cut -d ' ' -f 1)" "$WB2A_STATE_DIR/current.manifest"
+backups=("$WB2A_STATE_DIR"/runs/update.*/wb2api.previous)
+assert test "${#backups[@]}" = 1
+assert cmp -s "${backups[0]}" "$WB_TEST_CASE/original.binary"
+assert test "$(grep -c '^restart ' "$WB_TEST_CASE/service.calls")" = 1
+assert jq -e '.result == "failed" and .stage == "cleanup" and .exit_code == 23' "$WB2A_STATE_DIR/last-check.json"
+printf 'PASS: post-commit cleanup failure preserves the active deployment and rollback backup\n'
+
+new_case newline_path
+export WB2A_STATE_DIR="$WB_TEST_CASE/"$'state\nsplit'
+export WB_TEST_CHECK_PRUNE=1
+mkdir -p "$WB2A_STATE_DIR/runs/update.old"
+update
+assert test ! -d "$WB2A_STATE_DIR/runs/update.old"
+assert grep -qx "binary_sha256=$(sha256sum "$WB2A_REPO/bin/wb2api" | cut -d ' ' -f 1)" "$WB2A_STATE_DIR/current.manifest"
+update
+assert grep -q 'already deployed' "$WB_TEST_CASE/run.log"
+assert test "$(wc -l < "$WB_TEST_CASE/go.calls" | tr -d ' ')" = 3
+printf 'PASS: newline paths retain complete cleanup targets and stable hashes\n'
+
 new_case conflict
 printf 'upstream changed\n' > "$WB_TEST_CASE/upstream/feature.txt"
 git -C "$WB_TEST_CASE/upstream" commit -qam changed
 failed_update
 assert test ! -f "$WB_TEST_CASE/go.calls"
 assert test ! -f "$WB_TEST_CASE/service.calls"
+assert jq -e '.result == "failed" and .stage == "patch" and .exit_code != 0' "$WB2A_STATE_DIR/last-check.json"
 printf 'PASS: conflict preserves the fixed patch, checkout and running binary\n'
 
 for removed_guard in TestResinProxy TestLocalGlobalDeepSeekSGCatalog; do
@@ -264,6 +307,7 @@ for stage in vet test build; do
     export WB_TEST_FAIL_GO=$stage
     failed_update
     assert test ! -f "$WB_TEST_CASE/service.calls"
+    assert jq -e --arg stage "$stage" '.result == "failed" and .stage == $stage' "$WB2A_STATE_DIR/last-check.json"
 done
 printf 'PASS: vet, race and build failures do not activate a candidate\n'
 
@@ -325,6 +369,7 @@ for failure in service signal rollback; do
     assert test "$(grep -c '^restart ' "$WB_TEST_CASE/service.calls")" = 2
     if [[ "$failure" == rollback ]]; then
         assert grep -q 'CRITICAL: rollback could not be verified' "$WB_TEST_CASE/run.log"
+        assert jq -e '.rollback_failed == true and .result == "failed"' "$WB2A_STATE_DIR/last-check.json"
     else
         assert grep -q 'rollback verified' "$WB_TEST_CASE/run.log"
     fi

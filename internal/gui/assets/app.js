@@ -2252,6 +2252,10 @@ const MODEL_DISTRIBUTION_LIMIT = 5;
 const DISPLAY_REQUEST_TIMEOUT_MS = 15000;
 
 function cancelTabRequests(name) {
+  if (name === 'settings') {
+    runtimeConfigRequest?.abort();
+    runtimeConfigRequest = null;
+  }
   if (name === 'analytics') AnalyticsModule.cancel();
   if (name === 'quota') QuotaModule.cancel();
   if (name === 'performance') {
@@ -2278,7 +2282,7 @@ function cancelTabRequests(name) {
 
 function handleVisibilityChange() {
   if (document.hidden) {
-    for (const tab of ['overview', 'performance', 'analytics', 'quota', 'history']) cancelTabRequests(tab);
+    for (const tab of ['overview', 'performance', 'analytics', 'quota', 'history', 'settings']) cancelTabRequests(tab);
     return;
   }
   refreshVisibleTab();
@@ -2286,7 +2290,7 @@ function handleVisibilityChange() {
 document.addEventListener('visibilitychange', handleVisibilityChange);
 
 window.addEventListener('pagehide', () => {
-  for (const tab of ['overview', 'performance', 'analytics', 'quota', 'history']) cancelTabRequests(tab);
+  for (const tab of ['overview', 'performance', 'analytics', 'quota', 'history', 'settings']) cancelTabRequests(tab);
   serviceStatusRequest?.abort();
   serviceStatusRequest = null;
   catalogAgeRequest?.abort();
@@ -2301,7 +2305,7 @@ window.addEventListener('pageshow', event => {
   activateTab(parseViewHash(location.hash).name);
   refreshCore();
   applyActiveSite();
-  if (activeTab === 'settings') loadChannelCatalog();
+  loadChannelCatalog();
 });
 
 // Automatic entry/resume is not a manual refresh that bypasses account caches.
@@ -3146,16 +3150,27 @@ function bindHistoryTokenTooltips(root) {
 }
 
 /* ── /api/config ───────────────────────────────────────────────── */
+let runtimeConfigRequest = null;
+
 async function refreshConfig() {
+  const autostartToggle = document.getElementById('toggle-autostart');
+  const notifyToggle = document.getElementById('toggle-notify');
+  if (document.hidden || runtimeConfigRequest || autostartToggle?._changing || notifyToggle?._changing) return;
+  const controller = runtimeConfigRequest = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), DISPLAY_REQUEST_TIMEOUT_MS);
   try {
-    const r = await fetch('/api/config');
+    const r = await fetch('/api/config', {signal: controller.signal});
     if (!r.ok) return;
     const d = await r.json();
-    const autostartToggle = document.getElementById('toggle-autostart');
-    const notifyToggle    = document.getElementById('toggle-notify');
+    if (runtimeConfigRequest !== controller || controller.signal.aborted) return;
     if (autostartToggle && !autostartToggle._changing) autostartToggle.checked = !!d.autostart;
     if (notifyToggle    && !notifyToggle._changing)    notifyToggle.checked    = !!d.notify;
-  } catch(e) {}
+  } catch (_) {
+    // Keep the last confirmed switches; saves report their own errors.
+  } finally {
+    clearTimeout(deadline);
+    if (runtimeConfigRequest === controller) runtimeConfigRequest = null;
+  }
 }
 
 /* ── /api/catalog/lock & /api/catalog/sync ─────────────────────── */
@@ -3376,6 +3391,7 @@ async function toggleNotify(el) {
 
 async function saveRuntimeSetting(el, field) {
   if (el.disabled) return;
+  cancelTabRequests('settings');
   const requested = el.checked;
   clearSettingsFieldError();
   el.disabled = true;

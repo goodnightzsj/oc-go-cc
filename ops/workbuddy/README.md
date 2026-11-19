@@ -6,11 +6,11 @@
 
 1. `flock` 串行执行；复制固定 `local.patch`，不从生产工作树自动导出或覆盖补丁。
 2. fetch 上游，在独立临时 clone 中显式 fetch 已解析的目标 SHA，再检出并完整应用补丁；即使指定 SHA 只在生产 `FETCH_HEAD` 中、不被 branch/tag 引用，也不能依赖 clone 偶然带上对象。生产工作树不 checkout/reset。
-3. 检查 Resin、配置接线、DeepSeek max、Global SG目录和托管更新保护的五个测试存在，再依次执行 Go `vet`、全量 `test -race`、`build`。
+3. 检查 Resin、配置接线、DeepSeek max、Global SG目录、托管只读状态和托管更新保护的六个测试存在，再依次执行 Go `vet`、全量 `test -race`、`build`。
 4. 只有候选通过且旧服务健康，才保留旧二进制/manifest，使用同目录原子 rename 安装 `bin/wb2api` 并重启。
 5. 只有 systemd active、`/healthz` 返回 HTTP **200** 且 JSON `service` 为 **`workbuddy2api`** 才提交新 manifest。503 表示目前不可服务，不算上线成功。
 
-冲突、测试或构建失败均不替换运行二进制。切换后的命令失败、INT/TERM 或健康失败会恢复旧二进制及 manifest，并再次验证恢复后的服务。退出清理不依赖日志写入成功，保留原失败退出码；普通执行阶段日志写入失败仍明确报错并停止。若恢复也失败，明确报 `CRITICAL`、非零退出，不声称回滚成功。SIGKILL、断电、存储故障导致恢复操作本身失败及同时绕过此锁的人工操作不在自动回退保证内。
+冲突、测试或构建失败均不替换运行二进制。切换开始至健康确认、manifest 提交之间的命令失败、INT/TERM 或健康失败会恢复旧二进制及 manifest，并再次验证恢复后的服务。提交成功后的清理或日志失败仍非零退出，但不撤回健康版本，也不删除本次 run 中的旧二进制与 manifest。退出清理不依赖日志写入成功，保留原失败退出码；普通执行阶段日志写入失败仍明确报错并停止。若恢复也失败，明确报 `CRITICAL`、非零退出，不声称回滚成功。SIGKILL、断电、存储故障导致恢复操作本身失败及同时绕过此锁的人工操作不在自动回退保证内。
 
 生产 checkout 的 HEAD **不表示运行版本**。权威证据是 state 目录的 `current.manifest`（上游 SHA、patch SHA-256、binary SHA-256）与实际 `bin/wb2api` 的 hash；每次候选目录保留对应源码。三个值均匹配才跳过构建，因此 patch-only 变更和被外部修改的二进制也会重新验证、部署。
 
@@ -30,7 +30,7 @@ bash /opt/workbuddy-ops/update.sh
 
 其余参数：`WB2A_SERVICE` 默认 `workbuddy2api.service`，`WB2A_HEALTH_URL` 默认 `http://127.0.0.1:7863/healthz`，`WB2A_REF` 默认 `main`；`WB2A_BUILD_TIMEOUT` 为每项 Go 门禁的秒数（默认900），`WB2A_HEALTH_ATTEMPTS` 默认30、`WB2A_HEALTH_INTERVAL` 默认1秒，每次 HTTP 最多3秒；`WB2A_KEEP_RUNS` 默认3，表示成功后保留多少个**成功部署**的 run 目录。没有账号/容量而持续503时升级会停止，需先恢复健康，不应放宽门禁。
 
-**保留策略**：成功部署后只留最近 `WB2A_KEEP_RUNS` 个含 `wb2api` 的 run 目录（本次运行的目录永远不删）；没有 `wb2api` 的目录（重复检查、patch-only 之类的空跑）一律删除。失败候选只把 `update.log` 覆写到 `state/last-failure.log`，整个 run 目录删除——源码克隆与构建产物可复现，一次约15MB。回滚本身失败（`CRITICAL`）时相反：保留全部现场供排查。
+**保留策略**：成功部署后只留最近 `WB2A_KEEP_RUNS` 个含 `wb2api` 的 run 目录（本次运行的目录永远不删）；没有 `wb2api` 的旧目录（如重复检查的空跑）删除。按完整路径数组和目录修改时间排序，不解析 `ls` 的行，不跟随符号链接；路径包含换行也只删除同一个完整目标。哈希从文件标准输入计算，避免文件名转义污染摘要。失败候选只把 `update.log` 覆写到 `state/last-failure.log`，整个 run 目录删除——源码克隆与构建产物可复现，一次约15MB。已提交部署的后处理失败、回滚本身失败（`CRITICAL`）时保留本次现场供排查。
 
 已有 timer/service 应改为调用这一入口并显式设置上述环境变量。不要再并行运行会自动捕获 patch 或强制 checkout 的旧脚本。
 
@@ -87,15 +87,13 @@ SG补丁已在`5373578`基线上通过Linux隔离与托管两轮vet/race/build�
 
 面板 `update.auto_enabled/auto_time` 只控制内置安装流程，不会修改 systemd timer。源码构建显示 dev、官方 Release 较旧或仍提示有新版，均不能单独判定托管部署落后；托管版本以 manifest 的 source/patch/binary 三项核实，官方版本以 Release 检查核实。也不能为了消除提示给任意 main 提交冒填正式 Release 版本。
 
-后续若整合面板展示，应读取托管执行器提供的只读状态（运行源 SHA、patch SHA、目标 SHA、检查时间、阶段及安全错误），保留两种来源标签；不要从官方 `update_available` 推导托管更新成功、失败或已是最新。定时器与手动操作仍调用同一执行器、共享同一锁。该展示集成是设计方案，本次测试竞争修复没有新增面板 API 或修改其认证边界。
+2026-11-19本地新增只读展示，固定补丁仍基于 `3412082`，尚未部署。脚本取得同一更新锁后原子写入 `last-check.json`：检查及阶段时间、阶段、结果、目标 source/patch、退出码和回退失败标记。阶段覆盖 prepare/fetch/checkout/patch/vet/test/build/health/activate/commit/cleanup，不写原始错误、日志、配置或凭据。状态发布失败明确非零退出，不阻止已有回退逻辑；候选失败不能覆盖 `current.manifest` 中的已部署版本。
 
-建议按以下顺序实施后续整合：
+面板沿现有认证的 `/panel/api/update` 和 overview 快照读取 `Manager.Status().managed`，不新增安装入口。只读取 `current.manifest` 与 `last-check.json`，各最多16KiB；校验哈希、时间和枚举，返回固定错误码，不泄露文件路径或原始内容。检查记录缺失、坏数据或超过两小时未更新时明确显示未知。源码、补丁和二进制哈希表示**上次提交的部署记录**，不代替实际 binary/MainPID 核验；官方 Release 的检查按钮、提示与托管信息分开标注，不能由 `update_available` 推导托管成功或已最新。
 
-1. 先补只读状态：已安装版本继续只认 `current.manifest`，最近检查/失败是另一维度，不能覆盖它。托管执行器原子写入白名单字段，面板沿用现有认证读取；状态缺失或过期显示未知，不显示“已最新”，不把包含账号配置的整个 state 目录暴露给面板。
-2. 面板在托管模式显示“由 systemd 管理”、真实源/补丁版本、上次检查和失败阶段；原内置安装开关注明不适用于该部署。第一阶段不增加网页提权或启动脚本能力，手动更新继续走既有运维入口。
-3. 补丁持续收敛：上游吸收相同修复或提供等效公开配置后，逐项验证并移除对应 hunk，保留行为回归；上游改动造成冲突时停止更新并提示具体阶段，不能跳过 patch 发布官方二进制。
+Linux 受托管进程默认读取 `/var/lib/workbuddy-updater`；使用其他位置时须在更新 service 和桥 service 中同时设置 `WB2A_STATE_DIR`，并让桥进程能读取上述两个记录。显式设置该目录同样禁用内置安装。不要把整个 state 目录作为静态资源公开，或为此放开账号/配置文件权限。网页仅展示外部服务负责安装和回退，说明原内置安装设置不控制托管 timer；手动更新仍走本脚本和同一锁。
 
-验收至少覆盖：同时触发只执行一次、官方 Release 与 main 进度不同不会误报、patch 冲突和各项门禁失败保持旧服务、健康失败恢复旧 binary/manifest、状态文件缺失或读取失败不伪装成功。当前切换仍会短暂重启服务，不承诺零中断；单纯替换更新器不能消除这段停顿。
+上游吸收相同修复或提供等效公开配置后，逐项验证并移除对应 hunk，保留行为回归；冲突时停止更新并显示失败阶段，不能跳过 patch 发布官方二进制。当前切换仍会短暂重启服务，不承诺零中断。
 
 ## 回归测试
 
@@ -104,7 +102,9 @@ bash -n ops/workbuddy/update.sh ops/workbuddy/update.test.sh
 bash ops/workbuddy/update.test.sh
 ```
 
-测试仅创建合成 Git 仓库，替换 Go、systemctl、curl，不触碰真实服务；Git clone 使用真实 Git 的 `--no-local` transport 路径，防止本地对象整包复制掩盖 FETCH_HEAD 引用缺口。Linux 上使用真实 `flock` 验证并发排他。覆盖无 HOME 的默认缓存及显式缓存保留、精确 SHA（生产 branch/tag 未前进）、patch 冲突、guard 缺失、vet/race/build 失败、重启失败、503/身份错误、信号回退、manifest 回退、重复版本、补丁变化、上游变化和二进制被改动；日志不可写叠加重启失败、TERM 或恢复服务失败时仍尝试回退，检查原退出码和明确失败报告。
+测试仅创建合成 Git 仓库，替换 Go、systemctl、curl，不触碰真实服务；Git clone 使用真实 Git 的 `--no-local` transport 路径，防止本地对象整包复制掩盖 FETCH_HEAD 引用缺口。Linux 上使用真实 `flock` 验证并发排他。覆盖无 HOME 的默认缓存及显式缓存保留、精确 SHA（生产 branch/tag 未前进）、patch 冲突、guard 缺失、vet/race/build 失败、重启失败、503/身份错误、信号回退、manifest 回退、重复版本、补丁变化、上游变化和二进制被改动；日志不可写叠加重启失败、TERM 或恢复服务失败时仍尝试回退，检查原退出码和明确失败报告。另覆盖提交后清理失败仍保留回退资料、含换行的 state 路径不越界、检查阶段/退出码与失败一致。
+
+补丁内 `TestLocalManagedStatus` 及 panel 回归覆盖已部署版本与失败候选分离、缺失/损坏/过期/超大记录、字段白名单、原有认证、官方 Release 文案与托管失败展示。此轮 macOS 上 updater/panel 的 race 测试通过，不代表 Linux 原生安装路径或线上页面已经验收。
 
 缺少 Linux 工具时测试退出77，不能当通过。`WB2A_TEST_PORTABLE=1 bash ops/workbuddy/update.test.sh` 只提供本地功能诊断，显式跳过 native flock/timeout，不能替代 Linux 门禁。测试产物保留在打印的独立临时目录。
 

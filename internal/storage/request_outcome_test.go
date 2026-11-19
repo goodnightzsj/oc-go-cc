@@ -41,13 +41,6 @@ func TestUnobservedUsageRetainsKnownOutcome(t *testing.T) {
 	if len(rows) == 1 && !rows[0].OutcomeKnown {
 		t.Error("record lost its observed outcome")
 	}
-	totals, err := repo.Totals()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if totals.Received != 3 || totals.Success != 1 || totals.Failed != 1 || totals.Streamed != 2 {
-		t.Errorf("totals=%+v", totals)
-	}
 	a := NewAnalytics(db)
 	window, err := a.WindowBetween(at, at.Add(time.Hour))
 	if err != nil {

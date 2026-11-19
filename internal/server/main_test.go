@@ -7,9 +7,14 @@ import (
 	"testing"
 
 	"github.com/routatic/proxy/internal/storage"
+	"github.com/routatic/proxy/internal/testutil/tokenfixture"
 )
 
 func TestMain(m *testing.M) {
+	if err := tokenfixture.Prime(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	dir, err := os.MkdirTemp("", "oc-go-cc-server-tests-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

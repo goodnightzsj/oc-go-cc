@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,6 +93,37 @@ func TestClientCancelBeforePayloadIsNotRecorded(t *testing.T) {
 	}
 	if total != 0 {
 		t.Errorf("recorded %d rows for a client cancellation that never reached the wire, want 0", total)
+	}
+}
+
+type sourceResetThenCancelBody struct{ cancel context.CancelFunc }
+
+func (*sourceResetThenCancelBody) Read([]byte) (int, error) {
+	return 0, errors.New("source reset before first frame")
+}
+
+func (b *sourceResetThenCancelBody) Close() error {
+	b.cancel() // The source failure is already known when cleanup overlaps cancellation.
+	return nil
+}
+
+func TestStreamSourceFailureSurvivesCancellationDuringClose(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	db, h := newFailureTestHandler(t, &sourceResetThenCancelBody{cancel: cancel})
+	h.handleStreaming(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/messages", nil).WithContext(ctx),
+		&types.MessageRequest{Stream: boolPtr(true), MaxTokens: 64},
+		[]config.ModelConfig{{Provider: "opencode-zen", ModelID: "synthetic"}},
+		nil, router.ScenarioDefault, "source-reset-late-cancel")
+	rows, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
+	if err != nil || total != 1 {
+		t.Fatalf("confirmed source failure records=%d want=1 err=%v", total, err)
+	}
+	if rows[0].Success || !rows[0].OutcomeKnown || rows[0].DetailsKnown || rows[0].CostKnown || !strings.Contains(rows[0].ErrorMsg, "source reset") {
+		t.Fatalf("source failure lost its outcome or invented usage: %+v", rows[0])
+	}
+	if h.metrics.GetSnapshot().RequestsFailed != 0 {
+		t.Fatal("late cancellation must remain neutral for logical request metrics")
 	}
 }
 

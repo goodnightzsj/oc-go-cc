@@ -452,18 +452,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	if s.met != nil {
 		snap = s.met.GetSnapshot()
 	}
-	// The metrics counters live in process memory and reset on restart, which
-	// left the overview page reading all zeros even with thousands of requests
-	// on record. Fall back to the persisted roll-up in that case.
-	if snap.RequestsReceived == 0 && s.storage != nil {
-		if totals, err := storage.NewRequests(s.storage).Totals(); err == nil && totals.Received > 0 {
-			snap.RequestsReceived = totals.Received
-			snap.RequestsStreamed = totals.Streamed
-			snap.RequestsSuccess = totals.Success
-			snap.RequestsFailed = totals.Failed
-			snap.ModelCounts = totals.ModelCounts
-		}
-	}
+	// Persisted rows count attempts, so they cannot backfill process request counters.
 	resp := metricsResponse{
 		ProxyRunning:      s.proxyRunning.Load(),
 		ConnectedExisting: s.connectedExisting.Load(),

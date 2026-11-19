@@ -28,6 +28,12 @@ import (
 // indistinguishable from a moved endpoint, and guessing wrong takes the whole
 // platform dark. The pool's own auth quarantine still bounds the damage in
 // that case.
+//
+// Health is per credential, not per credential x model. An account that can
+// reach its own plan endpoint but is not entitled to one model still fails
+// that model's requests; that case degrades to the pool's auth quarantine and
+// the fallback chain, because probing every model on every key would spend
+// what it measures.
 type keyHealthGate struct {
 	mu    sync.Mutex
 	state map[string]healthVerdict

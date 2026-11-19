@@ -70,6 +70,11 @@ type keyPool struct {
 	states map[string]*keyState
 	// now is the clock, injectable so tests can advance time without sleeping.
 	now func() time.Time
+	// authNotify is called (outside the lock) when a key is rejected with an
+	// auth verdict, so a provider holding a subscription probe can re-judge the
+	// key at once instead of waiting for its next periodic pass. Nil when the
+	// provider has no probe.
+	authNotify func(key string)
 }
 
 func newKeyPool() *keyPool {
@@ -239,8 +244,8 @@ func (s *selection) settle(verdict verdict, err error) {
 	}
 	p := s.pool
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if s.done {
+		p.mu.Unlock()
 		return
 	}
 	s.done = true
@@ -284,6 +289,14 @@ func (s *selection) settle(verdict verdict, err error) {
 			// failures that opened it have been paid for by the rest.
 			st.consecutive = 0
 		}
+	}
+	// Called outside the lock: the hook issues network probes and must never
+	// serialize the scheduler behind them.
+	notify := verdict == verdictAuth && p.authNotify != nil
+	key := s.key
+	p.mu.Unlock()
+	if notify {
+		p.authNotify(key)
 	}
 }
 

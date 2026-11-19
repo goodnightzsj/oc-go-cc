@@ -178,6 +178,28 @@ func poolFor(provider string) *keyPool {
 	return pools[provider]
 }
 
+// gates maps a provider name to its subscription-probe gate, when it has one.
+// Registered beside the pool for the same reason: the fallback handler asks
+// about a platform by name and must see the same key set Reserve would.
+var (
+	gatesMu sync.RWMutex
+	gates   = map[string]*keyHealthGate{}
+)
+
+func registerGate(provider string, gate *keyHealthGate) {
+	gatesMu.Lock()
+	defer gatesMu.Unlock()
+	gates[provider] = gate
+}
+
+// gateFor returns a provider's gate, or nil when it has no probe. A nil gate
+// passes keys through unchanged, so callers need no branch.
+func gateFor(provider string) *keyHealthGate {
+	gatesMu.RLock()
+	defer gatesMu.RUnlock()
+	return gates[provider]
+}
+
 // HasUsableKey reports whether any key in this provider's pool can take a
 // request right now.
 //
@@ -189,10 +211,14 @@ func poolFor(provider string) *keyPool {
 // A pool with no keys reports false, and so does a provider whose scheduler was
 // never initialised - both mean there is nothing to send with.
 func (b *baseProvider) HasUsableKey(keys []string) bool {
-	if b.keys == nil || len(keys) == 0 {
+	if b.keys == nil {
 		return false
 	}
-	return b.keys.HasUsable(keys)
+	// Gate first, so "usable" means the same set of keys Reserve would pick
+	// from. A pool whose remaining keys are all cooling is not usable just
+	// because the probe-dead keys are idle.
+	keys = b.health.Filter(keys)
+	return len(keys) > 0 && b.keys.HasUsable(keys)
 }
 
 // HasUsable reports whether any of the given keys is not resting.
@@ -238,5 +264,8 @@ func (k *KeyAvailability) HasUsableKey(provider string) bool {
 	if pool == nil {
 		return false
 	}
-	return pool.HasUsable(cfg.ProviderAPIKeys(provider))
+	// The gate is consulted so "cannot serve" agrees with what Reserve would
+	// actually pick: probe-dead keys are not candidates, and keys they crowded
+	// out are back in the usable set.
+	return pool.HasUsable(gateFor(provider).Filter(cfg.ProviderAPIKeys(provider)))
 }

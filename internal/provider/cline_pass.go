@@ -30,6 +30,10 @@ type ClinePassProvider struct {
 	recentProbeModels []string
 	recentProbeScope  [32]byte
 	probeResults      []ChannelProbeResult
+	// healthProbeAt floors on-demand health probes per key; see
+	// cline_pass_health.go.
+	healthProbeMu sync.Mutex
+	healthProbeAt map[string]time.Time
 }
 
 func NewClinePassProvider(atomic *config.AtomicConfig, capture *debug.CaptureLogger) *ClinePassProvider {
@@ -37,6 +41,7 @@ func NewClinePassProvider(atomic *config.AtomicConfig, capture *debug.CaptureLog
 	registerPool(client.ProviderClinePass, base.keys)
 	// The subscription probe's verdicts gate rotation; see key_health.go.
 	base.health = newKeyHealthGate()
+	registerGate(client.ProviderClinePass, base.health)
 	p := &ClinePassProvider{baseProvider: base, capture: capture}
 	// Redirects must not move a dedicated credential to another endpoint.
 	p.httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }

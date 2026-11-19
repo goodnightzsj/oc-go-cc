@@ -14,19 +14,38 @@ import (
 // lapsing and long compared to any reasonable account-endpoint rate limit.
 const keyHealthProbeInterval = 10 * time.Minute
 
+// keyHealthAsyncProbeFloor is the minimum gap between on-demand probes of the
+// same key. An auth rejection asks for an immediate re-judgement; a burst of
+// rejections must not become a burst of account-endpoint calls.
+const keyHealthAsyncProbeFloor = time.Minute
+
+// keyHealthFirstPassTimeout bounds the synchronous first pass. The gate is
+// fail-open, so a request that arrives before the first verdict can take a key
+// the probe has not judged yet - on a restart that window produced a real 403.
+// Waiting is bounded so a hanging account endpoint cannot delay start-up.
+const keyHealthFirstPassTimeout = 3 * time.Second
+
 // StartHealthLoop gates key rotation on the subscription probe until ctx is
 // cancelled. It is started by the server wiring, not the constructor, so tests
-// that only need the provider's request paths never touch the network.
+// that only need the provider's request paths never touch the network. The
+// first pass runs synchronously (bounded) before the server starts accepting
+// requests; later passes run every interval on a ticker.
 func (p *ClinePassProvider) StartHealthLoop(ctx context.Context) {
 	if p.health == nil {
 		return
 	}
+	// An auth rejection re-judges the key immediately instead of waiting for
+	// the next periodic pass. The hook is wired here rather than in the
+	// constructor so a provider whose loop was never started never probes.
+	p.keys.authNotify = p.probeKeyAsync
+	firstCtx, cancel := context.WithTimeout(ctx, keyHealthFirstPassTimeout)
+	probed, excluded := p.probeKeyHealth(firstCtx)
+	cancel()
+	// One line at start-up answers "is the gate live and what does it see"
+	// without turning a ten-minute cadence into log noise.
+	slog.Info("cline-pass key health gate started", "provider", client.ProviderClinePass,
+		"interval", keyHealthProbeInterval.String(), "keys_probed", probed, "keys_excluded", excluded)
 	go func() {
-		probed, excluded := p.probeKeyHealth(ctx)
-		// One line at start-up answers "is the gate live and what does it see"
-		// without turning a ten-minute cadence into log noise.
-		slog.Info("cline-pass key health gate started", "provider", client.ProviderClinePass,
-			"interval", keyHealthProbeInterval.String(), "keys_probed", probed, "keys_excluded", excluded)
 		ticker := time.NewTicker(keyHealthProbeInterval)
 		defer ticker.Stop()
 		for {
@@ -64,17 +83,57 @@ func (p *ClinePassProvider) probeKeyHealth(ctx context.Context) (probed, exclude
 		if ctx.Err() != nil {
 			return probed, excluded
 		}
-		prev := p.health.Excluded(key)
-		_, ferr := quota.FetchClinePass(ctx, nil, endpoint, key)
-		p.health.Record(key, ferr)
-		now := p.health.Excluded(key)
-		if now != prev {
-			logKeyExclusion(key, now, ferr)
-		}
-		if now {
+		p.probeOneKey(ctx, endpoint, key)
+		if p.health.Excluded(key) {
 			excluded++
 		}
 		probed++
 	}
 	return probed, excluded
+}
+
+// probeOneKey reads one credential's subscription endpoint and records the
+// verdict, logging a membership change. Callers bound ctx.
+func (p *ClinePassProvider) probeOneKey(ctx context.Context, endpoint, key string) {
+	prev := p.health.Excluded(key)
+	_, ferr := quota.FetchClinePass(ctx, nil, endpoint, key)
+	p.health.Record(key, ferr)
+	if now := p.health.Excluded(key); now != prev {
+		logKeyExclusion(key, now, ferr)
+	}
+}
+
+// probeKeyAsync re-judges one key right after the upstream rejected it with an
+// auth verdict, so a dead key leaves rotation in about a second instead of
+// waiting for the next periodic pass. Probes for the same key are floored to
+// one per minute; the probe itself runs on its own bounded context because a
+// shutdown must not cancel a verdict that is already in flight.
+func (p *ClinePassProvider) probeKeyAsync(key string) {
+	if p.health == nil || key == "" {
+		return
+	}
+	p.healthProbeMu.Lock()
+	if p.healthProbeAt == nil {
+		p.healthProbeAt = map[string]time.Time{}
+	}
+	if last, ok := p.healthProbeAt[key]; ok && time.Since(last) < keyHealthAsyncProbeFloor {
+		p.healthProbeMu.Unlock()
+		return
+	}
+	p.healthProbeAt[key] = time.Now()
+	p.healthProbeMu.Unlock()
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), quota.RequestTimeout)
+		defer cancel()
+		cfg := p.atomic.Get()
+		if cfg == nil {
+			return
+		}
+		endpoint, err := quota.ClinePassUsageURL(cfg.ClinePass.BaseURL)
+		if err != nil {
+			return
+		}
+		p.probeOneKey(ctx, endpoint, key)
+	}()
 }

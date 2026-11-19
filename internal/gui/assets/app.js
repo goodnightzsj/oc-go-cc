@@ -4779,6 +4779,24 @@ const ACTIVE_SITE_POLL_MS = 30000;
 let lastActiveSite = null;
 let activeSiteRequest = null;
 
+// seedActiveSite resolves the active site before the first tab load without
+// touching the platform selects: applyViewState sets those once, so no
+// intermediate change event can start a load for a platform it is about to
+// replace. The wait is bounded so an unreachable endpoint cannot hold boot;
+// failure keeps the DOM default, which the polling applyActiveSite still
+// corrects.
+async function seedActiveSite() {
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), 1500);
+  try {
+    lastActiveSite = (await fetchJSON('/api/sites', {signal: controller.signal})).active || '';
+  } catch (_) {
+    // keep the DOM default; applyActiveSite polling corrects it later
+  } finally {
+    clearTimeout(deadline);
+  }
+}
+
 function cancelActiveSiteRequest() {
   activeSiteRequest?.abort();
   activeSiteRequest = null;
@@ -6143,15 +6161,10 @@ queueMicrotask(async () => {
   // and lastActiveSite is only known after the first /api/sites answer. Seed it
   // before the view state is applied, or the first tab load renders the
   // fallback platform and is corrected afterwards - a visible flash on every
-  // reload. The wait is bounded so an unreachable endpoint cannot hold boot;
-  // the write-back is suppressed because syncViewState would otherwise persist
-  // these not-yet-restored defaults over the saved view.
-  suppressViewStateSync = true;
-  try {
-    await Promise.race([applyActiveSite(), new Promise(resolve => setTimeout(resolve, 1500))]);
-  } finally {
-    suppressViewStateSync = false;
-  }
+  // reload. Only the answer is recorded; applyViewState sets the selects once,
+  // so no intermediate change event fires loads for a platform it is about to
+  // replace.
+  await seedActiveSite();
   // The tab comes from the hash (navigation); the filters come from localStorage
   // (the reader's own choices). A legacy link may still carry query parameters,
   // so those are honoured once - that keeps an old bookmark working without

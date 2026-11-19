@@ -31,9 +31,10 @@ const (
 // OpenCode handler only while Anthropic is unavailable.
 //
 // The direct path is a passthrough: it forwards the caller's own Anthropic
-// credentials and bytes, so it does not run admission, rate limiting, metrics
-// or history recording - those describe traffic this proxy routed, and this
-// traffic it did not. The config loader refuses to combine it with active_site,
+// credentials and bytes, so it does not run admission or the platform key
+// scheduler. It does record what it can observe - one history row with usage
+// explicitly unknown, and the in-process counters - so its traffic is visible
+// in the dashboard. The config loader refuses to combine it with active_site,
 // whose promise is that every request goes through the selected platform.
 type AnthropicFirstHandler struct {
 	atomic   *config.AtomicConfig
@@ -190,23 +191,30 @@ func (h *AnthropicFirstHandler) SetAccounting(storage StorageWriter, met *metric
 // carries no usage: the passthrough never parses the caller's body, so tokens
 // and cost stay unknown (details_known=0) rather than invented. Success follows
 // the upstream status, which is all this layer can observe.
-func (h *AnthropicFirstHandler) recordDirect(requestID, model string, streaming bool, start time.Time, status int) {
+func (h *AnthropicFirstHandler) recordDirect(model string, streaming bool, start time.Time, status int) {
 	if h.metrics != nil {
+		// The direct path forwards whatever model string the caller sent. Only
+		// the Anthropic family is a bounded keyspace; anything else would let a
+		// client grow the per-model counters without limit.
+		metricModel := model
+		if !strings.HasPrefix(metricModel, "claude-") {
+			metricModel = "unknown"
+		}
 		h.metrics.RecordRequest(streaming)
 		if status < 400 {
-			h.metrics.RecordSuccess(model, time.Since(start))
+			h.metrics.RecordSuccess(metricModel, time.Since(start))
 		} else {
-			h.metrics.RecordFailureForModel(model)
+			h.metrics.RecordFailureForModel(metricModel)
 		}
 	}
 	if h.storage == nil {
 		return
 	}
-	if requestID == "" {
-		requestID = uuid.NewString()
-	}
 	rec := history.RequestRecord{
-		ID:              requestID,
+		// One row per execution, never the caller's correlation id: the table
+		// is INSERT OR REPLACE on this key, so a reused X-Request-ID would
+		// silently delete the earlier row.
+		ID:              uuid.NewString(),
 		Model:           model,
 		RequestedModel:  model,
 		Provider:        "anthropic",
@@ -263,7 +271,7 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 
 	attempt, allowed := h.gate.allow(time.Now(), cfg.BaseURL)
 	if !allowed {
-		h.serveFallback(w, r, body)
+		h.serveFallback(w, r, body, requestID)
 		return
 	}
 
@@ -280,7 +288,7 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		}
 		delay := h.gate.failed(time.Now(), attempt, "")
 		h.logger.Warn("Anthropic unavailable, using OpenCode", "error", err, "retry_in", delay)
-		h.serveFallback(w, r, body)
+		h.serveFallback(w, r, body, requestID)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -289,7 +297,7 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		delay := h.gate.failed(time.Now(), attempt, resp.Header.Get("Retry-After"))
 		h.logger.Warn("Anthropic unavailable, using OpenCode", "status", resp.StatusCode, "retry_in", delay)
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
-		h.serveFallback(w, r, body)
+		h.serveFallback(w, r, body, requestID)
 		return
 	}
 
@@ -304,7 +312,7 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 	copyStreamingResponse(r.Context(), w, resp.Body)
-	h.recordDirect(requestID, meta.Model, streaming, start, resp.StatusCode)
+	h.recordDirect(meta.Model, streaming, start, resp.StatusCode)
 }
 
 func newAnthropicRequest(in *http.Request, baseURL string, body []byte) (*http.Request, error) {
@@ -328,9 +336,14 @@ func isAnthropicAvailabilityFailure(status int) bool {
 	return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500
 }
 
-func (h *AnthropicFirstHandler) serveFallback(w http.ResponseWriter, r *http.Request, body []byte) {
+func (h *AnthropicFirstHandler) serveFallback(w http.ResponseWriter, r *http.Request, body []byte, requestID string) {
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	r.ContentLength = int64(len(body))
+	// Hand the correlation id to the fallback chain, which reuses a request
+	// header when present. The response header alone is not visible to it.
+	if requestID != "" {
+		r.Header.Set("X-Request-ID", requestID)
+	}
 	h.fallback.ServeHTTP(w, r)
 }
 

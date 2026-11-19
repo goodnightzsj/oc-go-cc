@@ -10,7 +10,6 @@ import (
 )
 
 const lockFileName = "catalog.lock.json"
-const lockTmpFileName = "catalog.lock.json.tmp"
 
 // Lock records metadata about a successfully synced catalog.
 type Lock struct {
@@ -45,14 +44,30 @@ func WriteLock(destDir string, lock *Lock) error {
 	}
 	data = append(data, '\n')
 
-	tmpPath := filepath.Join(destDir, lockTmpFileName)
-	finalPath := filepath.Join(destDir, lockFileName)
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		_ = os.Remove(tmpPath)
+	// Unique temp file per writer; see the catalog write for why.
+	tmpFile, err := os.CreateTemp(destDir, "catalog.lock.json.tmp-*")
+	if err != nil {
+		return fmt.Errorf("create lock temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	cleanup := func() { _ = os.Remove(tmpPath) }
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		cleanup()
 		return fmt.Errorf("write lock temp file: %w", err)
 	}
+	if err := tmpFile.Chmod(0644); err != nil {
+		_ = tmpFile.Close()
+		cleanup()
+		return fmt.Errorf("chmod lock temp file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("close lock temp file: %w", err)
+	}
+	finalPath := filepath.Join(destDir, lockFileName)
 	if err := os.Rename(tmpPath, finalPath); err != nil {
-		_ = os.Remove(tmpPath)
+		cleanup()
 		return fmt.Errorf("rename lock file: %w", err)
 	}
 	return nil

@@ -205,9 +205,18 @@ func DownloadAndInstall(url, filename, checksumURL string) error {
 		}
 	}
 
-	// Keep the old binary until the new one is in place, so a failed install
-	// restores it instead of leaving the installation without a working
-	// executable.
+	if runtime.GOOS != "windows" {
+		// On Unix rename is atomic and the running process keeps its old inode,
+		// so there is no window without an executable. Moving the old binary
+		// aside first would create one for no benefit.
+		if err := os.Rename(tmpPath, execPath); err != nil {
+			return fmt.Errorf("failed to replace executable: %w", err)
+		}
+		return nil
+	}
+
+	// Windows cannot overwrite a running executable, so it is moved aside and
+	// restored if the install fails.
 	oldPath := execPath + ".old"
 	_ = os.Remove(oldPath)
 	if err := os.Rename(execPath, oldPath); err != nil {

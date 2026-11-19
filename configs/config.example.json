@@ -44,7 +44,7 @@
     }
   },
   "anthropic_first": {
-    "//": "Direct Anthropic passthrough with the OpenCode chain as fallback. This path forwards the caller's own credentials and bytes and is not recorded in History/Analytics. enabled cannot be combined with a non-empty active_site.",
+    "//": "Direct Anthropic passthrough with the OpenCode chain as fallback. This path forwards the caller's own credentials and bytes; it records history rows with usage unknown (no token/cost figures) and the in-process counters. enabled cannot be combined with a non-empty active_site.",
     "enabled": false,
     "base_url": "https://api.anthropic.com"
   },

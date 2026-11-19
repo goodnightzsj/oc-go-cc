@@ -41,7 +41,9 @@ async function checks() {
   fetch = async (url, init) => {
     if (url === '/api/sites') return ok({sites:[],active:''});
     if (url === '/api/cline-pass/channels') return ok({capture_enabled:false,channels:{}});
-    if (url === '/api/proxy/config' && !init) {
+    // GETs carry only the deadline signal now; the method is what separates
+    // them from a save.
+    if (url === '/api/proxy/config' && !init?.method) {
       if (mode === 'refresh-failed') throw new Error('private-sentinel');
       return ok(stored);
     }

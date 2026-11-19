@@ -130,9 +130,11 @@ func (p *WorkBuddyProvider) request(ctx context.Context, req *types.MessageReque
 		retryAfter := resp.Header.Get("Retry-After")
 		if readErr != nil {
 			return nil, fmt.Errorf("read upstream error: %w: %w", readErr,
-				&client.APIError{StatusCode: resp.StatusCode, Body: string(body)})
+				&client.APIError{StatusCode: resp.StatusCode, Body: string(body), KeyHint: sel.KeyHint()})
 		}
-		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(body), RetryAfter: retryAfter}
+		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(body), RetryAfter: retryAfter}
+		apiErr.KeyHint = sel.KeyHint()
+		return nil, apiErr
 	}
 	// Stamp the raw read before capture's tee; CaptureBody forwards observations.
 	var body io.ReadCloser = newWorkBuddyBody(resp.Body, sel.KeyHint())

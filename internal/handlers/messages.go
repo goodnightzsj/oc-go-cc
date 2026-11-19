@@ -1054,11 +1054,14 @@ func (h *MessagesHandler) handleStreaming(
 			// for the attempt that failed.
 			firstByte := client.FirstByteAtOf(currentStream)
 			rec := history.RequestRecord{
-				ID:                  recordID,
-				Model:               model.ModelID,
-				RequestedModel:      requestedModel,
-				Provider:            providerName,
-				Scenario:            string(scenario),
+				ID:             recordID,
+				Model:          model.ModelID,
+				RequestedModel: requestedModel,
+				Provider:       providerName,
+				Scenario:       string(scenario),
+				// Request-relative, like the success path: the fallback rows
+				// describe one timeline, and attempt-relative timing lives in
+				// the generation sample.
 				StartTime:           streamStart,
 				Duration:            time.Since(streamStart),
 				InputTokens:         rw.usage.inputTokens,

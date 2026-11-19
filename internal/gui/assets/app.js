@@ -653,6 +653,7 @@ const TRANSLATIONS = {
     'test.platform': 'Platform',
     'test.noModels': 'No models available for this platform',
     'test.modelsUnavailable': 'Model list unavailable - check the proxy connection',
+    'test.timeout': 'Test request timed out',
     'test.send': 'Send',
     'test.promptPlaceholder': 'Enter your prompt...',
     'test.latency': 'Latency:',
@@ -1265,6 +1266,7 @@ const TRANSLATIONS = {
     'test.platform': '平台',
     'test.noModels': '该平台没有可用模型',
     'test.modelsUnavailable': '模型列表获取失败，请检查代理连接',
+    'test.timeout': '测试请求超时',
     'test.send': '发送',
     'test.promptPlaceholder': '输入测试提示词...',
     'test.latency': '延迟：',
@@ -1491,7 +1493,6 @@ function syncThemeControl() {
   label.textContent = nextLabel;
   // A hairline marker shows the pinned state at a glance; the icon alone cannot.
   document.documentElement.dataset.themeMode = mode;
-  document.documentElement.dataset.themeShown = showing;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1608,7 +1609,12 @@ window.CustomSelect = {
     const option = select.options[select.selectedIndex];
     state.label.textContent = option?.textContent || '';
     state.button.disabled = select.disabled;
-    state.button.setAttribute('aria-label', select.getAttribute('aria-label') || state.label.textContent);
+    // Announce the field and its current value. Naming the button only after
+    // the field hid the selection from assistive technology.
+    const fieldName = select.getAttribute('aria-label')
+      || (select.labels && select.labels[0] ? select.labels[0].textContent.trim() : '');
+    const value = state.label.textContent;
+    state.button.setAttribute('aria-label', fieldName && value ? fieldName + ': ' + value : (fieldName || value));
     state.list.querySelectorAll('[role="option"]').forEach((item, index) => {
       const selected = index === select.selectedIndex;
       item.setAttribute('aria-selected', String(selected));
@@ -2231,8 +2237,9 @@ function applyViewState(saved) {
     // Restored here rather than in FallbackModule.loadConfig: the hash is read
     // once at boot, and the listing may not have arrived yet, so the module
     // decides when it can act on the value.
-    FallbackModule.applyPendingPlatform(params.get('fplatform') || '');
+    // The search must be in place before applyPendingPlatform consumes it.
     FallbackModule.pendingSearch = params.get('fsearch') || '';
+    FallbackModule.applyPendingPlatform(params.get('fplatform') || '');
     const changed = [];
     for (const [key, ids] of Object.entries(VIEW_CONTROLS)) {
       if (key === 'platform') continue;
@@ -3063,6 +3070,10 @@ function historyDisplayModel(record) {
 }
 
 function renderHistory() {
+  // The token tooltip lives on <body>, so replacing the table would leave it
+  // showing numbers from a row that no longer exists.
+  const staleTip = document.getElementById('history-token-tip');
+  if (staleTip) staleTip.style.display = 'none';
   const tbody = document.getElementById('history-tbody');
   document.getElementById('history-count').textContent =
     historyTotal + t('status.count') + (historyHasFilters() ? t('status.filtered') : '');
@@ -3285,6 +3296,28 @@ async function refreshCatalog() {
 // /api/catalog/models, which answers from the proxy's own /v1/models listing:
 // that applies the active-site scope and each platform's live roster, so the
 // browser never advertises a model that would fail on use.
+// trapModalFocus keeps Tab inside a visible aria-modal dialog. Idempotent, so
+// every open path can call it without binding twice.
+function trapModalFocus(modal) {
+  if (!modal || modal.dataset.focusTrap) return;
+  modal.dataset.focusTrap = '1';
+  modal.addEventListener('keydown', e => {
+    if (e.key !== 'Tab') return;
+    const focusables = [...modal.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+      .filter(el => !el.disabled && el.offsetParent !== null);
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
+}
+
 const CatalogModule = {
   models: [],
   scope: '',
@@ -3299,21 +3332,7 @@ const CatalogModule = {
     });
     // The dialog is aria-modal, so keyboard focus must stay inside it and the
     // Escape key must close it like every other overlay on this page.
-    modal?.addEventListener('keydown', e => {
-      if (e.key !== 'Tab') return;
-      const focusables = [...modal.querySelectorAll('button, input, select, [tabindex]:not([tabindex="-1"])')]
-        .filter(el => !el.disabled && el.offsetParent !== null);
-      if (focusables.length === 0) return;
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    });
+    trapModalFocus(modal);
     document.getElementById('catalog-platform-filter')?.addEventListener('change', () => this.render());
     document.getElementById('catalog-search')?.addEventListener('input', () => this.render());
     document.getElementById('btn-catalog-resync')?.addEventListener('click', () => {
@@ -4408,7 +4427,26 @@ function moveKeyRow(id, from, to) {
   const rows = editor.rows;
   [rows[from], rows[to]] = [rows[to], rows[from]];
   renderKeyEditor(id);
+  focusKeyRow(id, to);
   updateConfigChangeCount();
+}
+
+// focusKeyRow restores focus after a key row is added, moved or removed. The
+// host is rewritten via innerHTML, so without this the control the operator was
+// using is detached and focus falls to <body>.
+function focusKeyRow(id, index, preferInput = false) {
+  const host = document.getElementById(id);
+  if (!host) return;
+  const rows = [...host.querySelectorAll('[data-key-row]')];
+  if (rows.length === 0) {
+    document.querySelector('[data-key-add="' + id + '"]')?.focus();
+    return;
+  }
+  const row = rows[Math.max(0, Math.min(index, rows.length - 1))];
+  const control = preferInput
+    ? row.querySelector('input:not([readonly])') || row.querySelector('input')
+    : row.querySelector('button:not([disabled])') || row.querySelector('input');
+  control?.focus();
 }
 
 function initKeyEditors() {
@@ -4431,6 +4469,7 @@ function initKeyEditors() {
         confirmKeyRemoval(editor.rows[at], () => {
           editor.rows.splice(at, 1);
           renderKeyEditor(id);
+          focusKeyRow(id, at);
           updateConfigChangeCount();
         });
         return;
@@ -4458,6 +4497,7 @@ function addKeyRow(id) {
   if (!editor) return;
   editor.rows.push({label: '', kept: false, value: ''});
   renderKeyEditor(id);
+  focusKeyRow(id, editor.rows.length - 1, true);
   updateConfigChangeCount();
 }
 
@@ -5021,11 +5061,22 @@ function settingsFailure(message, details = {}) {
 }
 
 async function settingsRequest(url, options, writing = false) {
+  // Every settings call gets a deadline. A stalled request used to leave Save
+  // and Import disabled and the fallback persist queue waiting forever.
+  const opts = {...(options || {})};
+  let deadline = null;
+  if (!opts.signal) {
+    const controller = new AbortController();
+    opts.signal = controller.signal;
+    deadline = setTimeout(() => controller.abort(), DISPLAY_REQUEST_TIMEOUT_MS);
+  }
   let response;
   try {
-    response = await fetch(url, options);
+    response = await fetch(url, opts);
   } catch (_) {
     throw settingsFailure(t(writing ? 'save.unknown' : 'save.loadFailed'), {unknown: writing});
+  } finally {
+    if (deadline) clearTimeout(deadline);
   }
   if (response.ok) return response;
   let detail;
@@ -5303,8 +5354,12 @@ const commandPalette = document.getElementById('command-palette');
 const commandInput = document.getElementById('command-input');
 let commandPaletteOpen = false;
 
+let commandPaletteReturnFocus = null;
+
 function openCommandPalette() {
   commandPaletteOpen = true;
+  commandPaletteReturnFocus = document.activeElement;
+  trapModalFocus(commandPalette);
   commandPalette.classList.add('visible');
   commandInput.value = '';
   commandInput.focus();
@@ -5314,6 +5369,10 @@ function openCommandPalette() {
 function closeCommandPalette() {
   commandPaletteOpen = false;
   commandPalette.classList.remove('visible');
+  if (commandPaletteReturnFocus && typeof commandPaletteReturnFocus.focus === 'function') {
+    commandPaletteReturnFocus.focus();
+  }
+  commandPaletteReturnFocus = null;
 }
 
 function updateCommandList(query) {
@@ -5441,28 +5500,6 @@ document.addEventListener('keydown', function(e) {
 });
 
 /* ── Accordion Sections ────────────────────────────────────────── */
-function initAccordions() {
-  document.querySelectorAll('.accordion-header').forEach(header => {
-    header.addEventListener('click', function() {
-      const section = this.closest('.accordion-section');
-      const wasExpanded = section.classList.contains('expanded');
-
-      // Collapse all other sections (optional: remove for multi-expand)
-      document.querySelectorAll('.accordion-section').forEach(s => {
-        s.classList.remove('expanded');
-      });
-
-      // Toggle this section
-      if (!wasExpanded) {
-        section.classList.add('expanded');
-      }
-    });
-  });
-}
-
-// Initialize on load
-document.addEventListener('DOMContentLoaded', initAccordions);
-
 /* ── Config Backup/Restore ─────────────────────────────────────── */
 async function exportConfig() {
   const btn = document.getElementById('btn-export-config');
@@ -6333,6 +6370,8 @@ const TestModule = {
 
   open() {
     this.populateModels();
+    this.previousFocus = document.activeElement;
+    trapModalFocus(this.testModal);
     this.testModal?.classList.add('visible');
     if (this.testPrompt) {
       this.testPrompt.value = '';
@@ -6343,6 +6382,10 @@ const TestModule = {
 
   close() {
     this.testModal?.classList.remove('visible');
+    if (this.previousFocus && typeof this.previousFocus.focus === 'function') {
+      this.previousFocus.focus();
+    }
+    this.previousFocus = null;
   },
 
   async populateModels() {
@@ -6453,10 +6496,15 @@ const TestModule = {
     this.resetResponse();
 
     const start = performance.now();
+    // The proxy's own test budget is five minutes; matching it here means a
+    // dead connection cannot leave the Send button disabled for the session.
+    const controller = new AbortController();
+    const deadline = setTimeout(() => controller.abort(), 300000);
     try {
       const r = await fetch('/api/test/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           model: model,
           max_tokens: 1024,
@@ -6496,10 +6544,11 @@ const TestModule = {
       }
     } catch (e) {
       const pre = document.createElement('pre');
-      pre.textContent = t('test.error') + e.message;
+      pre.textContent = t('test.error') + (e.name === 'AbortError' ? t('test.timeout') : e.message);
       this.testResponse.innerHTML = '';
       this.testResponse.appendChild(pre);
     } finally {
+      clearTimeout(deadline);
       this.testSendBtn.disabled = false;
       this.testSendBtn.textContent = t('test.send');
     }

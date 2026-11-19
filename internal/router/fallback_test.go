@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -1007,5 +1008,15 @@ func TestAuthFailureReportsTheModelThatFailed(t *testing.T) {
 	}
 	if result == nil || result.ModelID != "go-a" || result.Provider != "opencode-go" {
 		t.Fatalf("result = %+v, want the model whose 401 the client is shown", result)
+	}
+}
+
+func TestUpstreamSyntaxErrorsStayRetryable(t *testing.T) {
+	// A corrupted upstream frame carries a *json.SyntaxError, but it says the
+	// source broke, not that the client sent a bad request. The ResponseError
+	// wrapper must win so the chain falls back instead of stopping.
+	err := fmt.Errorf("collect cline-pass response: %w", &core.ResponseError{Err: &json.SyntaxError{}})
+	if IsNonRetryableRequestError(err) {
+		t.Fatal("an upstream JSON decode failure must stay retryable")
 	}
 }

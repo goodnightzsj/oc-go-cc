@@ -279,8 +279,33 @@ func TestAnthropicFirstRecordsDirectTraffic(t *testing.T) {
 	if got.Provider != "anthropic" || got.Model != "claude-sonnet-4-6" || !got.Success || !got.UsageUnobserved {
 		t.Fatalf("record = %+v, want an unobserved-usage success attributed to anthropic", got)
 	}
-	if got.ID == "" || rec.Header().Get("X-Request-ID") == "" || got.ID != rec.Header().Get("X-Request-ID") {
-		t.Fatalf("request id must be shared with the response header: row=%q header=%q", got.ID, rec.Header().Get("X-Request-ID"))
+	if got.ID == "" || rec.Header().Get("X-Request-ID") == "" {
+		t.Fatalf("both the row and the response header need an id: row=%q header=%q", got.ID, rec.Header().Get("X-Request-ID"))
+	}
+	// The row key is per execution. Reusing the caller's correlation id would
+	// let INSERT OR REPLACE delete an earlier row.
+	if got.ID == rec.Header().Get("X-Request-ID") {
+		t.Fatal("the history key must not be the caller-supplied correlation id")
+	}
+}
+
+func TestAnthropicFirstRowsSurviveAReusedRequestID(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"id":"msg_1","type":"message"}`)
+	}))
+	defer upstream.Close()
+
+	store := &captureRequestStorage{}
+	h := newAnthropicFirstTestHandler(upstream.URL, true, http.NotFoundHandler())
+	h.SetAccounting(store, metrics.New())
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-6"}`))
+		req.Header.Set("X-Request-ID", "reused-by-the-client")
+		h.ServeHTTP(httptest.NewRecorder(), req)
+	}
+	if recs := store.records(); len(recs) != 2 {
+		t.Fatalf("recorded %d rows, want 2: a reused correlation id must not overwrite history", len(recs))
 	}
 }
 

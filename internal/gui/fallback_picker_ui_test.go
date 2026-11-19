@@ -212,6 +212,10 @@ async function checks() {
   document.getElementById('fallback-platform-filter').value = '';
   applyViewState(parseViewHash('./#fallback?fplatform=cline-pass').params);
   assert.equal(FallbackModule.platformFilter, 'cline-pass', 'the restored value must drive the filter');
+  // The picker search is restored too; it used to be assigned after the
+  // consumer ran, so the saved value was never applied.
+  applyViewState(new URLSearchParams('fplatform=cline-pass&fsearch=kimi'));
+  assert.equal(FallbackModule.pickerSearch, 'kimi', 'the saved picker search must be restored');
   assert.equal(document.getElementById('fallback-platform-filter').value, 'cline-pass');
 
   // A platform that is no longer reachable falls back to "all" rather than

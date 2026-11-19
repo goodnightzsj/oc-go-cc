@@ -1563,6 +1563,10 @@ input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
 [class~="bg-[#3a3a3c]"] { background-color: var(--ui-surface-raised); }
 [class~="bg-[#1c1c1e]"] { background-color: var(--ui-input); }
 [class~="border-[#48484a]"] { border-color: var(--ui-line); }
+[class~="bg-[#ff453a]/20"] { background-color: color-mix(in srgb, var(--ui-red) 15%, transparent); }
+[class~="text-[#ff6b5e]"] { color: var(--ui-red); }
+[class~="bg-[#ff9f0a]/20"] { background-color: color-mix(in srgb, var(--ui-amber) 18%, transparent); }
+[class~="text-[#ffb340]"] { color: var(--ui-amber); }
 input::placeholder, textarea::placeholder { color: var(--ui-muted); opacity: 1; }
 input, select, textarea { accent-color: var(--ui-indigo); }
 :focus-visible { outline: 2px solid var(--ui-indigo); outline-offset: 2px; }

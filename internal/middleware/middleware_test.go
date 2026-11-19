@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -57,6 +58,26 @@ func TestGetClientIPRequiresATrustedDirectPeer(t *testing.T) {
 	direct.Header.Set("X-Forwarded-For", "198.51.100.7")
 	if got := GetClientIP(direct, ClientIPOptions{TrustForwardedFor: true, TrustedProxies: trusted}); got != "192.0.2.9" {
 		t.Fatalf("GetClientIP = %q, an untrusted peer's header must be ignored", got)
+	}
+}
+
+func TestGetClientIPJoinsHeaderLinesAndStripsPorts(t *testing.T) {
+	trusted := mustNets(t, "127.0.0.1/32")
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "127.0.0.1:5555"
+	// A client-supplied line followed by the proxy's own line.
+	r.Header.Add("X-Forwarded-For", "spoofed-value")
+	r.Header.Add("X-Forwarded-For", "198.51.100.7:44321")
+	if got := GetClientIP(r, ClientIPOptions{TrustForwardedFor: true, TrustedProxies: trusted}); got != "198.51.100.7" {
+		t.Fatalf("GetClientIP = %q, want the rightmost hop without its port", got)
+	}
+
+	// An unparseable hop falls back to the direct peer rather than inventing a
+	// bucket key.
+	r.Header = http.Header{}
+	r.Header.Set("X-Forwarded-For", "not-an-ip")
+	if got := GetClientIP(r, ClientIPOptions{TrustForwardedFor: true, TrustedProxies: trusted}); got != "127.0.0.1" {
+		t.Fatalf("GetClientIP = %q, want the trusted direct peer", got)
 	}
 }
 

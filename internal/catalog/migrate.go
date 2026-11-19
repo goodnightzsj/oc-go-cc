@@ -2,7 +2,10 @@ package catalog
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -42,15 +45,13 @@ func EnsureImported(ctx context.Context, db *storage.Database, jsonPath string) 
 		return err
 	}
 
-	// The sync lock records the hash of the file it wrote. That is the file's
-	// identity: mtime alone can be older for newer content (an rsync -t
-	// restore, or a second config sharing this database), which would skip a
-	// real update forever.
-	sha := ""
-	if lock, err := ReadLock(filepath.Dir(jsonPath)); err == nil {
-		sha = lock.SHA256
-	}
-	if sha != "" {
+	// Hash the file itself, not the sync lock. The lock is written after the
+	// rename, so a crash between the two leaves new content under the old
+	// hash; a file replaced out of band is invisible either way. mtime alone
+	// can be older for newer content (an rsync -t restore, or a second config
+	// sharing this database), which would skip a real update forever.
+	sha, hashErr := hashFile(jsonPath)
+	if hashErr == nil {
 		if stored, err := repo.ImportedSHA(ctx); err == nil && stored == sha {
 			return nil
 		}
@@ -63,12 +64,26 @@ func EnsureImported(ctx context.Context, db *storage.Database, jsonPath string) 
 	if _, _, err := ImportFromJSON(ctx, db, jsonPath); err != nil {
 		return err
 	}
-	if sha != "" {
+	if hashErr == nil && sha != "" {
 		// A failed hash write only means the next start imports once more; it
 		// must not turn a successful import into an error.
 		_ = repo.SetImportedSHA(ctx, sha)
 	}
 	return nil
+}
+
+// hashFile returns the SHA-256 of a file's contents.
+func hashFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	sum := sha256.New()
+	if _, err := io.Copy(sum, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(sum.Sum(nil)), nil
 }
 
 // ImportFromJSON reads catalog.json and replaces the SQLite catalog with its

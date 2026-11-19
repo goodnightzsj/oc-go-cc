@@ -335,12 +335,12 @@ func applyProviderRequestSync(ctx context.Context, tx *sql.Tx, providerRows []pr
 		result, err := tx.ExecContext(ctx, `
 			INSERT INTO requests (
 				id, model, provider, scenario, start_time, duration_ms,
-				input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+				input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_creation_tokens,
 				cost_usd, cost_source, details_known, outcome_known, usage_trusted, streaming, success, error_msg, attempt, created_at,
 				peak_multiplier
-			) VALUES (?, ?, ?, 'override', ?, 0, ?, ?, ?, ?, ?, ?, 0, 0, 1, 0, 0, '', 1, ?, ?)`,
+			) VALUES (?, ?, ?, 'override', ?, 0, ?, ?, ?, ?, ?, ?, ?, 0, 0, 1, 0, 0, '', 1, ?, ?)`,
 			requestIDs[providerIndex], row.Model, providerUsageTarget, row.Time.UTC().Format(time.RFC3339Nano),
-			row.InputTokens, row.OutputTokens, row.CacheReadTokens,
+			row.InputTokens, row.OutputTokens, row.ReasoningTokens, row.CacheReadTokens,
 			row.CacheWrite5mTokens+row.CacheWrite1hTokens, row.costUSD(), CostSourceProvider,
 			// The column's own spelling (CURRENT_TIMESTAMP format). A mixed
 			// table forced retention into a full-table julianday() scan; one

@@ -136,6 +136,7 @@ func (p *CommandCodeProvider) request(ctx context.Context, req *types.MessageReq
 		defer func() { _ = resp.Body.Close() }()
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(body), RetryAfter: resp.Header.Get("Retry-After")}
+		apiErr.KeyHint = sel.KeyHint()
 		if err != nil {
 			return nil, fmt.Errorf("read commandcode error: %w: %w", err, apiErr)
 		}

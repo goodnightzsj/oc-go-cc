@@ -398,14 +398,24 @@ func retryAfter(err error, def time.Duration) time.Duration {
 	if raw == "" {
 		return def
 	}
+	// The header is upstream-controlled. An enormous value would overflow the
+	// scheduler's wait*(n+1) score into a negative number and make a resting
+	// key look like the best candidate, so the wait is capped.
+	const maxRetryAfter = time.Hour
 	if secs, convErr := strconv.Atoi(raw); convErr == nil {
 		if secs <= 0 {
 			return def
+		}
+		if secs > int(maxRetryAfter/time.Second) {
+			return maxRetryAfter
 		}
 		return time.Duration(secs) * time.Second
 	}
 	if at, parseErr := http.ParseTime(raw); parseErr == nil {
 		if d := time.Until(at); d > 0 {
+			if d > maxRetryAfter {
+				return maxRetryAfter
+			}
 			return d
 		}
 		return def

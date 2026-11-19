@@ -187,7 +187,9 @@ func (p *OpenCodeZenProvider) executeAnthropic(ctx context.Context, req *types.M
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
+		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
+		apiErr.KeyHint = sel.KeyHint()
+		return nil, apiErr
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -231,7 +233,9 @@ func (p *OpenCodeZenProvider) streamAnthropic(ctx context.Context, req *types.Me
 	if resp.StatusCode >= http.StatusBadRequest {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
+		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
+		apiErr.KeyHint = sel.KeyHint()
+		return nil, apiErr
 	}
 
 	return p.withKeyHint(resp.Body, sel), nil
@@ -392,6 +396,7 @@ func (p *OpenCodeZenProvider) doRequest(ctx context.Context, endpoint string, se
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
+		apiErr.KeyHint = sel.KeyHint()
 		return nil, apiErr
 	}
 

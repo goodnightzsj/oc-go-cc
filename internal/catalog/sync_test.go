@@ -110,9 +110,14 @@ func TestSync(t *testing.T) {
 				}
 			}
 
-			tmpPath := filepath.Join(destDir, tmpFileName)
-			if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
-				t.Fatalf("expected no temp file left behind, got %v", err)
+			entries, err := os.ReadDir(destDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range entries {
+				if strings.HasPrefix(entry.Name(), "catalog.json.tmp-") {
+					t.Fatalf("expected no temp file left behind, got %s", entry.Name())
+				}
 			}
 		})
 	}
@@ -135,10 +140,14 @@ func TestSyncOversized(t *testing.T) {
 		t.Fatalf("expected error for oversized response, got nil")
 	}
 
-	for _, name := range []string{catalogFileName, tmpFileName, lockFileName} {
-		path := filepath.Join(destDir, name)
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Fatalf("expected no %s after oversized sync failure, got %v", name, err)
+	entries, err := os.ReadDir(destDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == catalogFileName || name == lockFileName || strings.HasPrefix(name, "catalog.json.tmp-") {
+			t.Fatalf("expected no %s after oversized sync failure", name)
 		}
 	}
 }

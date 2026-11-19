@@ -618,6 +618,9 @@ func (d *Database) normalizeRequestCreatedAt(ctx context.Context) error {
 		if err != nil {
 			return false, err
 		}
+		// Keep runOnce's retry semantics: an old binary (or an import) can
+		// still write the legacy spelling after this process first started, and
+		// a zero-row scan on a clean database costs milliseconds at start-up.
 		return changed > 0, nil
 	})
 }

@@ -112,7 +112,10 @@ type ClientIPOptions struct {
 // own bucket.
 func GetClientIP(r *http.Request, opts ClientIPOptions) string {
 	remoteHost, remoteIP := splitHost(r.RemoteAddr)
-	forwarded := r.Header.Get("X-Forwarded-For")
+	// Join every header line: a client that sends its own X-Forwarded-For and a
+	// proxy that appends one produce two lines, and Get would return only the
+	// client-controlled first one.
+	forwarded := strings.Join(r.Header.Values("X-Forwarded-For"), ",")
 	if !opts.TrustForwardedFor {
 		if forwarded != "" {
 			forwardedForWarning.Do(func() {
@@ -133,18 +136,24 @@ func GetClientIP(r *http.Request, opts ClientIPOptions) string {
 		}
 	}
 	for i := len(entries) - 1; i >= 0; i-- {
-		ip := net.ParseIP(entries[i])
+		// Entries may carry a port ("1.2.3.4:5678"); the port belongs to a
+		// connection, so leaving it in would give every connection its own
+		// bucket. splitHost also normalizes IPv6 spellings.
+		host, ip := splitHost(entries[i])
 		if ip == nil {
-			// An unparseable hop cannot be a trusted proxy; treat it as the
-			// client label rather than silently skipping past it.
-			return entries[i]
+			// A malformed hop cannot be a trusted proxy. Falling back to the
+			// direct peer is the fail-safe choice.
+			return remoteHost
 		}
 		if !ipInNets(ip, opts.TrustedProxies) {
-			return entries[i]
+			return host
 		}
 	}
 	if len(entries) > 0 {
-		return entries[0]
+		host, ip := splitHost(entries[0])
+		if ip != nil {
+			return host
+		}
 	}
 	return remoteHost
 }

@@ -29,6 +29,21 @@ func (a *AtomicConfig) Get() *Config {
 	return a.ptr.Load()
 }
 
+// storageSettingsDiffer reports whether a reload changed a field the storage
+// layer reads only at construction.
+func storageSettingsDiffer(a, b *StorageConfig) bool {
+	if a == nil || b == nil {
+		return a != b
+	}
+	return a.DatabasePath != b.DatabasePath ||
+		a.RetentionDays != b.RetentionDays ||
+		a.AnalyticsBaseline != b.AnalyticsBaseline
+}
+
+func debugCaptureEnabled(logging LoggingConfig) bool {
+	return logging.DebugCapture != nil && logging.DebugCapture.Enabled
+}
+
 // Reload reloads the configuration from disk and atomically swaps it in.
 // If the reload fails, the old configuration is preserved and an error is returned.
 // On successful reload, all registered callbacks are invoked.
@@ -63,6 +78,16 @@ func (a *AtomicConfig) applyLoaded(cfg *Config) {
 			slog.Warn("host/port changed but requires server restart to take effect",
 				"old_host", old.Host, "new_host", cfg.Host,
 				"old_port", old.Port, "new_port", cfg.Port)
+		}
+		// The storage layer is opened once at startup; a reload cannot move the
+		// database or change the retention schedule underneath it. Saying so
+		// avoids an edit that looks applied while writes continue to the old
+		// file.
+		if storageSettingsDiffer(old.Storage, cfg.Storage) {
+			slog.Warn("storage settings changed but require a server restart to take effect")
+		}
+		if debugCaptureEnabled(old.Logging) != debugCaptureEnabled(cfg.Logging) {
+			slog.Warn("debug capture settings changed but require a server restart to take effect")
 		}
 		// Timeout changes apply on the next request.
 		if old.OpenCodeGo.TimeoutMs != cfg.OpenCodeGo.TimeoutMs ||

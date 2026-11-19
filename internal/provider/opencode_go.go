@@ -212,6 +212,7 @@ func (p *OpenCodeGoProvider) executeAnthropic(ctx context.Context, req *types.Me
 	if resp.StatusCode >= http.StatusBadRequest {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
+		apiErr.KeyHint = sel.KeyHint()
 		return nil, apiErr
 	}
 
@@ -261,6 +262,7 @@ func (p *OpenCodeGoProvider) streamAnthropic(ctx context.Context, req *types.Mes
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
+		apiErr.KeyHint = sel.KeyHint()
 		return nil, apiErr
 	}
 
@@ -310,6 +312,7 @@ func (p *OpenCodeGoProvider) doRequest(ctx context.Context, endpoint string, sel
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
+		apiErr.KeyHint = sel.KeyHint()
 		return nil, apiErr
 	}
 

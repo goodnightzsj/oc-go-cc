@@ -111,9 +111,10 @@ func (p *OpenRouterProvider) request(ctx context.Context, req *types.MessageRequ
 		body, readErr := io.ReadAll(resp.Body)
 		retryAfter := resp.Header.Get("Retry-After")
 		if readErr != nil {
-			return nil, fmt.Errorf("read upstream error: %w: %w", readErr, &client.APIError{StatusCode: resp.StatusCode, Body: string(body)})
+			return nil, fmt.Errorf("read upstream error: %w: %w", readErr, &client.APIError{StatusCode: resp.StatusCode, Body: string(body), KeyHint: sel.KeyHint()})
 		}
 		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(body), RetryAfter: retryAfter}
+		apiErr.KeyHint = sel.KeyHint()
 		return nil, apiErr
 	}
 	if p.capture != nil {

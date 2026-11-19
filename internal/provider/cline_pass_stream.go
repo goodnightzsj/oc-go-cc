@@ -69,7 +69,10 @@ func aggregateChatStream(r io.Reader, modelID string) (_ *types.ChatCompletionRe
 			chunk.Usage = &next
 		}
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			return fmt.Errorf("decode cline-pass stream chunk: %w", err)
+			// A corrupted upstream frame is a source failure, not malformed
+			// client input. Without this wrapper the *json.SyntaxError made
+			// IsNonRetryableRequestError stop the whole fallback chain.
+			return fmt.Errorf("decode cline-pass stream chunk: %w", &core.ResponseError{Err: err})
 		}
 		if chunk.Usage != nil {
 			if transformer.ChatUsageToAnthropic(chunk.Usage).ReasoningTokens == 0 {

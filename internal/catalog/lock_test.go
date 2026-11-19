@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -58,9 +59,14 @@ func TestLockRoundTrip(t *testing.T) {
 				t.Fatalf("lock mismatch:\n got: %+v\nwant: %+v", got, tc.lock)
 			}
 
-			tmpPath := filepath.Join(destDir, lockTmpFileName)
-			if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
-				t.Fatalf("expected no temp lock file left behind, got %v", err)
+			entries, err := os.ReadDir(destDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range entries {
+				if strings.HasPrefix(entry.Name(), "catalog.lock.json.tmp-") {
+					t.Fatalf("expected no temp lock file left behind, got %s", entry.Name())
+				}
 			}
 		})
 	}

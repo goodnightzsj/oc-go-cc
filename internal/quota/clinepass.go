@@ -136,13 +136,27 @@ func clinePassErrorText(body []byte) string {
 	return strings.TrimSpace(envelope.Message)
 }
 
+// HTTPStatusError carries the HTTP status of a failed quota fetch, so callers
+// can classify an outcome (a 404 means the account has no subscription, not a
+// flake) instead of parsing the message. The rendered text is unchanged.
+type HTTPStatusError struct {
+	Status int
+	Err    error
+}
+
+func (e *HTTPStatusError) Error() string { return e.Err.Error() }
+func (e *HTTPStatusError) Unwrap() error { return e.Err }
+
 // clinePassStatusError builds the error for a non-2xx response, preferring the
 // platform's explanation and falling back to the status text.
 func clinePassStatusError(status int, body []byte) error {
+	var base error
 	if detail := clinePassErrorText(body); detail != "" {
-		return fmt.Errorf("HTTP %d: %s", status, detail)
+		base = fmt.Errorf("HTTP %d: %s", status, detail)
+	} else {
+		base = fmt.Errorf("HTTP %d: %s", status, http.StatusText(status))
 	}
-	return fmt.Errorf("HTTP %d: %s", status, http.StatusText(status))
+	return &HTTPStatusError{Status: status, Err: base}
 }
 
 // FetchClinePassPlan reads the plan's absolute per-window ceilings.

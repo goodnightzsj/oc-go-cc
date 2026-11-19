@@ -218,6 +218,15 @@ func (s *Server) StartChannelProbe(ctx context.Context) {
 	}
 }
 
+// StartKeyHealthLoop starts the cline-pass subscription probe that gates key
+// rotation on account health. Unlike the channel probe it consumes no
+// inference quota, so it runs whenever the provider is registered.
+func (s *Server) StartKeyHealthLoop(ctx context.Context) {
+	if s.clinePass != nil {
+		s.clinePass.StartHealthLoop(ctx)
+	}
+}
+
 func (s *Server) ChannelDiagnostics() provider.ChannelDiagnosticsSnapshot {
 	return s.clinePass.ChannelDiagnostics()
 }

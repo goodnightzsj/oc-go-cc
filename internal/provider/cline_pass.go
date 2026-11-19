@@ -35,6 +35,8 @@ type ClinePassProvider struct {
 func NewClinePassProvider(atomic *config.AtomicConfig, capture *debug.CaptureLogger) *ClinePassProvider {
 	base := newBaseProvider(atomic)
 	registerPool(client.ProviderClinePass, base.keys)
+	// The subscription probe's verdicts gate rotation; see key_health.go.
+	base.health = newKeyHealthGate()
 	p := &ClinePassProvider{baseProvider: base, capture: capture}
 	// Redirects must not move a dedicated credential to another endpoint.
 	p.httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }

@@ -100,13 +100,22 @@ type selection struct {
 // request without the database ever holding a credential. Empty when nothing
 // was reserved.
 func (s *selection) KeyHint() string {
-	if s == nil || s.key == "" {
+	if s == nil {
 		return ""
 	}
-	if len(s.key) <= 4 {
+	return KeyMaskHint(s.key)
+}
+
+// KeyMaskHint renders a credential's last four characters behind a mask, the
+// label every key-attributed log line and history column uses.
+func KeyMaskHint(key string) string {
+	if key == "" {
+		return ""
+	}
+	if len(key) <= 4 {
 		return "****"
 	}
-	return "****" + s.key[len(s.key)-4:]
+	return "****" + key[len(key)-4:]
 }
 
 // Key is the credential to send. Empty when no key could be reserved.
@@ -238,6 +247,15 @@ func (s *selection) settle(verdict verdict, err error) {
 	st := p.stateFor(s.key)
 	if st.inFlight > 0 {
 		st.inFlight--
+	}
+	// Stamp the credential label onto any API error this attempt produced, so
+	// a failure record can say which key was rejected. The error belongs to
+	// this attempt alone; no other holder can observe the field appearing.
+	if err != nil && s.key != "" {
+		var apiErr *client.APIError
+		if errors.As(err, &apiErr) && apiErr != nil && apiErr.KeyHint == "" {
+			apiErr.KeyHint = s.KeyHint()
+		}
 	}
 	now := p.now()
 

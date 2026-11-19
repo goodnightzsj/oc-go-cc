@@ -254,6 +254,9 @@ Press Ctrl+C to stop the server.`,
 			}()
 			// Diagnostics have their own paid opt-in and never change routing or health.
 			srv.StartChannelProbe(ctx)
+			// The subscription probe reads the account endpoint only; it is
+			// what keeps probe-dead credentials out of key rotation.
+			srv.StartKeyHealthLoop(ctx)
 			defer func() {
 				cancel()
 				<-pricesDone

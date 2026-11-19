@@ -95,3 +95,28 @@ func TestObservedFailureSurvivesLateCancellation(t *testing.T) {
 		}
 	}
 }
+
+// The scheduler stamps the credential label on the API error when the attempt
+// settles, and the failure row carries it - a rejected key must be visible in
+// history without reconstructing pool state.
+func TestFailedAttemptRecordsStampedKeyHint(t *testing.T) {
+	failure := &client.APIError{StatusCode: 403, Body: "not subscribed", KeyHint: "****9f2c"}
+	h, db := newResponsesTestHandler(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("stubbed provider must not make an HTTP request")
+	}))
+	h.providerRegistry = core.NewProviderRegistry()
+	if err := h.providerRegistry.Register(&lateCancelFailureProvider{cancel: func() {}, failure: failure}); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages",
+		strings.NewReader(`{"model":"alias","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}`))
+	h.HandleMessages(w, r)
+	rows, total, err := storage.NewRequests(db).Query(t.Context(), storage.RequestQuery{Page: 1, PageSize: 10})
+	if err != nil || total != 1 {
+		t.Fatalf("records=%d want 1 err=%v", total, err)
+	}
+	if rows[0].KeyHint != failure.KeyHint {
+		t.Fatalf("failure row key_hint=%q want %q", rows[0].KeyHint, failure.KeyHint)
+	}
+}

@@ -128,6 +128,11 @@ type APIError struct {
 	// has a use for it, and the value may be either delta-seconds or an HTTP
 	// date; the scheduler handles both.
 	RetryAfter string
+	// KeyHint is the masked label of the credential this rejection was carried
+	// on, stamped by the key scheduler when the attempt settles. Failure
+	// history reads it to answer "which key was rejected" without the database
+	// ever holding a credential. Empty for errors that never touched a key.
+	KeyHint string
 }
 
 func (e *APIError) Error() string {

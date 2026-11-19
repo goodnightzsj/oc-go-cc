@@ -22,6 +22,9 @@ type baseProvider struct {
 	atomic     *config.AtomicConfig
 	httpClient *http.Client
 	keys       *keyPool
+	// health holds subscription-probe verdicts; nil on providers without a
+	// probe. Filter is nil-safe, so reserveKey need not branch.
+	health *keyHealthGate
 }
 
 func differingResponseModel(reported, requested string) string {
@@ -123,6 +126,9 @@ func (t *countingTransport) RoundTrip(req *http.Request) (*http.Response, error)
 // Callers defer Release immediately; doSelected hands successful responses to
 // their consumer without releasing the in-flight reservation at HTTP headers.
 func (b *baseProvider) reserveKey(keys []string) *selection {
+	// Probe-dead credentials never reach the scheduler; the gate is nil for
+	// providers without a subscription probe and fail-open by construction.
+	keys = b.health.Filter(keys)
 	if b.keys == nil {
 		// A zero-value baseProvider would otherwise panic; treat it as a pool
 		// with no keys so the caller reports "no API key configured".

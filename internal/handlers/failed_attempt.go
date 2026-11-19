@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/internal/history"
 	"github.com/routatic/proxy/internal/transformer"
@@ -54,6 +55,13 @@ func (h *MessagesHandler) recordFailedAttempt(ctx context.Context, rec history.R
 	rec.ID = uuid.NewString()
 	rec.Success, rec.ErrorMsg = false, err.Error()
 	rec.UsageUnobserved = reported == nil
+	// The scheduler stamps the credential label on API errors when the
+	// attempt settles, so the row says which key was rejected - the one fact
+	// the fallback logs cannot show for the attempt that never opened a body.
+	var apiErr *client.APIError
+	if errors.As(err, &apiErr) {
+		rec.KeyHint = apiErr.KeyHint
+	}
 	rec.Duration = time.Since(rec.StartTime)
 	if err := h.storage.InsertRequest(rec); err != nil {
 		h.logger.Warn("failed to insert failed attempt into storage", "error", err)

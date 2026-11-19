@@ -294,6 +294,9 @@ func (p *ClinePassProvider) send(ctx context.Context, cfg *config.Config, sel *s
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer func() { _ = resp.Body.Close() }()
 		apiErr := &client.APIError{StatusCode: resp.StatusCode, RetryAfter: resp.Header.Get("Retry-After")}
+		// Set at construction: the routing-rejection branch deliberately skips
+		// Settle, which is the only place that would otherwise stamp it.
+		apiErr.KeyHint = sel.KeyHint()
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		apiErr.Body = clineErrorBody(resp, body)
 		// Cline also uses 403 for unsupported routing fields, which says nothing

@@ -57,6 +57,11 @@ type MessagesHandler struct {
 	proxyNetsMu  sync.Mutex
 	proxyNetsKey string
 	proxyNets    []*net.IPNet
+
+	// One warning per active site, not one per request: the condition is a
+	// configuration fact that does not change between requests.
+	fallbackWarnMu       sync.Mutex
+	lastFallbackWarnSite string
 }
 
 // responseWriter wraps http.ResponseWriter to track if headers were written.
@@ -751,9 +756,18 @@ func (h *MessagesHandler) buildModelChain(
 			// Configured but unreachable. Without this the operator sees a chain
 			// in the dashboard and no fallback in practice, with nothing saying
 			// why: the active site scopes routing, and every configured fallback
-			// belonged to another platform.
-			h.logger.Warn("configured fallbacks are outside the active site and cannot be used",
-				"active_site", h.modelRouter.ActiveSite(), "configured", len(configured))
+			// belonged to another platform. Once per site, not per request.
+			activeSite := h.modelRouter.ActiveSite()
+			h.fallbackWarnMu.Lock()
+			warn := h.lastFallbackWarnSite != activeSite
+			if warn {
+				h.lastFallbackWarnSite = activeSite
+			}
+			h.fallbackWarnMu.Unlock()
+			if warn {
+				h.logger.Warn("configured fallbacks are outside the active site and cannot be used",
+					"active_site", activeSite, "configured", len(configured))
+			}
 		}
 		result = router.RouteResult{Primary: primary, Scenario: router.ScenarioOverride}
 		chain = appendUniqueModels([]config.ModelConfig{primary}, net)

@@ -143,7 +143,20 @@ func (g *availabilityGate) abandon(attempt availabilityAttempt) {
 }
 
 func parseRetryAfter(value string, now time.Time) (time.Duration, bool) {
+	// The header is upstream-controlled. A huge delta-seconds value overflows
+	// time.Duration into the past, which would make the gate probe on every
+	// request; a far-future date would park it for years. Both clamp to the
+	// existing backoff ceiling.
+	capDelay := func(d time.Duration) time.Duration {
+		if d > availabilityBackoffMax {
+			return availabilityBackoffMax
+		}
+		return d
+	}
 	if seconds, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && seconds >= 0 {
+		if seconds > int(availabilityBackoffMax/time.Second) {
+			return availabilityBackoffMax, true
+		}
 		return time.Duration(seconds) * time.Second, true
 	}
 	when, err := http.ParseTime(value)
@@ -153,7 +166,7 @@ func parseRetryAfter(value string, now time.Time) (time.Duration, bool) {
 	if when.Before(now) {
 		return 0, true
 	}
-	return when.Sub(now), true
+	return capDelay(when.Sub(now)), true
 }
 
 // NewAnthropicFirstHandler creates the opt-in Anthropic passthrough layer.
@@ -187,21 +200,34 @@ func (h *AnthropicFirstHandler) SetAccounting(storage StorageWriter, met *metric
 	h.metrics = met
 }
 
+// metricModelForDirect buckets a client-supplied model id into the fixed set
+// the counters can safely hold. The raw id is unbounded and client-controlled,
+// so keeping it as a map key would grow four maps without limit.
+func metricModelForDirect(model string) string {
+	switch {
+	case strings.HasPrefix(model, "claude-opus"):
+		return "claude-opus"
+	case strings.HasPrefix(model, "claude-sonnet"):
+		return "claude-sonnet"
+	case strings.HasPrefix(model, "claude-haiku"):
+		return "claude-haiku"
+	case strings.HasPrefix(model, "claude"):
+		return "claude"
+	default:
+		return "unknown"
+	}
+}
+
 // recordDirect accounts for one response this handler delivered. The row
 // carries no usage: the passthrough never parses the caller's body, so tokens
-// and cost stay unknown (details_known=0) rather than invented. Success follows
-// the upstream status, which is all this layer can observe.
-func (h *AnthropicFirstHandler) recordDirect(model string, streaming bool, start time.Time, status int) {
+// and cost stay unknown (details_known=0) rather than invented. Success requires
+// both a non-error status and a complete body copy.
+func (h *AnthropicFirstHandler) recordDirect(model string, streaming bool, start time.Time, status int, copyErr error) {
+	success := status < 400 && copyErr == nil
 	if h.metrics != nil {
-		// The direct path forwards whatever model string the caller sent. Only
-		// the Anthropic family is a bounded keyspace; anything else would let a
-		// client grow the per-model counters without limit.
-		metricModel := model
-		if !strings.HasPrefix(metricModel, "claude-") {
-			metricModel = "unknown"
-		}
+		metricModel := metricModelForDirect(model)
 		h.metrics.RecordRequest(streaming)
-		if status < 400 {
+		if success {
 			h.metrics.RecordSuccess(metricModel, time.Since(start))
 		} else {
 			h.metrics.RecordFailureForModel(metricModel)
@@ -222,11 +248,14 @@ func (h *AnthropicFirstHandler) recordDirect(model string, streaming bool, start
 		StartTime:       start,
 		Duration:        time.Since(start),
 		Streaming:       streaming,
-		Success:         status < 400,
+		Success:         success,
 		UsageUnobserved: true,
 	}
-	if status >= 400 {
+	switch {
+	case status >= 400:
 		rec.ErrorMsg = fmt.Sprintf("anthropic returned HTTP %d", status)
+	case copyErr != nil:
+		rec.ErrorMsg = copyErr.Error()
 	}
 	_ = h.storage.InsertRequest(rec)
 }
@@ -311,8 +340,8 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		h.logger.Debug("Anthropic response delivery failed", "error", err)
 		return
 	}
-	copyStreamingResponse(r.Context(), w, resp.Body)
-	h.recordDirect(meta.Model, streaming, start, resp.StatusCode)
+	copyErr := copyStreamingResponse(r.Context(), w, resp.Body)
+	h.recordDirect(meta.Model, streaming, start, resp.StatusCode, copyErr)
 }
 
 func newAnthropicRequest(in *http.Request, baseURL string, body []byte) (*http.Request, error) {
@@ -376,14 +405,17 @@ var streamBufPool = sync.Pool{
 	},
 }
 
-func copyStreamingResponse(ctx context.Context, w http.ResponseWriter, body io.Reader) {
+// copyStreamingResponse forwards the upstream body and reports how it ended.
+// A clean EOF or a caller cancellation is nil; a truncated upstream or a write
+// failure is returned so the accounting row does not claim success.
+func copyStreamingResponse(ctx context.Context, w http.ResponseWriter, body io.Reader) error {
 	bufPtr := streamBufPool.Get().(*[]byte)
 	defer streamBufPool.Put(bufPtr)
 	buf := *bufPtr
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		default:
 		}
 		n, err := body.Read(buf)
@@ -398,11 +430,17 @@ func copyStreamingResponse(ctx context.Context, w http.ResponseWriter, body io.R
 				}
 				return http.NewResponseController(w).Flush()
 			}); writeErr != nil {
-				return
+				if ctx.Err() != nil {
+					return nil // the caller left; not an upstream failure
+				}
+				return writeErr
 			}
 		}
 		if err != nil {
-			return
+			if err == io.EOF || ctx.Err() != nil {
+				return nil
+			}
+			return err
 		}
 	}
 }

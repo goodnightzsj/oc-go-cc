@@ -1397,6 +1397,12 @@ function applyTranslations() {
   window.CustomSelect?.syncAll();
   window.HistoryDateRange?.syncLabel();
   AnalyticsModule?.syncDateRange?.();
+  // The test dialog's option text is built on open; re-render it so an open
+  // dialog follows a language switch too.
+  if (typeof TestModule !== 'undefined') {
+    TestModule.renderPlatforms();
+    TestModule.renderModels();
+  }
 }
 
 function toggleLanguage() {
@@ -3308,6 +3314,11 @@ function trapModalFocus(modal) {
     if (focusables.length === 0) return;
     const first = focusables[0];
     const last = focusables[focusables.length - 1];
+    if (!modal.contains(document.activeElement)) {
+      e.preventDefault();
+      first.focus();
+      return;
+    }
     if (e.shiftKey && document.activeElement === first) {
       e.preventDefault();
       last.focus();
@@ -4949,9 +4960,12 @@ function renderActiveSiteNote(site) {
   const el = document.getElementById('active-site-note');
   if (!el) return;
   el.hidden = !site;
-  el.textContent = site
+  const next = site
     ? t('setting.activeSiteNotShown').replace('{site}', providerInfo(site)?.name || site)
     : '';
+  // role="status" announces every textContent assignment; the poll runs every
+  // 30s, so an unchanged sentence must not be rewritten.
+  if (el.textContent !== next) el.textContent = next;
 }
 
 function startActiveSitePolling() {
@@ -5064,19 +5078,19 @@ async function settingsRequest(url, options, writing = false) {
   // Every settings call gets a deadline. A stalled request used to leave Save
   // and Import disabled and the fallback persist queue waiting forever.
   const opts = {...(options || {})};
-  let deadline = null;
   if (!opts.signal) {
     const controller = new AbortController();
     opts.signal = controller.signal;
-    deadline = setTimeout(() => controller.abort(), DISPLAY_REQUEST_TIMEOUT_MS);
+    // Deliberately not cleared: the deadline must also cover the response body,
+    // which the callers read after this returns. The abort is a no-op once the
+    // body has been consumed.
+    setTimeout(() => controller.abort(), DISPLAY_REQUEST_TIMEOUT_MS);
   }
   let response;
   try {
     response = await fetch(url, opts);
   } catch (_) {
     throw settingsFailure(t(writing ? 'save.unknown' : 'save.loadFailed'), {unknown: writing});
-  } finally {
-    if (deadline) clearTimeout(deadline);
   }
   if (response.ok) return response;
   let detail;
@@ -5369,10 +5383,16 @@ function openCommandPalette() {
 function closeCommandPalette() {
   commandPaletteOpen = false;
   commandPalette.classList.remove('visible');
-  if (commandPaletteReturnFocus && typeof commandPaletteReturnFocus.focus === 'function') {
-    commandPaletteReturnFocus.focus();
-  }
+  const target = commandPaletteReturnFocus;
   commandPaletteReturnFocus = null;
+  if (!target || typeof target.focus !== 'function') return;
+  // A goto-* command hides the tab the palette was opened from; focusing a
+  // detached/hidden node silently drops focus to <body>.
+  if (target.isConnected && target.getClientRects().length > 0) {
+    target.focus();
+  } else {
+    document.getElementById('main-content')?.focus();
+  }
 }
 
 function updateCommandList(query) {
@@ -5400,6 +5420,7 @@ commandInput?.addEventListener('input', function(e) {
 
 commandInput?.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') {
+    e.preventDefault();
     closeCommandPalette();
   } else if (e.key === 'Enter') {
     const selected = document.querySelector('.command-item.selected') || document.querySelector('.command-item:not(.hidden)');
@@ -5816,7 +5837,6 @@ const FallbackModule = {
     sel.value = providers.includes(previous) ? previous : '';
     this.platformFilter = sel.value;
     this.pendingPlatform = '';
-    this.pendingPlatformConsumed = true;
     window.CustomSelect?.sync(sel);
   },
 
@@ -6235,7 +6255,10 @@ const FallbackModule = {
       } catch (e) {
         // The page keeps the change it drew. Saying so is the only honest
         // option: silently reverting would look like the click did nothing,
-        // and the config really does differ from what is on screen.
+        // and the config really does differ from what is on screen. Dropping
+        // the queued state is safe: the next edit rebuilds the full chain from
+        // this.chains, so nothing is lost by starting the queue clean.
+        this.pending = null;
         this.setStatus(e.settingsError ? e.message : t('save.rejected'), 'error');
       } finally {
         this.persisting = null;
@@ -6604,7 +6627,6 @@ const TestModule = {
       this.testCopyBtn.classList.add('copied');
       setTimeout(() => {
         this.testCopyBtn.innerHTML = originalText;
-        this.testCopyBtn.classList.remove('copied');
         this.testCopyBtn.classList.remove('copied');
       }, 2000);
     } catch (e) {}

@@ -138,22 +138,24 @@ func GetClientIP(r *http.Request, opts ClientIPOptions) string {
 	for i := len(entries) - 1; i >= 0; i-- {
 		// Entries may carry a port ("1.2.3.4:5678"); the port belongs to a
 		// connection, so leaving it in would give every connection its own
-		// bucket. splitHost also normalizes IPv6 spellings.
-		host, ip := splitHost(entries[i])
+		// bucket.
+		_, ip := splitHost(entries[i])
 		if ip == nil {
 			// A malformed hop cannot be a trusted proxy. Falling back to the
 			// direct peer is the fail-safe choice.
 			return remoteHost
 		}
 		if !ipInNets(ip, opts.TrustedProxies) {
-			return host
+			// ip.String() normalizes IPv6 spellings; the raw text would give one
+			// client several buckets.
+			return ip.String()
 		}
 	}
 	if len(entries) > 0 {
-		host, ip := splitHost(entries[0])
-		if ip != nil {
-			return host
-		}
+		// Every hop is a trusted proxy. The leftmost entry is still whatever the
+		// client sent, so it cannot serve as an identity; the direct peer is the
+		// only one the code can vouch for.
+		return remoteHost
 	}
 	return remoteHost
 }

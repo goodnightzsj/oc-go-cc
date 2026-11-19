@@ -37,7 +37,16 @@ func storageSettingsDiffer(a, b *StorageConfig) bool {
 	}
 	return a.DatabasePath != b.DatabasePath ||
 		a.RetentionDays != b.RetentionDays ||
-		a.AnalyticsBaseline != b.AnalyticsBaseline
+		a.AnalyticsBaseline != b.AnalyticsBaseline ||
+		a.VacuumOnStartup != b.VacuumOnStartup ||
+		!boolPointerEqual(a.WALEnabled, b.WALEnabled)
+}
+
+func boolPointerEqual(a, b *bool) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 func debugCaptureEnabled(logging LoggingConfig) bool {

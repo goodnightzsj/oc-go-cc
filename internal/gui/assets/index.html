@@ -312,7 +312,7 @@
           <select id="test-provider" class="filter-select" aria-label="Select platform" data-i18n-aria-label="test.platform">
             <option value="" data-i18n-option="filter.allProviders">All platforms</option>
           </select>
-          <select id="test-model" class="filter-select flex-1" aria-label="Select model">
+          <select id="test-model" class="filter-select flex-1" aria-label="Select model" data-i18n-aria-label="test.selectModel">
             <option value="" data-i18n="test.selectModel">Select a model...</option>
           </select>
           <button class="btn btn-primary" id="btn-test-send" data-i18n="test.send">Send</button>
@@ -359,7 +359,7 @@
   </dialog>
 
   <!-- Command Palette -->
-  <div class="command-palette-overlay" id="command-palette" role="dialog" aria-label="Command palette">
+  <div class="command-palette-overlay" id="command-palette" role="dialog" aria-modal="true" aria-label="Command palette">
     <div class="command-palette">
       <input type="text" class="command-palette-input" id="command-input" placeholder="Type a command or search..." aria-label="Command search" aria-autocomplete="list" aria-controls="command-list" aria-activedescendant="">
       <div class="command-palette-list" id="command-list" role="listbox" aria-activedescendant="">

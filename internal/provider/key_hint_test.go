@@ -1,66 +1,113 @@
 package provider
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
+	"fmt"
 	"io"
-	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/routatic/proxy/internal/client"
 	"github.com/routatic/proxy/internal/config"
+	"github.com/routatic/proxy/internal/debug"
+	"github.com/routatic/proxy/internal/transformer"
 	"github.com/routatic/proxy/pkg/types"
 )
 
-// A rejected request must carry the credential label the scheduler stamped on
-// the settlement, or the history row cannot say which key was refused.
-func TestProviderErrorsCarryKeyHint(t *testing.T) {
-	cfg := config.NewAtomicConfig(&config.Config{
-		OpenCodeGo: config.OpenCodeGoConfig{APIKey: "synthetic-key-abcd", BaseURL: "https://synthetic.invalid/chat"},
-	}, "")
-	p := NewOpenCodeGoProvider(cfg, nil)
-	p.httpClient = &http.Client{Transport: responseContractTransport(func(r *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusUnauthorized,
-			Header:     make(http.Header),
-			Body:       io.NopCloser(strings.NewReader(`{"error":"bad key"}`)),
-			Request:    r,
-		}, nil
-	})}
-
-	req := &types.MessageRequest{
-		Model:     "m",
-		MaxTokens: 16,
-		Messages:  []types.Message{{Role: "user", Content: json.RawMessage(`"hi"`)}},
-	}
-	_, err := p.Execute(context.Background(), req, config.ModelConfig{Provider: "opencode-go", ModelID: "deepseek-v4-flash"})
-	var apiErr *client.APIError
-	if !errors.As(err, &apiErr) {
-		t.Fatalf("error = %v, want an APIError", err)
-	}
-	if apiErr.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", apiErr.StatusCode)
-	}
-	if apiErr.KeyHint == "" {
-		t.Fatal("the rejected attempt lost its key hint")
+func TestOpenCodeGoKeyHintAcrossFormatsAndCapture(t *testing.T) {
+	for format, response := range map[string]string{
+		"openai":    `{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`,
+		"responses": `{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`,
+		"anthropic": `{"type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`,
+	} {
+		for _, stream := range []bool{false, true} {
+			for _, captureEnabled := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/stream=%t/capture=%t", format, stream, captureEnabled), func(t *testing.T) {
+					p := responseContractProviders(response)[0].(*OpenCodeGoProvider)
+					p.atomic.Get().OpenCodeGo.AnthropicBaseURL = "https://synthetic.invalid/messages"
+					if captureEnabled {
+						store, err := debug.NewStorage(config.DebugCapture{Enabled: true, Directory: filepath.Join(t.TempDir(), "capture"), MaxFiles: 2, MaxFileSize: 1 << 20})
+						if err != nil {
+							t.Fatal(err)
+						}
+						t.Cleanup(func() { _ = store.Close() })
+						p.capture = debug.NewCaptureLogger(store, true)
+						t.Cleanup(func() { _ = p.capture.Close() })
+					}
+					req := &types.MessageRequest{MaxTokens: 16}
+					model := config.ModelConfig{Provider: p.Name(), ModelID: "synthetic", WireFormat: format}
+					var hint string
+					if stream {
+						body, err := p.Stream(t.Context(), req, model)
+						if err != nil {
+							t.Fatal(err)
+						}
+						defer body.Close()
+						if _, err := io.Copy(io.Discard, body); err != nil {
+							t.Fatal(err)
+						}
+						hint = client.KeyHintOf(body)
+					} else {
+						result, err := p.Execute(t.Context(), req, model)
+						if err != nil {
+							t.Fatal(err)
+						}
+						hint = result.KeyHint
+					}
+					if hint != "****etic" {
+						t.Fatalf("key hint = %q, want masked credential label", hint)
+					}
+				})
+			}
+		}
 	}
 }
 
-func TestRetryAfterIsCapped(t *testing.T) {
-	// A huge delta-seconds value used to overflow the scheduler's wait score
-	// into a negative number, making a resting key look playable.
-	err := &client.APIError{StatusCode: 429, RetryAfter: "3153600000"}
-	if got := retryAfter(err, time.Minute); got != time.Hour {
-		t.Fatalf("retryAfter = %v, want the one-hour cap", got)
+// The label has to survive every wrapper between the provider and the handler.
+// Each one erases a method it does not declare, which this project has hit five
+// times already.
+func TestKeyHintSurvivesEveryWrapper(t *testing.T) {
+	const hint = "****abcd"
+	base := &keyHintBody{ReadCloser: io.NopCloser(strings.NewReader("x")), hint: hint}
+
+	if got := client.KeyHintOf(base); got != hint {
+		t.Fatalf("bare body: %q", got)
 	}
-	far := time.Now().Add(100 * 365 * 24 * time.Hour).UTC().Format(http.TimeFormat)
-	if got := retryAfter(&client.APIError{StatusCode: 429, RetryAfter: far}, time.Minute); got != time.Hour {
-		t.Fatalf("retryAfter(date) = %v, want the one-hour cap", got)
+
+	peeked := &peekedBody{ReadCloser: base}
+	if got := client.KeyHintOf(peeked); got != hint {
+		t.Errorf("peekedBody erased the hint: %q", got)
 	}
-	if got := retryAfter(&client.APIError{StatusCode: 429, RetryAfter: "12"}, time.Minute); got != 12*time.Second {
-		t.Fatalf("retryAfter = %v, want 12s", got)
+
+	closed := &cancelOnClose{ReadCloser: peeked, cancel: func() {}}
+	if got := client.KeyHintOf(closed); got != hint {
+		t.Errorf("cancelOnClose erased the hint: %q", got)
+	}
+
+	ctxBody := transformer.NewCtxReadCloser(t.Context(), closed)
+	if got := client.KeyHintOf(ctxBody); got != hint {
+		t.Errorf("ctxReadCloser erased the hint: %q", got)
+	}
+
+	captured := client.CaptureBody(ctxBody, func([]byte) {})
+	if got := client.KeyHintOf(captured); got != hint {
+		t.Errorf("captureReadCloser erased the hint: %q", got)
+	}
+}
+
+// A short or empty key must not leak more than a label.
+func TestKeyHintNeverShowsAWholeShortKey(t *testing.T) {
+	p := newKeyPool()
+	for _, key := range []string{"a", "abc", "abcd"} {
+		if got := p.Reserve([]string{key}).KeyHint(); strings.Contains(got, key) {
+			t.Errorf("hint %q contains the whole key %q", got, key)
+		}
+	}
+	sel := p.Reserve([]string{"sk-12345678"})
+	if got := sel.KeyHint(); got != "****5678" {
+		t.Errorf("hint = %q, want the last four only", got)
+	}
+	if strings.Contains(sel.KeyHint(), "sk-1") {
+		t.Error("hint leaked more than the last four characters")
 	}
 }

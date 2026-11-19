@@ -114,6 +114,14 @@ func Sync(ctx context.Context, sourceURL, destDir string) (*Lock, error) {
 		cleanup()
 		return nil, fmt.Errorf("chmod catalog temp file: %w", err)
 	}
+	// Flush before rename: a power loss between the two could otherwise leave a
+	// zero-length catalog behind a fresh lock, which suppresses re-download for
+	// the whole TTL.
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		cleanup()
+		return nil, fmt.Errorf("sync catalog temp file: %w", err)
+	}
 	if err := tmpFile.Close(); err != nil {
 		cleanup()
 		return nil, fmt.Errorf("close catalog temp file: %w", err)

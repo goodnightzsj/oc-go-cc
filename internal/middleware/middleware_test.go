@@ -104,3 +104,25 @@ func TestRateLimiterSweepsIdleBuckets(t *testing.T) {
 		t.Fatal("the new client's bucket must be kept")
 	}
 }
+
+func TestGetClientIPAllTrustedHopsFallBackToPeer(t *testing.T) {
+	trusted := mustNets(t, "10.0.0.0/8")
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "10.1.2.3:5555"
+	r.Header.Set("X-Forwarded-For", "10.9.9.9, 10.8.8.8")
+	// Every hop is a trusted proxy, so the leftmost entry is still whatever the
+	// client typed. Only the direct peer is trustworthy.
+	if got := GetClientIP(r, ClientIPOptions{TrustForwardedFor: true, TrustedProxies: trusted}); got != "10.1.2.3" {
+		t.Fatalf("GetClientIP = %q, want the direct peer", got)
+	}
+}
+
+func TestGetClientIPNormalizesIPv6(t *testing.T) {
+	trusted := mustNets(t, "127.0.0.1/32")
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "127.0.0.1:5555"
+	r.Header.Set("X-Forwarded-For", "2001:0db8:0:0:0:0:0:1")
+	if got := GetClientIP(r, ClientIPOptions{TrustForwardedFor: true, TrustedProxies: trusted}); got != "2001:db8::1" {
+		t.Fatalf("GetClientIP = %q, want the canonical IPv6 form", got)
+	}
+}

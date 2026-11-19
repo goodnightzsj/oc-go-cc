@@ -331,3 +331,46 @@ func TestAnthropicFirstRecordsDirectFailures(t *testing.T) {
 		t.Fatalf("record = %+v, want a failed row with the upstream status", recs[0])
 	}
 }
+
+// A stream that ends before its declared length is a failed delivery, not a
+// success with fewer bytes.
+func TestAnthropicFirstRecordsTruncatedStream(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Content-Length", "4096")
+		_, _ = io.WriteString(w, "event: message_start\ndata: {}\n\n")
+		// Returning with fewer bytes than Content-Length makes the client read
+		// fail, which is the truncation this row must record.
+	}))
+	defer upstream.Close()
+
+	store := &captureRequestStorage{}
+	h := newAnthropicFirstTestHandler(upstream.URL, true, http.NotFoundHandler())
+	h.SetAccounting(store, metrics.New())
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-6","stream":true}`))
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	recs := store.records()
+	if len(recs) != 1 {
+		t.Fatalf("recorded %d rows, want 1", len(recs))
+	}
+	if recs[0].Success || recs[0].ErrorMsg == "" {
+		t.Fatalf("record = %+v, want a failed row for the truncated stream", recs[0])
+	}
+}
+
+func TestMetricModelForDirectIsBounded(t *testing.T) {
+	for model, want := range map[string]string{
+		"claude-opus-4-1":   "claude-opus",
+		"claude-sonnet-4-6": "claude-sonnet",
+		"claude-haiku-4-5":  "claude-haiku",
+		"claude-xyz-random": "claude",
+		"gpt-4o":            "unknown",
+		"":                  "unknown",
+	} {
+		if got := metricModelForDirect(model); got != want {
+			t.Errorf("metricModelForDirect(%q) = %q, want %q", model, got, want)
+		}
+	}
+}

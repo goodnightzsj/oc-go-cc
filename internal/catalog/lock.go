@@ -61,6 +61,11 @@ func WriteLock(destDir string, lock *Lock) error {
 		cleanup()
 		return fmt.Errorf("chmod lock temp file: %w", err)
 	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		cleanup()
+		return fmt.Errorf("sync lock temp file: %w", err)
+	}
 	if err := tmpFile.Close(); err != nil {
 		cleanup()
 		return fmt.Errorf("close lock temp file: %w", err)

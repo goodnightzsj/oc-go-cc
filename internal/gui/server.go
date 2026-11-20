@@ -1632,6 +1632,15 @@ func (s *Server) handleCatalogSync(w http.ResponseWriter, r *http.Request) {
 // diagnosis; the caller gets a sentence it can act on without learning the
 // schema, which is what a page that reached this server would otherwise read.
 func writeInternalError(w http.ResponseWriter, msg string, err error) {
+	if errors.Is(err, context.Canceled) {
+		// The reader changed tab or reloaded, and the query was cancelled with
+		// the request. The status still has to say the query did not succeed,
+		// but nobody is listening for it - and logging it as a failure turned
+		// ordinary navigation into ERROR lines in the journal.
+		slog.Debug("dashboard request cancelled", "message", msg)
+		http.Error(w, msg, http.StatusInternalServerError)
+		return
+	}
 	slog.Error("dashboard request failed", "message", msg, "error", err)
 	http.Error(w, msg, http.StatusInternalServerError)
 }

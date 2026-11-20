@@ -5002,13 +5002,23 @@ let activeSiteRequest = null;
 // replace. The wait is bounded so an unreachable endpoint cannot hold boot;
 // failure keeps the DOM default, which the polling applyActiveSite still
 // corrects.
+// activeSitePending is true only while boot is waiting for /api/sites and has
+// no answer yet. It is what keeps the quota page from querying the first
+// platform in the list - a value chosen by list order, not by this deployment -
+// when a cold start or a tab waking from sleep outlives the seed deadline.
+let activeSitePending = false;
+
 async function seedActiveSite() {
   const controller = new AbortController();
   const deadline = setTimeout(() => controller.abort(), 1500);
+  activeSitePending = true;
   try {
     lastActiveSite = (await fetchJSON('/api/sites', {signal: controller.signal})).active || '';
+    activeSitePending = false;
   } catch (_) {
-    // keep the DOM default; applyActiveSite polling corrects it later
+    // Keep the selects on their DOM default but leave the pending flag set:
+    // applyActiveSite answers next, and until it does the quota page waits
+    // instead of querying a platform nobody chose.
   } finally {
     clearTimeout(deadline);
   }
@@ -5028,6 +5038,7 @@ async function applyActiveSite(force = false) {
     const active = (await fetchJSON('/api/sites', {signal: controller.signal})).active || '';
     if (activeSiteRequest !== controller || controller.signal.aborted) return false;
     lastActiveSite = active;
+    activeSitePending = false;
     setViewPlatform(viewPlatformPinned);
     const offered = VIEW_CONTROLS.platform.some(id => {
       const select = document.getElementById(id);
@@ -6468,6 +6479,10 @@ queueMicrotask(async () => {
   // this call's select write a no-op in the common case.
   bootComplete = true;
   applyActiveSite();
+  if (activeSitePending) {
+    // One quick retry covers a slow first request; the 30s poll is the fallback.
+    setTimeout(() => { if (activeSitePending) applyActiveSite(); }, 2000);
+  }
 });
 
 // History pagination controls.
@@ -7729,6 +7744,10 @@ const QuotaModule = {
 
   async loadAccounts(force, billingRefresh = false) {
     if (document.hidden || activeTab !== 'quota') return;
+    // Without the active site, the control holds the first option - a platform
+    // chosen by list order. Querying it spends an account endpoint on a guess
+    // and shows that account's error as if it were this deployment's.
+    if (activeSitePending && !viewPlatformPinned) return;
     const provider = this.provider;
     const changed = this.accountProvider !== provider;
     if (!changed && this.loading) return;
@@ -7770,6 +7789,7 @@ const QuotaModule = {
 
   async loadLocalUsage(force) {
     if (document.hidden || activeTab !== 'quota') return;
+    if (activeSitePending && !viewPlatformPinned) return;
     const provider = this.provider;
     const days = document.getElementById('quota-local-days')?.value || '30';
     const params = new URLSearchParams({provider, days});

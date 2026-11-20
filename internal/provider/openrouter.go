@@ -115,7 +115,10 @@ func (p *OpenRouterProvider) request(ctx context.Context, req *types.MessageRequ
 		return nil, apiErr
 	}
 	if p.capture != nil {
-		return client.CaptureBody(resp.Body, func(data []byte) {
+		// The key hint is attached inside the capture wrapper: the raw body has
+		// none, so wrapping it the other way round left every OpenRouter row with
+		// a NULL key_hint whenever capture was on.
+		return client.CaptureBody(p.withKeyHint(resp.Body, sel), func(data []byte) {
 			p.capture.CaptureUpstreamResponse(rid(ctx), p.Name(), data)
 		}), nil
 	}

@@ -234,6 +234,10 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 	// The direct path is a passthrough; give it the same history and counters
 	// the platform path uses, so its traffic is not invisible in the dashboard.
 	anthropicFirst.SetAccounting(storageWriter, metrics)
+	healthHandler.SetAdmission(func(w http.ResponseWriter, r *http.Request) bool {
+		_, ok := messagesHandler.Admit(w, r)
+		return ok
+	})
 	// The readiness probe needs the direct path's verdict, so it is installed
 	// here rather than with the other health wiring above.
 	healthHandler.SetReadiness(readinessProbe(atomic, provider.NewKeyAvailability(atomic), anthropicFirst.DirectPathDown))

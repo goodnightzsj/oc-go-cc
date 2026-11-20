@@ -564,6 +564,12 @@ func (h *MessagesHandler) clientIPOptions() middleware.ClientIPOptions {
 
 // admitRequest is shared by protocol entry points. Only the internal adapter
 // can carry this marker, so a Responses request consumes the same bucket once.
+// Admit applies the per-client admission policy for a route that does not
+// route inference itself, such as token counting.
+func (h *MessagesHandler) Admit(w http.ResponseWriter, r *http.Request) (*http.Request, bool) {
+	return h.admitRequest(w, r)
+}
+
 func (h *MessagesHandler) admitRequest(w http.ResponseWriter, r *http.Request) (*http.Request, bool) {
 	if requestID, ok := r.Context().Value(admittedRequestKey{}).(string); ok {
 		w.Header().Set("X-Request-ID", requestID)

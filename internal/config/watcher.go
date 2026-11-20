@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -60,7 +61,10 @@ func WatchConfig(ctx context.Context, atomic *AtomicConfig) error {
 
 		case event, ok := <-watcher.Events:
 			if !ok {
-				return nil
+				// The watch was removed underneath us (directory replaced,
+				// unmounted, inotify limit). Returning nil left hot reload dead
+				// until a restart with nothing in the journal saying so.
+				return errors.New("config watcher stopped: the events channel closed")
 			}
 			// Only care about events for our specific config file
 			if filepath.Base(event.Name) != filename {
@@ -85,7 +89,7 @@ func WatchConfig(ctx context.Context, atomic *AtomicConfig) error {
 
 		case err, ok := <-watcher.Errors:
 			if !ok {
-				return nil
+				return errors.New("config watcher stopped: the errors channel closed")
 			}
 			slog.Error("config watcher error", "error", err)
 

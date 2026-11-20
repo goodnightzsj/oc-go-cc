@@ -43,6 +43,10 @@ func NewCaptureLogger(storage *Storage, enabled bool) *CaptureLogger {
 	return cl
 }
 
+// maxCapturedEntry bounds one captured body, matching what the upstream capture
+// wrapper applies to responses.
+const maxCapturedEntry = 1 << 20
+
 // worker is the background goroutine that processes capture entries.
 // It reads from entryChan and writes to storage until the channel is closed.
 func (c *CaptureLogger) worker() {
@@ -66,6 +70,13 @@ func (c *CaptureLogger) capture(phase, requestID, provider string, data []byte) 
 		return
 	}
 
+	// Bound each entry. The queue was limited by entry count alone, and an
+	// inbound request can be 100 MB: a burst of large requests parked ~10 GB in
+	// memory whenever the disk writer fell behind, with capture enabled - which
+	// is exactly when the proxy needs to stay up.
+	if len(data) > maxCapturedEntry {
+		data = data[:maxCapturedEntry]
+	}
 	c.sendEntry(CaptureEntry{
 		Timestamp: time.Now(),
 		Phase:     phase,

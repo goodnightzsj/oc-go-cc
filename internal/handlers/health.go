@@ -24,6 +24,9 @@ type HealthHandler struct {
 	// with no usable credential was indistinguishable from a working one - and
 	// the deploy gate only asks this endpoint.
 	readiness func() (reason string, degraded bool)
+	// admit applies the proxy's per-client admission policy, answering the 429
+	// itself and reporting false. nil leaves the endpoint unthrottled.
+	admit func(http.ResponseWriter, *http.Request) bool
 	// directPath, when set, reports the direct Anthropic passthrough's current
 	// verdict. It is informational: readiness already decides whether it is
 	// degraded, and this is what lets an operator see the path being skipped
@@ -45,6 +48,12 @@ func NewHealthHandler(tokenCounter *token.Counter, fallbackHandler *router.Fallb
 // durable conditions: a transient one would roll back a healthy release.
 func (h *HealthHandler) SetReadiness(fn func() (reason string, degraded bool)) {
 	h.readiness = fn
+}
+
+// SetAdmission installs the per-client admission check this endpoint shares with
+// the inference routes.
+func (h *HealthHandler) SetAdmission(fn func(http.ResponseWriter, *http.Request) bool) {
+	h.admit = fn
 }
 
 // SetDirectPathStatus installs the direct passthrough's availability verdict.
@@ -137,7 +146,12 @@ func (h *HealthHandler) HandleCountTokens(w http.ResponseWriter, r *http.Request
 	// The only entry point that had neither a size cap nor admission. The
 	// decoder allocates whatever the body declares, so one request from a local
 	// process - or a cross-site page - could take the process down and every
-	// stream with it.
+	// stream with it. Admission matters here too: counting runs a tokeniser over
+	// the whole prompt, so an unthrottled caller spends the same CPU that
+	// inference needs.
+	if h.admit != nil && !h.admit(w, r) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxAnthropicBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAnthropicError(w, http.StatusBadRequest, "invalid request", nil)

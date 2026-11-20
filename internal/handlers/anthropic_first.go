@@ -481,37 +481,41 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 	wroteAny, terminated, copyErr := copyStreamingResponse(idleCtx, w, resp.Body, ping)
-	switch {
-	case copyErr == nil && terminated:
-		// A clean end after the protocol's terminal event proves the upstream
-		// served.
-		h.gate.available(attempt)
-	case copyErr == nil && wroteAny:
-		// Truncated after delivery: handled below, where the gate is cooled and
-		// the row is written with the cause.
-	case copyErr == nil || errors.Is(copyErr, errClientGone):
-		// Nothing reached the caller. A caller that left proves nothing against
-		// the upstream; an upstream that closed without a byte does.
-		if !errors.Is(copyErr, errClientGone) {
-			delay := h.gate.failed(time.Now(), attempt, "")
-			h.logger.Warn("Anthropic stream ended without a byte", "retry_in", delay)
-		}
-	default:
-		// The stream died under a caller who is still waiting: that is an
-		// upstream failure, and cooling the path is what moves the next
-		// request to the platform.
-		delay := h.gate.failed(time.Now(), attempt, "")
-		h.logger.Warn("Anthropic stream ended early", "error", copyErr, "retry_in", delay)
-	}
-	if copyErr == nil && !terminated {
+	// The terminal-event rule only applies to a response that was meant to be a
+	// stream. A non-2xx body is the upstream's own answer - a JSON error object
+	// that will never contain message_start - and the status already decided
+	// whether this path is unavailable. Judging it by the marker cooled the
+	// shared gate for one caller's expired key, diverting everyone else.
+	sse := resp.StatusCode >= 200 && resp.StatusCode < 300
+	if copyErr == nil && !terminated && sse {
 		// A clean EOF before message_stop is the commonest truncation: the
 		// upstream closes the chunked body properly after half an answer, so
 		// nothing at the transport level says anything went wrong. Scoring it
 		// as success left the caller with a stream that never ended while the
 		// History tab showed a healthy request.
 		copyErr = fmt.Errorf("direct stream ended before the terminal event: %w", io.ErrUnexpectedEOF)
-		h.gate.failed(time.Now(), attempt, "")
-		h.logger.Warn("Anthropic stream truncated before message_stop", "request_id", requestID)
+	}
+	// One vote per attempt. An empty 2xx body and a truncated one are the same
+	// event, and counting both escalated the backoff twice as fast.
+	switch {
+	case copyErr == nil && terminated:
+		// A clean end after the protocol's terminal event proves the upstream
+		// served.
+		h.gate.available(attempt)
+	case errors.Is(copyErr, errClientGone):
+		// The caller left. That proves nothing against the upstream.
+	case !sse:
+		// The upstream answered with its own status - the caller's 401, a
+		// rejected request. Whether that means the path is unavailable was
+		// decided by isAnthropicAvailabilityFailure before the body was
+		// forwarded.
+	default:
+		delay := h.gate.failed(time.Now(), attempt, "")
+		if wroteAny {
+			h.logger.Warn("Anthropic stream ended early", "error", copyErr, "retry_in", delay)
+		} else {
+			h.logger.Warn("Anthropic stream ended without a byte", "error", copyErr, "retry_in", delay)
+		}
 	}
 	h.recordDirect(requestID, meta.Model, streaming, start, resp.StatusCode, wroteAny, copyErr)
 }

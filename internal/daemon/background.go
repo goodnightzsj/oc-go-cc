@@ -49,9 +49,9 @@ func ForkIntoBackground(opts BackgroundOpts) error {
 	}
 
 	// Open log file for the background process
-	logFile, err := os.OpenFile(paths.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logFile, err := NewRotatingWriter(paths.LogFile, logFileMax)
 	if err != nil {
-		return fmt.Errorf("cannot open log file: %w", err)
+		return err
 	}
 	defer func() { _ = logFile.Close() }()
 
@@ -79,15 +79,15 @@ func ForkIntoBackground(opts BackgroundOpts) error {
 // DaemonizeSetup is called by the child process (when --_daemonize is set).
 // It redirects stdout/stderr to the log file and writes the PID file.
 func DaemonizeSetup(paths *Paths) error {
-	// Redirect stdout and stderr to log file
-	logFile, err := os.OpenFile(paths.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// Redirect stdout and stderr to log file. os.Stdout/os.Stderr are
+	// *os.File, so they get the underlying descriptor; the rotating writer (and
+	// therefore the rotation) is what everything else writes through.
+	logFile, err := NewRotatingWriter(paths.LogFile, logFileMax)
 	if err != nil {
-		return fmt.Errorf("cannot open log file: %w", err)
+		return err
 	}
-
-	// Replace file descriptors so slog (which writes to os.Stdout) works
-	os.Stdout = logFile
-	os.Stderr = logFile
+	os.Stdout = logFile.file
+	os.Stderr = logFile.file
 
 	// Re-initialize the default logger to use the new stdout
 	logger := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{

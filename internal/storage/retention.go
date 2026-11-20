@@ -20,7 +20,7 @@ type Retention struct {
 
 func NewRetention(db *Database, days int) *Retention {
 	if days == 0 {
-		days = 7
+		days = DefaultRetentionDays
 	}
 	return &Retention{
 		db:       db,

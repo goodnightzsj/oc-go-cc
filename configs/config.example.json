@@ -599,7 +599,8 @@
   },
   "storage": {
     "database_path": "",
-    "retention_days": 7,
+    "//_retention_days": "Days a request row is kept. Negative keeps everything. The default (38) covers the 31-day subscription cycle the Quota tab's per-model ledger sums; a shorter window makes that ledger report part of the month as the whole month.",
+    "retention_days": 38,
     "vacuum_on_startup": false
   }
 }

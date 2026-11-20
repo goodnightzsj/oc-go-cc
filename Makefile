@@ -29,9 +29,14 @@ dmg: build-ui
 
 # `start` is the subcommand that runs the proxy and the dashboard; without it
 # this printed cobra's help and exited 0, which reads as "it is running".
-# CGO is off because the darwin tray needs the main thread (see start_gui_darwin.go).
+# -race is on so a development run surfaces data races the same way `make test`
+# does. The binary gets a `-race` suffix so the go tool keeps two build entries
+# instead of invalidating the non-race package cache `make build` and `make
+# test` fill - without it every flip between the two recompiled the world.
+# CGO is off because the darwin tray needs the main thread (see
+# start_gui_darwin.go).
 run:
-	CGO_ENABLED=0 go run -ldflags "$(LDFLAGS)" $(CMD) start
+	CGO_ENABLED=0 go run -race -ldflags "$(LDFLAGS)" $(CMD) start
 
 test:
 	go test ./... -v -race

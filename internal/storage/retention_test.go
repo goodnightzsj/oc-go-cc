@@ -14,8 +14,11 @@ func TestRetentionPolicy(t *testing.T) {
 		want int
 	}{
 		{name: "disabled", days: -1, want: 3},
-		{name: "default", days: 0, want: 2},
-		{name: "configured", days: 1, want: 1},
+		// The default has to outlive the 31-day cycle the Quota tab sums, so
+		// the 10-day-old row is kept; a shorter default would make that panel
+		// report part of a month as the whole month.
+		{name: "default", days: 0, want: 3},
+		{name: "configured_short", days: 1, want: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := DefaultConfig.WithOverlay(Overlay{

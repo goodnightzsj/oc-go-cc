@@ -130,10 +130,16 @@ func (d *Database) storeSummary(key, revision string, summary *RequestSummary) {
 }
 
 type Config struct {
-	DatabasePath    string `json:"database_path"`
-	RetentionDays   int    `json:"retention_days"` // Negative disables cleanup; zero uses the default.
-	VacuumOnStartup bool   `json:"vacuum_on_startup"`
-	WALEnabled      bool   `json:"wal_enabled"`
+	DatabasePath string `json:"database_path"`
+	// RetentionDays bounds how long a request row is kept. Negative disables
+	// cleanup; zero uses DefaultRetentionDays.
+	//
+	// The default is sized by the longest reader of this table: the Quota tab's
+	// monthly view sums the current 31-day subscription cycle, so a shorter
+	// retention silently reports part of the month as the whole month.
+	RetentionDays   int  `json:"retention_days"`
+	VacuumOnStartup bool `json:"vacuum_on_startup"`
+	WALEnabled      bool `json:"wal_enabled"`
 	// AnalyticsBaseline optionally drops requests recorded before this instant
 	// from every analytics aggregate, as an RFC3339 timestamp. Use it when an
 	// older build recorded a token split that cannot be trusted — for example a
@@ -144,9 +150,13 @@ type Config struct {
 	AnalyticsBaseline string `json:"analytics_baseline,omitempty"`
 }
 
+// DefaultRetentionDays covers the 31-day subscription cycle the Quota tab's
+// per-model ledger sums, plus a week of slack for a late-draining window.
+const DefaultRetentionDays = 38
+
 var DefaultConfig = Config{
 	DatabasePath:    "~/.local/share/routatic-proxy/data.db",
-	RetentionDays:   7,
+	RetentionDays:   DefaultRetentionDays,
 	VacuumOnStartup: false,
 	WALEnabled:      true,
 }

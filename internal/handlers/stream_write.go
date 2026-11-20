@@ -56,6 +56,13 @@ func (w *responseWriter) writeIO(timeout time.Duration, write func() error) erro
 // Caller holds mu. Local failures bypass the source decoder and end any
 // already-forwarded partial frame before emitting their own terminal event.
 func (w *responseWriter) writeErrorEvent(data []byte) error {
+	// An Anthropic error event is terminal. When the upstream already sent one,
+	// the bytes are on the wire and a second event both violates that and hides
+	// the real cause from a client that surfaces the last error it saw.
+	if w.sourceErrored {
+		return nil
+	}
+	w.sourceErrored = true
 	return w.writeIO(w.writeTimeout, func() error {
 		if !w.wroteHeader {
 			w.wroteHeader = true

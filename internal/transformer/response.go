@@ -150,9 +150,16 @@ func (t *ResponseTransformer) transformContent(msg types.ChatMessage) ([]types.C
 			}
 		}
 
+		// A gateway may omit the call id. The streaming path generates one in
+		// the same shape; without it the client sends tool_use_id "" back and the
+		// next request fails upstream.
+		toolID := tc.ID
+		if toolID == "" {
+			toolID = fmt.Sprintf("toolu_%s", generateID())
+		}
 		blocks = append(blocks, types.ContentBlock{
 			Type:  "tool_use",
-			ID:    tc.ID,
+			ID:    toolID,
 			Name:  tc.Function.Name,
 			Input: inputJSON,
 		})
@@ -222,6 +229,11 @@ func mapHTTPStatusToErrorType(statusCode int) string {
 		return "permission_error"
 	case statusCode == 404:
 		return "not_found_error"
+	case statusCode == 405, statusCode == 413, statusCode == 415, statusCode == 422:
+		// The request itself is unusable. Every 4xx that is not about identity
+		// or a missing route belongs here; "api_error" described a refusal the
+		// caller could actually fix.
+		return "invalid_request_error"
 	case statusCode == 429:
 		return "rate_limit_error"
 	case statusCode >= 500:

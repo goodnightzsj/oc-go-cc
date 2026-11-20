@@ -110,7 +110,8 @@ func (h *HealthHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 // display real-time proxy health without polling the full /health endpoint.
 func (h *HealthHandler) HandleStatusline(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		w.Header().Set("Allow", http.MethodGet)
+		writeAnthropicError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -126,7 +127,8 @@ func (h *HealthHandler) HandleStatusline(w http.ResponseWriter, r *http.Request)
 // HandleCountTokens handles POST /v1/messages/count_tokens.
 func (h *HealthHandler) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		w.Header().Set("Allow", http.MethodPost)
+		writeAnthropicError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
 		return
 	}
 
@@ -138,14 +140,14 @@ func (h *HealthHandler) HandleCountTokens(w http.ResponseWriter, r *http.Request
 	// stream with it.
 	r.Body = http.MaxBytesReader(w, r.Body, maxAnthropicBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+		writeAnthropicError(w, http.StatusBadRequest, "invalid request", nil)
 		return
 	}
 
 	// Count tokens.
 	systemText, err := systemAndToolsTokenText(body.SystemText(), body.Tools)
 	if err != nil {
-		http.Error(w, "failed to process tools", http.StatusBadRequest)
+		writeAnthropicError(w, http.StatusBadRequest, "failed to process tools", nil)
 		return
 	}
 	messages := tokenMessagesFromAnthropic(body.Messages)

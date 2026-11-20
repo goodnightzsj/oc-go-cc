@@ -11,8 +11,36 @@ import (
 	"github.com/routatic/proxy/pkg/types"
 )
 
+// errorTypeForStatus names the cause in the taxonomy this API documents. Every
+// error event used to say "api_error" whatever had happened, so a client that
+// branches on the type - rate_limit_error in particular - could not tell a
+// rate limit from a server fault. The status code was the only clue and it is a
+// nonstandard extension field.
+func errorTypeForStatus(status int) string {
+	switch {
+	case status == http.StatusTooManyRequests:
+		return "rate_limit_error"
+	case status == http.StatusServiceUnavailable:
+		return "overloaded_error"
+	case status == http.StatusBadRequest, status == http.StatusRequestEntityTooLarge, status == http.StatusUnprocessableEntity:
+		return "invalid_request_error"
+	default:
+		return "api_error"
+	}
+}
+
 func streamErrorDetails(message string, cause error) types.APIError {
-	details := types.APIError{Type: "api_error", Message: message}
+	return settleErrorType(streamErrorCause(message, cause))
+}
+
+// settleErrorType names the cause once its status is known.
+func settleErrorType(details types.APIError) types.APIError {
+	details.Type = errorTypeForStatus(details.StatusCode)
+	return details
+}
+
+func streamErrorCause(message string, cause error) types.APIError {
+	details := types.APIError{Message: message}
 	var cooling *core.KeysCoolingError
 	if errors.As(cause, &cooling) {
 		details.StatusCode = http.StatusServiceUnavailable

@@ -87,11 +87,14 @@ type responseWriter struct {
 	// handler has to be able to tell "the caller has seen an answer" from "the
 	// SSE status line has been committed", because an upstream that answers 200
 	// and then sends nothing can still be replaced by the next model.
-	payloadWritten  bool
-	sseDecoder      sse.Decoder
-	messageStopped  bool
-	stopReason      string
-	streamErr       error
+	payloadWritten bool
+	sseDecoder     sse.Decoder
+	messageStopped bool
+	stopReason     string
+	streamErr      error
+	// sourceErrored records that the upstream's own terminal error event has
+	// already reached the caller, so the handler does not append a second one.
+	sourceErrored   bool
 	writeErr        error
 	writeTimeout    time.Duration
 	cancelWrites    context.CancelFunc
@@ -217,6 +220,7 @@ func (w *responseWriter) observeSSEEvent(name string, data []byte, needContent b
 		w.messageStopped = true
 	case "error":
 		w.streamErr = errors.New("upstream reported an SSE error")
+		w.sourceErrored = true
 	}
 	if event.Type == "content_block_start" || event.Type == "content_block_delta" {
 		w.contentWritten = true

@@ -3,6 +3,8 @@ package transformer
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/core"
@@ -415,7 +417,11 @@ func GeminiToNormalized(geminiResp *types.GeminiResponse, modelID string) (_ *co
 	if err := upstreamJSONError("Gemini", geminiResp.Error); err != nil {
 		return nil, err
 	}
+	// Gemini reports no response id. An Anthropic message id is always present,
+	// and clients trace, dedupe and correlate on it; the streaming path already
+	// generates one.
 	nr := &core.NormalizedResponse{
+		ID:    "msg_" + strconv.FormatInt(time.Now().UnixNano(), 10),
 		Model: modelID,
 	}
 	if geminiResp.PromptFeedback != nil && geminiResp.PromptFeedback.BlockReason != "" {

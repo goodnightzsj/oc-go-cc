@@ -54,7 +54,8 @@ func TestStreamTerminationContracts(t *testing.T) {
 		{"anthropic-late-usage", core.WireFormatAnthropic, "data: {\"type\":\"message_stop\"}\n\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":3}}\n\n", false, false},
 		{"anthropic-late-extension", core.WireFormatAnthropic, "data: {\"type\":\"message_stop\"}\n\ndata: {\"type\":\"ping\"}\n\ndata: {\"type\":\"future_extension\"}\n\n", false, false},
 		{"gemini-safety", core.WireFormatGemini, "data: {\"promptFeedback\":{\"blockReason\":\"SAFETY\"}}\n\n", false, false},
-		{"gemini-failure", core.WireFormatGemini, "data: {\"candidates\":[{\"finishReason\":\"OTHER\"}]}\n\n", false, true},
+		{"gemini-other-is-a-terminal", core.WireFormatGemini, "data: {\"candidates\":[{\"finishReason\":\"OTHER\"}]}\n\n", false, false},
+		{"gemini-failure", core.WireFormatGemini, "data: {\"error\":{\"code\":503,\"message\":\"synthetic\"}}\n\n", false, true},
 		{"responses-length", core.WireFormatOpenAIResponses, "event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n", false, false},
 		{"responses-failed", core.WireFormatOpenAIResponses, "event: response.failed\ndata: {\"type\":\"response.failed\"}\n\n", false, true},
 	} {

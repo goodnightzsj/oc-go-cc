@@ -488,6 +488,16 @@ func geminiFinishReason(reason string) (string, error) {
 		return "max_tokens", nil
 	case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT":
 		return "refusal", nil
+	// Gemini's other documented terminals. The model answered; the reason only
+	// says the turn ended for a non-safety cause - OTHER (an unspecified stop,
+	// including upstream-side filter blocks Gemini does not classify),
+	// FINISH_REASON_UNSPECIFIED, LANGUAGE, MALFORMED_FUNCTION_CALL and
+	// UNEXPECTED_TOOL_CALL. Reporting these as errors turned a completed reply
+	// into a stream failure with no message_delta and no message_stop.
+	case "OTHER", "FINISH_REASON_UNSPECIFIED", "LANGUAGE":
+		return "end_turn", nil
+	case "MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL":
+		return "tool_use", nil
 	default:
 		return "", fmt.Errorf("unsuccessful or missing Gemini finish reason %q", reason)
 	}

@@ -47,7 +47,9 @@ func TestSourceTerminalEdgeCases(t *testing.T) {
 			t.Fatalf("empty refusal lost: %+v", got)
 		}
 	}
-	for _, raw := range []string{`{}`, `{"candidates":[{"finishReason":"MALFORMED_FUNCTION_CALL"}]}`, `{"error":{"code":503,"message":"synthetic"}}`} {
+	// A documented terminal reason is a completed answer, not a failure. Only an
+	// absent reason or an upstream error object is one.
+	for _, raw := range []string{`{}`, `{"error":{"code":503,"message":"synthetic"}}`} {
 		var response types.GeminiResponse
 		if err := json.Unmarshal([]byte(raw), &response); err != nil {
 			t.Fatal(err)

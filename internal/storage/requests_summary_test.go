@@ -281,3 +281,29 @@ func TestObservedChannelsFollowsTheRevisionCounter(t *testing.T) {
 		t.Fatalf("channels after a new write = %v, want one containing zeta", after)
 	}
 }
+
+// The caller's X-Request-ID has to come back out of the history: it is the only
+// value a client can quote, and it used to exist nowhere but the response
+// header while the dashboard showed a per-execution UUID under that name.
+func TestRequestIDRoundTripsAndIsSearchable(t *testing.T) {
+	db := newCostTestDB(t)
+	repo := NewRequests(db)
+	rec := history.RequestRecord{
+		ID:        "row-1",
+		RequestID: "client-correlation-42",
+		Model:     "m",
+		Provider:  "cline-pass",
+		StartTime: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+		Success:   true,
+	}
+	if err := repo.Insert(rec); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	rows, _, err := repo.Query(t.Context(), RequestQuery{Search: "correlation-42", Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if len(rows) != 1 || rows[0].RequestID != "client-correlation-42" {
+		t.Fatalf("rows = %+v, want the row carrying the client id", rows)
+	}
+}

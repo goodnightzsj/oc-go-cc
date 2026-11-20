@@ -492,7 +492,7 @@ func (r *Requests) Query(ctx context.Context, q RequestQuery) ([]history.Request
 
 	selectArgs := append(append([]any{}, args...), q.PageSize, offset)
 	rows, err := r.db.DB().QueryContext(ctx, `
-		SELECT id, model, requested_model, provider, scenario, start_time, duration_ms,
+		SELECT id, COALESCE(request_id, ''), model, requested_model, provider, scenario, start_time, duration_ms,
 		       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens,
 		       cost_usd, cost_source, details_known, `+observedOutcome+`, streaming, success, error_msg, attempt,
 		       peak_multiplier, upstream_channel, upstream_model, response_model, first_byte_ms, reasoning_effort,
@@ -696,6 +696,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		// scan them as nullable booleans instead of failing on NULL.
 		var detailsKnown, streaming, success sql.NullInt64
 
+		var requestID sql.NullString
 		var attempt, candidatePosition sql.NullInt64
 		var costUSD sql.NullFloat64
 		var costSource sql.NullString
@@ -708,6 +709,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		var peakMul float64
 		err := rows.Scan(
 			&rec.ID,
+			&requestID,
 			&rec.Model,
 			&requestedModel,
 			&provider,
@@ -750,6 +752,7 @@ func scanRequests(rows *sql.Rows) ([]history.RequestRecord, error) {
 		rec.UpstreamModel = upstreamModel.String
 		rec.ResponseModel = responseModel.String
 		rec.FirstByte = time.Duration(firstByteMS.Int64) * time.Millisecond
+		rec.RequestID = requestID.String
 		rec.ReasoningEffort = reasoningEffort.String
 		rec.KeyHint = keyHint.String
 		rec.PeakMultiplier = peakMul

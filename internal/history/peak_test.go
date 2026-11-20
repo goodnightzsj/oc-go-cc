@@ -332,3 +332,35 @@ func TestOpenRouterPeakMatchesThePublishedOverrides(t *testing.T) {
 		}
 	}
 }
+
+// The rules the price refresh derives from OpenRouter's own payload are the ones
+// that price traffic; the static table is only the seed before the first
+// refresh. Nothing exercised that path before.
+func TestDerivedPeakRulesPriceTheRuntimePath(t *testing.T) {
+	t.Cleanup(resetDerivedPeakRules)
+	SetDerivedPeakRules("openrouter", []PeakRuleSpec{{
+		Models:     []string{"tencent/hy3"},
+		Windows:    []PeakWindow{{Start: 0, End: 16}},
+		Multiplier: 1.6,
+		AllDays:    true,
+	}})
+
+	inside := time.Date(2026, 9, 6, 9, 0, 0, 0, time.UTC)   // Sunday, inside the window
+	outside := time.Date(2026, 9, 7, 20, 0, 0, 0, time.UTC) // Monday, outside it
+	if got := ProviderPeakMultiplier("openrouter", "tencent/hy3", inside); got != 1.6 {
+		t.Fatalf("inside window = %v, want 1.6", got)
+	}
+	if got := ProviderPeakMultiplier("openrouter", "tencent/hy3", outside); got != 1 {
+		t.Fatalf("outside window = %v, want 1", got)
+	}
+}
+
+// A refresh that produced no rules is still a statement. Falling back to the
+// static table would reinstate a schedule the payload had already contradicted.
+func TestEmptyDerivedRulesDoNotFallBackToTheSeed(t *testing.T) {
+	SetDerivedPeakRules("openrouter", nil)
+	if got := ProviderPeakMultiplier("openrouter", "tencent/hy3", time.Date(2026, 9, 7, 3, 0, 0, 0, time.UTC)); got != 1 {
+		t.Fatalf("multiplier = %v after an empty refresh, want 1 (the seed must not return)", got)
+	}
+	t.Cleanup(resetDerivedPeakRules)
+}

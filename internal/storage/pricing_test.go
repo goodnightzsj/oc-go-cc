@@ -125,6 +125,16 @@ func TestParseRequestTime(t *testing.T) {
 // rather than from a platform table; any pair works, and the assertion is
 // against the off-peak cost of the same tokens.
 func TestOpenRouterFractionalPeakSurvivesTheCostPath(t *testing.T) {
+	// Install the rule the payload derives, rather than relying on the static
+	// seed table: the seed is only what applies before the first refresh, and a
+	// derived rule for this platform replaces it wholesale.
+	history.SetDerivedPeakRules("openrouter", []history.PeakRuleSpec{{
+		Models:     []string{"tencent/hy3"},
+		Windows:    []history.PeakWindow{{Start: 0, End: 16}},
+		Multiplier: 1.6,
+		AllDays:    true,
+	}})
+
 	in := sql.NullFloat64{Float64: 0.0825, Valid: true} // hy3's catalog input rate
 	out := sql.NullFloat64{Float64: 0.33, Valid: true}  // and its output rate
 	const tokens = 1_000_000

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"regexp"
@@ -1010,13 +1011,17 @@ type openRouterBand struct {
 }
 
 type openRouterOverride struct {
-	UTCStart        *int   `json:"utc_start"`
-	UTCEnd          *int   `json:"utc_end"`
-	MinPromptTokens *int64 `json:"min_prompt_tokens"`
-	Prompt          string `json:"prompt"`
-	Completion      string `json:"completion"`
-	InputCacheRead  string `json:"input_cache_read"`
-	InputCacheWrite string `json:"input_cache_write"`
+	UTCStart *int `json:"utc_start"`
+	UTCEnd   *int `json:"utc_end"`
+	// UTCDays restricts a window to named days. The parser does not model day
+	// sets, and applying such a window every day would charge weekend rates at
+	// peak, so a band that states it is left out entirely.
+	UTCDays         json.RawMessage `json:"utc_days"`
+	MinPromptTokens *int64          `json:"min_prompt_tokens"`
+	Prompt          string          `json:"prompt"`
+	Completion      string          `json:"completion"`
+	InputCacheRead  string          `json:"input_cache_read"`
+	InputCacheWrite string          `json:"input_cache_write"`
 }
 
 type openRouterModel struct {
@@ -1045,14 +1050,12 @@ func parseOpenRouterPrices(raw []byte) ([]priceEntry, []history.PeakRuleSpec, er
 		if id == "" {
 			continue
 		}
-		entry, spec, ok := openRouterEntry(id, m)
+		entry, specs, ok := openRouterEntry(id, m)
 		if !ok {
 			continue
 		}
 		entries = append(entries, entry)
-		if spec != nil {
-			rules = append(rules, *spec)
-		}
+		rules = append(rules, specs...)
 	}
 	if len(entries) == 0 {
 		return nil, nil, fmt.Errorf("no usable rows")
@@ -1062,7 +1065,7 @@ func parseOpenRouterPrices(raw []byte) ([]priceEntry, []history.PeakRuleSpec, er
 
 // openRouterEntry turns one model's payload into a rate entry and, when the
 // model publishes time windows, the peak rule that prices them.
-func openRouterEntry(id string, m openRouterModel) (priceEntry, *history.PeakRuleSpec, bool) {
+func openRouterEntry(id string, m openRouterModel) (priceEntry, []history.PeakRuleSpec, bool) {
 	headline := openRouterBand{start: -1, end: -1}
 	var inOK, outOK bool
 	headline.prompt, inOK = perTokenToPerMillion(m.Pricing.Prompt)
@@ -1092,6 +1095,9 @@ func openRouterEntry(id string, m openRouterModel) (priceEntry, *history.PeakRul
 			continue
 		}
 		if override.UTCStart == nil || override.UTCEnd == nil {
+			continue
+		}
+		if len(override.UTCDays) > 0 && string(override.UTCDays) != "null" {
 			continue
 		}
 		band := openRouterBand{start: *override.UTCStart, end: *override.UTCEnd}
@@ -1147,32 +1153,56 @@ func openRouterEntry(id string, m openRouterModel) (priceEntry, *history.PeakRul
 		entry.Tiers = tiers
 	}
 
-	// Time-scoped bands above the base rate are peak rules. The payload states
-	// no day condition on any of them today, so they apply every day; a rule
-	// that forgot that would silently drop weekend peak hours.
-	var windows []history.PeakWindow
-	multiplier := 1.0
+	// Time-scoped bands above the base rate are peak rules, grouped by
+	// multiplier: two windows that bill at different rates cannot share one
+	// rule, and collapsing them used to apply whichever came last to both.
+	byMultiplier := make(map[float64][]history.PeakWindow)
 	for _, band := range bands {
-		if band.start < 0 || band.prompt <= base.prompt || base.prompt <= 0 {
+		if band.start < 0 || base.prompt <= 0 || band.prompt <= base.prompt {
 			continue
 		}
-		windows = append(windows, peakWindows(band.start, band.end)...)
-		multiplier = band.prompt / base.prompt
+		// A band whose two sides do not scale by the same factor cannot be
+		// expressed as one multiplier. Skipping it prices that window at base
+		// rather than guessing which side to overcharge.
+		promptRatio := band.prompt / base.prompt
+		outputRatio := 1.0
+		if base.completion > 0 {
+			outputRatio = band.completion / base.completion
+		}
+		if math.Abs(promptRatio-outputRatio) > 0.01 {
+			continue
+		}
+		windows := peakWindows(band.start, band.end)
+		if len(windows) == 0 {
+			continue
+		}
+		key := math.Round(promptRatio*1000) / 1000
+		byMultiplier[key] = append(byMultiplier[key], windows...)
 	}
-	if len(windows) == 0 || multiplier <= 1 {
+	if len(byMultiplier) == 0 {
 		return entry, nil, true
 	}
-	return entry, &history.PeakRuleSpec{
-		Models:     []string{id},
-		Windows:    windows,
-		Multiplier: multiplier,
-		AllDays:    true,
-	}, true
+	specs := make([]history.PeakRuleSpec, 0, len(byMultiplier))
+	for multiplier, windows := range byMultiplier {
+		specs = append(specs, history.PeakRuleSpec{
+			Models:     []string{id},
+			Windows:    windows,
+			Multiplier: multiplier,
+			AllDays:    true,
+		})
+	}
+	return entry, specs, true
 }
 
 // peakWindows converts one utc_start/utc_end pair, both HHMM, into hour ranges.
 // A window that crosses midnight comes back as two ranges.
 func peakWindows(startHHMM, endHHMM int) []history.PeakWindow {
+	// PeakWindow is whole hours. A window that starts or ends mid-hour would be
+	// rounded by half an hour in each direction, so it is left unmodelled rather
+	// than mis-billed.
+	if startHHMM%100 != 0 || endHHMM%100 != 0 {
+		return nil
+	}
 	start, end := startHHMM/100, endHHMM/100
 	if start < 0 || start > 23 || end < 0 || end > 24 || start == end {
 		return nil

@@ -265,7 +265,9 @@ func metricModelForDirect(model string) string {
 // and cost stay unknown (details_known=0) rather than invented. Success requires
 // both a non-error status and a complete body copy.
 func (h *AnthropicFirstHandler) recordDirect(model string, streaming bool, start time.Time, status int, wroteAny bool, copyErr error) {
-	success := status < 400 && copyErr == nil
+	// A stream that delivered nothing is not a success even though it ended
+	// cleanly: the caller got an empty answer and the gate must not stay warm.
+	success := status < 400 && copyErr == nil && (!streaming || wroteAny)
 	clientGone := errors.Is(copyErr, errClientGone)
 	if h.metrics != nil {
 		metricModel := metricModelForDirect(model)
@@ -441,6 +443,16 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 			h.serveFallback(w, r, body, requestID)
 			return
 		}
+		if len(payload) == 0 && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.StatusCode != http.StatusNoContent {
+			// 200 with an empty body is the commonest way a broken direct path
+			// looks: headers fine, nothing behind them. The status is still
+			// uncommitted, so this can fall back - and it must, or every later
+			// request repeats the same empty answer.
+			delay := h.gate.failed(time.Now(), attempt, "")
+			h.logger.Warn("Anthropic returned an empty body, using OpenCode", "retry_in", delay)
+			h.serveFallback(w, r, body, requestID)
+			return
+		}
 		// The body arrived in full: that, not the header, is what says this
 		// upstream is serving. Settling before the client write also keeps a
 		// caller who leaves mid-write from being read as an upstream failure.
@@ -469,10 +481,16 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	wroteAny, copyErr := copyStreamingResponse(idleCtx, w, resp.Body, ping)
 	switch {
-	case copyErr == nil || errors.Is(copyErr, errClientGone):
-		// A clean end proves the upstream served; a caller that left proves
-		// nothing against it.
+	case copyErr == nil && wroteAny:
+		// A clean end after delivering something proves the upstream served.
 		h.gate.available(attempt)
+	case copyErr == nil || errors.Is(copyErr, errClientGone):
+		// Nothing reached the caller. A caller that left proves nothing against
+		// the upstream; an upstream that closed without a byte does.
+		if !errors.Is(copyErr, errClientGone) {
+			delay := h.gate.failed(time.Now(), attempt, "")
+			h.logger.Warn("Anthropic stream ended without a byte", "retry_in", delay)
+		}
 	default:
 		// The stream died under a caller who is still waiting: that is an
 		// upstream failure, and cooling the path is what moves the next

@@ -364,3 +364,23 @@ func TestCommandCodePresetIsIndependent(t *testing.T) {
 		t.Fatal("default must use native Messages with image support")
 	}
 }
+
+// Every preset must produce a file that its own printed export line satisfies.
+// Three of them used to carry a top-level "${ROUTATIC_PROXY_API_KEY}" pool next
+// to the provider block, so following the instructions left a placeholder that
+// validate and start both reject.
+func TestProviderPresetsValidateWithTheirOwnEnvVar(t *testing.T) {
+	for name, preset := range providerPresets {
+		t.Run(name, func(t *testing.T) {
+			text := preset.Generator()
+			t.Setenv(preset.EnvVarName, "synthetic-key-for-validation")
+			cfg, err := config.LoadJSON([]byte(text))
+			if err != nil {
+				t.Fatalf("preset %s does not load with %s set: %v", name, preset.EnvVarName, err)
+			}
+			if len(cfg.ProviderAPIKeys(name)) == 0 {
+				t.Fatalf("preset %s produced no credential for its own platform", name)
+			}
+		})
+	}
+}

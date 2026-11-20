@@ -49,6 +49,16 @@ func newBaseProvider(atomic *config.AtomicConfig) baseProvider {
 		atomic: atomic,
 		httpClient: &http.Client{
 			Transport: &countingTransport{transport},
+			// Go copies non-sensitive headers to a redirect target; x-api-key is
+			// not on its sensitive list, and this proxy sets it alongside
+			// Authorization. An upstream (or a hop in front of it) that answers
+			// 3xx would hand the credential to whatever host it names.
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) > 0 && req.URL.Host != via[0].URL.Host {
+					return fmt.Errorf("refusing cross-host redirect to %s", req.URL.Host)
+				}
+				return nil
+			},
 		},
 		keys: newKeyPool(),
 	}

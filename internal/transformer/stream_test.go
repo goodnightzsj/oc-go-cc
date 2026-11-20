@@ -1273,3 +1273,32 @@ func TestProxyStream_ToolCallsForceToolUseStopReason(t *testing.T) {
 	}
 	t.Fatal("no message_delta event")
 }
+
+// A gateway that sends tool_calls, then text, then finish_reason "stop" still
+// emitted a tool call. Closing the tool block early (so the text gets its own
+// index) used to clear the only record that a tool was emitted, and the stop
+// reason fell back to end_turn - the bug this whole path exists to prevent.
+func TestProxyStream_ToolThenTextStillEndsWithToolUse(t *testing.T) {
+	for _, middle := range []string{
+		`{"choices":[{"delta":{"content":"done"}}]}`,
+		`{"choices":[{"delta":{"reasoning_content":"thinking"}}]}`,
+	} {
+		w := newMockResponseWriter()
+		body := sseLines(
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"toolu_1","type":"function","function":{"name":"search","arguments":"{}"}}]}}]}`,
+			middle,
+			`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		)
+		if err := NewStreamHandler().ProxyStream(w, body, "synthetic", t.Context(), 0, func() {}); err != nil {
+			t.Fatalf("ProxyStream error: %v", err)
+		}
+		for _, event := range parseSSEEvents(t, w.buf.String()) {
+			if event.Type == "message_delta" && event.Delta != nil {
+				if event.Delta.StopReason != "tool_use" {
+					t.Fatalf("stop_reason = %q after %s, want tool_use", event.Delta.StopReason, middle)
+				}
+				break
+			}
+		}
+	}
+}

@@ -106,6 +106,24 @@ func LoadFromPath(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// stripCommentKeys removes "//"-prefixed keys at every level. The example
+// config uses them inside blocks too (anthropic_first, workbuddy), and a
+// top-level-only sweep made `validate` reject the repository's own reference
+// file.
+func stripCommentKeys(value map[string]json.RawMessage) map[string]json.RawMessage {
+	for key, raw := range value {
+		if strings.HasPrefix(key, "//") {
+			delete(value, key)
+			continue
+		}
+		var nested map[string]json.RawMessage
+		if len(raw) > 0 && raw[0] == '{' && json.Unmarshal(raw, &nested) == nil {
+			value[key], _ = json.Marshal(stripCommentKeys(nested))
+		}
+	}
+	return value
+}
+
 // CheckUnknownFields reports an unrecognised key in the file at path. The
 // validate command uses it; the running proxy only warns.
 func CheckUnknownFields(path string) error {
@@ -132,12 +150,7 @@ func UnknownFields(data []byte) error {
 	if err := json.Unmarshal(data, &top); err != nil {
 		return err
 	}
-	for key := range top {
-		if strings.HasPrefix(key, "//") {
-			delete(top, key)
-		}
-	}
-	cleaned, err := json.Marshal(top)
+	cleaned, err := json.Marshal(stripCommentKeys(top))
 	if err != nil {
 		return err
 	}
@@ -438,7 +451,7 @@ func validate(cfg *Config) error {
 		// platform. Both cannot hold, and silently letting one win made the
 		// selector lie about where traffic went.
 		if cfg.ActiveSite != "" {
-			return invalid("active_site", "routing_conflict", "active_site cannot be combined with anthropic_first.enabled: the first routes every request to one platform, the second sends it to Anthropic before any platform is considered")
+			return invalid("active_site", "routing_conflict", "active_site cannot be combined with anthropic_first.enabled: the first routes every request to one platform, the second sends it to Anthropic before any platform is considered (remove one of the two)")
 		}
 	}
 

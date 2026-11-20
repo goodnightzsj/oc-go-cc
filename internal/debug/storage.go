@@ -119,9 +119,14 @@ func (s *Storage) ensureDirectory() error {
 
 // rotateFile closes the current file and creates a new one.
 func (s *Storage) rotateFile() error {
-	// Close existing file
+	// Close existing file. The pointer is cleared first: if anything below fails
+	// (disk full, EMFILE), the next WriteEntry must not try to use a closed file
+	// forever.
 	if s.currentFile != nil {
-		if err := s.currentFile.Close(); err != nil {
+		err := s.currentFile.Close()
+		s.currentFile = nil
+		s.currentSize = 0
+		if err != nil {
 			return fmt.Errorf("closing capture file: %w", err)
 		}
 		s.fileCount++

@@ -242,12 +242,6 @@ func (w *responseWriter) sourceTerminalObserved() bool {
 
 // finish checks the observed protocol terminal event before accounting. An
 // output adapter may still fail while serializing its own terminal response.
-// hasStopped reports whether the terminal event has already been forwarded.
-func (w *responseWriter) hasStopped() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.messageStopped
-}
 
 func (w *responseWriter) finish() error {
 	w.mu.Lock()
@@ -342,24 +336,6 @@ func (w *responseWriter) getOutputTokens() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.usage.outputTokens
-}
-
-// isLowValueResponse decides whether a completed stream should be treated as a
-// failure and trigger fallback. Currently this applies to long_context and
-// complex scenarios when the model produced very little output.
-func isLowValueResponse(scenario router.Scenario, outputTokens int, hasContent bool) bool {
-	if outputTokens >= 64 {
-		return false
-	}
-	if hasContent {
-		return false
-	}
-	switch scenario {
-	case router.ScenarioLongContext, router.ScenarioComplex:
-		return true
-	default:
-		return false
-	}
 }
 
 // headerWritten returns true if headers have been written to the response.
@@ -1169,7 +1145,7 @@ func (h *MessagesHandler) handleStreaming(
 				return false // abort
 			}
 			recordStreamFailure(model, err, action, true)
-			if err == transformer.ErrStreamIdle {
+			if errors.Is(err, transformer.ErrStreamIdle) {
 				h.logger.Warn("upstream "+action+" stream idle, trying next model",
 					"model", model.ModelID, "idle_timeout", idleTimeout)
 				if rw.ssePayloadWritten {
@@ -1296,24 +1272,6 @@ func (h *MessagesHandler) handleStreaming(
 				errProxy = fmt.Errorf("streaming timeout (%v) exceeded", timeout)
 			}
 			if !handleStreamError(errProxy, model, wireFormat.String()) {
-				return
-			}
-			continue
-		}
-
-		// OpenRouter's former Chat Completions path accepted completed empty
-		// replies. Moving its transport must not add this provider heuristic.
-		//
-		// Only while the stream is still open. The check runs after ProxyStream
-		// has already written message_stop for a complete response, and an error
-		// frame after the terminal event is the one ordering this proxy refuses
-		// from its own upstreams: the client would have a finished answer and a
-		// failure for the same request.
-		if !native && !rw.isRefusal() && providerName != client.ProviderOpenRouter && !rw.hasStopped() && isLowValueResponse(scenario, rw.getOutputTokens(), rw.hasContent()) {
-			h.logger.Warn("upstream returned low-value response, triggering fallback",
-				"model", model.ModelID, "provider", model.Provider,
-				"scenario", scenario, "output_tokens", rw.getOutputTokens())
-			if !handleStreamError(transformer.ErrEmptyStream, model, wireFormat.String()) {
 				return
 			}
 			continue

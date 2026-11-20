@@ -392,22 +392,21 @@ func stopCmd() *cobra.Command {
 // statusCmd returns the command to check server status.
 func statusCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "status",
-		Short: "Check server status",
+		Use:          "status",
+		Short:        "Check server status",
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pidPath := getPIDPath()
 			pid, err := daemon.GetPID(pidPath)
 			if err != nil {
 				// A non-zero exit is what lets a script ask this question at
 				// all: `if routatic-proxy status` used to be always true.
-				fmt.Println("Server is not running")
 				return fmt.Errorf("server is not running")
 			}
 
 			if !daemon.IsOurProcess(pid, daemon.AppName) {
-				fmt.Println("Server is not running (stale PID file)")
 				_ = os.Remove(pidPath)
-				return fmt.Errorf("server is not running")
+				return fmt.Errorf("server is not running (removed stale PID file %s)", pidPath)
 			}
 
 			fmt.Printf("Server is running (PID %d)\n", pid)
@@ -523,7 +522,7 @@ func validateCmd() *cobra.Command {
 			// both had a side effect and checked a database nothing would serve
 			// from. A path that cannot be opened is worth knowing about here,
 			// which is why the directory is checked rather than written.
-			dbDir := filepath.Dir(storageConfig(cfg).DatabasePath)
+			dbDir := filepath.Dir(config.ExpandHome(storageConfig(cfg).DatabasePath))
 			if info, statErr := os.Stat(dbDir); statErr != nil {
 				fmt.Printf("  Warning: database directory %s does not exist yet\n", dbDir)
 			} else if !info.IsDir() {

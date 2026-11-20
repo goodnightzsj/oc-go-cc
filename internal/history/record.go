@@ -403,14 +403,6 @@ func PeakMultiplier(model string, t time.Time) float64 {
 	return ProviderPeakMultiplier("opencode-go", model, t)
 }
 
-// PeakRuleView is one peak rule as reported by PeakWindowsFor. Tests only.
-type PeakRuleView struct {
-	Models     map[string]bool
-	Windows    []PeakWindow
-	Multiplier float64
-	AllDays    bool
-}
-
 // PeakScheduledProviders names the platforms that publish peak pricing.
 // Tests only, for the reason on PeakWindowsFor.
 func PeakScheduledProviders() map[string]bool {
@@ -471,10 +463,10 @@ func SetDerivedPeakRules(provider string, specs []PeakRuleSpec) {
 	id := site.Normalize(provider)
 	derivedPeakMu.Lock()
 	defer derivedPeakMu.Unlock()
-	if len(specs) == 0 {
-		delete(derivedPeak, id)
-		return
-	}
+	// An empty set is stored, not deleted. Presence means "a refresh has spoken":
+	// falling back to the static table after a successful refresh that produced
+	// no rules would reinstate the hand-copied schedule this replaced, which had
+	// already drifted from the payload in both directions.
 	schedule := peakSchedule{}
 	for _, spec := range specs {
 		if spec.Multiplier <= 1 || len(spec.Windows) == 0 {
@@ -491,11 +483,16 @@ func SetDerivedPeakRules(provider string, specs []PeakRuleSpec) {
 			allDays:    spec.AllDays,
 		})
 	}
-	if len(schedule.rules) == 0 {
-		delete(derivedPeak, id)
-		return
-	}
 	derivedPeak[id] = schedule
+}
+
+// resetDerivedPeakRules forgets every derived schedule, so a test can return the
+// package to its start-up state. Production never needs this: a platform that
+// has refreshed keeps its last answer until the next refresh.
+func resetDerivedPeakRules() {
+	derivedPeakMu.Lock()
+	defer derivedPeakMu.Unlock()
+	derivedPeak = map[string]peakSchedule{}
 }
 
 func peakScheduleFor(provider string) (peakSchedule, bool) {

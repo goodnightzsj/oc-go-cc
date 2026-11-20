@@ -21,8 +21,12 @@ type ProviderPreset struct {
 // Supported provider presets.
 var providerPresets = map[string]ProviderPreset{
 	"opencode-go": {
-		Name:        "OpenCode Go",
-		EnvVarName:  "ROUTATIC_PROXY_OPENCODE_GO_API_KEY",
+		Name: "OpenCode Go",
+		// The generated file carries the global pool placeholder, so this is the
+		// variable its own instructions must name. Advertising the
+		// provider-specific one left that placeholder unresolved and the freshly
+		// generated config failed validate and start.
+		EnvVarName:  "ROUTATIC_PROXY_API_KEY",
 		Description: "OpenCode Go subscription - $5/month with powerful coding models",
 		BaseURL:     "https://opencode.ai/zen/go/v1/chat/completions",
 		Generator:   getOpenCodeGoConfig,
@@ -122,7 +126,6 @@ func getProviderConfig(provider string) (string, error) {
 // getOpenRouterConfig returns a config optimized for OpenRouter.
 func getOpenRouterConfig() string {
 	return `{
-  "api_keys": ["${ROUTATIC_PROXY_API_KEY}"],
   "host": "127.0.0.1",
   "port": 3456,
   "hot_reload": false,
@@ -210,7 +213,6 @@ func getOpenRouterConfig() string {
 // getAWSBedrockConfig returns a config optimized for AWS Bedrock.
 func getAWSBedrockConfig() string {
 	return `{
-  "api_keys": ["${ROUTATIC_PROXY_API_KEY}"],
   "host": "127.0.0.1",
   "port": 3456,
   "hot_reload": false,
@@ -301,7 +303,6 @@ func getAWSBedrockConfig() string {
 // getOpenCodeZenConfig returns a config optimized for OpenCode Zen.
 func getOpenCodeZenConfig() string {
 	return `{
-  "api_keys": ["${ROUTATIC_PROXY_API_KEY}"],
   "host": "127.0.0.1",
   "port": 3456,
   "hot_reload": false,

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/routatic/proxy/internal/core"
 	"github.com/routatic/proxy/internal/sse"
 	"github.com/routatic/proxy/pkg/types"
 )
@@ -25,6 +26,13 @@ var ErrClientDisconnected = fmt.Errorf("client disconnected")
 // upstream stream. The connection is stale (e.g. backend hang or network
 // partition). The handler decides whether to fall back to another model.
 var ErrStreamIdle = fmt.Errorf("upstream stream idle")
+
+// streamIdleError is what the readers return: it keeps ErrStreamIdle as the
+// identity the handler compares context causes against, and adds the
+// classification the circuit breaker needs.
+func streamIdleError() error {
+	return fmt.Errorf("%w: %w", ErrStreamIdle, core.ErrUpstreamStreamFailed)
+}
 
 var ErrEmptyStream = fmt.Errorf("upstream returned empty stream")
 
@@ -127,6 +135,7 @@ func (h *StreamHandler) ProxyStream(
 	terminalStopReason := ""
 	var terminalUsage *types.UsageInfo
 	startedToolCalls := make(map[int]*chatToolState)
+	emittedToolUse := false
 
 	// Get a buffer from the pool; return it when done.
 	readBuf := readBufPool.Get().(*[]byte)
@@ -153,7 +162,7 @@ func (h *StreamHandler) ProxyStream(
 			// lives as long as data keeps arriving.
 			ping()
 			if err := decoder.Feed((*readBuf)[:n], func(event string, data []byte) error {
-				return h.processChatEvent(w, flusher, event, data, &contentIndex, &contentStarted, &reasoningStarted, &sawRefusal, &terminalStopReason, &terminalUsage, startedToolCalls)
+				return h.processChatEvent(w, flusher, event, data, &contentIndex, &contentStarted, &reasoningStarted, &sawRefusal, &terminalStopReason, &terminalUsage, startedToolCalls, &emittedToolUse)
 			}); err != nil {
 				return err
 			}
@@ -167,13 +176,13 @@ func (h *StreamHandler) ProxyStream(
 		}
 		if err != nil {
 			if IsIdleTimeout(err) {
-				return ErrStreamIdle
+				return streamIdleError()
 			}
 			// When the idle watchdog fires, it cancels the upstream context
 			// which produces context.Canceled on Read. Distinguish that
 			// from a client disconnect by checking clientCtx.
 			if (errors.Is(err, context.Canceled) || errors.Is(err, ErrStreamReadCanceled)) && clientCtx.Err() == nil {
-				return ErrStreamIdle
+				return streamIdleError()
 			}
 			return fmt.Errorf("failed to read stream: %w", err)
 		}
@@ -228,6 +237,10 @@ func (h *StreamHandler) processChatEvent(
 	terminalStopReason *string,
 	terminalUsage **types.UsageInfo,
 	startedToolCalls map[int]*chatToolState,
+	// emittedToolUse survives the tool blocks being closed early: a gateway that
+	// sends tool_calls, then text, then finish_reason "stop" still produced a
+	// tool call, and the stop reason has to say so.
+	emittedToolUse *bool,
 ) error {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 {
@@ -424,6 +437,7 @@ func (h *StreamHandler) processChatEvent(
 				}
 				tool = &chatToolState{index: *contentIndex}
 				startedToolCalls[oi] = tool
+				*emittedToolUse = true
 
 				toolID := tc.ID
 				if toolID == "" {
@@ -486,11 +500,6 @@ func (h *StreamHandler) processChatEvent(
 			*contentStarted = false
 		}
 
-		// Captured before the blocks are closed: a response that emitted tool
-		// blocks ended the turn for the client to run them, whatever the
-		// upstream's finish_reason says.
-		emittedTools := len(startedToolCalls) > 0
-
 		// Close any open tool_use blocks in ascending index order.
 		if len(startedToolCalls) > 0 {
 			indices := make([]int, 0, len(startedToolCalls))
@@ -518,7 +527,7 @@ func (h *StreamHandler) processChatEvent(
 		// end the turn, and every agent loop that branches on stop_reason ==
 		// "tool_use" would never run the tool. The Responses and Gemini adapters
 		// already apply this rule; the Chat path was the one that did not.
-		if emittedTools && stopReason == "end_turn" {
+		if *emittedToolUse && stopReason == "end_turn" {
 			stopReason = "tool_use"
 		}
 		*terminalStopReason = stopReason
@@ -785,10 +794,10 @@ func (h *StreamHandler) ProxyResponsesStream(
 		}
 		if err != nil {
 			if IsIdleTimeout(err) {
-				return ErrStreamIdle
+				return streamIdleError()
 			}
 			if (errors.Is(err, context.Canceled) || errors.Is(err, ErrStreamReadCanceled)) && clientCtx.Err() == nil {
-				return ErrStreamIdle
+				return streamIdleError()
 			}
 			return fmt.Errorf("failed to read stream: %w", err)
 		}
@@ -1230,10 +1239,10 @@ func (h *StreamHandler) ProxyGeminiStream(
 		}
 		if err != nil {
 			if IsIdleTimeout(err) {
-				return ErrStreamIdle
+				return streamIdleError()
 			}
 			if (errors.Is(err, context.Canceled) || errors.Is(err, ErrStreamReadCanceled)) && clientCtx.Err() == nil {
-				return ErrStreamIdle
+				return streamIdleError()
 			}
 			return fmt.Errorf("failed to read stream: %w", err)
 		}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -526,6 +527,12 @@ func IsRetryableError(err error) bool {
 
 	// Wrapped deadlines and network timeouts need not contain "timeout".
 	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	// A stream that stalled or ended early failed after its headers arrived. The
+	// HTTP status looked fine, so nothing else in this classifier sees it - and
+	// without a vote the same dead upstream is picked for every later request.
+	if errors.Is(err, core.ErrUpstreamStreamFailed) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return true
 	}
 	var netErr net.Error

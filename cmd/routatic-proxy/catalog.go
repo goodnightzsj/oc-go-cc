@@ -51,6 +51,13 @@ By default exports to the catalog directory as catalog-export.json.`,
 			if err != nil {
 				return fmt.Errorf("read config flag: %w", err)
 			}
+			if configPath == "" {
+				// Fall back to the environment and default paths, exactly as
+				// start does. Otherwise an operator who names the config through
+				// ROUTATIC_PROXY_CONFIG gets a catalog written where the proxy
+				// never looks, and it re-downloads on every start.
+				configPath = config.ResolveConfigPath()
+			}
 
 			catalogDir := resolveCatalogDir(configPath)
 			if outputPath == "" {
@@ -91,6 +98,13 @@ func catalogSyncCmd() *cobra.Command {
 			configPath, err := cmd.Flags().GetString("config")
 			if err != nil {
 				return fmt.Errorf("read config flag: %w", err)
+			}
+			if configPath == "" {
+				// Fall back to the environment and default paths, exactly as
+				// start does. Otherwise an operator who names the config through
+				// ROUTATIC_PROXY_CONFIG gets a catalog written where the proxy
+				// never looks, and it re-downloads on every start.
+				configPath = config.ResolveConfigPath()
 			}
 
 			catalogDir := resolveCatalogDir(configPath)

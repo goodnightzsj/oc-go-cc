@@ -12,6 +12,10 @@ type Retention struct {
 	interval time.Duration
 	stopCh   chan struct{}
 	doneCh   chan struct{}
+	// lastRun is the wall clock of the previous pass. Deletion is irreversible
+	// and the cutoff is derived from the clock: a forward step would delete more
+	// than the window without leaving any trace of why.
+	lastRun time.Time
 }
 
 func NewRetention(db *Database, days int) *Retention {
@@ -63,7 +67,19 @@ func (r *Retention) run() {
 const retentionBatch = 5000
 
 func (r *Retention) runOnce() {
-	before := time.Now().AddDate(0, 0, -r.days)
+	now := time.Now()
+	if !r.lastRun.IsZero() {
+		gap := now.Sub(r.lastRun)
+		if gap < 0 || gap > 24*time.Hour {
+			slog.Warn("skipping retention cleanup: the clock moved unexpectedly",
+				"since_last_run", gap.String(), "retention_days", r.days)
+			r.lastRun = now
+			return
+		}
+	}
+	r.lastRun = now
+
+	before := now.AddDate(0, 0, -r.days)
 
 	stats := struct {
 		requestsDeleted int64

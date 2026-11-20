@@ -119,6 +119,11 @@ func (h *HealthHandler) HandleCountTokens(w http.ResponseWriter, r *http.Request
 
 	var body types.MessageRequest
 
+	// The only entry point that had neither a size cap nor admission. The
+	// decoder allocates whatever the body declares, so one request from a local
+	// process - or a cross-site page - could take the process down and every
+	// stream with it.
+	r.Body = http.MaxBytesReader(w, r.Body, maxAnthropicBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return

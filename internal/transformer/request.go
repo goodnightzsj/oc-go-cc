@@ -1150,8 +1150,8 @@ func rejectServerTools(tools []types.Tool) error {
 		if tool.Type == "" || tool.Type == "custom" {
 			continue
 		}
-		return fmt.Errorf("%w: server tool %q (type %q) cannot run on a Chat Completions upstream",
-			core.ErrInvalidRequest, tool.Name, tool.Type)
+		return fmt.Errorf("%w: server tool %q (type %q) cannot run on this upstream",
+			core.ErrUnsupportedForWireFormat, tool.Name, tool.Type)
 	}
 	return nil
 }

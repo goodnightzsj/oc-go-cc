@@ -25,19 +25,33 @@ health_url_from_config() {
   [[ -n "${config}" && -r "${config}" ]] || return 0
   command -v python3 >/dev/null 2>&1 || return 0
   python3 - "${config}" <<'PY'
-import json, sys
+import json, os, sys
 try:
     cfg = json.load(open(sys.argv[1]))
 except Exception:
-    sys.exit(0)
-host = str(cfg.get("host") or "127.0.0.1")
+    cfg = {}
+# The service loads .env through systemd's EnvironmentFile, and an override there
+# wins over the file. Probing the file's value while the service listens on the
+# overridden one fails every deploy.
+host = os.environ.get("ROUTATIC_PROXY_HOST") or str(cfg.get("host") or "127.0.0.1")
+port = os.environ.get("ROUTATIC_PROXY_PORT") or cfg.get("port") or 3456
 if host in ("0.0.0.0", "::", ""):
     host = "127.0.0.1"
 elif host == "::1":
     host = "[::1]"
-print(f"http://{host}:{cfg.get('port') or 3456}/health")
+print(f"http://{host}:{port}/health")
 PY
 }
+# The service's EnvironmentFile is where the port override actually lives.
+# Only the two listener variables are read: the file may also hold credentials,
+# and a deploy has no reason to have them in its environment.
+if [[ -r "${ROOT_DIR}/.env" ]]; then
+  while IFS='=' read -r key value; do
+    case "${key}" in
+      ROUTATIC_PROXY_HOST|ROUTATIC_PROXY_PORT) export "${key}=${value}" ;;
+    esac
+  done < "${ROOT_DIR}/.env"
+fi
 HEALTH_URL="${OC_GO_CC_HEALTH_URL:-}"
 if [[ -z "${HEALTH_URL}" ]]; then
   HEALTH_URL="$(health_url_from_config)"

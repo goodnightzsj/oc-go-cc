@@ -81,6 +81,22 @@ var ErrAllKeysCooling = errors.New("every API key is resting after an upstream r
 // target may accept the same request.
 var ErrInvalidRequest = errors.New("invalid request")
 
+// ErrUnsupportedForWireFormat marks a request this target's protocol cannot
+// express, while another target in the chain still might.
+//
+// It is deliberately not ErrInvalidRequest: a server-side tool (web_search_*,
+// computer_*) has no representation in Chat Completions, but the native
+// Anthropic path forwards the same body untouched. Aborting the whole chain
+// would skip the one candidate that can serve it.
+var ErrUnsupportedForWireFormat = errors.New("unsupported for this wire format")
+
+// ErrUpstreamStreamFailed marks a stream that stopped before its terminal event:
+// a stall with no bytes, or a connection that ended early. The headers already
+// arrived, so the request "succeeded" by HTTP terms, but the model did not
+// finish - and the circuit breaker has to see that or every later request
+// repeats the same wait.
+var ErrUpstreamStreamFailed = errors.New("upstream stream failed")
+
 // KeysCoolingError is local unavailability, not a new upstream HTTP failure.
 type KeysCoolingError struct {
 	RetryAt time.Time

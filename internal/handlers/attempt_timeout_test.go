@@ -118,16 +118,26 @@ func TestStreamingBodyTimeoutAttribution(t *testing.T) {
 				case <-time.After(3 * time.Second):
 					t.Fatal("handler did not finish")
 				}
-				if attempts.Load() != 1 {
-					t.Fatalf("attempts=%d; must not fallback after output", attempts.Load())
-				}
 				wantFailures := int64(1)
 				if parentCancel {
 					wantFailures = 0
 				}
+				// A native passthrough forwards the upstream's first frame, so
+				// content was delivered and nothing may fall back. The cached
+				// Chat/Responses/Gemini path opens with the proxy's own
+				// message_start and the timeout fired before any upstream event
+				// reached the client, so the chain moves to the next candidate.
+				delivered := protocol.name == "anthropic"
+				wantAttempts, wantCalls := int32(1), int64(1)
+				if !delivered && !parentCancel {
+					wantAttempts, wantCalls = 2, 2
+				}
+				if attempts.Load() != wantAttempts {
+					t.Fatalf("attempts=%d want %d", attempts.Load(), wantAttempts)
+				}
 				snapshot := h.metrics.GetSnapshot()
-				if snapshot.RequestsFailed != wantFailures || snapshot.RequestsSuccess != 0 || snapshot.UpstreamCalls != 1 {
-					t.Errorf("stream outcome counters=%+v want failures=%d and one upstream call", snapshot, wantFailures)
+				if snapshot.RequestsFailed != wantFailures || snapshot.RequestsSuccess != 0 || snapshot.UpstreamCalls != wantCalls {
+					t.Errorf("stream outcome counters=%+v want failures=%d and %d upstream calls", snapshot, wantFailures, wantCalls)
 				}
 				want := "open"
 				if parentCancel {

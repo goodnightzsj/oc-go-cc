@@ -94,16 +94,27 @@ type responseWriter struct {
 	streamErr      error
 	// sourceErrored records that the upstream's own terminal error event has
 	// already reached the caller, so the handler does not append a second one.
-	sourceErrored   bool
-	writeErr        error
-	writeTimeout    time.Duration
-	cancelWrites    context.CancelFunc
-	sourceModel     string
-	sourceAnthropic bool
-	nativeResponses *transformer.ResponsesObservation
-	nativeDecoder   sse.Decoder
-	timing          streamTiming
-	usage           struct {
+	sourceErrored bool
+	// frameWritten records that this attempt has written one body frame. It is
+	// per attempt and reset by the loop: the status line is committed before any
+	// attempt begins, so wroteHeader cannot tell an attempt's own first frame
+	// from the next candidate's.
+	frameWritten bool
+	// passthrough records that this writer forwards raw upstream frames, so its
+	// first frame is content rather than this proxy's opening message_start.
+	passthrough bool
+	// skippedProxyFrame records that the one frame this proxy writes on its own
+	// ahead of upstream content has been passed over.
+	skippedProxyFrame bool
+	writeErr          error
+	writeTimeout      time.Duration
+	cancelWrites      context.CancelFunc
+	sourceModel       string
+	sourceAnthropic   bool
+	nativeResponses   *transformer.ResponsesObservation
+	nativeDecoder     sse.Decoder
+	timing            streamTiming
+	usage             struct {
 		observed                 bool
 		inputTokens              int
 		outputTokens             int
@@ -133,13 +144,20 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 	}
 	var observed streamMilestones
 	if len(b) > 0 {
-		// The first frame of every transformed stream is this proxy's own
-		// message_start, so it cannot answer whether the upstream produced
-		// anything. Everything after it is either upstream events or keepalive
-		// comments.
-		if w.wroteHeader {
+		// The transformed path opens every stream with the proxy's own
+		// message_start, which does not mean the upstream produced anything; the
+		// passthrough forwards the upstream's own first frame, which does. Only
+		// the first is skipped. w.frameWritten rather than wroteHeader: the status
+		// line is committed before any attempt begins.
+		firstUpstreamFrame := w.frameWritten && !w.skippedProxyFrame
+		if w.passthrough || firstUpstreamFrame {
 			w.payloadWritten = w.payloadWritten || !keepaliveFrame(b)
 		}
+		if !w.frameWritten && !w.passthrough {
+			// The transformed path's opening message_start is the proxy's own.
+			w.skippedProxyFrame = true
+		}
+		w.frameWritten = true
 		var err error
 		if w.nativeResponses != nil {
 			observed, err = w.observeNativeResponses(b)
@@ -1022,6 +1040,12 @@ func (h *MessagesHandler) handleStreaming(
 		// write and reopened a window in which a keepalive comment frame could
 		// follow the stream's terminal event.
 		atomic.StoreInt32(&heartbeatPaused, 0)
+		// frameWritten is per attempt: the next candidate opens its own stream,
+		// and this attempt's opening frame must not make it look delivered.
+		rw.mu.Lock()
+		rw.frameWritten = false
+		rw.skippedProxyFrame = false
+		rw.mu.Unlock()
 		earlyRecord := history.RequestRecord{
 			RequestID: requestID,
 			Model:     model.ModelID, RequestedModel: requestedModel, Provider: providerName,
@@ -1300,6 +1324,9 @@ func (h *MessagesHandler) handleStreaming(
 			servedModel = model.ModelID
 		}
 		native := len(metadata.ResponsesBody) > 0 && wireFormat == core.WireFormatOpenAIResponses
+		rw.mu.Lock()
+		rw.passthrough = wireFormat == core.WireFormatAnthropic || native
+		rw.mu.Unlock()
 		rw.setSourceFormat(wireFormat, native)
 		var errProxy error
 		if native {
@@ -1345,6 +1372,8 @@ func (h *MessagesHandler) handleStreaming(
 		return
 	}
 
+	// One outcome per request: the attempt that failed already recorded its own
+	// key, and this is the logical request.
 	h.metrics.RecordFailure()
 	if rw.payloadWritten {
 		// SSE payload was already sent — do not attempt further writes

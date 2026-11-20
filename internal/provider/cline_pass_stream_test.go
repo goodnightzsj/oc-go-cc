@@ -22,7 +22,9 @@ func TestClineAggregateFailureRetainsReportedUsage(t *testing.T) {
 			t.Fatalf("error identity/usage carrier lost: %v", err)
 		}
 		got := observed.ReportedUsage()
-		if (got == nil) != (usage == "null") {
+		// An all-zero usage object is unreported, not a measured zero.
+		unreported := usage == "null" || strings.Contains(usage, `"prompt_tokens":0`)
+		if (got == nil) != unreported {
 			t.Fatalf("usage presence changed: source=%s got=%+v", usage, got)
 		}
 		if got != nil && strings.Contains(usage, "11") && (got.InputTokens != 11 || got.OutputTokens != 7) {

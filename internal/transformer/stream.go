@@ -571,8 +571,15 @@ func (t *chatToolState) finishArguments(reason string) error {
 }
 
 // ChatUsageToAnthropic preserves absence and maps cache/reasoning counts once.
+//
+// A usage object with no recognised count is treated as unreported, not as a
+// measured zero. `{}`, a total-only object and a response that kept Anthropic's
+// field names all decode to the zero value, and committing that as observed put
+// a genuinely free request into every cost total and the Quota tab's ledger.
+// A real zero (a cache-only turn) always carries a non-zero figure somewhere in
+// the object, which is what this checks before giving up on it.
 func ChatUsageToAnthropic(usage *types.UsageInfo) *types.Usage {
-	if usage == nil {
+	if usage == nil || !usageMeasured(usage) {
 		return nil
 	}
 	in, cacheRead, cacheCreate := splitPromptTokens(usage)
@@ -583,6 +590,13 @@ func ChatUsageToAnthropic(usage *types.UsageInfo) *types.Usage {
 		CacheReadInputTokens:     cacheRead,
 		ReasoningTokens:          reasoningTokensOf(usage),
 	}
+}
+
+// usageMeasured reports whether the object carried any recognised figure.
+func usageMeasured(u *types.UsageInfo) bool {
+	return u.PromptTokens != 0 || u.CompletionTokens != 0 || u.TotalTokens != 0 ||
+		u.PromptCacheHitTokens != 0 || u.PromptCacheMissTokens != 0 || u.CompletionThinkingTokens != 0 ||
+		u.PromptTokensDetails != nil || u.CompletionTokensDetails != nil
 }
 
 // reasoningTokensOf reads the thinking split of the completion, under either
@@ -625,6 +639,14 @@ func geminiUsageToAnthropic(usage *types.GeminiUsage) *types.Usage {
 	}
 	// Gemini counts thoughts outside candidates, unlike Chat/Responses output.
 	thinking := count(usage.ThoughtsTokenCount)
+	// A present-but-empty usageMetadata is unreported, not a measured zero.
+	// Only counts the payload actually carried are handed on: the detail blocks
+	// below always exist, and an all-nil object would otherwise be measured
+	// with every figure at zero.
+	if count(usage.PromptTokenCount) == 0 && count(usage.CandidatesTokenCount) == 0 && thinking == 0 &&
+		count(usage.ToolUsePromptTokenCount) == 0 && count(usage.CachedContentTokenCount) == 0 && usage.TotalTokenCount == 0 {
+		return nil
+	}
 	return ChatUsageToAnthropic(&types.UsageInfo{
 		PromptTokens:            count(usage.PromptTokenCount) + count(usage.ToolUsePromptTokenCount),
 		CompletionTokens:        count(usage.CandidatesTokenCount) + thinking,

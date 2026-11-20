@@ -126,7 +126,8 @@ func TestNonStreamingResponsesFailureRetainsEachAttemptUsage(t *testing.T) {
 							if !strings.Contains(row.ErrorMsg, status) {
 								t.Errorf("failure status lost: %+v", row)
 							}
-							observed := usageMode == "zero" || usageMode == "present"
+							// An all-zero usage object is unreported, not a measured zero.
+							observed := usageMode == "present"
 							if !row.OutcomeKnown || row.DetailsKnown != observed || !observed && row.CostKnown {
 								t.Errorf("usage presence/outcome lost: %+v", row)
 							}

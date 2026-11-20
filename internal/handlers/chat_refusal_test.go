@@ -34,7 +34,9 @@ func TestEmptyRefusalIsNotLowValueFailure(t *testing.T) {
 							t.Fatalf("refusal retried/failed: calls=%d rows=%+v body=%s", p.calls, records.rows, out.Body.String())
 						}
 						r := records.rows[0]
-						if r.UsageUnobserved != (usage == "null") || r.GenerationSample != nil {
+						// An all-zero usage object is unreported, not a measured zero.
+						unreported := usage == "null" || strings.Contains(usage, `"prompt_tokens":0`)
+						if r.UsageUnobserved != unreported || r.GenerationSample != nil {
 							t.Fatalf("fabricated usage/timing: %+v", r)
 						}
 					})

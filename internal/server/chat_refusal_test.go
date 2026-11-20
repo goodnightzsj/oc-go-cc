@@ -65,7 +65,8 @@ func TestChatRefusalReachesBothInboundsAndHistory(t *testing.T) {
 						if strings.Contains(usage, "5") {
 							wantTokens = 2
 						}
-						if row.OutputTokens != wantTokens || row.DetailsKnown != (usage != "null") {
+						// An all-zero usage object is unreported, not a measured zero.
+						if row.OutputTokens != wantTokens || row.DetailsKnown != (usage != "null" && !strings.Contains(usage, `"prompt_tokens":0`)) {
 							t.Fatalf("usage changed: %+v", row)
 						}
 						if usage == "null" && row.CostKnown {

@@ -2,9 +2,14 @@ package history
 
 // ValidGenerationSample also checks the sample against its owning request;
 // subtracting avoids overflow when reading externally supplied durations.
+//
+// A zero-length generation is not a sample. An upstream that emits its whole
+// answer in one write produced nothing to measure, and accepting that produced
+// a row carrying a 0ms span - which Insert refuses outright, so the request
+// vanished from the history rather than being recorded without a sample.
 func (r RequestRecord) ValidGenerationSample() bool {
 	s := r.GenerationSample
-	return r.Streaming && r.Success && !r.UsageUnobserved && s.Valid() &&
+	return r.Streaming && r.Success && !r.UsageUnobserved && s.Valid() && s.DurationMs > 0 &&
 		s.DurationMs <= r.Duration.Milliseconds() && s.FirstOutputMs <= r.Duration.Milliseconds()-s.DurationMs
 }
 

@@ -59,13 +59,20 @@ func TestSourceUsagePresenceReachesHistory(t *testing.T) {
 								t.Fatalf("rows=%d err=%v HTTP=%d body=%s", total, err, w.Code, w.Body.String())
 							}
 							row := rows[0]
-							if !row.OutcomeKnown || row.Success == failed || row.DetailsKnown != (usage != "absent") {
+							// On the converted Chat, Responses and Gemini paths, "zero"
+							// is a usage object with every count at zero, which is
+							// indistinguishable from an unrecognised one and so counts
+							// as unreported. The native Anthropic passthrough parses its
+							// own body and keeps it measured: a number there is a number
+							// the upstream wrote.
+							zeroMeasured := wire == "anthropic"
+							if !row.OutcomeKnown || row.Success == failed || row.DetailsKnown != (usage == "reported" || usage == "zero" && zeroMeasured) {
 								t.Fatalf("source observation lost: %+v", row)
 							}
-							if usage == "absent" && row.CostKnown {
+							if usage != "reported" && !(usage == "zero" && zeroMeasured) && row.CostKnown {
 								t.Fatal("unreported usage was priced as zero")
 							}
-							if usage == "absent" && row.GenerationSample != nil {
+							if usage != "reported" && !(usage == "zero" && zeroMeasured) && row.GenerationSample != nil {
 								t.Fatal("unreported usage became a throughput sample")
 							}
 							wantInput, wantOutput := 0, 0

@@ -963,6 +963,8 @@ func (t *RequestTransformer) transformUserMessage(blocks []types.ContentBlock, i
 				}
 				hasImage = true
 			}
+		default:
+			return nil, unrepresentableBlock(block.Type)
 		}
 	}
 
@@ -1082,6 +1084,13 @@ func (t *RequestTransformer) transformAssistantMessage(blocks []types.ContentBlo
 					Arguments: arguments,
 				},
 			})
+		case "redacted_thinking":
+			// Opaque by construction: the ciphertext the original provider
+			// emitted, which only that provider can read. It carries nothing a
+			// Chat upstream could use, so dropping it loses no information the
+			// model was ever going to see.
+		default:
+			return nil, unrepresentableBlock(block.Type)
 		}
 	}
 
@@ -1145,6 +1154,16 @@ func (t *RequestTransformer) transformAssistantMessage(blocks []types.ContentBlo
 // tool available", and the capability vanished with no error anywhere. The
 // native Anthropic path forwards the body untouched and still works, which made
 // the two paths disagree invisibly.
+// unrepresentableBlock refuses a content block the Chat Completions wire format
+// has no field for. The alternative was to drop it and answer anyway, which
+// showed up as a model replying about a document it never received while the
+// client was told 200 - the failure mode this file already refuses for server
+// tools and for unknown tool_result parts.
+func unrepresentableBlock(blockType string) error {
+	return &core.RequestConversionError{Err: fmt.Errorf(
+		"Chat Completions cannot represent content block %q; set anthropic_tools_disabled or route this model to a native endpoint that accepts it", blockType)}
+}
+
 func rejectServerTools(tools []types.Tool) error {
 	for _, tool := range tools {
 		if tool.Type == "" || tool.Type == "custom" {

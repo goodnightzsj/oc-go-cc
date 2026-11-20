@@ -96,7 +96,8 @@ func TestNativeFailureSurvivesLateCancellation(t *testing.T) {
 						t.Fatalf("native source failure vanished or duplicated: rows=%+v total=%d err=%v", rows, total, err)
 					}
 					row := rows[0]
-					observed := usageMode == "zero" || usageMode == "present"
+					// An all-zero usage object is unreported, not a measured zero.
+					observed := usageMode == "present"
 					source := wrapped.seen.Response
 					if row.Success || !row.OutcomeKnown || row.DetailsKnown != observed || !observed && row.CostKnown {
 						t.Errorf("source outcome/usage presence lost: %+v", row)

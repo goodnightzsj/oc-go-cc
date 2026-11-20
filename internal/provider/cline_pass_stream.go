@@ -30,6 +30,16 @@ const maxAggregatedStreamBytes = 64 << 20
 // upstream sends one choice split across many chunks: content arrives in
 // pieces, tool arguments arrive as fragments that only form JSON once
 // concatenated, and usage arrives in the final chunk (usually with no choices).
+// carriedReasoning reads a usage object's reasoning count directly. ChatUsageToAnthropic
+// returns nil for an object with no recognised figure, which is the right answer
+// for accounting but not something this accumulator can dereference.
+func carriedReasoning(usage types.UsageInfo) int {
+	if usage.CompletionTokensDetails != nil {
+		return usage.CompletionTokensDetails.ReasoningTokens
+	}
+	return usage.CompletionThinkingTokens
+}
+
 func aggregateChatStream(r io.Reader, modelID string) (_ *types.ChatCompletionResponse, err error) {
 	out := &types.ChatCompletionResponse{
 		Object:  "chat.completion",
@@ -63,7 +73,10 @@ func aggregateChatStream(r io.Reader, modelID string) (_ *types.ChatCompletionRe
 		var chunk types.ChatCompletionChunk
 		previousReasoning := 0
 		if out.Usage != nil {
-			previousReasoning = transformer.ChatUsageToAnthropic(out.Usage).ReasoningTokens
+			// An empty usage object now yields no converted figure, so this reads
+			// the raw count instead; the nil that ChatUsageToAnthropic returns
+			// for an unmeasured object must not be dereferenced here.
+			previousReasoning = carriedReasoning(*out.Usage)
 			next := *out.Usage
 			next.CompletionTokensDetails, next.CompletionThinkingTokens = nil, 0
 			chunk.Usage = &next
@@ -75,7 +88,7 @@ func aggregateChatStream(r io.Reader, modelID string) (_ *types.ChatCompletionRe
 			return fmt.Errorf("decode cline-pass stream chunk: %w", err)
 		}
 		if chunk.Usage != nil {
-			if transformer.ChatUsageToAnthropic(chunk.Usage).ReasoningTokens == 0 {
+			if carriedReasoning(*chunk.Usage) == 0 {
 				chunk.Usage.CompletionThinkingTokens = previousReasoning
 			}
 			out.Usage = chunk.Usage

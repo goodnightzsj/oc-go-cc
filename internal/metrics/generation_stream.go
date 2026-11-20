@@ -198,7 +198,11 @@ func (b *generationBody) complete(at time.Time) {
 		DurationMs:    at.Sub(b.firstOutput).Milliseconds(),
 		OutputTokens:  *b.output,
 	}
-	if sample.Valid() {
+	// A zero-length span is not a measurement: the whole answer arrived in one
+	// read, so there is no generation interval to report. Keeping it produced a
+	// row the database refuses, and the request disappeared from the history
+	// instead of being recorded without a throughput sample.
+	if sample.Valid() && sample.DurationMs > 0 {
 		b.observation.sample = sample
 	}
 }

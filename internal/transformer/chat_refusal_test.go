@@ -77,7 +77,11 @@ func TestChatRefusalContentAndTerminal(t *testing.T) {
 						if err != nil || text != tc.text || stop != wantStop {
 							t.Fatalf("text=%q stop=%s err=%v; want %q/%s", text, stop, err, tc.text, wantStop)
 						}
-						if (gotUsage == nil) != (usage == "null") {
+						// An all-zero usage object is unreported, not a measured
+						// zero: `{}` and `{"prompt_tokens":0,"completion_tokens":0}`
+						// both decode to the zero value.
+						wantUsage := usage == "null" || strings.Contains(usage, `"prompt_tokens":0`)
+						if (gotUsage == nil) != wantUsage {
 							t.Fatalf("usage presence changed: %+v", gotUsage)
 						}
 						if gotUsage != nil {

@@ -1260,10 +1260,10 @@ func (h *MessagesHandler) handleStreaming(
 			// caller. Restore it before classifying the transport's generic sentinel.
 			var sourceFailure *core.ResponseError
 			if !errors.As(errProxy, &sourceFailure) && (errors.Is(errProxy, transformer.ErrStreamReadCanceled) || errors.Is(errProxy, transformer.ErrClientDisconnected) || errors.Is(errProxy, context.Canceled)) {
-				if context.Cause(attemptCtx) == transformer.ErrStreamIdle {
+				if errors.Is(context.Cause(attemptCtx), transformer.ErrStreamIdle) {
 					// Keep the classification: the bare sentinel is not
 					// retryable, so restoring it dropped the breaker vote.
-					errProxy = transformer.StreamIdleFailure()
+					errProxy = transformer.ErrStreamIdle
 				}
 			}
 			if errProxy == transformer.ErrClientDisconnected {

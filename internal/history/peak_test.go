@@ -377,3 +377,32 @@ func TestDerivedRulesKeepTheSeedForUnmodellableFamilies(t *testing.T) {
 		t.Fatalf("multiplier = %v, want the seed rule's 2", got)
 	}
 }
+
+// Two families sharing one seed rule must not append it twice, and a family the
+// payload already expressed must not gain a shadowed seed rule.
+func TestKeepStaticNarrowsAndDeduplicates(t *testing.T) {
+	t.Cleanup(resetDerivedPeakRules)
+	SetDerivedPeakRules("openrouter", []PeakRuleSpec{{
+		Models:     []string{"tencent/hy3"},
+		Windows:    []PeakWindow{{Start: 0, End: 16}},
+		Multiplier: 1.6,
+		AllDays:    true,
+	}}, []string{
+		"deepseek/deepseek-v4.1-flash",
+		"deepseek/deepseek-v4.1-flash-1017",
+		"tencent/hy3",
+	})
+
+	derivedPeakMu.RLock()
+	rules := derivedPeak["openrouter"].rules
+	derivedPeakMu.RUnlock()
+
+	if len(rules) != 2 {
+		t.Fatalf("rules = %d, want the derived one plus one narrowed seed rule", len(rules))
+	}
+	for _, rule := range rules {
+		if rule.models["hy3"] && rule.multiplier != 1.6 {
+			t.Fatal("the seed rule was added for a family the payload already expressed")
+		}
+	}
+}

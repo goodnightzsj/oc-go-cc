@@ -1121,7 +1121,8 @@ func openRouterEntry(id string, m openRouterModel) (priceEntry, []history.PeakRu
 		// towards the base rate: skipping it here made a model whose cheap bands
 		// are all day-scoped look like its peak price was the base, and every
 		// off-peak hour then billed at the peak rate.
-		band.modellable = len(override.UTCDays) == 0 || string(override.UTCDays) == "null"
+		noDays := len(override.UTCDays) == 0 || string(override.UTCDays) == "null"
+		band.modellable = noDays && len(peakWindows(*override.UTCStart, *override.UTCEnd)) > 0
 		bands = append(bands, band)
 	}
 

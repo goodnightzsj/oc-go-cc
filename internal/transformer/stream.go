@@ -25,18 +25,11 @@ var ErrClientDisconnected = fmt.Errorf("client disconnected")
 // ErrStreamIdle is returned when no bytes arrive within idleTimeout on the
 // upstream stream. The connection is stale (e.g. backend hang or network
 // partition). The handler decides whether to fall back to another model.
-var ErrStreamIdle = fmt.Errorf("upstream stream idle")
-
-// streamIdleError is what the readers return: it keeps ErrStreamIdle as the
-// identity the handler compares context causes against, and adds the
-// classification the circuit breaker needs.
-func streamIdleError() error {
-	return fmt.Errorf("%w: %w", ErrStreamIdle, core.ErrUpstreamStreamFailed)
-}
-
-// StreamIdleFailure is the classified idle error, for a caller that has to
-// re-derive it from a context cause instead of receiving it from a reader.
-func StreamIdleFailure() error { return streamIdleError() }
+// ErrStreamIdle is an upstream that stopped sending. It wraps the breaker's
+// classification itself: the value is used both as an identity (context cause,
+// errors.Is) and as a retryability signal, and when the two were separate every
+// new return point had to remember to wrap - three of them did not.
+var ErrStreamIdle = fmt.Errorf("upstream stream idle: %w", core.ErrUpstreamStreamFailed)
 
 var ErrEmptyStream = fmt.Errorf("upstream returned empty stream")
 
@@ -180,7 +173,7 @@ func (h *StreamHandler) ProxyStream(
 		}
 		if err != nil {
 			if IsIdleTimeout(err) {
-				return streamIdleError()
+				return ErrStreamIdle
 			}
 			// When the idle watchdog fires it cancels the upstream context, so
 			// the read fails with context.Canceled and clientCtx.Err() is NOT
@@ -189,7 +182,7 @@ func (h *StreamHandler) ProxyStream(
 			// disconnect, which is not retryable and never votes on the breaker.
 			if errors.Is(err, context.Canceled) || errors.Is(err, ErrStreamReadCanceled) {
 				if errors.Is(context.Cause(clientCtx), ErrStreamIdle) || clientCtx.Err() == nil {
-					return streamIdleError()
+					return ErrStreamIdle
 				}
 			}
 			return fmt.Errorf("failed to read stream: %w", err)
@@ -802,10 +795,10 @@ func (h *StreamHandler) ProxyResponsesStream(
 		}
 		if err != nil {
 			if IsIdleTimeout(err) {
-				return streamIdleError()
+				return ErrStreamIdle
 			}
 			if (errors.Is(err, context.Canceled) || errors.Is(err, ErrStreamReadCanceled)) && clientCtx.Err() == nil {
-				return streamIdleError()
+				return ErrStreamIdle
 			}
 			return fmt.Errorf("failed to read stream: %w", err)
 		}
@@ -1247,10 +1240,10 @@ func (h *StreamHandler) ProxyGeminiStream(
 		}
 		if err != nil {
 			if IsIdleTimeout(err) {
-				return streamIdleError()
+				return ErrStreamIdle
 			}
 			if (errors.Is(err, context.Canceled) || errors.Is(err, ErrStreamReadCanceled)) && clientCtx.Err() == nil {
-				return streamIdleError()
+				return ErrStreamIdle
 			}
 			return fmt.Errorf("failed to read stream: %w", err)
 		}

@@ -499,12 +499,39 @@ func SetDerivedPeakRules(provider string, specs []PeakRuleSpec, keepStatic []str
 	// the parameter was accepted and ignored: a model whose cheap bands are all
 	// day-scoped lost its peak hours entirely, and because the backfill only
 	// revisits rows with peak_multiplier <= 1, the loss was permanent.
-	for _, family := range keepStatic {
-		name := models.ModelFamily(family)
+	if len(keepStatic) > 0 {
+		derived := make(map[string]bool)
+		for _, rule := range schedule.rules {
+			for family := range rule.models {
+				derived[family] = true
+			}
+		}
+		keep := make(map[string]bool, len(keepStatic))
+		for _, family := range keepStatic {
+			name := models.ModelFamily(family)
+			// A family the payload did express keeps the payload's rule: adding
+			// the seed rule as well would be shadowed at best and contradict it
+			// at worst.
+			if !derived[name] {
+				keep[name] = true
+			}
+		}
 		for _, rule := range peakSchedules[id].rules {
-			if rule.models[name] {
-				schedule.rules = append(schedule.rules, rule)
-				break
+			narrowed := make(map[string]bool)
+			for family := range rule.models {
+				if keep[family] {
+					narrowed[family] = true
+				}
+			}
+			if len(narrowed) == 0 {
+				continue
+			}
+			// Narrowed to the families that actually needed it, so the rules
+			// stay disjoint and one seed rule cannot be appended twice.
+			rule.models = narrowed
+			schedule.rules = append(schedule.rules, rule)
+			for family := range narrowed {
+				delete(keep, family)
 			}
 		}
 	}

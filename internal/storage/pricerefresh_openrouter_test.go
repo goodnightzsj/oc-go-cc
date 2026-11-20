@@ -198,3 +198,29 @@ func TestOpenRouterDayScopedBandsStillSetTheBase(t *testing.T) {
 		t.Fatal("a model whose windows cannot be modelled must keep its seed peak rule")
 	}
 }
+
+// A peak band that starts mid-hour cannot become a window either, so the family
+// must keep its seed rule rather than silently losing its peak hours.
+func TestOpenRouterMidHourBandKeepsTheSeedRule(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek/deepseek-v4.1-flash","pricing":{
+			"prompt":"0.00000015","completion":"0.0000006",
+			"overrides":[
+				{"utc_start":130,"utc_end":400,"prompt":"0.0000003","completion":"0.0000012"}
+			]}}]}`))
+	}))
+	defer srv.Close()
+	entries, _, err := FetchOpenRouterPrices(context.Background(), srv.Client(), srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d", len(entries))
+	}
+	if entries[0].Input != 0.15 {
+		t.Fatalf("base = %v, want the cheaper band", entries[0].Input)
+	}
+	if !entries[0].KeepStaticPeak {
+		t.Fatal("a mid-hour band must mark the family degraded")
+	}
+}

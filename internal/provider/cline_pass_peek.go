@@ -170,7 +170,7 @@ func peekServedModel(ctx context.Context, cancel context.CancelFunc, body io.Rea
 			// forward it as one. ErrStreamIdle is what the handler already
 			// recognises as "try the next model", so a stalled gateway becomes
 			// a fallback instead of a truncated answer.
-			return nil, "", consumed.Len() > 0, transformer.StreamIdleFailure()
+			return nil, "", consumed.Len() > 0, transformer.ErrStreamIdle
 		}
 		if err := ctx.Err(); err != nil {
 			return nil, "", consumed.Len() > 0, err
@@ -194,7 +194,7 @@ func peekServedModel(ctx context.Context, cancel context.CancelFunc, body io.Rea
 		// Read may return a model frame and an error together. Do not publish a
 		// successful stream before checking the failure and its cancellation cause.
 		if idleFired.Load() {
-			return nil, "", consumed.Len() > 0, transformer.StreamIdleFailure()
+			return nil, "", consumed.Len() > 0, transformer.ErrStreamIdle
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, "", consumed.Len() > 0, ctxErr

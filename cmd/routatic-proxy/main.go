@@ -254,8 +254,15 @@ Press Ctrl+C to stop the server.`,
 				}()
 			}
 
-			// Context for graceful shutdown.
+			// Context for graceful shutdown. After the first signal the handler is
+			// restored, so a second Ctrl+C or SIGTERM terminates instead of being
+			// swallowed while the drain runs.
 			ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			go func() {
+				<-ctx.Done()
+				cancel()
+				signal.Reset(os.Interrupt, syscall.SIGTERM)
+			}()
 			pricesDone := make(chan struct{})
 			go func() {
 				defer close(pricesDone)

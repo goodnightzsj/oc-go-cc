@@ -60,5 +60,8 @@ func StopProcess(pid int, appName string) error {
 	}
 
 	// Wait for the process to exit. process.Wait only works for children.
-	return waitForExit(pid, 10*time.Second)
+	// The wait matches the service unit's own stop budget: the proxy drains
+	// in-flight streams before it exits, and giving up after ten seconds
+	// reported a healthy shutdown as a failed stop.
+	return waitForExit(pid, 11*time.Minute)
 }

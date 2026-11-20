@@ -625,6 +625,12 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 		h.sendError(w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
+	// Bound the client-supplied model once, here. From this point the string
+	// reaches a SQLite column, a journal line, the circuit breaker's map key and
+	// the history API response verbatim, so an unbounded value is unbounded
+	// storage and unbounded memory in four places at once. The direct path and
+	// the Responses bridge do the same to their own copies.
+	anthropicReq.Model = truncateModelID(anthropicReq.Model)
 	metadata := core.RequestMetadataFromContext(r.Context())
 	if len(metadata.ResponsesBody) > 0 {
 		var original struct {
@@ -1272,7 +1278,12 @@ func (h *MessagesHandler) handleStreaming(
 		streamReader := transformer.NewCtxReadCloser(attemptCtx, streamBody)
 		currentStream = streamReader
 
-		if wireFormat == core.WireFormatAnthropic {
+		// Raw passthrough forwards upstream bytes untouched, so a keepalive
+		// comment written between two reads can land inside an upstream SSE
+		// frame. Both formats that use it are covered: an Anthropic stream, and a
+		// native Responses stream, which reaches the same copy loop.
+		if wireFormat == core.WireFormatAnthropic ||
+			(wireFormat == core.WireFormatOpenAIResponses && len(metadata.ResponsesBody) > 0) {
 			atomic.StoreInt32(&heartbeatPaused, 1)
 		}
 		// The model to name in message_start. The provider peeked the first

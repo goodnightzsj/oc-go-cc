@@ -51,6 +51,9 @@ func (h *MessagesHandler) HandleResponses(w http.ResponseWriter, r *http.Request
 	if bridgeErr != nil {
 		message = projection
 	}
+	// The same bound the /v1/messages path applies: this model string becomes a
+	// SQLite column, a log field and the breaker's map key.
+	message.Model = truncateModelID(message.Model)
 	encoded, err := json.Marshal(message)
 	if err != nil {
 		writeResponsesError(w, http.StatusInternalServerError, "failed to encode adapted request")

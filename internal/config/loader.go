@@ -860,6 +860,14 @@ func validateModelConfig(label string, mc ModelConfig) error {
 	if NormalizeProvider(mc.Provider) == "workbuddy" && mc.WireFormat != "" && mc.WireFormat != "auto" && mc.WireFormat != "openai" {
 		return invalid(label+".wire_format", "workbuddy_wire_format", "%s: workbuddy supports only the openai upstream wire format", label)
 	}
+	// OpenRouter's adapter refuses anything but Chat Completions
+	// (internal/provider/openrouter.go), and the refusal carries no upstream
+	// status, so it is not classified as retryable and the breaker never opens:
+	// a model configured this way is retried on every request for the life of
+	// the config, each time costing a warn line and a position in the chain.
+	if NormalizeProvider(mc.Provider) == "openrouter" && mc.WireFormat != "" && mc.WireFormat != "auto" && mc.WireFormat != "openai" {
+		return invalid(label+".wire_format", "openrouter_wire_format", "%s: openrouter supports only the openai upstream wire format", label)
+	}
 	// ClinePass takes its billing pool from the model id's first segment and
 	// answers a bare name with 400 "invalid model format. Expected format:
 	// modelType/model". The field is sent verbatim, so a config entry without

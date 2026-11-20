@@ -24,6 +24,11 @@ type HealthHandler struct {
 	// with no usable credential was indistinguishable from a working one - and
 	// the deploy gate only asks this endpoint.
 	readiness func() (reason string, degraded bool)
+	// directPath, when set, reports the direct Anthropic passthrough's current
+	// verdict. It is informational: readiness already decides whether it is
+	// degraded, and this is what lets an operator see the path being skipped
+	// without reading the journal.
+	directPath func() bool
 }
 
 // NewHealthHandler creates a new health handler.
@@ -40,6 +45,11 @@ func NewHealthHandler(tokenCounter *token.Counter, fallbackHandler *router.Fallb
 // durable conditions: a transient one would roll back a healthy release.
 func (h *HealthHandler) SetReadiness(fn func() (reason string, degraded bool)) {
 	h.readiness = fn
+}
+
+// SetDirectPathStatus installs the direct passthrough's availability verdict.
+func (h *HealthHandler) SetDirectPathStatus(fn func() bool) {
+	h.directPath = fn
 }
 
 // HandleHealth handles GET /health.
@@ -80,6 +90,9 @@ func (h *HealthHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 		},
 		"circuit_breakers": cbStates,
 		"models":           snapshot.ModelCounts,
+	}
+	if h.directPath != nil {
+		response["direct_path"] = map[string]interface{}{"unavailable": h.directPath()}
 	}
 	if reason != "" {
 		response["reason"] = reason

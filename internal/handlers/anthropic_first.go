@@ -75,6 +75,16 @@ type AnthropicFirstHandler struct {
 	maxResponseBytes int64
 }
 
+// DirectPathDown reports whether the direct passthrough is currently being
+// skipped. The gate is otherwise process-invisible: an operator cannot tell
+// from /health or the dashboard that every request is going to the platform
+// chain, and that is exactly the state an outage looks like from outside.
+func (h *AnthropicFirstHandler) DirectPathDown() bool {
+	h.gate.mu.Lock()
+	defer h.gate.mu.Unlock()
+	return h.gate.unavailable
+}
+
 type availabilityGate struct {
 	mu          sync.Mutex
 	baseURL     string

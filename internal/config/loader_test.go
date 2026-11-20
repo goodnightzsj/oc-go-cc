@@ -114,6 +114,14 @@ func TestWorkBuddyOnlyConfigLoads(t *testing.T) {
 	if _, err := LoadJSON([]byte(`{"workbuddy":{"base_url":"http://127.0.0.1:7863","api_key":"test-key"},"models":{"default":{"provider":"workbuddy","model_id":"global:x","wire_format":"anthropic"}}}`)); err == nil {
 		t.Fatal("expected an unsupported WorkBuddy wire_format to fail validation")
 	}
+	// OpenRouter's adapter refuses anything but Chat Completions, and that
+	// refusal is not retryable, so the model would be retried forever without
+	// ever opening its breaker.
+	for _, wire := range []string{"anthropic", "responses"} {
+		if _, err := LoadJSON([]byte(`{"openrouter":{"base_url":"https://example.test/v1/chat/completions","api_key":"test-key"},"models":{"default":{"provider":"openrouter","model_id":"anthropic/claude-sonnet-4","wire_format":"` + wire + `"}}}`)); err == nil {
+			t.Fatalf("expected openrouter wire_format %q to fail validation", wire)
+		}
+	}
 }
 
 func TestLoadJSON_WithModelOverrides(t *testing.T) {

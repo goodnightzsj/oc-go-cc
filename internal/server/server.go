@@ -44,10 +44,21 @@ type keyAvailabilityChecker interface {
 //     with no usable credential anywhere is degraded;
 //   - when the direct passthrough is enabled, this endpoint cannot judge it and
 //     stays quiet rather than guessing.
-func readinessProbe(atomic *config.AtomicConfig, keys keyAvailabilityChecker) func() (string, bool) {
+func readinessProbe(atomic *config.AtomicConfig, keys keyAvailabilityChecker, directDown func() bool) func() (string, bool) {
 	return func() (string, bool) {
 		cfg := atomic.Get()
-		if cfg == nil || cfg.AnthropicFirst.Enabled {
+		if cfg == nil {
+			return "", false
+		}
+		if cfg.AnthropicFirst.Enabled {
+			// The direct path is this instance's answer to everything. It is
+			// judged by its own gate, not by the platform credentials, so an
+			// instance whose gate is down AND whose credentials are exhausted
+			// cannot serve - and used to report ok because enabling the
+			// passthrough made this endpoint stop looking entirely.
+			if directDown != nil && directDown() && platformCredentialsExhausted(keys) {
+				return "direct path unavailable and no usable platform credential", true
+			}
 			return "", false
 		}
 		if active := strings.TrimSpace(cfg.ActiveSite); active != "" {
@@ -57,13 +68,22 @@ func readinessProbe(atomic *config.AtomicConfig, keys keyAvailabilityChecker) fu
 			}
 			return "", false
 		}
-		for _, descriptor := range site.All() {
-			if !keys.CredentialsExhausted(descriptor.ID) {
-				return "", false
-			}
+		if !platformCredentialsExhausted(keys) {
+			return "", false
 		}
 		return "no usable credential on any platform", true
 	}
+}
+
+// platformCredentialsExhausted reports whether every platform has no usable
+// credential left.
+func platformCredentialsExhausted(keys keyAvailabilityChecker) bool {
+	for _, descriptor := range site.All() {
+		if !keys.CredentialsExhausted(descriptor.ID) {
+			return false
+		}
+	}
+	return true
 }
 
 // Server represents the proxy server.
@@ -201,7 +221,6 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 		storageWriter,
 	)
 	healthHandler := handlers.NewHealthHandler(tokenCounter, fallbackHandler, metrics, statusStore)
-	healthHandler.SetReadiness(readinessProbe(atomic, provider.NewKeyAvailability(atomic)))
 	modelsHandler := handlers.NewModelsHandler(modelRouter)
 	// The statusline endpoint was wired but never fed; publish the routing
 	// decision from the request path so it reports live data.
@@ -215,6 +234,10 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 	// The direct path is a passthrough; give it the same history and counters
 	// the platform path uses, so its traffic is not invisible in the dashboard.
 	anthropicFirst.SetAccounting(storageWriter, metrics)
+	// The readiness probe needs the direct path's verdict, so it is installed
+	// here rather than with the other health wiring above.
+	healthHandler.SetReadiness(readinessProbe(atomic, provider.NewKeyAvailability(atomic), anthropicFirst.DirectPathDown))
+	healthHandler.SetDirectPathStatus(anthropicFirst.DirectPathDown)
 	mux.Handle("/v1/messages", anthropicFirst)
 	mux.HandleFunc("/v1/responses", messagesHandler.HandleResponses)
 	mux.HandleFunc("/v1/messages/count_tokens", healthHandler.HandleCountTokens)

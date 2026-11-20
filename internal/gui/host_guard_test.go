@@ -17,7 +17,7 @@ func TestSecurityHeadersRejectForeignHost(t *testing.T) {
 	handler := securityHeadersMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reached = true
 		w.WriteHeader(http.StatusOK)
-	}))
+	}), map[string]bool{"dashboard.example": true})
 
 	for _, tc := range []struct {
 		host string
@@ -30,6 +30,7 @@ func TestSecurityHeadersRejectForeignHost(t *testing.T) {
 		{"127.0.0.1:3445", http.StatusOK},
 		{"[::1]:3445", http.StatusOK},
 		{"LOCALHOST", http.StatusOK},
+		{"dashboard.example:443", http.StatusOK},
 	} {
 		reached = false
 		req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
@@ -51,7 +52,7 @@ func TestSecurityHeadersRejectForeignHost(t *testing.T) {
 func TestSecurityHeadersRejectCrossSiteWrite(t *testing.T) {
 	handler := securityHeadersMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
-	}))
+	}), nil)
 
 	crossSite := httptest.NewRequest(http.MethodPost, "/api/proxy/config", nil)
 	crossSite.Host = "127.0.0.1:3445"
@@ -73,7 +74,7 @@ func TestSecurityHeadersRejectCrossSiteWrite(t *testing.T) {
 }
 
 func TestSecurityHeadersRefuseFraming(t *testing.T) {
-	handler := securityHeadersMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	handler := securityHeadersMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}), nil)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Host = "localhost:3445"
 	rec := httptest.NewRecorder()
@@ -83,5 +84,22 @@ func TestSecurityHeadersRefuseFraming(t *testing.T) {
 	}
 	if csp := rec.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'none'") {
 		t.Fatalf("CSP lacks frame-ancestors: %q", csp)
+	}
+}
+
+// A dashboard behind a reverse proxy sees the public name, not loopback. That
+// name has to be declared, or every page is refused - which is how this shipped
+// broken once.
+func TestGuiAllowedHostsFromEnvironment(t *testing.T) {
+	t.Setenv("ROUTATIC_PROXY_GUI_ALLOWED_HOSTS", " dash.example , [::2]:8443 ,,")
+	extra := guiAllowedHosts()
+	if !extra["dash.example"] || !extra["::2"] || len(extra) != 2 {
+		t.Fatalf("parsed hosts = %v", extra)
+	}
+	if !dashboardHostAllowed("dash.example:443", extra) {
+		t.Fatal("declared host refused")
+	}
+	if dashboardHostAllowed("evil.example:443", extra) {
+		t.Fatal("undeclared host allowed")
 	}
 }

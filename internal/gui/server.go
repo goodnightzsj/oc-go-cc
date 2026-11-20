@@ -274,7 +274,7 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 	// longer than any fixed write budget, and every handler writes its whole
 	// response at once.
 	s.srv = &http.Server{
-		Handler:           securityHeadersMiddleware(mux),
+		Handler:           securityHeadersMiddleware(mux, guiAllowedHosts()),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       120 * time.Second,
@@ -1632,7 +1632,8 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// dashboardHostAllowed reports whether a Host header names this machine.
+// dashboardHostAllowed reports whether a Host header names a name this
+// dashboard answers to.
 //
 // The dashboard holds the operator's credentials and binds to loopback, but
 // loopback is not a security boundary against a browser: DNS rebinding points
@@ -1640,17 +1641,37 @@ func writeJSON(w http.ResponseWriter, v any) {
 // with the dashboard and every header-based defence (CORS, CSP, Sec-Fetch-Site)
 // passes. The Host header is the one thing rebinding cannot forge, which is why
 // this check is the boundary and the rest is defence in depth.
-func dashboardHostAllowed(hostport string) bool {
+//
+// extra holds names the operator declared in ROUTATIC_PROXY_GUI_ALLOWED_HOSTS.
+// A deployment behind a reverse proxy needs its public name there: the proxy
+// forwards the original Host, so loopback alone would refuse every page.
+func dashboardHostAllowed(hostport string, extra map[string]bool) bool {
+	switch host := hostOnly(hostport); host {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return extra[host]
+	}
+}
+
+func hostOnly(hostport string) string {
 	host := hostport
 	if h, _, err := net.SplitHostPort(hostport); err == nil {
 		host = h
 	}
-	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
-	switch strings.ToLower(host) {
-	case "localhost", "127.0.0.1", "::1":
-		return true
+	return strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(host, "["), "]"))
+}
+
+// guiAllowedHosts reads the operator-declared public names, comma-separated.
+// The environment is the same override channel the GUI port already uses.
+func guiAllowedHosts() map[string]bool {
+	hosts := make(map[string]bool)
+	for _, entry := range strings.Split(os.Getenv("ROUTATIC_PROXY_GUI_ALLOWED_HOSTS"), ",") {
+		if host := hostOnly(strings.TrimSpace(entry)); host != "" {
+			hosts[host] = true
+		}
 	}
-	return false
+	return hosts
 }
 
 // crossOriginWrite denies cross-site writes. The Host check stops a rebound
@@ -1663,9 +1684,9 @@ var crossOriginWrite = http.NewCrossOriginProtection()
 
 // securityHeadersMiddleware rejects foreign Host headers and adds the response
 // hardening headers shared by every route.
-func securityHeadersMiddleware(next http.Handler) http.Handler {
+func securityHeadersMiddleware(next http.Handler, extraHosts map[string]bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !dashboardHostAllowed(r.Host) {
+		if !dashboardHostAllowed(r.Host, extraHosts) {
 			http.Error(w, "unexpected Host header", http.StatusForbidden)
 			return
 		}

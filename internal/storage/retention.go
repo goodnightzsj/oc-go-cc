@@ -67,7 +67,10 @@ func (r *Retention) run() {
 const retentionBatch = 5000
 
 func (r *Retention) runOnce() {
-	now := time.Now()
+	// UTC() strips the monotonic reading, and that is the point: the guard below
+	// exists to notice a wall-clock step, and Sub on two monotonic values walks
+	// the monotonic clock, where a step never shows up.
+	now := time.Now().UTC()
 	if !r.lastRun.IsZero() {
 		gap := now.Sub(r.lastRun)
 		if gap < 0 || gap > 24*time.Hour {

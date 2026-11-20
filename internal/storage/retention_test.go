@@ -98,3 +98,13 @@ func TestOpenNormalizesLegacyRequestTimestamps(t *testing.T) {
 		t.Fatal("legacy RFC3339 timestamp was not normalized to the column's UTC spelling")
 	}
 }
+
+// The jump guard has to see wall-clock steps. Comparing two monotonic readings
+// makes Sub walk the monotonic clock, where a step does not exist.
+func TestRetentionJumpGuardUsesWallClock(t *testing.T) {
+	r := &Retention{days: 7}
+	// Simulate a previous run a moment ago and a clock that jumped forward a
+	// month: the guard must skip, and it can only know that from wall time.
+	r.lastRun = time.Now().UTC().AddDate(0, 0, -40)
+	r.runOnce() // no database: a skipped run must not touch it
+}

@@ -103,7 +103,7 @@ func (p *OpenCodeZenProvider) executeOpenAI(ctx context.Context, req *types.Mess
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := client.ReadAllLimited(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -186,13 +186,10 @@ func (p *OpenCodeZenProvider) executeAnthropic(ctx context.Context, req *types.M
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= http.StatusBadRequest {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
-		apiErr.KeyHint = sel.KeyHint()
-		return nil, apiErr
+		return nil, client.ReadAPIError(resp, sel.KeyHint())
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := client.ReadAllLimited(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -231,11 +228,7 @@ func (p *OpenCodeZenProvider) streamAnthropic(ctx context.Context, req *types.Me
 	}
 
 	if resp.StatusCode >= http.StatusBadRequest {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
-		apiErr.KeyHint = sel.KeyHint()
-		return nil, apiErr
+		return nil, client.ReadAPIError(resp, sel.KeyHint())
 	}
 
 	return p.withKeyHint(resp.Body, sel), nil
@@ -263,7 +256,7 @@ func (p *OpenCodeZenProvider) executeResponses(ctx context.Context, req *types.M
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := client.ReadAllLimited(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -315,7 +308,7 @@ func (p *OpenCodeZenProvider) executeGemini(ctx context.Context, req *types.Mess
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := client.ReadAllLimited(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -393,11 +386,7 @@ func (p *OpenCodeZenProvider) doRequest(ctx context.Context, endpoint string, se
 	}
 
 	if resp.StatusCode >= http.StatusBadRequest {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
-		apiErr.KeyHint = sel.KeyHint()
-		return nil, apiErr
+		return nil, client.ReadAPIError(resp, sel.KeyHint())
 	}
 
 	return resp, nil

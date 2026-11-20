@@ -107,7 +107,7 @@ func (p *AWSBedrockProvider) executeOpenAI(ctx context.Context, req *types.Messa
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := client.ReadAllLimited(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -185,7 +185,7 @@ func (p *AWSBedrockProvider) executeResponses(ctx context.Context, req *types.Me
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := client.ReadAllLimited(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -256,13 +256,10 @@ func (p *AWSBedrockProvider) executeAnthropic(ctx context.Context, req *types.Me
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= http.StatusBadRequest {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
-		apiErr.KeyHint = sel.KeyHint()
-		return nil, apiErr
+		return nil, client.ReadAPIError(resp, sel.KeyHint())
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := client.ReadAllLimited(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -306,11 +303,7 @@ func (p *AWSBedrockProvider) streamAnthropic(ctx context.Context, req *types.Mes
 	}
 
 	if resp.StatusCode >= http.StatusBadRequest {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
-		apiErr.KeyHint = sel.KeyHint()
-		return nil, apiErr
+		return nil, client.ReadAPIError(resp, sel.KeyHint())
 	}
 
 	return p.withKeyHint(resp.Body, sel), nil
@@ -390,11 +383,7 @@ func (p *AWSBedrockProvider) doBedrockRequest(ctx context.Context, endpoint stri
 	}
 
 	if resp.StatusCode >= http.StatusBadRequest {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes), RetryAfter: resp.Header.Get("Retry-After")}
-		apiErr.KeyHint = sel.KeyHint()
-		return nil, apiErr
+		return nil, client.ReadAPIError(resp, sel.KeyHint())
 	}
 
 	return resp, nil

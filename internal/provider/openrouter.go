@@ -41,7 +41,7 @@ func (p *OpenRouterProvider) Execute(ctx context.Context, req *types.MessageRequ
 		return nil, err
 	}
 	defer func() { _ = body.Close() }()
-	raw, err := io.ReadAll(body)
+	raw, err := client.ReadAllLimited(body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -108,13 +108,10 @@ func (p *OpenRouterProvider) request(ctx context.Context, req *types.MessageRequ
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
 		defer func() { _ = resp.Body.Close() }()
-		body, readErr := io.ReadAll(resp.Body)
-		retryAfter := resp.Header.Get("Retry-After")
+		apiErr, readErr := client.ReadAPIErrorBody(resp, sel.KeyHint())
 		if readErr != nil {
-			return nil, fmt.Errorf("read upstream error: %w: %w", readErr, &client.APIError{StatusCode: resp.StatusCode, Body: string(body), KeyHint: sel.KeyHint()})
+			return nil, fmt.Errorf("read upstream error: %w: %w", readErr, apiErr)
 		}
-		apiErr := &client.APIError{StatusCode: resp.StatusCode, Body: string(body), RetryAfter: retryAfter}
-		apiErr.KeyHint = sel.KeyHint()
 		return nil, apiErr
 	}
 	if p.capture != nil {

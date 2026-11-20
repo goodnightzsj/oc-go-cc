@@ -148,11 +148,17 @@ func (c *countingReadCloser) Close() error { return nil }
 func TestStreamWriteDirectCopyAndNativeError(t *testing.T) {
 	out := &deadlineCheckWriter{ResponseRecorder: httptest.NewRecorder()}
 	body := io.NopCloser(strings.NewReader(nativeMessageTerminal))
-	if _, err := copyStreamingResponse(t.Context(), out, body, nil); err != nil {
-		t.Fatalf("direct copy returned %v", err)
+	if _, terminated, err := copyStreamingResponse(t.Context(), out, body, nil); err != nil || !terminated {
+		t.Fatalf("direct copy returned %v (terminal=%t)", err, terminated)
 	}
 	if out.Body.String() != nativeMessageTerminal || out.flushes != 1 || !out.deadline.IsZero() {
 		t.Fatal("direct copy did not preserve bytes and deadline lifecycle")
+	}
+	// A body that ends without message_stop must be reported as unterminated
+	// even though the transport read returned a clean EOF.
+	if _, terminated, err := copyStreamingResponse(t.Context(), &deadlineCheckWriter{ResponseRecorder: httptest.NewRecorder()},
+		io.NopCloser(strings.NewReader("event: message_start\ndata: {}\n\n")), nil); err != nil || terminated {
+		t.Fatalf("truncated copy: err=%v terminal=%t", err, terminated)
 	}
 	failure := errors.New("synthetic flush failed")
 	out.flushErr = failure
@@ -168,7 +174,7 @@ func TestStreamWriteDirectCopyAndNativeError(t *testing.T) {
 	out = &deadlineCheckWriter{ResponseRecorder: httptest.NewRecorder(), flushErr: io.ErrClosedPipe}
 	counting := &countingReadCloser{r: strings.NewReader("firstsecond")}
 	body = counting
-	if _, err := copyStreamingResponse(t.Context(), out, body, nil); !errors.Is(err, io.ErrClosedPipe) {
+	if _, _, err := copyStreamingResponse(t.Context(), out, body, nil); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatalf("direct copy error = %v, want the write failure", err)
 	}
 	if counting.reads != 1 {

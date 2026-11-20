@@ -480,11 +480,15 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		h.recordDirect(requestID, meta.Model, streaming, start, resp.StatusCode, false, err)
 		return
 	}
-	wroteAny, copyErr := copyStreamingResponse(idleCtx, w, resp.Body, ping)
+	wroteAny, terminated, copyErr := copyStreamingResponse(idleCtx, w, resp.Body, ping)
 	switch {
-	case copyErr == nil && wroteAny:
-		// A clean end after delivering something proves the upstream served.
+	case copyErr == nil && terminated:
+		// A clean end after the protocol's terminal event proves the upstream
+		// served.
 		h.gate.available(attempt)
+	case copyErr == nil && wroteAny:
+		// Truncated after delivery: handled below, where the gate is cooled and
+		// the row is written with the cause.
 	case copyErr == nil || errors.Is(copyErr, errClientGone):
 		// Nothing reached the caller. A caller that left proves nothing against
 		// the upstream; an upstream that closed without a byte does.
@@ -498,6 +502,16 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		// request to the platform.
 		delay := h.gate.failed(time.Now(), attempt, "")
 		h.logger.Warn("Anthropic stream ended early", "error", copyErr, "retry_in", delay)
+	}
+	if copyErr == nil && !terminated {
+		// A clean EOF before message_stop is the commonest truncation: the
+		// upstream closes the chunked body properly after half an answer, so
+		// nothing at the transport level says anything went wrong. Scoring it
+		// as success left the caller with a stream that never ended while the
+		// History tab showed a healthy request.
+		copyErr = fmt.Errorf("direct stream ended before the terminal event: %w", io.ErrUnexpectedEOF)
+		h.gate.failed(time.Now(), attempt, "")
+		h.logger.Warn("Anthropic stream truncated before message_stop", "request_id", requestID)
 	}
 	h.recordDirect(requestID, meta.Model, streaming, start, resp.StatusCode, wroteAny, copyErr)
 }
@@ -662,18 +676,34 @@ func streamEndError(ctx context.Context) error {
 }
 
 // copyStreamingResponse forwards the upstream body and reports how it ended:
-// whether any byte reached the caller, and the terminating error. A clean EOF
-// is nil; a caller cancellation is errClientGone; an upstream stall or write
-// failure is returned so the accounting row does not claim success.
-func copyStreamingResponse(ctx context.Context, w http.ResponseWriter, body io.Reader, ping func()) (bool, error) {
+// whether any byte reached the caller, whether the stream carried its terminal
+// event, and the terminating error. A clean EOF is nil; a caller cancellation
+// is errClientGone; an upstream stall or write failure is returned so the
+// accounting row does not claim success.
+//
+// The terminal event is detected by scanning for "message_stop" across a frame
+// boundary that keeps the last 12 bytes, so the marker cannot be split between
+// two reads. It is a marker scan and not a parse because this path forwards the
+// body untouched - the event is the upstream's, not something this proxy wrote.
+func copyStreamingResponse(ctx context.Context, w http.ResponseWriter, body io.Reader, ping func()) (bool, bool, error) {
 	bufPtr := streamBufPool.Get().(*[]byte)
 	defer streamBufPool.Put(bufPtr)
 	buf := *bufPtr
 	wroteAny := false
+	terminatedSeen := false
+	var tail []byte
+	terminated := func(chunk []byte) bool {
+		tail = append(tail, chunk...)
+		hit := bytes.Contains(tail, []byte("message_stop"))
+		if len(tail) > len("message_stop")-1 {
+			tail = tail[len(tail)-(len("message_stop")-1):]
+		}
+		return hit
+	}
 	for {
 		select {
 		case <-ctx.Done():
-			return wroteAny, streamEndError(ctx)
+			return wroteAny, false, streamEndError(ctx)
 		default:
 		}
 		n, err := body.Read(buf)
@@ -692,20 +722,21 @@ func copyStreamingResponse(ctx context.Context, w http.ResponseWriter, body io.R
 				return http.NewResponseController(w).Flush()
 			}); writeErr != nil {
 				if ctx.Err() != nil {
-					return wroteAny, streamEndError(ctx)
+					return wroteAny, false, streamEndError(ctx)
 				}
-				return wroteAny, writeErr
+				return wroteAny, false, writeErr
 			}
 			wroteAny = true
+			terminatedSeen = terminatedSeen || terminated(buf[:n])
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				return wroteAny, nil
+				return wroteAny, terminatedSeen, nil
 			}
 			if ctx.Err() != nil {
-				return wroteAny, streamEndError(ctx)
+				return wroteAny, terminatedSeen, streamEndError(ctx)
 			}
-			return wroteAny, err
+			return wroteAny, terminatedSeen, err
 		}
 	}
 }

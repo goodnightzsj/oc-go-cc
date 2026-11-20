@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -77,23 +78,29 @@ type MessagesHandler struct {
 // stream proxy) don't interleave SSE frames.
 type responseWriter struct {
 	http.ResponseWriter
-	mu                sync.Mutex
-	wroteHeader       bool
-	ssePayloadWritten bool
-	contentWritten    bool
-	sseDecoder        sse.Decoder
-	messageStopped    bool
-	stopReason        string
-	streamErr         error
-	writeErr          error
-	writeTimeout      time.Duration
-	cancelWrites      context.CancelFunc
-	sourceModel       string
-	sourceAnthropic   bool
-	nativeResponses   *transformer.ResponsesObservation
-	nativeDecoder     sse.Decoder
-	timing            streamTiming
-	usage             struct {
+	mu             sync.Mutex
+	wroteHeader    bool
+	contentWritten bool
+	// payloadWritten records that something besides this proxy's own framing
+	// reached the caller: an upstream event, or content this proxy generated.
+	// Opening message_start and keepalive comment frames do not count - the
+	// handler has to be able to tell "the caller has seen an answer" from "the
+	// SSE status line has been committed", because an upstream that answers 200
+	// and then sends nothing can still be replaced by the next model.
+	payloadWritten  bool
+	sseDecoder      sse.Decoder
+	messageStopped  bool
+	stopReason      string
+	streamErr       error
+	writeErr        error
+	writeTimeout    time.Duration
+	cancelWrites    context.CancelFunc
+	sourceModel     string
+	sourceAnthropic bool
+	nativeResponses *transformer.ResponsesObservation
+	nativeDecoder   sse.Decoder
+	timing          streamTiming
+	usage           struct {
 		observed                 bool
 		inputTokens              int
 		outputTokens             int
@@ -123,7 +130,13 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 	}
 	var observed streamMilestones
 	if len(b) > 0 {
-		w.ssePayloadWritten = true
+		// The first frame of every transformed stream is this proxy's own
+		// message_start, so it cannot answer whether the upstream produced
+		// anything. Everything after it is either upstream events or keepalive
+		// comments.
+		if w.wroteHeader {
+			w.payloadWritten = w.payloadWritten || !keepaliveFrame(b)
+		}
 		var err error
 		if w.nativeResponses != nil {
 			observed, err = w.observeNativeResponses(b)
@@ -152,6 +165,17 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 		w.timing.record(observed)
 	}
 	return n, err
+}
+
+// keepaliveFrame reports whether b is nothing but SSE comments and blank lines,
+// which is what startKeepaliveHeartbeat writes to hold a silent connection open.
+func keepaliveFrame(b []byte) bool {
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, ":") {
+			return false
+		}
+	}
+	return true
 }
 
 // observeSSE reads complete events without changing forwarded bytes. Native
@@ -366,8 +390,8 @@ const (
 )
 
 // WriteKeepalive writes a keepalive comment frame (":keepalive\n\n") to the
-// response. Unlike Write, it does NOT set ssePayloadWritten — keepalives are
-// not real SSE events and should not block fallback logic on idle timeout.
+// response. Unlike Write, it does NOT set payloadWritten — keepalives are not
+// real SSE events and must not block fallback logic on idle timeout.
 func (w *responseWriter) WriteKeepalive(writeTimeout time.Duration) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -547,11 +571,15 @@ func (h *MessagesHandler) admitRequest(w http.ResponseWriter, r *http.Request) (
 		// Skipping 0 was the bug: clearing the field after it had been set left
 		// the old rate in force until a restart.
 		if previous := h.appliedRate.Swap(int64(setting)); setting > 0 || previous > 0 {
-			h.rateLimiter.Configure(setting, time.Minute)
+			h.rateLimiter.Configure(setting, rateLimitWindow)
 		}
 		if !h.rateLimiter.Allow(clientIP) {
 			h.metrics.RecordRateLimited()
 			h.logger.Warn("rate limited", "client", clientIP, "request_id", requestID)
+			// The bucket is a fixed one-minute window, so the wait is at most a
+			// minute. Without this header a client's own retry logic has no hint
+			// and either gives up or hammers.
+			w.Header().Set("Retry-After", strconv.Itoa(int(rateLimitWindow/time.Second)))
 			return r, false
 		}
 	}
@@ -561,12 +589,13 @@ func (h *MessagesHandler) admitRequest(w http.ResponseWriter, r *http.Request) (
 // HandleMessages handles POST /v1/messages.
 func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		w.Header().Set("Allow", http.MethodPost)
+		writeAnthropicError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
 		return
 	}
 	admitted, allowed := h.admitRequest(w, r)
 	if !allowed {
-		http.Error(w, "rate limited", http.StatusTooManyRequests)
+		writeAnthropicError(w, http.StatusTooManyRequests, "rate limited", nil)
 		return
 	}
 	r = admitted
@@ -1074,7 +1103,7 @@ func (h *MessagesHandler) handleStreaming(
 			}
 			// Payload/usage retain the existing cancellation accounting; a known
 			// source failure does not need either to be recorded.
-			payloadWritten := rw.ssePayloadWritten
+			payloadWritten := rw.payloadWritten
 			rw.mu.Unlock()
 			if h.storage == nil {
 				return
@@ -1138,10 +1167,19 @@ func (h *MessagesHandler) handleStreaming(
 		handleStreamError := func(err error, model config.ModelConfig, action string) bool {
 			cancelAttempt()
 			lastStreamErr = err
-			if complete(clientCtx, err) {
+			// A caller that left is a neutral outcome for the breaker. Completing
+			// after learning that is the point: the error handed to the breaker is
+			// whatever the transport reported, and a caller cancellation can carry
+			// an upstream status in its joined error - which would then be scored
+			// against a model whose only fault was that nobody was listening.
+			var canceled bool
+			if clientCtx.Err() != nil {
+				canceled = true
+				complete(clientCtx, transformer.ErrClientDisconnected)
+			} else if complete(clientCtx, err) {
 				blockedProviders[providerName] = true
 			}
-			if clientCtx.Err() != nil {
+			if canceled {
 				h.logger.Debug("client disconnected during " + action + " stream")
 				recordStreamFailure(model, err, action, false)
 				if rw.usage.observed || rw.streamErr != nil {
@@ -1153,7 +1191,7 @@ func (h *MessagesHandler) handleStreaming(
 			if errors.Is(err, transformer.ErrStreamIdle) {
 				h.logger.Warn("upstream "+action+" stream idle, trying next model",
 					"model", model.ModelID, "idle_timeout", idleTimeout)
-				if rw.ssePayloadWritten {
+				if rw.payloadWritten {
 					h.sendStreamError(rw, "stream idle after SSE payload started", err)
 					h.metrics.RecordFailureForModel(model.ModelID)
 					return false // abort
@@ -1163,7 +1201,7 @@ func (h *MessagesHandler) handleStreaming(
 			if err == transformer.ErrEmptyStream {
 				h.logger.Warn("upstream "+action+" stream empty, trying next model",
 					"model", model.ModelID)
-				if rw.ssePayloadWritten {
+				if rw.payloadWritten {
 					h.sendStreamError(rw, "empty stream after SSE payload started", err)
 					h.metrics.RecordFailureForModel(model.ModelID)
 					return false // abort
@@ -1182,7 +1220,7 @@ func (h *MessagesHandler) handleStreaming(
 				return false
 			}
 			h.logger.Warn(action+" streaming failed", "model", model.ModelID, "error", err)
-			if rw.ssePayloadWritten {
+			if rw.payloadWritten {
 				h.sendStreamError(rw, streamFailureMessage(err), err)
 				h.metrics.RecordFailureForModel(model.ModelID)
 				return false // abort — cannot fallback after SSE payload started
@@ -1268,7 +1306,9 @@ func (h *MessagesHandler) handleStreaming(
 			}
 			if errProxy == transformer.ErrClientDisconnected {
 				if clientCtx.Err() != nil {
-					complete(clientCtx, errProxy)
+					// Same rule as handleStreamError: a departure is neutral, so
+					// the breaker sees the sentinel rather than the transport error.
+					complete(clientCtx, transformer.ErrClientDisconnected)
 					h.logger.Debug("client disconnected during stream")
 					recordStreamFailure(model, errProxy, wireFormat.String(), false)
 					if rw.usage.observed || rw.streamErr != nil {
@@ -1291,7 +1331,7 @@ func (h *MessagesHandler) handleStreaming(
 	}
 
 	h.metrics.RecordFailure()
-	if rw.ssePayloadWritten {
+	if rw.payloadWritten {
 		// SSE payload was already sent — do not attempt further writes
 		// beyond the error event.  The client has a partial stream.
 		return
@@ -1627,6 +1667,26 @@ func truncateError(s string) string {
 		cut--
 	}
 	return s[:cut] + "… (truncated)"
+}
+
+// rateLimitWindow is the bucket window for the per-client admission limit. It is
+// named because the 429's Retry-After is derived from it: a refill granularity
+// changed here without changing that header would tell clients to retry too
+// early or too late.
+const rateLimitWindow = time.Minute
+
+// writeAnthropicError answers a request refused before routing with the error
+// body this API documents. http.Error was the wrong shape on three counts: a
+// plain-text body, no Retry-After beside a 429, and no Allow beside a 405 - and
+// Claude Code parses the body, so a refusal it cannot read is one it reports
+// generically. err may be nil when there is no cause to classify.
+func writeAnthropicError(w http.ResponseWriter, status int, message string, err error) {
+	if retry := streamErrorDetails(message, err).RetryAfter; retry != "" {
+		w.Header().Set("Retry-After", retry)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(transformer.TransformErrorResponse(status, message))
 }
 
 // sendError sends an error response in Anthropic format.

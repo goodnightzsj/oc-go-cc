@@ -79,6 +79,10 @@ func TestChatIncompleteToolArgumentsDoNotComplete(t *testing.T) {
 func TestChatRefusalAndUnknownFinishJSON(t *testing.T) {
 	for _, tc := range []struct{ reason, want string }{
 		{"stop", "end_turn"}, {"length", "max_tokens"}, {"content_filter", "refusal"}, {"unknown", ""}, {"", ""},
+		// The deprecated OpenAI name for tool_calls. LiteLLM, vLLM and gateway
+		// translations still emit it; refusing it made a completed tool call an
+		// error.
+		{"function_call", "tool_use"},
 	} {
 		var upstream types.ChatCompletionResponse
 		if err := json.Unmarshal([]byte(`{"choices":[{"message":{"role":"assistant","content":"answer"},"finish_reason":"`+tc.reason+`"}]}`), &upstream); err != nil {

@@ -31,7 +31,11 @@ var ErrClientDisconnected = fmt.Errorf("client disconnected")
 // new return point had to remember to wrap - three of them did not.
 var ErrStreamIdle = fmt.Errorf("upstream stream idle: %w", core.ErrUpstreamStreamFailed)
 
-var ErrEmptyStream = fmt.Errorf("upstream returned empty stream")
+// ErrEmptyStream is an upstream that answered 200 and then closed without a
+// single chunk. It wraps the breaker's classification so the handler's identity
+// check and the retryability vote agree: http.NoBody and an SSE endpoint that
+// answers 200 to a request it never forwarded both look like this.
+var ErrEmptyStream = fmt.Errorf("upstream returned empty stream: %w", core.ErrUpstreamStreamFailed)
 
 const thinkingSignaturePlaceholder = "proxy-thinking-placeholder"
 
@@ -190,6 +194,14 @@ func (h *StreamHandler) ProxyStream(
 	}
 
 	if terminalStopReason == "" {
+		// A body that carried nothing at all is a different fault from a
+		// conversation that stopped halfway: the first is an upstream that
+		// answered 200 to a request it never ran, the second is a truncated
+		// generation. The handler has its own branch for the first, which used
+		// to be unreachable because both arrived here.
+		if !contentStarted && terminalUsage == nil && len(startedToolCalls) == 0 && !reasoningStarted {
+			return ErrEmptyStream
+		}
 		return fmt.Errorf("chat stream has no finish reason: %w", io.ErrUnexpectedEOF)
 	}
 	if terminalStopReason == "end_turn" && sawRefusal {

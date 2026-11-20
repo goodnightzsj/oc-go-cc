@@ -188,7 +188,10 @@ func (t *ResponseTransformer) mapFinishReason(reason string) (string, error) {
 		return "end_turn", nil
 	case "length":
 		return "max_tokens", nil
-	case "tool_calls", "tool_use":
+	// "function_call" is the deprecated OpenAI name for the same thing. LiteLLM,
+	// vLLM and several gateway translations still emit it, and refusing it turned
+	// a completed tool call into an error response.
+	case "tool_calls", "tool_use", "function_call":
 		return "tool_use", nil
 	case "content_filter":
 		return "refusal", nil

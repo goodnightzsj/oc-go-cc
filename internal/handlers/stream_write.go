@@ -61,7 +61,9 @@ func (w *responseWriter) writeErrorEvent(data []byte) error {
 			w.wroteHeader = true
 			w.ResponseWriter.WriteHeader(http.StatusOK)
 		}
-		w.ssePayloadWritten = true
+		// The error event is caller-visible, so it counts as payload: nothing
+		// can be replaced by a fallback after it.
+		w.payloadWritten = true
 		frame := fmt.Sprintf("\n\nevent: error\ndata: %s\n\n", data)
 		n, err := w.ResponseWriter.Write([]byte(frame))
 		if err != nil {

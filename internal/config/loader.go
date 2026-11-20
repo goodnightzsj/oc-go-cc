@@ -755,7 +755,7 @@ func validateSingleAPIKey(key string) error {
 		return nil
 	}
 	if envVarPattern.MatchString(key) {
-		return invalid("api_key", "unresolved_env", "api_key contains unresolved env var — set the corresponding environment variable or use api_keys")
+		return invalid("api_key", "unresolved_env", "api_key contains unresolved env var — set the corresponding environment variable, or remove the api_key field if this platform uses its own api_keys")
 	}
 	return nil
 }

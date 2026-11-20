@@ -34,6 +34,10 @@ func streamIdleError() error {
 	return fmt.Errorf("%w: %w", ErrStreamIdle, core.ErrUpstreamStreamFailed)
 }
 
+// StreamIdleFailure is the classified idle error, for a caller that has to
+// re-derive it from a context cause instead of receiving it from a reader.
+func StreamIdleFailure() error { return streamIdleError() }
+
 var ErrEmptyStream = fmt.Errorf("upstream returned empty stream")
 
 const thinkingSignaturePlaceholder = "proxy-thinking-placeholder"
@@ -178,11 +182,15 @@ func (h *StreamHandler) ProxyStream(
 			if IsIdleTimeout(err) {
 				return streamIdleError()
 			}
-			// When the idle watchdog fires, it cancels the upstream context
-			// which produces context.Canceled on Read. Distinguish that
-			// from a client disconnect by checking clientCtx.
-			if (errors.Is(err, context.Canceled) || errors.Is(err, ErrStreamReadCanceled)) && clientCtx.Err() == nil {
-				return streamIdleError()
+			// When the idle watchdog fires it cancels the upstream context, so
+			// the read fails with context.Canceled and clientCtx.Err() is NOT
+			// nil - the cause is what distinguishes that from a caller leaving.
+			// Checking clientCtx.Err() alone made the watchdog path look like a
+			// disconnect, which is not retryable and never votes on the breaker.
+			if errors.Is(err, context.Canceled) || errors.Is(err, ErrStreamReadCanceled) {
+				if errors.Is(context.Cause(clientCtx), ErrStreamIdle) || clientCtx.Err() == nil {
+					return streamIdleError()
+				}
 			}
 			return fmt.Errorf("failed to read stream: %w", err)
 		}

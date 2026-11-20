@@ -19,7 +19,8 @@
   "active_site": "",
   "enable_cost_based_routing": false,
   "cost_routing": {
-    "enabled": true,
+    "//_enabled": "Cheapest-model selection. This is the switch that counts: the legacy enable_cost_based_routing above is OR-ed with it, so leaving that false does not turn it off.",
+    "enabled": false,
     "prefer_providers": [
       "opencode-go",
       "aws-bedrock"
@@ -565,7 +566,7 @@
     "zero_data_retention": false
   },
   "cline_pass": {
-    "base_url": "https://api.cline.bot",
+    "base_url": "https://api.cline.bot/api/v1/chat/completions",
     "api_keys": [],
     "key_strategy": "fill_first",
     "timeout_ms": 120000,

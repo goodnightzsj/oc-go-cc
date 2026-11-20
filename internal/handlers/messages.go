@@ -627,6 +627,7 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 	h.metrics.RecordRequest(isStreaming)
 
 	h.logger.Info("received request",
+		"request_id", requestID,
 		"model", anthropicReq.Model,
 		"streaming", isStreaming,
 		"messages", len(anthropicReq.Messages),
@@ -676,6 +677,7 @@ func (h *MessagesHandler) HandleMessages(w http.ResponseWriter, r *http.Request)
 	}
 
 	h.logger.Info("routing request",
+		"request_id", requestID,
 		"scenario", routeResult.Scenario,
 		"model", routeResult.Primary.ModelID,
 		"provider", routeResult.Primary.Provider,
@@ -982,13 +984,14 @@ func (h *MessagesHandler) handleStreaming(
 		// follow the stream's terminal event.
 		atomic.StoreInt32(&heartbeatPaused, 0)
 		earlyRecord := history.RequestRecord{
-			Model: model.ModelID, RequestedModel: requestedModel, Provider: providerName,
+			RequestID: requestID,
+			Model:     model.ModelID, RequestedModel: requestedModel, Provider: providerName,
 			Scenario: string(scenario), StartTime: attemptStart, Streaming: true,
 			Attempt: attempted, ReasoningEffort: clientEffort,
 			CandidatePosition: candidateIndex + 1,
 		}
 
-		h.logger.Info("attempting streaming model", "model", model.ModelID, "provider", model.Provider)
+		h.logger.Info("attempting streaming model", "request_id", requestID, "model", model.ModelID, "provider", model.Provider)
 
 		// Upstream context carries the streaming timeout configured for the model.
 		timeout := h.client.StreamingTimeout(model)
@@ -1022,6 +1025,7 @@ func (h *MessagesHandler) handleStreaming(
 			)
 			rec := history.RequestRecord{
 				ID:                  recordID,
+				RequestID:           requestID,
 				Model:               model.ModelID,
 				RequestedModel:      requestedModel,
 				Provider:            providerName,
@@ -1091,6 +1095,7 @@ func (h *MessagesHandler) handleStreaming(
 			firstByte := client.FirstByteAtOf(currentStream)
 			rec := history.RequestRecord{
 				ID:             recordID,
+				RequestID:      requestID,
 				Model:          model.ModelID,
 				RequestedModel: requestedModel,
 				Provider:       providerName,
@@ -1256,7 +1261,9 @@ func (h *MessagesHandler) handleStreaming(
 			var sourceFailure *core.ResponseError
 			if !errors.As(errProxy, &sourceFailure) && (errors.Is(errProxy, transformer.ErrStreamReadCanceled) || errors.Is(errProxy, transformer.ErrClientDisconnected) || errors.Is(errProxy, context.Canceled)) {
 				if context.Cause(attemptCtx) == transformer.ErrStreamIdle {
-					errProxy = transformer.ErrStreamIdle
+					// Keep the classification: the bare sentinel is not
+					// retryable, so restoring it dropped the breaker vote.
+					errProxy = transformer.StreamIdleFailure()
 				}
 			}
 			if errProxy == transformer.ErrClientDisconnected {
@@ -1384,7 +1391,8 @@ func (h *MessagesHandler) handleNonStreaming(
 			defer func() {
 				if execErr != nil && len(body) == 0 {
 					h.recordFailedAttempt(ctx, history.RequestRecord{
-						Model: model.ModelID, RequestedModel: requestedModel, Provider: client.Provider(model),
+						RequestID: requestID,
+						Model:     model.ModelID, RequestedModel: requestedModel, Provider: client.Provider(model),
 						Scenario: string(scenario), StartTime: attemptStart, Attempt: attempt, ReasoningEffort: clientEffort,
 						CandidatePosition: candidatePosition,
 					}, execErr)
@@ -1494,6 +1502,7 @@ func (h *MessagesHandler) handleNonStreaming(
 
 	rec := history.RequestRecord{
 		ID:                  recordID,
+		RequestID:           requestID,
 		Model:               result.ModelID,
 		RequestedModel:      requestedModel,
 		Provider:            result.Provider,

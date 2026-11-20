@@ -253,7 +253,24 @@ Press Ctrl+C to stop the server.`,
 			pricesDone := make(chan struct{})
 			go func() {
 				defer close(pricesDone)
-				storage.PriceRefreshLoop(ctx, priceRefreshConfig(atomicCfg, srv.Storage()), nil, logPriceRefresh)
+				// The first refresh is also when the derived peak rules replace
+				// the seed. Re-running the backfill once afterwards keeps rows
+				// written at start-up (which used the seed) consistent with rows
+				// written live (which use the derived rules).
+				backfilled := false
+				onResult := func(counts map[string]int, errs map[string]error) {
+					logPriceRefresh(counts, errs)
+					if backfilled || srv.Storage() == nil {
+						return
+					}
+					backfilled = true
+					if n, err := srv.Storage().BackfillPeakMultipliers(ctx); err != nil {
+						slog.Warn("peak multiplier backfill after refresh failed", "err", err)
+					} else if n > 0 {
+						slog.Info("re-marked peak rows after the first price refresh", "rows", n)
+					}
+				}
+				storage.PriceRefreshLoop(ctx, priceRefreshConfig(atomicCfg, srv.Storage()), nil, onResult)
 			}()
 			// The holiday calendar decides peak pricing on Chinese public
 			// holidays, so it has to be current before the first request is

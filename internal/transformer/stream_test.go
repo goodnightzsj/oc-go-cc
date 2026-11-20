@@ -1302,3 +1302,59 @@ func TestProxyStream_ToolThenTextStillEndsWithToolUse(t *testing.T) {
 		}
 	}
 }
+
+// Text, then a tool call, then text again: every content block must be opened
+// and closed exactly once, at an index that is never reused.
+func TestProxyStream_InterleavedBlocksUseUniqueIndices(t *testing.T) {
+	for _, frames := range [][]string{
+		{
+			`{"choices":[{"delta":{"content":"a"}}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"t1","type":"function","function":{"name":"f","arguments":"{}"}}]}}]}`,
+			`{"choices":[{"delta":{"content":"b"}}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		},
+		{
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"t1","type":"function","function":{"name":"f","arguments":"{}"}}]}}]}`,
+			`{"choices":[{"delta":{"content":"a"}}]}`,
+			`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		},
+	} {
+		w := newMockResponseWriter()
+		if err := NewStreamHandler().ProxyStream(w, sseLines(frames...), "m", context.Background(), 0, func() {}); err != nil {
+			t.Fatalf("ProxyStream: %v", err)
+		}
+		starts := map[int]int{}
+		stops := map[int]int{}
+		order := []string{}
+		for _, ev := range parseSSEEvents(t, w.buf.String()) {
+			switch ev.Type {
+			case "content_block_start":
+				starts[*ev.Index]++
+				order = append(order, "start:"+indexString(*ev.Index))
+			case "content_block_stop":
+				stops[*ev.Index]++
+				order = append(order, "stop:"+indexString(*ev.Index))
+			}
+		}
+		for idx, n := range starts {
+			if n != 1 {
+				t.Fatalf("index %d started %d times (order %v)", idx, n, order)
+			}
+			if stops[idx] != 1 {
+				t.Fatalf("index %d stopped %d times (order %v)", idx, stops[idx], order)
+			}
+		}
+	}
+}
+
+func indexString(v int) string {
+	if v == 0 {
+		return "0"
+	}
+	var b []byte
+	for v > 0 {
+		b = append([]byte{byte('0' + v%10)}, b...)
+		v /= 10
+	}
+	return string(b)
+}

@@ -344,6 +344,7 @@ const TRANSLATIONS = {
     'detail.subtitle': 'Routing, billing, and token details',
     'detail.close': 'Close request details',
     'detail.requestId': 'Request ID',
+    'detail.recordId': 'Record ID',
     'detail.time': 'Time',
     'detail.model': 'Model',
     'detail.requestedModel': 'Requested',
@@ -1025,6 +1026,7 @@ const TRANSLATIONS = {
     'detail.subtitle': '路由、费用与 Token 明细',
     'detail.close': '关闭请求详情',
     'detail.requestId': '请求 ID',
+    'detail.recordId': '记录 ID',
     'detail.time': '请求时间',
     'detail.model': '模型',
     'detail.requestedModel': '请求的模型',
@@ -3074,7 +3076,11 @@ function setSegmentedSelection(button) {
 // Publish the initial selection too: before the first click the state exists
 // only as a class in the markup.
 function syncSegmentedState() {
-  document.querySelectorAll('button.active').forEach(button => {
+  // Segmented controls only. Matching every active button also caught the
+  // navigation tab, whose parent is the nav - so all seven tabs were announced
+  // as pressed and the state went stale on the next tab switch. Navigation is
+  // expressed by aria-current, which activateTab already maintains.
+  document.querySelectorAll('.metric-segment button.active').forEach(button => {
     const group = button.parentElement;
     if (!group) return;
     group.querySelectorAll('button').forEach(item => {
@@ -5392,7 +5398,8 @@ function showHistoryDetail(record) {
       <div class="detail-token"><span>${t('detail.outputTokens')}</span><strong>${tokenValue(record.output_tokens)}</strong></div>
     </div>
     <div class="detail-metadata">
-      <div class="detail-row"><span class="detail-label">${t('detail.requestId')}</span><span class="detail-value">${escapeHtml(record.id || '—')}</span></div>
+      <div class="detail-row"><span class="detail-label">${t('detail.requestId')}</span><span class="detail-value">${escapeHtml(record.request_id || '—')}</span></div>
+      <div class="detail-row"><span class="detail-label">${t('detail.recordId')}</span><span class="detail-value">${escapeHtml(record.id || '—')}</span></div>
       <div class="detail-row"><span class="detail-label">${t('history.costSource')}</span><span class="detail-value">${costSourceLabel(record.cost_source)}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.billingWindow')}</span><span class="detail-value">${billingWindowLabel(record)}</span></div>
       <div class="detail-row"><span class="detail-label">${t('detail.requestType')}</span><span class="detail-value">${outcomeKnown ? t(record.streaming ? 'detail.streaming' : 'detail.nonStreaming') : t('detail.unavailable')}</span></div>
@@ -6069,6 +6076,10 @@ const FallbackModule = {
   // renderPickerList draws the filtered, grouped rows. query is matched against
   // the model id and the platform's display name, case-insensitively.
   renderPickerList(query) {
+    // The rows are about to be replaced, so any active descendant is about to
+    // name an element that no longer exists. Clearing it here is what keeps the
+    // search box's aria state truthful between keystrokes.
+    document.getElementById('fallback-add-search')?.removeAttribute?.('aria-activedescendant');
     const list = document.getElementById('fallback-add-list');
     if (!list) return;
     const q = (query || '').trim().toLowerCase();

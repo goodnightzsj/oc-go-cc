@@ -343,7 +343,7 @@ func TestDerivedPeakRulesPriceTheRuntimePath(t *testing.T) {
 		Windows:    []PeakWindow{{Start: 0, End: 16}},
 		Multiplier: 1.6,
 		AllDays:    true,
-	}})
+	}}, nil)
 
 	inside := time.Date(2026, 9, 6, 9, 0, 0, 0, time.UTC)   // Sunday, inside the window
 	outside := time.Date(2026, 9, 7, 20, 0, 0, 0, time.UTC) // Monday, outside it
@@ -358,7 +358,7 @@ func TestDerivedPeakRulesPriceTheRuntimePath(t *testing.T) {
 // A refresh that produced no rules is still a statement. Falling back to the
 // static table would reinstate a schedule the payload had already contradicted.
 func TestEmptyDerivedRulesDoNotFallBackToTheSeed(t *testing.T) {
-	SetDerivedPeakRules("openrouter", nil)
+	SetDerivedPeakRules("openrouter", nil, nil)
 	if got := ProviderPeakMultiplier("openrouter", "tencent/hy3", time.Date(2026, 9, 7, 3, 0, 0, 0, time.UTC)); got != 1 {
 		t.Fatalf("multiplier = %v after an empty refresh, want 1 (the seed must not return)", got)
 	}

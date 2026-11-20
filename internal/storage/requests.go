@@ -60,15 +60,16 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 	// explicitly.
 	_, err = r.db.DB().ExecContext(ctx, `
 		INSERT OR REPLACE INTO requests (
-			id, model, requested_model, provider, scenario, start_time, duration_ms,
+			id, request_id, model, requested_model, provider, scenario, start_time, duration_ms,
 			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens,
 			cost_usd, cost_source, details_known, outcome_known, usage_trusted, streaming, success, error_msg, attempt,
 			peak_multiplier, upstream_channel, upstream_model, response_model, first_byte_ms, reasoning_effort,
 			key_hint, first_event_ms, first_content_ms, message_end_ms,
 			generation_first_output_ms, generation_duration_ms, generation_output_tokens, candidate_position
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		rec.ID,
+		nullIfEmpty(rec.RequestID),
 		rec.Model,
 		requestedModelForRecord(rec),
 		rec.Provider,
@@ -593,8 +594,8 @@ func requestWhere(q RequestQuery) (string, []any) {
 		// only the non-streaming failure path fills it, and a history with no
 		// such failure yet is not a history that never has one. Dropping the
 		// column would make "search the error text" silently match nothing.
-		clauses = append(clauses, `(id LIKE ? OR model LIKE ? OR COALESCE(requested_model, '') LIKE ? OR COALESCE(provider, '') LIKE ? OR COALESCE(scenario, '') LIKE ? OR COALESCE(error_msg, '') LIKE ? OR response_model LIKE ? OR upstream_model LIKE ? OR upstream_channel LIKE ?)`)
-		args = append(args, term, term, term, term, term, term, term, term, term)
+		clauses = append(clauses, `(id LIKE ? OR COALESCE(request_id, '') LIKE ? OR model LIKE ? OR COALESCE(requested_model, '') LIKE ? OR COALESCE(provider, '') LIKE ? OR COALESCE(scenario, '') LIKE ? OR COALESCE(error_msg, '') LIKE ? OR response_model LIKE ? OR upstream_model LIKE ? OR upstream_channel LIKE ?)`)
+		args = append(args, term, term, term, term, term, term, term, term, term, term)
 	}
 	for _, filter := range []struct {
 		column string

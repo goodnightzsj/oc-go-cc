@@ -493,8 +493,11 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 }
 
 type historyEntry struct {
-	ID    string `json:"id"`
-	Model string `json:"model"`
+	ID string `json:"id"`
+	// RequestID is the caller's X-Request-ID - the value it can quote back to
+	// an operator, and the one the search box matches.
+	RequestID string `json:"request_id,omitempty"`
+	Model     string `json:"model"`
 	// RequestedModel is the model the client named. Omitted when it matched the
 	// served model, so the field's presence is itself the signal that this
 	// request was routed somewhere other than what it asked for.
@@ -711,6 +714,7 @@ func toHistoryEntries(records []history.RequestRecord) []historyEntry {
 		}
 		entry := historyEntry{
 			ID:                        rec.ID,
+			RequestID:                 rec.RequestID,
 			Model:                     rec.Model,
 			RequestedModel:            rec.RequestedModel,
 			Provider:                  rec.Provider,

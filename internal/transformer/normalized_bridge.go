@@ -34,7 +34,7 @@ func AnthropicToResponses(anthropicReq *types.MessageRequest, model config.Model
 	// input from the original blocks so mixed text/tool chronology is retained.
 	chat, err := NewRequestTransformer().transformParameters(anthropicReq, model)
 	if err != nil {
-		return nil, err
+		return nil, &core.RequestConversionError{Err: err}
 	}
 	responsesReq := &types.ResponsesRequest{
 		Model: model.ModelID, Temperature: chat.Temperature, TopP: chat.TopP,
@@ -297,6 +297,9 @@ func AnthropicToGemini(anthropicReq *types.MessageRequest, model config.ModelCon
 
 	// Convert tools.
 	if len(req.Tools) > 0 {
+		if err := rejectServerTools(anthropicReq.Tools); err != nil {
+			return nil, err
+		}
 		var functions []types.GeminiFunctionDeclaration
 		for _, tool := range req.Tools {
 			functions = append(functions, types.GeminiFunctionDeclaration{

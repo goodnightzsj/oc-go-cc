@@ -264,7 +264,7 @@ func metricModelForDirect(model string) string {
 // carries no usage: the passthrough never parses the caller's body, so tokens
 // and cost stay unknown (details_known=0) rather than invented. Success requires
 // both a non-error status and a complete body copy.
-func (h *AnthropicFirstHandler) recordDirect(model string, streaming bool, start time.Time, status int, wroteAny bool, copyErr error) {
+func (h *AnthropicFirstHandler) recordDirect(requestID, model string, streaming bool, start time.Time, status int, wroteAny bool, copyErr error) {
 	// A stream that delivered nothing is not a success even though it ended
 	// cleanly: the caller got an empty answer and the gate must not stay warm.
 	success := status < 400 && copyErr == nil && (!streaming || wroteAny)
@@ -301,6 +301,7 @@ func (h *AnthropicFirstHandler) recordDirect(model string, streaming bool, start
 		// is INSERT OR REPLACE on this key, so a reused X-Request-ID would
 		// silently delete the earlier row.
 		ID:             uuid.NewString(),
+		RequestID:      truncateModelID(requestID),
 		Model:          model,
 		RequestedModel: model,
 		// Not a site registry id: the registry lists the platforms this proxy
@@ -427,7 +428,7 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		payload, readErr := readAllWithIdle(idleCtx, resp.Body, ping, h.maxResponseBytes)
 		if readErr != nil {
 			if errors.Is(readErr, errClientGone) {
-				h.recordDirect(meta.Model, false, start, resp.StatusCode, false, readErr)
+				h.recordDirect(requestID, meta.Model, false, start, resp.StatusCode, false, readErr)
 				return
 			}
 			if errors.Is(readErr, errDirectTooLarge) {
@@ -465,7 +466,7 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 			// was scored as a model failure.
 			writeErr = errClientGone
 		}
-		h.recordDirect(meta.Model, false, start, resp.StatusCode, true, writeErr)
+		h.recordDirect(requestID, meta.Model, false, start, resp.StatusCode, true, writeErr)
 		return
 	}
 
@@ -476,7 +477,7 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}); err != nil {
 		h.logger.Debug("Anthropic response delivery failed", "error", err)
 		// The caller never saw a byte; still account for the failure.
-		h.recordDirect(meta.Model, streaming, start, resp.StatusCode, false, err)
+		h.recordDirect(requestID, meta.Model, streaming, start, resp.StatusCode, false, err)
 		return
 	}
 	wroteAny, copyErr := copyStreamingResponse(idleCtx, w, resp.Body, ping)
@@ -498,7 +499,7 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		delay := h.gate.failed(time.Now(), attempt, "")
 		h.logger.Warn("Anthropic stream ended early", "error", copyErr, "retry_in", delay)
 	}
-	h.recordDirect(meta.Model, streaming, start, resp.StatusCode, wroteAny, copyErr)
+	h.recordDirect(requestID, meta.Model, streaming, start, resp.StatusCode, wroteAny, copyErr)
 }
 
 // streamChunkSize matches the streaming copy's buffer, so a buffered answer and

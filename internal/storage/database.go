@@ -381,6 +381,9 @@ func (d *Database) initSchema(ctx context.Context) error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS requests (
 		id TEXT PRIMARY KEY,
+		-- The caller's X-Request-ID. Not unique and not the key: one client id
+		-- can cover several attempts, and the row key must stay per execution.
+		request_id TEXT,
 		model TEXT NOT NULL,
 		requested_model TEXT,
 		provider TEXT,
@@ -492,6 +495,9 @@ type columnMigration struct {
 func (d *Database) migrateColumns(ctx context.Context) error {
 	migrations := []columnMigration{
 		{"requests", "attempt", `ALTER TABLE requests ADD COLUMN attempt INTEGER DEFAULT 1`},
+		// Existing rows keep NULL: their client id was never recorded, and
+		// inventing one would be worse than an honest absence.
+		{"requests", "request_id", `ALTER TABLE requests ADD COLUMN request_id TEXT`},
 		// Legacy rows retain NULL and their existing attempt-based fallback identity.
 		{"requests", "candidate_position", `ALTER TABLE requests ADD COLUMN candidate_position INTEGER CHECK(candidate_position >= 1)`},
 		{"requests", "cache_read_tokens", `ALTER TABLE requests ADD COLUMN cache_read_tokens INTEGER DEFAULT 0`},
@@ -917,6 +923,9 @@ type priceEntry struct {
 	CacheRead  float64     `json:"cache_read,omitempty"`
 	CacheWrite float64     `json:"cache_write,omitempty"`
 	Tiers      []priceTier `json:"tiers,omitempty"`
+	// KeepStaticPeak marks a model whose payload states peak hours this parser
+	// cannot express. Its seed rule is kept rather than dropped.
+	KeepStaticPeak bool `json:"keep_static_peak,omitempty"`
 }
 
 // priceTier is one context-size band. Size is the threshold the band applies

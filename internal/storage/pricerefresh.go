@@ -611,7 +611,13 @@ func RefreshPrices(ctx context.Context, cfg PriceRefreshConfig, client *http.Cli
 		// The payload is the only statement of which models peak when. Handing
 		// it to the history table replaces the hand-copied rules, which had
 		// already drifted from it in both directions.
-		history.SetDerivedPeakRules(site.OpenRouter, orRules)
+		var keepStatic []string
+		for _, entry := range orEntries {
+			if entry.KeepStaticPeak {
+				keepStatic = append(keepStatic, entry.Match)
+			}
+		}
+		history.SetDerivedPeakRules(site.OpenRouter, orRules, keepStatic)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, map[string]error{site.OpenCodeGo: err, site.CommandCode: err, site.ClinePass: err, site.OpenRouter: err}
@@ -1008,6 +1014,9 @@ type openRouterBand struct {
 	// ok separates "parsed as zero" from "did not parse": a free model is a
 	// real price on this platform, an unparsable one is an absence.
 	ok bool
+	// modellable reports whether this band can become a peak rule. A band that
+	// cannot still contributes to the base rate.
+	modellable bool
 }
 
 type openRouterOverride struct {
@@ -1097,9 +1106,6 @@ func openRouterEntry(id string, m openRouterModel) (priceEntry, []history.PeakRu
 		if override.UTCStart == nil || override.UTCEnd == nil {
 			continue
 		}
-		if len(override.UTCDays) > 0 && string(override.UTCDays) != "null" {
-			continue
-		}
 		band := openRouterBand{start: *override.UTCStart, end: *override.UTCEnd}
 		input, bandInOK := perTokenToPerMillion(override.Prompt)
 		output, bandOutOK := perTokenToPerMillion(override.Completion)
@@ -1110,6 +1116,12 @@ func openRouterEntry(id string, m openRouterModel) (priceEntry, []history.PeakRu
 		band.prompt, band.completion = input, output
 		band.cacheRead, _ = perTokenToPerMillion(override.InputCacheRead)
 		band.cacheWrite, _ = perTokenToPerMillion(override.InputCacheWrite)
+		// A band restricted to named days, or to a part of an hour, states a
+		// real price that this parser cannot express as a rule. It still counts
+		// towards the base rate: skipping it here made a model whose cheap bands
+		// are all day-scoped look like its peak price was the base, and every
+		// off-peak hour then billed at the peak rate.
+		band.modellable = len(override.UTCDays) == 0 || string(override.UTCDays) == "null"
 		bands = append(bands, band)
 	}
 
@@ -1157,8 +1169,18 @@ func openRouterEntry(id string, m openRouterModel) (priceEntry, []history.PeakRu
 	// multiplier: two windows that bill at different rates cannot share one
 	// rule, and collapsing them used to apply whichever came last to both.
 	byMultiplier := make(map[float64][]history.PeakWindow)
+	degraded := false
 	for _, band := range bands {
-		if band.start < 0 || base.prompt <= 0 || band.prompt <= base.prompt {
+		if band.start < 0 {
+			continue
+		}
+		// Any band this parser cannot express changes which hours are cheap, so
+		// the family's peak shape is not fully known either way.
+		if !band.modellable {
+			degraded = true
+			continue
+		}
+		if base.prompt <= 0 || band.prompt <= base.prompt {
 			continue
 		}
 		// A band whose two sides do not scale by the same factor cannot be
@@ -1178,6 +1200,12 @@ func openRouterEntry(id string, m openRouterModel) (priceEntry, []history.PeakRu
 		}
 		key := math.Round(promptRatio*1000) / 1000
 		byMultiplier[key] = append(byMultiplier[key], windows...)
+	}
+	if degraded {
+		// Keep the seed's rule for this family: the payload says it has peak
+		// hours, this parser just cannot express them, and dropping to a flat
+		// rate would understate the bill.
+		entry.KeepStaticPeak = true
 	}
 	if len(byMultiplier) == 0 {
 		return entry, nil, true

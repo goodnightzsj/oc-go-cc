@@ -133,7 +133,7 @@ func TestOpenRouterFractionalPeakSurvivesTheCostPath(t *testing.T) {
 		Windows:    []history.PeakWindow{{Start: 0, End: 16}},
 		Multiplier: 1.6,
 		AllDays:    true,
-	}})
+	}}, nil)
 
 	in := sql.NullFloat64{Float64: 0.0825, Valid: true} // hy3's catalog input rate
 	out := sql.NullFloat64{Float64: 0.33, Valid: true}  // and its output rate

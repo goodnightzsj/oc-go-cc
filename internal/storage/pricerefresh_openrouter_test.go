@@ -168,3 +168,33 @@ func TestOpenRouterSkipsAHalfPricedModel(t *testing.T) {
 		}
 	}
 }
+
+// A model whose cheap bands are all restricted to named days still bills at the
+// cheap rate outside them. Skipping those bands before choosing the base made
+// the peak price look like the base, and every off-peak hour billed at 2x.
+func TestOpenRouterDayScopedBandsStillSetTheBase(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek/deepseek-v4.1-flash-1017","pricing":{
+			"prompt":"0.0000003","completion":"0.0000012",
+			"overrides":[
+				{"utc_start":0,"utc_end":100,"utc_days":["mon","tue","wed","thu","fri"],"prompt":"0.00000015","completion":"0.0000006"},
+				{"utc_start":0,"utc_end":2400,"utc_days":["sat","sun"],"prompt":"0.00000015","completion":"0.0000006"}
+			]}}]}`))
+	}))
+	defer srv.Close()
+
+	entries, _, err := FetchOpenRouterPrices(context.Background(), srv.Client(), srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d", len(entries))
+	}
+	got := entries[0]
+	if got.Input != 0.15 || got.Output != 0.6 {
+		t.Fatalf("base = %v/%v per million, want the day-scoped cheap band 0.15/0.6", got.Input, got.Output)
+	}
+	if !got.KeepStaticPeak {
+		t.Fatal("a model whose windows cannot be modelled must keep its seed peak rule")
+	}
+}

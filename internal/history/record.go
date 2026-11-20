@@ -16,7 +16,11 @@ import (
 
 // RequestRecord holds metadata for a single completed proxy request.
 type RequestRecord struct {
-	ID             string        // unique request ID
+	ID string // unique per execution; the history row key
+	// RequestID is the caller's X-Request-ID, the value it can quote back to an
+	// operator. It is not unique - several attempts may share one - and the row
+	// key stays ID for that reason.
+	RequestID      string
 	Model          string        // route/billing model sent to the provider
 	RequestedModel string        // model the client asked for, when it differs from Model
 	Provider       string        // provider name (e.g. "opencode-go")
@@ -421,7 +425,9 @@ func PeakScheduledProviders() map[string]bool {
 // prints the peak figure, and reconstructing the off-peak base from it needs the
 // ratio the platform itself declares.
 func PeakMultiplierFor(provider, model string) float64 {
-	schedule, ok := peakSchedules[site.Normalize(provider)]
+	// The same lookup the per-request path uses: a second source here would
+	// answer with the seed after a refresh had replaced it.
+	schedule, ok := peakScheduleFor(site.Normalize(provider))
 	if !ok {
 		return 1
 	}
@@ -457,9 +463,15 @@ var (
 	derivedPeak   = map[string]peakSchedule{}
 )
 
-// SetDerivedPeakRules replaces the rules derived from a payload for one
-// platform. An empty set removes them, falling back to the static table.
-func SetDerivedPeakRules(provider string, specs []PeakRuleSpec) {
+// SetDerivedPeakRules installs the rules derived from a payload for one
+// platform.
+//
+// keepStatic names model families the payload prices but whose windows this
+// parser could not express (day-scoped or mid-hour bands). Those keep the
+// static rule instead of dropping to a flat rate, which would understate the
+// bill. Every other family is exactly what the payload says, including "no
+// peak hours".
+func SetDerivedPeakRules(provider string, specs []PeakRuleSpec, keepStatic []string) {
 	id := site.Normalize(provider)
 	derivedPeakMu.Lock()
 	defer derivedPeakMu.Unlock()

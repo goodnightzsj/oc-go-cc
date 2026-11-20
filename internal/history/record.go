@@ -495,6 +495,19 @@ func SetDerivedPeakRules(provider string, specs []PeakRuleSpec, keepStatic []str
 			allDays:    spec.AllDays,
 		})
 	}
+	// Families the parser could not model keep the seed's rule. Without this
+	// the parameter was accepted and ignored: a model whose cheap bands are all
+	// day-scoped lost its peak hours entirely, and because the backfill only
+	// revisits rows with peak_multiplier <= 1, the loss was permanent.
+	for _, family := range keepStatic {
+		name := models.ModelFamily(family)
+		for _, rule := range peakSchedules[id].rules {
+			if rule.models[name] {
+				schedule.rules = append(schedule.rules, rule)
+				break
+			}
+		}
+	}
 	derivedPeak[id] = schedule
 }
 

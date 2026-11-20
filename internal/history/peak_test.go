@@ -364,3 +364,16 @@ func TestEmptyDerivedRulesDoNotFallBackToTheSeed(t *testing.T) {
 	}
 	t.Cleanup(resetDerivedPeakRules)
 }
+
+// A family the parser could not model must keep the seed rule. The parameter
+// was accepted and ignored once, so the model silently lost its peak hours.
+func TestDerivedRulesKeepTheSeedForUnmodellableFamilies(t *testing.T) {
+	t.Cleanup(resetDerivedPeakRules)
+	// The seed prices deepseek-v4.1-flash at 2x on weekday mornings.
+	SetDerivedPeakRules("openrouter", nil, []string{"deepseek/deepseek-v4.1-flash"})
+
+	peak := time.Date(2026, 9, 7, 3, 0, 0, 0, time.UTC) // Monday 03:00 UTC
+	if got := ProviderPeakMultiplier("openrouter", "deepseek/deepseek-v4.1-flash", peak); got != 2 {
+		t.Fatalf("multiplier = %v, want the seed rule's 2", got)
+	}
+}

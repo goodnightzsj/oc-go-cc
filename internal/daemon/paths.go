@@ -10,10 +10,9 @@ import (
 )
 
 const (
-	AppName       = "routatic-proxy"
-	LegacyAppName = "oc-go-cc"
-	ConfigDir     = ".config/routatic-proxy"
-	LaunchAgent   = "com.routatic.proxy"
+	AppName     = "routatic-proxy"
+	ConfigDir   = ".config/routatic-proxy"
+	LaunchAgent = "com.routatic.proxy"
 )
 
 // Paths holds well-known directories and files for the app.

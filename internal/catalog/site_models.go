@@ -46,12 +46,6 @@ var siteModelPathSuffix = map[string]string{
 // visible failure; a picker full of models this credential cannot call is not.
 const clinePassModelsPath = "/api/v1/ai/cline/recommended-models"
 
-// clinePassBucket names the bucket inside that response holding this
-// platform's roster. The payload carries four (recommended, free, clinePass,
-// clineCloud) and a model's bucket decides how it is billed - not its id
-// prefix, which the free bucket mixes (cline-free/..., z-ai/..., poolside/...).
-const clinePassBucket = "clinePass"
-
 // SiteModelsURL derives a platform's model-list endpoint from its configured
 // API endpoint, or reports that this platform has no derivable one.
 func SiteModelsURL(provider, apiEndpoint string) (string, error) {

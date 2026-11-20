@@ -229,11 +229,3 @@ func (p *noUsageProvider) Stream(context.Context, *types.MessageRequest, config.
 type noUsageFailureBody struct{ io.Reader }
 
 func (b *noUsageFailureBody) Close() error { return nil }
-
-// blockingThenErrorReader stalls until the caller's context cancels it.
-type blockingThenErrorReader struct{}
-
-func (r *blockingThenErrorReader) Read(p []byte) (int, error) {
-	time.Sleep(200 * time.Millisecond)
-	return 0, context.Canceled
-}

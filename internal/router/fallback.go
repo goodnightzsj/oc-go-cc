@@ -1,4 +1,5 @@
-// Package router defines HTTP route registration and middleware chaining.
+// Package router selects models: scenario detection, fallback chains, circuit
+// breakers, cost-based selection and the catalog lookups they share.
 package router
 
 import (

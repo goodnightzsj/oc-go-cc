@@ -98,7 +98,7 @@ func (h *AnalyticsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 	}
 	window, err := h.window(days, from, to, explicitRange)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, "invalid analytics window", err)
 		return
 	}
 	window = window.ForProvider(provider)
@@ -107,7 +107,7 @@ func (h *AnalyticsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 	// caches it until the request table changes.
 	snapshot, err := h.store.Summary(r.Context(), window)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, "analytics summary failed", err)
 		return
 	}
 	resp := map[string]any{
@@ -126,7 +126,7 @@ func (h *AnalyticsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		// rows through the start-time index.
 		lastMinute, err := h.summaryBetween(r.Context(), now.Add(-time.Minute), now.Add(time.Second), provider)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, "analytics unavailable", err)
 			return
 		}
 		// Whole minutes, so this answer is cacheable across the three-second
@@ -136,14 +136,14 @@ func (h *AnalyticsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 		today, err := h.summaryBetween(r.Context(), todayStart, now.Add(time.Minute), provider)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, "analytics unavailable", err)
 			return
 		}
 		// The storage baseline still governs this wide window, so retained means
 		// every trustworthy row rather than an arbitrary client-side date limit.
 		retained, err := h.store.TokenSummary(r.Context(), h.store.Window(36500).ForProvider(provider))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, "analytics unavailable", err)
 			return
 		}
 		resp["last_minute"] = lastMinute
@@ -195,12 +195,12 @@ func (h *AnalyticsHandler) TokenTrend(w http.ResponseWriter, r *http.Request) {
 	}
 	window, err := h.window(days, from, to, explicitRange)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, "invalid analytics window", err)
 		return
 	}
 	trend, err := h.store.TokenTrend(r.Context(), window.ForProvider(provider), granularity)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, "analytics unavailable", err)
 		return
 	}
 	h.writeJSON(w, map[string]any{

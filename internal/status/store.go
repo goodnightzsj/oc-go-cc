@@ -94,10 +94,13 @@ func (s *Store) Publish(snap Snapshot) {
 }
 
 func (s *Store) applyLocked(snap Snapshot) {
-	now := time.Now().UTC()
+	// Keep the raw reading - it carries the monotonic clock, which is what makes
+	// the age below immune to a wall-clock step - and derive the UTC form only
+	// for the field that goes on the wire.
+	now := time.Now()
 	s.updated = now
 	snap.SchemaVersion = 1
-	snap.UpdatedAt = now.Format(time.RFC3339Nano)
+	snap.UpdatedAt = now.UTC().Format(time.RFC3339Nano)
 	snap.AgeMS = 0
 	snap.Source = "proxy"
 	snap.Proxy = s.proxy

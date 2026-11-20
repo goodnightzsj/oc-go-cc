@@ -236,3 +236,48 @@ func TestObservedChannelsListsWhatServedTraffic(t *testing.T) {
 		t.Errorf("all channels = %v, want [deepseek]", all)
 	}
 }
+
+// The channel list is requested on the dashboard's three-second poll while a
+// platform is selected, and there is no filter that could make the query cheap:
+// without a cache it was a GROUP BY over every row, every three seconds. The
+// answer changes only with the request table, which is what history_revision
+// reports.
+func TestObservedChannelsFollowsTheRevisionCounter(t *testing.T) {
+	db := newCostTestDB(t)
+	summaryFixture(t, db)
+	repo := NewRequests(db)
+
+	first, err := repo.ObservedChannels(t.Context(), "cline-pass")
+	if err != nil {
+		t.Fatalf("observed channels: %v", err)
+	}
+	cached, err := repo.ObservedChannels(t.Context(), "cline-pass")
+	if err != nil {
+		t.Fatalf("cached observed channels: %v", err)
+	}
+	if len(cached) != len(first) || cached[0] != first[0] {
+		t.Fatalf("cached answer = %v, want %v", cached, first)
+	}
+
+	// A committed write advances the revision, so the cached answer must not
+	// outlive it: filtering by a channel that just started serving would
+	// otherwise return an empty page.
+	if _, err := db.DB().Exec(`
+		INSERT INTO requests (id, model, provider, upstream_channel, start_time, success)
+		VALUES ('rev-2', 'm', 'cline-pass', 'zeta', '2026-06-01T00:00:00Z', 1)`); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	after, err := repo.ObservedChannels(t.Context(), "cline-pass")
+	if err != nil {
+		t.Fatalf("observed channels after write: %v", err)
+	}
+	found := false
+	for _, channel := range after {
+		if channel == "zeta" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("channels after a new write = %v, want one containing zeta", after)
+	}
+}

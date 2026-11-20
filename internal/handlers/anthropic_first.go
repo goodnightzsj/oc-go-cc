@@ -42,6 +42,11 @@ const (
 // answer.
 var errClientGone = errors.New("client disconnected")
 
+// errDirectTooLarge is this proxy's own buffer limit, breached by a response it
+// could not hold. It says nothing about the upstream's health, so it must not
+// open the availability backoff.
+var errDirectTooLarge = errors.New("direct response exceeds the local buffer limit")
+
 // AnthropicFirstHandler sends inference to Anthropic and uses the existing
 // OpenCode handler only while Anthropic is unavailable.
 //
@@ -61,6 +66,13 @@ type AnthropicFirstHandler struct {
 	gate     availabilityGate
 	storage  StorageWriter    // optional: history rows for traffic served here
 	metrics  *metrics.Metrics // optional: in-process counters
+
+	// Budgets, seeded from the constants. They are fields, not constants, only
+	// so a test can drive an idle stall or an oversized body without waiting
+	// 150 seconds or allocating 256 MiB.
+	idleTimeout      time.Duration
+	totalTimeout     time.Duration
+	maxResponseBytes int64
 }
 
 type availabilityGate struct {
@@ -216,7 +228,10 @@ func NewAnthropicFirstHandler(atomic *config.AtomicConfig, fallback http.Handler
 				return http.ErrUseLastResponse
 			},
 		},
-		logger: slog.Default(),
+		logger:           slog.Default(),
+		idleTimeout:      directIdleTimeout,
+		totalTimeout:     directTotalTimeout,
+		maxResponseBytes: maxDirectResponseBytes,
 	}
 }
 
@@ -254,7 +269,6 @@ func (h *AnthropicFirstHandler) recordDirect(model string, streaming bool, start
 	clientGone := errors.Is(copyErr, errClientGone)
 	if h.metrics != nil {
 		metricModel := metricModelForDirect(model)
-		h.metrics.RecordRequest(streaming)
 		switch {
 		case success:
 			h.metrics.RecordSuccess(metricModel, time.Since(start))
@@ -280,9 +294,15 @@ func (h *AnthropicFirstHandler) recordDirect(model string, streaming bool, start
 		// One row per execution, never the caller's correlation id: the table
 		// is INSERT OR REPLACE on this key, so a reused X-Request-ID would
 		// silently delete the earlier row.
-		ID:              uuid.NewString(),
-		Model:           model,
-		RequestedModel:  model,
+		ID:             uuid.NewString(),
+		Model:          model,
+		RequestedModel: model,
+		// Not a site registry id: the registry lists the platforms this proxy
+		// routes to, and several invariants require each entry to have a
+		// credential source, a timeout source and a settings block. The direct
+		// passthrough has none of those, so this value lives here and in the
+		// dashboard's label map, and the history platform filter (which offers
+		// exactly the visible platforms) cannot select it.
 		Provider:        "anthropic",
 		Scenario:        "anthropic-first",
 		StartTime:       start,
@@ -297,7 +317,13 @@ func (h *AnthropicFirstHandler) recordDirect(model string, streaming bool, start
 	case copyErr != nil:
 		rec.ErrorMsg = copyErr.Error()
 	}
-	_ = h.storage.InsertRequest(rec)
+	if err := h.storage.InsertRequest(rec); err != nil {
+		// The one writer that used to drop this error. A schema drift or a
+		// read-only database would make direct traffic vanish from History
+		// silently - and these rows are already the ones analytics cannot
+		// reconstruct, because their usage is unknown.
+		h.logger.Warn("record direct-path request", "request_id", rec.ID, "error", err)
+	}
 }
 
 func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -337,17 +363,29 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	_ = json.Unmarshal(body, &meta)
 	streaming := meta.Stream != nil && *meta.Stream
 	start := time.Now()
+	// Count the request once, before any upstream work - the platform path
+	// counts at the same point. It used to be counted at completion inside
+	// recordDirect, so a caller that left before the headers never appeared as
+	// received, and received stopped equalling success plus failure.
+	if h.metrics != nil {
+		h.metrics.RecordRequest(streaming)
+	}
 
 	// An idle/stall budget for the upstream exchange plus a total cap. The
-	// direct path has no per-model settings, so it uses the proxy's own
+	// direct path has no per-request settings, so it uses the proxy's own
 	// streaming defaults. The total cap matters because the idle timer resets
 	// on every byte: a slow-drip upstream could otherwise hold the connection
 	// forever.
-	attemptCtx, cancelAttempt := context.WithTimeout(r.Context(), directTotalTimeout)
+	//
+	// These budgets belong to the upstream exchange, not to the handler: r
+	// keeps the caller's context. Rebinding r to idleCtx (which this did) handed
+	// a dead context to serveFallback, and every platform attempt then failed
+	// instantly - the caller waited out the idle budget and got a 5xx instead of
+	// an answer.
+	attemptCtx, cancelAttempt := context.WithTimeout(r.Context(), h.totalTimeout)
 	defer cancelAttempt()
 	idleCtx, cancelIdle := transformer.WithIdleCancellation(attemptCtx, cancelAttempt)
 	defer cancelIdle()
-	r = r.WithContext(idleCtx)
 
 	attempt, allowed := h.gate.allow(time.Now(), cfg.BaseURL)
 	if !allowed {
@@ -356,7 +394,7 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 
 	defer h.gate.abandon(attempt)
-	upstreamReq, err := newAnthropicRequest(r, cfg.BaseURL, body)
+	upstreamReq, err := newAnthropicRequest(r.WithContext(idleCtx), cfg.BaseURL, body)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, "invalid Anthropic base URL")
 		return
@@ -381,18 +419,25 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	h.gate.available(attempt)
 	h.logger.Debug("Anthropic request succeeded", "status", resp.StatusCode)
-	ping := transformer.StartIdleWatchdog(r.Context(), cancelIdle, directIdleTimeout)
+	ping := transformer.StartIdleWatchdog(idleCtx, cancelIdle, h.idleTimeout)
 
 	if !streaming {
 		// Buffer before committing the status. A committed 200 with a half body
 		// cannot be retried or fallen back, so a read failure must happen while
 		// the response is still uncommitted.
-		payload, readErr := readAllWithIdle(r.Context(), resp.Body, ping, maxDirectResponseBytes)
+		payload, readErr := readAllWithIdle(idleCtx, resp.Body, ping, h.maxResponseBytes)
 		if readErr != nil {
 			if errors.Is(readErr, errClientGone) {
 				h.recordDirect(meta.Model, false, start, resp.StatusCode, false, readErr)
+				return
+			}
+			if errors.Is(readErr, errDirectTooLarge) {
+				// This proxy's buffer limit, not the upstream's health: cooling
+				// the whole direct path for one response it could not hold would
+				// divert every later request to the platform over nothing.
+				h.logger.Warn("direct response too large to buffer, using OpenCode", "error", readErr)
+				h.serveFallback(w, r, body, requestID)
 				return
 			}
 			delay := h.gate.failed(time.Now(), attempt, "")
@@ -400,15 +445,18 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 			h.serveFallback(w, r, body, requestID)
 			return
 		}
+		// The body arrived in full: that, not the header, is what says this
+		// upstream is serving. Settling before the client write also keeps a
+		// caller who leaves mid-write from being read as an upstream failure.
+		h.gate.available(attempt)
 		copyHeader(w.Header(), resp.Header)
-		writeErr := withStreamWriteDeadline(w, keepaliveWriteTimeout, func() error {
-			w.WriteHeader(resp.StatusCode)
-			written, err := w.Write(payload)
-			if err == nil && written != len(payload) {
-				return io.ErrShortWrite
-			}
-			return err
-		})
+		writeErr := writeBufferedResponse(w, resp.StatusCode, payload)
+		if writeErr != nil && r.Context().Err() != nil {
+			// The write failed because the caller left. The streaming path
+			// classifies this the same way; without it a disconnected client
+			// was scored as a model failure.
+			writeErr = errClientGone
+		}
 		h.recordDirect(meta.Model, false, start, resp.StatusCode, true, writeErr)
 		return
 	}
@@ -423,8 +471,54 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		h.recordDirect(meta.Model, streaming, start, resp.StatusCode, false, err)
 		return
 	}
-	wroteAny, copyErr := copyStreamingResponse(r.Context(), w, resp.Body, ping)
+	wroteAny, copyErr := copyStreamingResponse(idleCtx, w, resp.Body, ping)
+	switch {
+	case copyErr == nil || errors.Is(copyErr, errClientGone):
+		// A clean end proves the upstream served; a caller that left proves
+		// nothing against it.
+		h.gate.available(attempt)
+	default:
+		// The stream died under a caller who is still waiting: that is an
+		// upstream failure, and cooling the path is what moves the next
+		// request to the platform.
+		delay := h.gate.failed(time.Now(), attempt, "")
+		h.logger.Warn("Anthropic stream ended early", "error", copyErr, "retry_in", delay)
+	}
 	h.recordDirect(meta.Model, streaming, start, resp.StatusCode, wroteAny, copyErr)
+}
+
+// streamChunkSize matches the streaming copy's buffer, so a buffered answer and
+// a streamed one reach the client in the same size pieces.
+const streamChunkSize = 32 << 10
+
+// writeBufferedResponse commits the status and then copies the payload in
+// chunks, each with its own write deadline. One deadline over the whole body
+// truncated a large buffered answer to a slow reader, while the streaming path
+// - which renews its budget per chunk - could finish the same response.
+func writeBufferedResponse(w http.ResponseWriter, status int, payload []byte) error {
+	if err := withStreamWriteDeadline(w, keepaliveWriteTimeout, func() error {
+		w.WriteHeader(status)
+		return nil
+	}); err != nil {
+		return err
+	}
+	for len(payload) > 0 {
+		chunk := payload[:min(len(payload), streamChunkSize)]
+		payload = payload[len(chunk):]
+		if err := withStreamWriteDeadline(w, keepaliveWriteTimeout, func() error {
+			written, err := w.Write(chunk)
+			if err != nil {
+				return err
+			}
+			if written != len(chunk) {
+				return io.ErrShortWrite
+			}
+			return http.NewResponseController(w).Flush()
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // readAllWithIdle buffers a non-streaming body under the same idle and total
@@ -444,7 +538,7 @@ func readAllWithIdle(ctx context.Context, body io.Reader, ping func(), limit int
 			}
 			total += int64(n)
 			if total > limit {
-				return nil, fmt.Errorf("direct response exceeds %d bytes", limit)
+				return nil, fmt.Errorf("%w of %d bytes", errDirectTooLarge, limit)
 			}
 			out.Write(buf[:n])
 		}

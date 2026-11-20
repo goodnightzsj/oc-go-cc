@@ -383,7 +383,7 @@ const TRANSLATIONS = {
     'setting.activeSiteUnrestricted': 'Not restricted',
     'setting.activeSiteHint': 'Routes every request through the selected platform.',
     'setting.trustForwardedFor': 'Trust X-Forwarded-For',
-    'setting.rateLimit': 'Rate limit (requests/minute, -1 disables)',
+    'setting.rateLimit': 'Rate limit (requests/minute; a negative value disables)',
     'setting.activeSiteUnavailable': 'Add an API key in Settings first.',
     'setting.activeSiteNotShown': 'Active platform "{site}" is not offered here, so these views show all platforms.',
     'detail.status': 'Status',
@@ -552,6 +552,9 @@ const TRANSLATIONS = {
     'catalog.ofTotal': 'of {n} total',
     'catalog.scoped': 'active site: {site}',
     'catalog.syncing': 'Syncing…',
+    'catalog.ctx': 'ctx',
+    'catalog.out': 'out',
+    'catalog.tools': 'tools',
     'catalog.filterPlatform': 'Filter by platform',
     'catalog.searchPlaceholder': 'Filter models...',
     'catalog.empty': 'No models match this filter',
@@ -1059,7 +1062,7 @@ const TRANSLATIONS = {
     'setting.activeSiteUnrestricted': '不限制',
     'setting.activeSiteHint': '所有请求都走选中的平台。',
     'setting.trustForwardedFor': '信任 X-Forwarded-For',
-    'setting.rateLimit': '限流（次/分钟，-1 关闭）',
+    'setting.rateLimit': '限流（次/分钟，负值即关闭）',
     'setting.activeSiteUnavailable': '请先在设置里填写 API 密钥。',
     'setting.activeSiteNotShown': '当前平台「{site}」未在此列出，各视图按全部平台展示。',
     'detail.status': '状态',
@@ -1228,6 +1231,9 @@ const TRANSLATIONS = {
     'catalog.ofTotal': '共 {n} 个',
     'catalog.scoped': '当前站点：{site}',
     'catalog.syncing': '同步中…',
+    'catalog.ctx': '上下文',
+    'catalog.out': '输出',
+    'catalog.tools': '工具',
     'catalog.filterPlatform': '按平台筛选',
     'catalog.searchPlaceholder': '筛选模型...',
     'catalog.empty': '没有匹配的模型',
@@ -1399,9 +1405,7 @@ function applyTranslations() {
   });
   // Update the language toggle text
   const langBtn = document.getElementById('btn-lang-toggle');
-  if (langBtn) {
-    langBtn.innerHTML = '<span data-i18n="lang.toggle">' + t('lang.toggle') + '</span>';
-  }
+  if (langBtn) langBtn.textContent = t('lang.toggle');
   window.CustomSelect?.syncAll();
   window.HistoryDateRange?.syncLabel();
   AnalyticsModule?.syncDateRange?.();
@@ -1423,6 +1427,12 @@ function applyTranslations() {
     TestModule.renderPlatforms();
     TestModule.renderModels();
   }
+  // The palette filters on label text, so a language switch changes which
+  // commands match the query that is already typed.
+  if (commandPaletteOpen) updateCommandList(commandInput?.value || '');
+  // The active-site note is composed here, not in markup, so it has to be
+  // rewritten rather than left in the previous language until the next poll.
+  if (lastActiveSiteNote !== null) renderActiveSiteNote(lastActiveSiteNote);
 }
 
 function toggleLanguage() {
@@ -2486,18 +2496,18 @@ async function refreshServiceStatus() {
     const dot  = document.getElementById('status-dot');
     const text = document.getElementById('status-text');
     dot.className = 'status-dot ' + (running ? 'running' : 'stopped');
-    if (running && connected) {
-      text.textContent = t('status.connected');
-    } else if (running) {
-      text.textContent = t('status.running');
-    } else {
-      text.textContent = t('status.stopped');
-    }
+    // Keep the i18n key in step with the value. Without it applyTranslations
+    // rewrites this node from "Checking..." on every language switch, showing
+    // the wrong state - not just the wrong language - until the next poll.
+    const statusKey = running && connected ? 'status.connected'
+      : running ? 'status.running' : 'status.stopped';
+    text.dataset.i18n = statusKey;
+    text.textContent = t(statusKey);
 
     // port info
     const portEl = document.getElementById('port-info');
     if (d.port) {
-      portEl.textContent = (currentLang === 'zh' ? '监听端口：' : 'Listening port: ') + d.port;
+      portEl.textContent = t('port.info').replace('—', d.port);
     }
 
     // model list
@@ -3033,7 +3043,7 @@ function renderCompactBreakdown(id, items, dimension) {
       <i class="compact-breakdown-fill" style="width:${Math.max(value > 0 ? 2 : 0, value / total * 100).toFixed(1)}%"></i>
       <span class="compact-breakdown-name">${escapeHtml(label)}</span>
       <span class="compact-breakdown-stat"><strong>${Number(item.requests || 0).toLocaleString('en-US')}</strong><small>${t('analytics.requests')}</small></span>
-      <span class="compact-breakdown-stat"><strong>${fmtTok(Number(item.tokens || 0))}</strong><small>Token</small></span>
+      <span class="compact-breakdown-stat"><strong>${fmtTok(Number(item.tokens || 0))}</strong><small>${t('th.tokens')}</small></span>
       <span class="compact-breakdown-stat" title="${escapeHtml(costCoverageNote(item))}"><strong>${fmtAggregateCost(item)}</strong><small>${t('analytics.cost')}</small></span>
     </div>`;
   }).join('');
@@ -3469,12 +3479,12 @@ const CatalogModule = {
         .sort((a, b) => a.id.localeCompare(b.id))
         .map(m => {
           const badges = [];
-          if (m.context_window) badges.push(`${fmtCompactTokens(m.context_window)} ctx`);
-          if (m.max_output) badges.push(`${fmtCompactTokens(m.max_output)} out`);
+          if (m.context_window) badges.push(`${fmtCompactTokens(m.context_window)} ${t('catalog.ctx')}`);
+          if (m.max_output) badges.push(`${fmtCompactTokens(m.max_output)} ${t('catalog.out')}`);
           if (m.input_per_m || m.output_per_m) badges.push(`$${fmtDecimal(m.input_per_m)} / $${fmtDecimal(m.output_per_m)}`);
-          if (m.tool_call) badges.push('tools');
-          if (m.vision) badges.push('vision');
-          if (m.reasoning) badges.push('reasoning');
+          if (m.tool_call) badges.push(t('catalog.tools'));
+          if (m.vision) badges.push(t('catalog.vision'));
+          if (m.reasoning) badges.push(t('catalog.reasoning'));
           if (m.routes_to) badges.push(`\u2192 ${m.routes_to}`);
           const name = m.name && m.name !== m.id ? `<div class="catalog-model-name">${escapeHtml(m.name)}</div>` : '';
           return `<div class="catalog-model-row">
@@ -3792,8 +3802,14 @@ function fmtRunway(days) {
 
 function providerLabel(provider) {
   // A hidden platform still has a name, so rows recorded under it keep
-  // rendering one instead of falling back to the raw id.
-  return providerInfo(provider)?.name || provider || t('detail.unknown');
+  // rendering one instead of falling back to the raw id. The registry is the
+  // list of platforms this proxy routes to, so a value it does not own - the
+  // direct passthrough stores "anthropic" - is only capitalised, which reads as
+  // a name without claiming the id is routable.
+  const known = providerInfo(provider)?.name;
+  if (known) return known;
+  const id = String(provider || '');
+  return id ? id.charAt(0).toUpperCase() + id.slice(1) : t('detail.unknown');
 }
 
 function emptyStateContent(titleKey, hintKey) {
@@ -4994,7 +5010,12 @@ async function applyActiveSite(force = false) {
 }
 
 // renderActiveSiteNote shows why the views cannot open on the active platform.
+// The last value is remembered so a language switch can redraw the sentence
+// instead of waiting up to 30 seconds for the next poll.
+let lastActiveSiteNote = null;
+
 function renderActiveSiteNote(site) {
+  lastActiveSiteNote = site || null;
   const el = document.getElementById('active-site-note');
   if (!el) return;
   el.hidden = !site;
@@ -5409,7 +5430,12 @@ let commandPaletteOpen = false;
 let commandPaletteReturnFocus = null;
 
 function openCommandPalette() {
+  // The shortcut handler refuses while a modal is open; the header button calls
+  // this directly. The invariant belongs here so no caller can open the palette
+  // behind a dialog.
+  if (document.querySelector('dialog[open]') || document.querySelector('.modal-overlay.visible')) return;
   commandPaletteOpen = true;
+  commandInput.setAttribute('aria-expanded', 'true');
   commandPaletteReturnFocus = document.activeElement;
   trapModalFocus(commandPalette);
   commandPalette.classList.add('visible');
@@ -5421,6 +5447,7 @@ function openCommandPalette() {
 function closeCommandPalette() {
   commandPaletteOpen = false;
   commandPalette.classList.remove('visible');
+  commandInput.setAttribute('aria-expanded', 'false');
   const target = commandPaletteReturnFocus;
   commandPaletteReturnFocus = null;
   if (!target || typeof target.focus !== 'function') return;
@@ -6040,7 +6067,7 @@ const FallbackModule = {
   // can see rather than a number they have to compare by hand.
   pickerRow(model) {
     const key = configModelKey(model);
-    const ctx = model.context_window ? fmtCompactTokens(model.context_window) + ' ctx' : '';
+    const ctx = model.context_window ? fmtCompactTokens(model.context_window) + ' ' + t('catalog.ctx') : '';
     const hasRate = model.input_per_m > 0 || model.output_per_m > 0;
     // An unpriced model shows a dash, never $0: zero is a real rate for a free
     // model, and conflating the two would make a platform with no price table

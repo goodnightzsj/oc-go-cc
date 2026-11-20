@@ -103,6 +103,11 @@ type quotaResponse struct {
 type quotaCacheEntry struct {
 	Identity string
 	Response quotaResponse
+	// StoredAt is the local receipt time, kept separate from the response's own
+	// FetchedAt because that field has been through UTC() and lost its
+	// monotonic reading: a backward clock step would otherwise stretch this
+	// entry's validity indefinitely.
+	StoredAt time.Time
 }
 
 // quotaModelUsage contains local Go ledger costs, not an official account bill.
@@ -168,6 +173,9 @@ func (s *Server) handleQuota(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPost {
 		// A paid query is an action, never a prefetchable GET or cross-site form.
+		// securityHeadersMiddleware applies the same refusal to every route; this
+		// handler repeats it because spending money must not depend on having
+		// been mounted behind that middleware.
 		if err := http.NewCrossOriginProtection().Check(r); err != nil {
 			http.Error(w, "cross-origin billing query denied", http.StatusForbidden)
 			return
@@ -616,7 +624,7 @@ func (s *Server) cachedQuota(provider, endpoint string, keys []string, force boo
 	if !ok || entry.Identity != quotaCacheKey(endpoint, keys) {
 		return nil
 	}
-	if time.Since(entry.Response.FetchedAt) >= time.Duration(entry.Response.TTLSeconds)*time.Second {
+	if time.Since(entry.StoredAt) >= time.Duration(entry.Response.TTLSeconds)*time.Second {
 		return nil
 	}
 	cached := entry.Response
@@ -630,7 +638,7 @@ func (s *Server) storeQuota(endpoint string, keys []string, resp quotaResponse) 
 	if s.quotaCache == nil {
 		s.quotaCache = make(map[string]quotaCacheEntry)
 	}
-	s.quotaCache[resp.Provider] = quotaCacheEntry{Identity: quotaCacheKey(endpoint, keys), Response: resp}
+	s.quotaCache[resp.Provider] = quotaCacheEntry{Identity: quotaCacheKey(endpoint, keys), Response: resp, StoredAt: time.Now()}
 }
 
 // quotaCacheKey identifies the endpoint and key set a cached response belongs
@@ -646,7 +654,7 @@ func quotaCacheKey(endpoint string, keys []string) string {
 func (s *Server) modelLimitsSnapshot() *quota.ModelLimits {
 	s.limitsMu.Lock()
 	defer s.limitsMu.Unlock()
-	if s.modelLimits == nil || time.Since(s.modelLimits.FetchedAt) >= limitsRefreshTTL {
+	if s.modelLimits == nil || time.Since(s.modelLimitsAt) >= limitsRefreshTTL {
 		select {
 		case s.limitsRefresh <- struct{}{}:
 		default:
@@ -658,9 +666,9 @@ func (s *Server) modelLimitsSnapshot() *quota.ModelLimits {
 // Only limitsLoop fetches at runtime; failed refreshes keep the old snapshot.
 func (s *Server) ensureModelLimits(ctx context.Context) *quota.ModelLimits {
 	s.limitsMu.Lock()
-	cached := s.modelLimits
+	cached, cachedAt := s.modelLimits, s.modelLimitsAt
 	s.limitsMu.Unlock()
-	if cached != nil && time.Since(cached.FetchedAt) < limitsRefreshTTL {
+	if cached != nil && !cachedAt.IsZero() && time.Since(cachedAt) < limitsRefreshTTL {
 		return cached
 	}
 	fetchCtx, cancel := context.WithTimeout(ctx, limitsFetchTimeout)
@@ -674,6 +682,7 @@ func (s *Server) ensureModelLimits(ctx context.Context) *quota.ModelLimits {
 	}
 	s.limitsMu.Lock()
 	s.modelLimits = lim
+	s.modelLimitsAt = time.Now()
 	s.limitsMu.Unlock()
 	return lim
 }

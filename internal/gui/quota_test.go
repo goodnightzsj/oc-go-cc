@@ -200,8 +200,10 @@ func TestHandleQuotaAttachesModelLimits(t *testing.T) {
 	}
 
 	// The service-owned refresh replaces stale (>24h) limits, not the handler.
+	// Staleness is judged by the local receipt time, which keeps the monotonic
+	// clock reading that ModelLimits.FetchedAt lost in UTC().
 	srv.limitsMu.Lock()
-	srv.modelLimits.FetchedAt = time.Now().Add(-25 * time.Hour)
+	srv.modelLimitsAt = time.Now().Add(-25 * time.Hour)
 	srv.limitsMu.Unlock()
 	srv.ensureModelLimits(t.Context())
 	_ = getQuota(t, srv, "?refresh=1")

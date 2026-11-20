@@ -138,6 +138,7 @@ func (s *Server) handleConfigImport(w http.ResponseWriter, r *http.Request) {
 		Apply  bool            `json:"apply"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeSettingsError(w, http.StatusBadRequest, "invalid_json", "", false)
 		return

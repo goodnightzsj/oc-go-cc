@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,10 +11,12 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/history"
 	"github.com/routatic/proxy/internal/metrics"
+	"github.com/routatic/proxy/internal/transformer"
 )
 
 func newAnthropicFirstTestHandler(baseURL string, enabled bool, fallback http.Handler) *AnthropicFirstHandler {
@@ -398,5 +402,145 @@ func TestParseRetryAfterPastDateFallsBack(t *testing.T) {
 	past := now.UTC().Add(-time.Hour).Format(http.TimeFormat)
 	if _, ok := parseRetryAfter(past, now); ok {
 		t.Fatal("a past Retry-After date must not reopen the probe window immediately")
+	}
+}
+
+// A stalled upstream must still be answerable by the platform path. The idle
+// watchdog cancels the upstream context, and the fallback used to inherit that
+// already-cancelled context - so every platform attempt failed instantly and
+// the caller got a 5xx after waiting out the whole budget.
+func TestAnthropicFirstIdleStallFallsBackOnLiveContext(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done() // headers arrive, body never does
+	}))
+	defer upstream.Close()
+
+	var fallbackCtxErr error
+	h := newAnthropicFirstTestHandler(upstream.URL, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fallbackCtxErr = r.Context().Err()
+		w.WriteHeader(http.StatusOK)
+	}))
+	h.idleTimeout = 80 * time.Millisecond
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-6"}`)))
+
+	if fallbackCtxErr != nil {
+		t.Fatalf("fallback ran with a dead context: %v", fallbackCtxErr)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want the platform answer", rec.Code)
+	}
+}
+
+// A response this proxy cannot buffer is not an upstream fault. Cooling the
+// whole direct path over one oversized answer would divert every later request
+// to the platform for no reason.
+func TestAnthropicFirstOversizedResponseDoesNotCoolThePath(t *testing.T) {
+	var upstreamCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls.Add(1)
+		_, _ = io.WriteString(w, strings.Repeat("x", 4096))
+	}))
+	defer upstream.Close()
+
+	var fallbackCalls atomic.Int32
+	h := newAnthropicFirstTestHandler(upstream.URL, true, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fallbackCalls.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	h.maxResponseBytes = 512
+
+	for i := 0; i < 2; i++ {
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-6"}`)))
+	}
+	if fallbackCalls.Load() != 2 {
+		t.Fatalf("fallback ran %d times, want 2", fallbackCalls.Load())
+	}
+	if upstreamCalls.Load() != 2 {
+		t.Fatalf("upstream called %d times, want 2: an oversized body must not open the backoff", upstreamCalls.Load())
+	}
+}
+
+// clientGoneWriter cancels the request as it fails, which is what a real
+// broken pipe looks like from the handler's side.
+type clientGoneWriter struct {
+	http.ResponseWriter
+	cancel context.CancelFunc
+}
+
+func (w *clientGoneWriter) Write([]byte) (int, error) {
+	w.cancel()
+	return 0, errors.New("write: broken pipe")
+}
+
+func (w *clientGoneWriter) Flush() {}
+
+// A caller that leaves during the delivery is not a model failure. The
+// streaming path has always classified this; the buffered one did not, so a
+// disconnection was scored against the model and polluted the success rate.
+func TestAnthropicFirstClientGoneDuringWriteIsNotAModelFailure(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"id":"msg_1"}`)
+	}))
+	defer upstream.Close()
+
+	store := &captureRequestStorage{}
+	met := metrics.New()
+	h := newAnthropicFirstTestHandler(upstream.URL, true, http.NotFoundHandler())
+	h.SetAccounting(store, met)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-6"}`)).WithContext(ctx)
+	h.ServeHTTP(&clientGoneWriter{ResponseWriter: httptest.NewRecorder(), cancel: cancel}, req)
+
+	recs := store.records()
+	if len(recs) != 1 {
+		t.Fatalf("recorded %d rows, want 1", len(recs))
+	}
+	if recs[0].Success || recs[0].ErrorMsg != errClientGone.Error() {
+		t.Fatalf("record = %+v, want a client-gone row", recs[0])
+	}
+	if got := met.GetSnapshot().RequestsFailed; got != 0 {
+		t.Fatalf("failed counter = %d, want 0: the caller left, no model was at fault", got)
+	}
+}
+
+func TestReadAllWithIdleTooLarge(t *testing.T) {
+	_, err := readAllWithIdle(context.Background(), strings.NewReader(strings.Repeat("x", 64)), func() {}, 32)
+	if !errors.Is(err, errDirectTooLarge) {
+		t.Fatalf("err = %v, want errDirectTooLarge", err)
+	}
+}
+
+func TestStreamEndErrorClassification(t *testing.T) {
+	idle, cancelIdle := context.WithCancelCause(context.Background())
+	cancelIdle(transformer.ErrStreamIdle)
+	if !errors.Is(streamEndError(idle), transformer.ErrStreamIdle) {
+		t.Fatalf("streamEndError(idle) = %v, want ErrStreamIdle", streamEndError(idle))
+	}
+
+	expired, cancelExpired := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancelExpired()
+	if got := streamEndError(expired); errors.Is(got, errClientGone) {
+		t.Fatalf("a total-timeout expiry was classified as the caller leaving: %v", got)
+	}
+}
+
+func TestTruncateModelIDCutsOnRuneBoundary(t *testing.T) {
+	long := strings.Repeat("模", 200) // 3 bytes each
+	got := truncateModelID(long)
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncateModelID split a rune: %q", got)
+	}
+	if len(got) > 256 || len(got) < 254 {
+		t.Fatalf("len = %d, want the longest valid prefix within 256", len(got))
+	}
+	if short := truncateModelID("claude-sonnet-4-6"); short != "claude-sonnet-4-6" {
+		t.Fatalf("short id changed: %q", short)
 	}
 }

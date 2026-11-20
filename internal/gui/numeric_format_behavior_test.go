@@ -64,11 +64,15 @@ async function checks() {
     CatalogModule.render();
     const catalog = get('catalog-model-list').innerHTML;
     const picker = FallbackModule.pickerRow(model);
-    for (const text of ['1M ctx','$0.123456 / $0.00002']) {
+    // The capability badges follow the language, so the expected label is the
+    // translated one rather than a fixed English word.
+    const ctxBadge = lang === 'zh' ? '上下文' : 'ctx';
+    const outBadge = lang === 'zh' ? '输出' : 'out';
+    for (const text of ['1M ' + ctxBadge,'$0.123456 / $0.00002']) {
       assert.ok(catalog.includes(text),'catalog: ' + text);
       assert.ok(picker.includes(text),'picker: ' + text);
     }
-    assert.ok(catalog.includes('33K out'),'output context keeps the compact role');
+    assert.ok(catalog.includes('33K ' + outBadge),'output context keeps the compact role');
   }
   const data = {currency:'USD',total_cost:1.25,linked_account_id:'synthetic',start_date:'2026-10-01',end_date:'2026-10-02',services:[],daily:[{date:'2026-10-01',cost:1.25}]};
   QuotaModule.renderBedrockBilling({bedrock_billing:data});

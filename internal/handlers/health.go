@@ -19,6 +19,11 @@ type HealthHandler struct {
 	fallbackHandler *router.FallbackHandler
 	metrics         *metrics.Metrics
 	statusStore     *status.Store
+	// readiness, when set, can declare this instance unable to serve. Without
+	// it the endpoint answered 200 unconditionally, so a release that started
+	// with no usable credential was indistinguishable from a working one - and
+	// the deploy gate only asks this endpoint.
+	readiness func() (reason string, degraded bool)
 }
 
 // NewHealthHandler creates a new health handler.
@@ -29,6 +34,12 @@ func NewHealthHandler(tokenCounter *token.Counter, fallbackHandler *router.Fallb
 		metrics:         metrics,
 		statusStore:     statusStore,
 	}
+}
+
+// SetReadiness installs the check that lets /health fail. It must only report
+// durable conditions: a transient one would roll back a healthy release.
+func (h *HealthHandler) SetReadiness(fn func() (reason string, degraded bool)) {
+	h.readiness = fn
 }
 
 // HandleHealth handles GET /health.
@@ -42,8 +53,16 @@ func (h *HealthHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 		cbStates = h.fallbackHandler.GetCircuitStates()
 	}
 
+	status, code := "ok", http.StatusOK
+	reason := ""
+	if h.readiness != nil {
+		if why, degraded := h.readiness(); degraded {
+			status, code, reason = "degraded", http.StatusServiceUnavailable, why
+		}
+	}
+
 	response := map[string]interface{}{
-		"status":     "ok",
+		"status":     status,
 		"service":    "routatic-proxy",
 		"version":    buildinfo.Version,
 		"build_time": buildinfo.Date,
@@ -62,10 +81,13 @@ func (h *HealthHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 		"circuit_breakers": cbStates,
 		"models":           snapshot.ModelCounts,
 	}
+	if reason != "" {
+		response["reason"] = reason
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(response)
 }
 

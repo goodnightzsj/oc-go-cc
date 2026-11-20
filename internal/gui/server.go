@@ -84,8 +84,13 @@ type Server struct {
 
 	// Per-model allowance table synced daily from the Go docs; see
 	// limitsRefreshTTL. modelLimitsURL overrides the docs URLs (tests).
-	limitsMu       sync.Mutex
-	modelLimits    *quota.ModelLimits
+	limitsMu    sync.Mutex
+	modelLimits *quota.ModelLimits
+	// modelLimitsAt is when the snapshot was received. ModelLimits.FetchedAt
+	// has been through UTC() and carries no monotonic reading, so a backward
+	// clock step would stretch this cache's validity; the local receipt time is
+	// what the refresh decision uses.
+	modelLimitsAt  time.Time
 	modelLimitsURL []string
 	limitsRefresh  chan struct{}
 
@@ -263,8 +268,17 @@ func (s *Server) Start(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("gui server listen: no available port in range %d-%d", startPort, startPort+9)
 	}
 
-	// Wrap with security headers middleware.
-	s.srv = &http.Server{Handler: securityHeadersMiddleware(mux)}
+	// Wrap with security headers middleware. The read timeouts bound what a
+	// local process (or a rebound page) can hold open; WriteTimeout stays 0
+	// because a large history window or a catalog sync legitimately takes
+	// longer than any fixed write budget, and every handler writes its whole
+	// response at once.
+	s.srv = &http.Server{
+		Handler:           securityHeadersMiddleware(mux),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	limitsCtx, cancel := context.WithCancel(ctx)
 	s.limitsCancel = cancel
 	s.limitsDone = make(chan struct{})
@@ -554,7 +568,9 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	repo := storage.NewRequests(s.storage)
 	records, total, err := repo.Query(r.Context(), query)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		// The driver's text names tables and columns; the caller gets a
+		// sentence, the journal keeps the diagnosis.
+		writeInternalError(w, "history query failed", err)
 		return
 	}
 	writeJSON(w, map[string]any{
@@ -581,7 +597,7 @@ func (s *Server) handleHistorySummary(w http.ResponseWriter, r *http.Request) {
 	}
 	summary, err := storage.NewRequests(s.storage).Summary(r.Context(), query)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, "history summary failed", err)
 		return
 	}
 	writeJSON(w, summary)
@@ -605,7 +621,7 @@ func (s *Server) handleHistoryChannels(w http.ResponseWriter, r *http.Request) {
 	}
 	channels, err := storage.NewRequests(s.storage).ObservedChannels(r.Context(), r.URL.Query().Get("provider"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, "history channels unavailable", err)
 		return
 	}
 	writeJSON(w, map[string]any{"channels": channels})
@@ -742,6 +758,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			Autostart *bool `json:"autostart"`
 			Notify    *bool `json:"notify"`
 		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeSettingsError(w, http.StatusBadRequest, "invalid_json", "", false)
 			return
@@ -1005,7 +1022,7 @@ func (s *Server) handleProxyStart(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.startProxy != nil {
 		if err := s.startProxy(); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, "failed to start the proxy", err)
 			return
 		}
 	}
@@ -1023,7 +1040,7 @@ func (s *Server) handleProxyStop(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.stopProxy != nil {
 		if err := s.stopProxy(); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, "failed to stop the proxy", err)
 			return
 		}
 	}
@@ -1110,6 +1127,7 @@ func (s *Server) handleProxyConfig(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		// Decode only the fields the client sent (partial update).
 		var patch map[string]json.RawMessage
+		r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 			writeSettingsError(w, http.StatusBadRequest, "invalid_json", "", false)
 			return
@@ -1137,6 +1155,11 @@ type catalogLockResponse struct {
 }
 
 const maxTestRequestBody = 1 << 20
+
+// Every other JSON endpoint accepts a config-sized document. Without this a
+// local process, or a page that reached the dashboard, could stream an
+// unbounded body into memory: json.Decoder buffers whatever the value needs.
+const maxJSONBodyBytes = 4 << 20
 
 // handleTestSend proxies a chat request to the proxy server and streams the
 // response back. This avoids CORS issues that would arise from the browser
@@ -1559,23 +1582,26 @@ func (s *Server) handleCatalogSync(w http.ResponseWriter, r *http.Request) {
 
 	lock, err := catalog.Sync(r.Context(), s.catalogSourceURL, s.catalogDir)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("catalog sync failed: %v", err), http.StatusInternalServerError)
+		writeInternalError(w, "catalog sync failed", err)
 		return
 	}
 	// A download the router never sees is not a sync. The file and the SQLite
 	// catalog are two views of one dataset; update both here so the picker,
 	// routing and cost selection change together.
+	// Reported below: the lock's copy unless the import saw different bytes.
+	importedSHA := lock.SHA256
 	if s.storage != nil {
 		jsonPath := filepath.Join(s.catalogDir, "catalog.json")
 		_, _, sha, err := catalog.ImportFromJSONHash(r.Context(), s.storage, jsonPath)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("catalog downloaded but SQLite import failed: %v", err), http.StatusInternalServerError)
+			writeInternalError(w, "catalog downloaded but could not be imported", err)
 			return
 		}
 		// Stamp the hash of the bytes that were actually imported, not the
 		// lock's copy: a file replaced between the download and the import
 		// would otherwise be recorded under the wrong identity.
 		_ = storage.NewCatalogRepo(s.storage).SetImportedSHA(r.Context(), sha)
+		importedSHA = sha
 	}
 	// The old file's parse is still cached; a reader who re-synced expects the
 	// model list to reflect what the sync just fetched.
@@ -1584,7 +1610,7 @@ func (s *Server) handleCatalogSync(w http.ResponseWriter, r *http.Request) {
 	age := time.Since(lock.SyncedAt)
 	writeJSON(w, catalogLockResponse{
 		SyncedAt:   &lock.SyncedAt,
-		SHA256:     lock.SHA256,
+		SHA256:     importedSHA,
 		Bytes:      lock.Bytes,
 		TTLHours:   lock.TTLHours,
 		AgeSeconds: int64(age.Seconds()),
@@ -1592,18 +1618,68 @@ func (s *Server) handleCatalogSync(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// writeInternalError keeps the driver's or the OS's text (table names, column
+// names, filesystem paths) out of the HTTP response. The journal keeps the
+// diagnosis; the caller gets a sentence it can act on without learning the
+// schema, which is what a page that reached this server would otherwise read.
+func writeInternalError(w http.ResponseWriter, msg string, err error) {
+	slog.Error("dashboard request failed", "message", msg, "error", err)
+	http.Error(w, msg, http.StatusInternalServerError)
+}
+
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// securityHeadersMiddleware adds security headers to all responses.
+// dashboardHostAllowed reports whether a Host header names this machine.
+//
+// The dashboard holds the operator's credentials and binds to loopback, but
+// loopback is not a security boundary against a browser: DNS rebinding points
+// a public name at 127.0.0.1, after which the attacker's page *is* same-origin
+// with the dashboard and every header-based defence (CORS, CSP, Sec-Fetch-Site)
+// passes. The Host header is the one thing rebinding cannot forge, which is why
+// this check is the boundary and the rest is defence in depth.
+func dashboardHostAllowed(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	switch strings.ToLower(host) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
+}
+
+// crossOriginWrite denies cross-site writes. The Host check stops a rebound
+// origin; this stops the simpler attack that needs no rebinding at all - a page
+// on any site can POST to 127.0.0.1:3445 with a legitimate Host header, and the
+// JSON decoders do not look at Content-Type, so a text/plain form body would be
+// accepted. Non-browser clients send neither header and pass, which is what
+// lets the CLI and tests keep calling the API.
+var crossOriginWrite = http.NewCrossOriginProtection()
+
+// securityHeadersMiddleware rejects foreign Host headers and adds the response
+// hardening headers shared by every route.
 func securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !dashboardHostAllowed(r.Host) {
+			http.Error(w, "unexpected Host header", http.StatusForbidden)
+			return
+		}
+		if err := crossOriginWrite.Check(r); err != nil {
+			http.Error(w, "cross-origin request denied", http.StatusForbidden)
+			return
+		}
 		// Prevent MIME-type sniffing.
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		// Restrict all resources to same-origin (all assets bundled in binary).
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:")
+		// Restrict all resources to same-origin (all assets bundled in binary),
+		// and refuse to be framed: there is no CSRF token on the mutating
+		// endpoints, so a framed dashboard would be clickjackable.
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'")
+		w.Header().Set("X-Frame-Options", "DENY")
 		next.ServeHTTP(w, r)
 	})
 }

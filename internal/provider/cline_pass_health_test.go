@@ -310,3 +310,32 @@ func TestLoneQuarantinedKeyIsNotUsableForFallback(t *testing.T) {
 		t.Fatal("a quarantined lone key must not keep the platform's remaining models alive")
 	}
 }
+
+// /health fails only on a durable reason. Keys that are merely cooling come
+// back in 30 seconds, and the deploy gate would roll a good release back if it
+// treated that as an outage.
+func TestCredentialsExhaustedOnlyOnDurableCauses(t *testing.T) {
+	p, _ := clinePassTestProvider(t, func(http.ResponseWriter, *http.Request) {})
+	cfg := p.atomic.Get()
+	cfg.ClinePass.APIKey = ""
+	cfg.ClinePass.APIKeys = nil
+	source := NewKeyAvailability(p.atomic)
+	if !source.CredentialsExhausted(client.ProviderClinePass) {
+		t.Fatal("a platform with no credential at all must be exhausted")
+	}
+
+	const live, alsoLive = "synthetic-live-a", "synthetic-live-b"
+	cfg.ClinePass.APIKeys = []string{live, alsoLive}
+	if source.CredentialsExhausted(client.ProviderClinePass) {
+		t.Fatal("configured keys that the probe has not rejected are not exhausted")
+	}
+
+	p.health.Record(live, &quota.HTTPStatusError{Status: 404, Err: errors.New("HTTP 404: no plan history found for user")})
+	if source.CredentialsExhausted(client.ProviderClinePass) {
+		t.Fatal("one rejected key among live ones is not exhausted")
+	}
+	p.health.Record(alsoLive, &quota.HTTPStatusError{Status: 404, Err: errors.New("HTTP 404: no plan history found for user")})
+	if !source.CredentialsExhausted(client.ProviderClinePass) {
+		t.Fatal("every key rejected by the probe is exhausted")
+	}
+}

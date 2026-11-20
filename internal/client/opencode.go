@@ -83,6 +83,15 @@ func (t *captureReadCloser) FirstByteAt() time.Time {
 	return time.Time{}
 }
 
+// maxCapturedBody bounds one capture entry. A captured body is debug data, not
+// the response: an unbounded tee turns every streamed answer into a full
+// in-memory copy that then waits in the capture queue. The remainder of the
+// stream is drained rather than abandoned, because leaving the pipe unread
+// would block the tee and stall the response being captured.
+const maxCapturedBody = 1 << 20
+
+const captureTruncatedMarker = "\n[capture truncated]\n"
+
 // CaptureBody wraps body so that all bytes read from it are delivered (async)
 // to capture. Returns body unchanged when capture is nil.
 func CaptureBody(body io.ReadCloser, capture func(data []byte)) io.ReadCloser {
@@ -95,7 +104,11 @@ func CaptureBody(body io.ReadCloser, capture func(data []byte)) io.ReadCloser {
 	go func() {
 		defer close(done)
 		defer pr.Close()
-		data, _ := io.ReadAll(pr)
+		data, _ := io.ReadAll(io.LimitReader(pr, maxCapturedBody+1))
+		if len(data) > maxCapturedBody {
+			data = append(data[:maxCapturedBody], captureTruncatedMarker...)
+			_, _ = io.Copy(io.Discard, pr)
+		}
 		capture(data)
 	}()
 	return tee

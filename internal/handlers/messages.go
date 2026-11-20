@@ -51,6 +51,13 @@ type MessagesHandler struct {
 	storage          StorageWriter // optional: SQLite persistence for requests/latency
 	statusStore      *status.Store // optional: /statusline feed
 
+	// appliedRate is the rate limit setting last observed. It exists only to
+	// tell "the setting just changed" from "the setting is 0 and always was":
+	// zero means the default, and re-applying it when an explicit rate was in
+	// force is what lets a hot reload return to the default. A limiter injected
+	// by a test is left alone while the setting has never been non-zero.
+	appliedRate atomic.Int64
+
 	// Parsed trusted-proxy CIDRs, rebuilt only when the configured list
 	// changes. Parsing on every request would put allocation on the hot path
 	// for a value that changes when an operator edits the config.
@@ -551,7 +558,12 @@ func (h *MessagesHandler) admitRequest(w http.ResponseWriter, r *http.Request) (
 	// operator) that injected its own limiter is not silently reset.
 	clientIP := middleware.GetClientIP(r, h.clientIPOptions())
 	if setting := h.rateLimitSetting(); setting >= 0 {
-		if setting > 0 {
+		// Apply on change, including a change back to 0. Configure maps <=0 to
+		// the default and is a no-op when the rate is already what it asks for,
+		// so this costs nothing until an operator actually edits the field.
+		// Skipping 0 was the bug: clearing the field after it had been set left
+		// the old rate in force until a restart.
+		if previous := h.appliedRate.Swap(int64(setting)); setting > 0 || previous > 0 {
 			h.rateLimiter.Configure(setting, time.Minute)
 		}
 		if !h.rateLimiter.Allow(clientIP) {
@@ -981,6 +993,11 @@ func (h *MessagesHandler) handleStreaming(
 		attemptStart := time.Now()
 		recordID = uuid.NewString()
 		currentStream = nil
+		// Each attempt starts with heartbeats allowed. The pause is cleared here
+		// rather than after the proxy returns: that spot ran before the history
+		// write and reopened a window in which a keepalive comment frame could
+		// follow the stream's terminal event.
+		atomic.StoreInt32(&heartbeatPaused, 0)
 		earlyRecord := history.RequestRecord{
 			Model: model.ModelID, RequestedModel: requestedModel, Provider: providerName,
 			Scenario: string(scenario), StartTime: attemptStart, Streaming: true,
@@ -1248,9 +1265,6 @@ func (h *MessagesHandler) handleStreaming(
 			errProxy = h.streamProxy.proxyAnthropicPassthroughStream(rw, streamReader, idleTimeout, attemptCtx, cancelAttempt)
 		} else {
 			errProxy = h.streamProxy.ProxyStream(rw, streamReader, wireFormat, servedModel, attemptCtx, idleTimeout, cancelAttempt)
-		}
-		if wireFormat == core.WireFormatAnthropic {
-			atomic.StoreInt32(&heartbeatPaused, 0)
 		}
 		if errProxy != nil {
 			errProxy = attemptFailure(attemptCtx, errProxy)

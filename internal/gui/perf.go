@@ -55,7 +55,7 @@ func (s *Server) handlePerformance(w http.ResponseWriter, r *http.Request) {
 
 		modelStats, err := latency.GetStats(r.Context(), since)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, "performance data unavailable", err)
 			return
 		}
 		for _, stat := range modelStats {
@@ -66,7 +66,7 @@ func (s *Server) handlePerformance(w http.ResponseWriter, r *http.Request) {
 
 		successCounts, failureCounts, err := latency.GetSuccessCounts(r.Context(), since)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, "performance data unavailable", err)
 			return
 		}
 		for key, count := range successCounts {
@@ -139,7 +139,7 @@ func (s *Server) handlePerformanceAggregate(w http.ResponseWriter, r *http.Reque
 		latency := storage.NewLatency(s.storage).ForProvider(provider)
 		latencyStats, err := latency.GetStats(r.Context(), since)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, "performance data unavailable", err)
 			return
 		}
 		if len(latencyStats) > 0 {
@@ -156,7 +156,7 @@ func (s *Server) handlePerformanceAggregate(w http.ResponseWriter, r *http.Reque
 
 		successCounts, failureCounts, err := latency.GetSuccessCounts(r.Context(), since)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, "performance data unavailable", err)
 			return
 		}
 		for _, s := range successCounts {

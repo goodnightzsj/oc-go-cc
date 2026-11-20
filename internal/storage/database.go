@@ -56,6 +56,15 @@ type Database struct {
 	latencyMu       sync.Mutex
 	latencies       map[string]*LatencySnapshot
 	latencyRevision string
+
+	// channels caches the history filter's channel list. It is a GROUP BY over
+	// every row with a non-null channel, requested on the same three-second
+	// poll as the history page, and it has no filter to make it cheap: without
+	// a cache the dashboard re-scanned the whole table every three seconds
+	// while a platform was selected.
+	channelsMu       sync.Mutex
+	channels         map[string][]string
+	channelsRevision string
 }
 
 // AnalyticsBaseline reports the configured cutoff for analytics aggregates.
@@ -83,6 +92,28 @@ func (d *Database) cachedSummary(key, revision string) (*RequestSummary, bool) {
 	}
 	summary, ok := d.summaries[key]
 	return summary, ok
+}
+
+// cachedChannels returns the channel list for one provider scope, if the cache
+// still describes the same rows.
+func (d *Database) cachedChannels(provider, revision string) ([]string, bool) {
+	d.channelsMu.Lock()
+	defer d.channelsMu.Unlock()
+	if d.channelsRevision != revision {
+		return nil, false
+	}
+	channels, ok := d.channels[provider]
+	return channels, ok
+}
+
+func (d *Database) storeChannels(provider, revision string, channels []string) {
+	d.channelsMu.Lock()
+	defer d.channelsMu.Unlock()
+	if d.channelsRevision != revision {
+		d.channels = make(map[string][]string, summaryCacheLimit)
+		d.channelsRevision = revision
+	}
+	d.channels[provider] = channels
 }
 
 func (d *Database) storeSummary(key, revision string, summary *RequestSummary) {

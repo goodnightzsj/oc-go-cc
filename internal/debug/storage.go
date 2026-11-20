@@ -87,11 +87,10 @@ func (s *Storage) WriteEntry(entry CaptureEntry) error {
 
 	s.currentSize += int64(n)
 
-	// Sync to ensure data is persisted
-	if err := s.currentFile.Sync(); err != nil {
-		return fmt.Errorf("syncing capture file: %w", err)
-	}
-
+	// No per-entry fsync: capture is diagnostic data, and Sync here cost one
+	// disk flush per captured phase per request. A reader sees the bytes as
+	// soon as they are written; only a power loss can lose them, and a lost
+	// debug entry is the one kind of data this project can afford to lose.
 	return nil
 }
 
@@ -103,7 +102,10 @@ func (s *Storage) ensureDirectory() error {
 
 	dir := config.ExpandHome(s.config.Directory)
 
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	// Capture holds whole prompts and responses. The config file and the SQLite
+	// database are 0600/0700 for the same reason; these must match, or a
+	// second user on the host can read every conversation this proxy carried.
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("creating debug directory %s: %w", dir, err)
 	}
 
@@ -132,7 +134,7 @@ func (s *Storage) rotateFile() error {
 	filepath := filepath.Join(config.ExpandHome(s.config.Directory), filename)
 
 	// Create new file
-	f, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	f, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return fmt.Errorf("creating capture file %s: %w", filepath, err)
 	}

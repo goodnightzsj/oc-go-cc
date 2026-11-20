@@ -271,6 +271,26 @@ func NewKeyAvailability(atomic *config.AtomicConfig) *KeyAvailability {
 	return &KeyAvailability{atomic: atomic}
 }
 
+// CredentialsExhausted reports a durable reason this provider cannot serve:
+// it has no key at all, or the subscription probe has excluded every key it
+// has. A key that is merely resting is deliberately ignored - a 30-second
+// cooldown would read as an outage, and the health endpoint that reports this
+// is what the deploy gate decides to roll back on.
+func (k *KeyAvailability) CredentialsExhausted(provider string) bool {
+	if k == nil || k.atomic == nil {
+		return false
+	}
+	cfg := k.atomic.Get()
+	if cfg == nil {
+		return false
+	}
+	keys := cfg.ProviderAPIKeys(provider)
+	if len(keys) == 0 {
+		return true
+	}
+	return gateFor(provider).ExcludesAll(keys)
+}
+
 // HasUsableKey reports whether the named provider has a key that can take a
 // request. A provider with no scheduler registered reports false.
 func (k *KeyAvailability) HasUsableKey(provider string) bool {

@@ -152,6 +152,11 @@ func fetchChecksum(checksumURL, filename string) (string, error) {
 	return "", fmt.Errorf("checksums.txt has no entry for %s", filename)
 }
 
+// maxUpdateBytes bounds a release asset. It is generous enough for a
+// statically linked binary built with CGO and still far below what would fill a
+// typical install partition.
+const maxUpdateBytes = 256 << 20
+
 // DownloadAndInstall downloads the binary, verifies it against the release's
 // checksums, and replaces the current executable. The temp file is created
 // beside the executable: a rename across filesystems fails with EXDEV, which
@@ -186,10 +191,19 @@ func DownloadAndInstall(url, filename, checksumURL string) error {
 	tmpPath := tmpFile.Name()
 	defer func() { _ = os.Remove(tmpPath) }()
 
+	// The binary is a few tens of MiB. Without a ceiling a wrong or hostile
+	// asset fills the installer's filesystem before the checksum is ever
+	// compared, which turns a rejected download into an outage.
+	body := io.LimitReader(resp.Body, maxUpdateBytes+1)
 	hasher := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(tmpFile, hasher), resp.Body); err != nil {
+	written, err := io.Copy(io.MultiWriter(tmpFile, hasher), body)
+	if err != nil {
 		_ = tmpFile.Close()
 		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+	if written > maxUpdateBytes {
+		_ = tmpFile.Close()
+		return fmt.Errorf("download exceeds the %d byte limit", int64(maxUpdateBytes))
 	}
 	if err := tmpFile.Close(); err != nil {
 		return fmt.Errorf("failed to close temp file: %w", err)

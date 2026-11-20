@@ -524,11 +524,23 @@ func (r *Requests) ObservedChannels(ctx context.Context, provider string) ([]str
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
+	// The answer changes only when the request table changes, which is exactly
+	// what the revision counter reports. One counter read replaces a full scan
+	// on every poll.
+	revision, err := r.historyRevision(ctx)
+	if err != nil {
+		return nil, err
+	}
+	scope := strings.TrimSpace(provider)
+	if cached, ok := r.db.cachedChannels(scope, revision); ok {
+		return cached, nil
+	}
+
 	query := `SELECT upstream_channel FROM requests WHERE upstream_channel IS NOT NULL`
 	var args []any
-	if value := strings.TrimSpace(provider); value != "" {
+	if scope != "" {
 		query += ` AND provider = ?`
-		args = append(args, value)
+		args = append(args, scope)
 	}
 	query += ` GROUP BY upstream_channel ORDER BY COUNT(*) DESC, upstream_channel`
 
@@ -546,7 +558,11 @@ func (r *Requests) ObservedChannels(ctx context.Context, provider string) ([]str
 		}
 		channels = append(channels, channel)
 	}
-	return channels, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	r.db.storeChannels(scope, revision, channels)
+	return channels, nil
 }
 
 func requestWhere(q RequestQuery) (string, []any) {

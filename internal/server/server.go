@@ -21,6 +21,7 @@ import (
 	"github.com/routatic/proxy/internal/metrics"
 	"github.com/routatic/proxy/internal/provider"
 	"github.com/routatic/proxy/internal/router"
+	"github.com/routatic/proxy/internal/site"
 	"github.com/routatic/proxy/internal/status"
 	"github.com/routatic/proxy/internal/storage"
 	"github.com/routatic/proxy/internal/token"
@@ -161,6 +162,23 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 		storageWriter,
 	)
 	healthHandler := handlers.NewHealthHandler(tokenCounter, fallbackHandler, metrics, statusStore)
+	// A release that starts with no usable credential must fail the deploy
+	// gate rather than silently serve nothing. Keys that are only cooling are
+	// not a degraded state - see provider.KeyAvailability.CredentialsExhausted.
+	keyAvailability := provider.NewKeyAvailability(atomic)
+	healthHandler.SetReadiness(func() (string, bool) {
+		cfg := atomic.Get()
+		if cfg == nil || cfg.AnthropicFirst.Enabled {
+			// The direct path has its own availability gate, which this
+			// endpoint does not expose; do not guess about it here.
+			return "", false
+		}
+		target := site.Normalize(cfg.ActiveSite)
+		if keyAvailability.CredentialsExhausted(target) {
+			return "no usable credential for " + target, true
+		}
+		return "", false
+	})
 	modelsHandler := handlers.NewModelsHandler(modelRouter)
 	// The statusline endpoint was wired but never fed; publish the routing
 	// decision from the request path so it reports live data.

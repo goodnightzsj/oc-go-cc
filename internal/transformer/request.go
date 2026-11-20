@@ -213,6 +213,9 @@ func (t *RequestTransformer) transformParameters(anthropicReq *types.MessageRequ
 
 	// Transform tools if present
 	if len(anthropicReq.Tools) > 0 {
+		if err := rejectServerTools(anthropicReq.Tools); err != nil {
+			return nil, err
+		}
 		openaiReq.Tools = t.transformTools(anthropicReq.Tools)
 	}
 	if len(anthropicReq.ToolChoice) > 0 {
@@ -1131,6 +1134,26 @@ func (t *RequestTransformer) transformAssistantMessage(blocks []types.ContentBlo
 	}
 
 	return []types.ChatMessage{msg}, nil
+}
+
+// rejectServerTools refuses Anthropic's server-side tools on this path.
+//
+// A server tool has no input_schema because the provider runs it, not the
+// client. Chat Completions can only express a function the client executes, so
+// the converter used to invent an empty schema and send it: the model then
+// called a function the client never declared, the call failed with "No such
+// tool available", and the capability vanished with no error anywhere. The
+// native Anthropic path forwards the body untouched and still works, which made
+// the two paths disagree invisibly.
+func rejectServerTools(tools []types.Tool) error {
+	for _, tool := range tools {
+		if tool.Type == "" || tool.Type == "custom" {
+			continue
+		}
+		return fmt.Errorf("%w: server tool %q (type %q) cannot run on a Chat Completions upstream",
+			core.ErrInvalidRequest, tool.Name, tool.Type)
+	}
+	return nil
 }
 
 // transformTools converts Anthropic tools to OpenAI tools.

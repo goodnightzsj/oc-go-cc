@@ -106,6 +106,12 @@ func (h *StreamHandler) ProxyStream(
 			Role:    "assistant",
 			Content: []types.ContentBlock{},
 			Model:   originalModel,
+			// No usage here on purpose. The real API always carries one, but
+			// this proxy's own accounting reads usage off the events it
+			// forwards: an empty placeholder object would be read as "usage was
+			// reported" and every such row would stop being marked
+			// unobserved. The final message_delta carries the real figures.
+			Usage: nil,
 		},
 	}
 	if err := writeSSEEvent(w, msgStart); err != nil {
@@ -183,6 +189,9 @@ func (h *StreamHandler) ProxyStream(
 	// Anthropic expects one terminal message_delta containing both stop_reason
 	// and usage. OpenAI-compatible providers commonly send those in separate
 	// chunks, so both are retained until the upstream stream ends.
+	// An upstream that reported no usage leaves the field absent rather than
+	// zero: this proxy must not present an unmeasured figure as a measured one,
+	// and the history row already records such a stream as unobserved.
 	msgDelta := types.MessageEvent{
 		Type: "message_delta",
 		Delta: &types.Delta{
@@ -280,6 +289,11 @@ func (h *StreamHandler) processChatEvent(
 
 	// Handle reasoning content deltas
 	if reasoning := choice.Delta.ReasoningText(); reasoning != "" {
+		if !*reasoningStarted && len(startedToolCalls) > 0 {
+			if err := closeOpenToolCalls(w, startedToolCalls, contentIndex); err != nil {
+				return err
+			}
+		}
 		if !*reasoningStarted {
 			// If text was already started, close it first
 			if *contentStarted {
@@ -321,6 +335,11 @@ func (h *StreamHandler) processChatEvent(
 
 	// Handle text content deltas
 	if textContent != "" {
+		if !*contentStarted && len(startedToolCalls) > 0 {
+			if err := closeOpenToolCalls(w, startedToolCalls, contentIndex); err != nil {
+				return err
+			}
+		}
 		if !*contentStarted {
 			// If reasoning was already started, close it first
 			if *reasoningStarted {
@@ -467,6 +486,11 @@ func (h *StreamHandler) processChatEvent(
 			*contentStarted = false
 		}
 
+		// Captured before the blocks are closed: a response that emitted tool
+		// blocks ended the turn for the client to run them, whatever the
+		// upstream's finish_reason says.
+		emittedTools := len(startedToolCalls) > 0
+
 		// Close any open tool_use blocks in ascending index order.
 		if len(startedToolCalls) > 0 {
 			indices := make([]int, 0, len(startedToolCalls))
@@ -489,6 +513,13 @@ func (h *StreamHandler) processChatEvent(
 		stopReason, err := h.responseTransformer.mapFinishReason(choice.FinishReason)
 		if err != nil {
 			return err
+		}
+		// A gateway that streams tool_calls and still says "stop" would otherwise
+		// end the turn, and every agent loop that branches on stop_reason ==
+		// "tool_use" would never run the tool. The Responses and Gemini adapters
+		// already apply this rule; the Chat path was the one that did not.
+		if emittedTools && stopReason == "end_turn" {
+			stopReason = "tool_use"
 		}
 		*terminalStopReason = stopReason
 		flusher.Flush()
@@ -639,6 +670,35 @@ func writeThinkingBlockStop(w http.ResponseWriter, index int) error {
 
 // writeSSEEvent writes a single SSE event to the HTTP response writer.
 // Format: "event: <type>\ndata: <json>\n\n"
+// closeOpenToolCalls closes every tool_use block still open and moves
+// contentIndex past them.
+//
+// Tool blocks stay open until finish_reason so their arguments can keep
+// arriving. A gateway that interleaves text or reasoning after a tool call then
+// starts the new block at an index the open tool block already owns: a client
+// that places deltas by index replaces the tool_use block with the text, and the
+// tool call silently disappears. Closing first is what the Gemini adapter
+// already does.
+func closeOpenToolCalls(w http.ResponseWriter, started map[int]*chatToolState, contentIndex *int) error {
+	if len(started) == 0 {
+		return nil
+	}
+	indices := make([]int, 0, len(started))
+	for _, tool := range started {
+		indices = append(indices, tool.index)
+	}
+	slices.Sort(indices)
+	for _, idx := range indices {
+		stopEvent := types.MessageEvent{Type: "content_block_stop", Index: &idx}
+		if err := writeSSEEvent(w, stopEvent); err != nil {
+			return ErrClientDisconnected
+		}
+	}
+	*contentIndex = indices[len(indices)-1] + 1
+	clear(started)
+	return nil
+}
+
 func writeSSEEvent(w http.ResponseWriter, event types.MessageEvent) error {
 	data, err := json.Marshal(event)
 	if err != nil {
@@ -680,6 +740,12 @@ func (h *StreamHandler) ProxyResponsesStream(
 			Role:    "assistant",
 			Content: []types.ContentBlock{},
 			Model:   originalModel,
+			// No usage here on purpose. The real API always carries one, but
+			// this proxy's own accounting reads usage off the events it
+			// forwards: an empty placeholder object would be read as "usage was
+			// reported" and every such row would stop being marked
+			// unobserved. The final message_delta carries the real figures.
+			Usage: nil,
 		},
 	}
 	if err := writeSSEEvent(w, msgStart); err != nil {
@@ -1119,6 +1185,12 @@ func (h *StreamHandler) ProxyGeminiStream(
 			Role:    "assistant",
 			Content: []types.ContentBlock{},
 			Model:   originalModel,
+			// No usage here on purpose. The real API always carries one, but
+			// this proxy's own accounting reads usage off the events it
+			// forwards: an empty placeholder object would be read as "usage was
+			// reported" and every such row would stop being marked
+			// unobserved. The final message_delta carries the real figures.
+			Usage: nil,
 		},
 	}
 	if err := writeSSEEvent(w, msgStart); err != nil {

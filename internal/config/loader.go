@@ -1,8 +1,10 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
@@ -84,12 +86,95 @@ func Load() (*Config, error) {
 }
 
 // LoadFromPath reads configuration from the given JSON file path.
+//
+// An unknown key is a warning here, not an error: refusing to start over a key
+// this version does not know would turn an upgrade into an outage. `validate`
+// fails on the same input, which is where an operator is asking the question.
 func LoadFromPath(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("loading config from %s: %w", path, err)
 	}
-	return LoadJSON(data)
+	cfg, err := LoadJSON(data)
+	if err != nil {
+		return nil, err
+	}
+	if unknown := UnknownFields(data); unknown != nil {
+		slog.Warn("config has a key this version does not recognise; it is being ignored",
+			"path", path, "error", unknown)
+	}
+	return cfg, nil
+}
+
+// CheckUnknownFields reports an unrecognised key in the file at path. The
+// validate command uses it; the running proxy only warns.
+func CheckUnknownFields(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	return UnknownFields(data)
+}
+
+// UnknownFields reports the first key in data that no Config field owns.
+//
+// Two other decoders in this repository already reject unknown fields, and the
+// cost_routing.scenarios validator exists precisely because a misspelled key
+// that does nothing is worse than a rejected one. The top level was the
+// exception: "modles" was accepted in silence and the routing block simply
+// vanished.
+//
+// Keys beginning with "//" are the project's way of writing commented-out
+// entries in a JSON example; they are dropped before the check rather than
+// reported.
+func UnknownFields(data []byte) error {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(data, &top); err != nil {
+		return err
+	}
+	for key := range top {
+		if strings.HasPrefix(key, "//") {
+			delete(top, key)
+		}
+	}
+	cleaned, err := json.Marshal(top)
+	if err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(cleaned))
+	decoder.DisallowUnknownFields()
+	var probe Config
+	if err := decoder.Decode(&probe); err != nil {
+		return err
+	}
+	return nil
+}
+
+// endpointSettings lists every URL-valued setting, so one rule covers them all.
+func endpointSettings(cfg *Config) []struct{ Field, Value string } {
+	var out []struct{ Field, Value string }
+	add := func(field, value string) {
+		out = append(out, struct{ Field, Value string }{field, value})
+	}
+	add("host", cfg.Host)
+	add("catalog.source_url", cfg.Catalog.SourceURL)
+	add("anthropic_first.base_url", cfg.AnthropicFirst.BaseURL)
+	add("opencode_go.base_url", cfg.OpenCodeGo.BaseURL)
+	add("opencode_go.anthropic_base_url", cfg.OpenCodeGo.AnthropicBaseURL)
+	add("opencode_go.responses_base_url", cfg.OpenCodeGo.ResponsesBaseURL)
+	add("opencode_zen.base_url", cfg.OpenCodeZen.BaseURL)
+	add("opencode_zen.anthropic_base_url", cfg.OpenCodeZen.AnthropicBaseURL)
+	add("opencode_zen.responses_base_url", cfg.OpenCodeZen.ResponsesBaseURL)
+	add("opencode_zen.gemini_base_url", cfg.OpenCodeZen.GeminiBaseURL)
+	add("aws_bedrock.base_url", cfg.AWSBedrock.BaseURL)
+	add("aws_bedrock.anthropic_base_url", cfg.AWSBedrock.AnthropicBaseURL)
+	add("openrouter.base_url", cfg.OpenRouter.BaseURL)
+	add("commandcode.base_url", cfg.CommandCode.BaseURL)
+	add("commandcode.anthropic_base_url", cfg.CommandCode.AnthropicBaseURL)
+	add("commandcode.responses_base_url", cfg.CommandCode.ResponsesBaseURL)
+	add("cline_pass.base_url", cfg.ClinePass.BaseURL)
+	add("workbuddy.base_url", cfg.WorkBuddy.BaseURL)
+	return out
 }
 
 // LoadJSON validates a config using the same environment and defaults as a
@@ -305,6 +390,30 @@ func validate(cfg *Config) error {
 		len(cfg.ClinePass.EffectiveAPIKeys()) == 0 && len(cfg.WorkBuddy.EffectiveAPIKeys()) == 0 {
 		return invalid("", "missing_api_key", "api_key or api_keys is required (set via config file or ROUTATIC_PROXY_API_KEY env var; OC_GO_CC_API_KEY is still supported)")
 	}
+	// An unresolved placeholder or a malformed endpoint fails at request time,
+	// where the error names neither the file nor the field: `base_url` used to
+	// escape both checks entirely, so a misspelled variable name produced
+	// "unsupported protocol scheme" on every call. `host` is exempt from the URL
+	// check (it is a host or address, not a URL) but not from the placeholder one.
+	for _, setting := range endpointSettings(cfg) {
+		if setting.Value == "" {
+			continue
+		}
+		if envVarPattern.MatchString(setting.Value) {
+			return invalid(setting.Field, "unresolved_env",
+				"%s contains an unresolved env var — set the corresponding environment variable or remove the placeholder", setting.Field)
+		}
+		if setting.Field == "host" {
+			continue
+		}
+		u, err := url.Parse(setting.Value)
+		if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" ||
+			(u.Scheme != "http" && u.Scheme != "https") {
+			return invalid(setting.Field, "plain_url",
+				"%s must be an absolute http or https URL without credentials or fragment", setting.Field)
+		}
+	}
+
 	for _, raw := range cfg.TrustedProxies {
 		entry := strings.TrimSpace(raw)
 		if entry == "" {

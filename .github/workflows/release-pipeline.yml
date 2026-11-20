@@ -206,18 +206,28 @@ jobs:
           cp signed/routatic-proxy_windows-arm64.exe dist/routatic-proxy_windows-arm64.exe
           rm -rf signing signed
 
+      # Built before the checksums, so the DMG is covered by them: it used to be
+      # produced after the manifest, which left the one artifact macOS users
+      # actually run as the only one with nothing to verify it against.
+      #
+      # No `brew install` here: jq is preinstalled on the runner (the version
+      # step already uses it), and build_dmg.sh falls back to hdiutil when
+      # create-dmg is absent. Installing a formula after the binaries are built
+      # ran third-party code with write access to dist/ and checksums.txt.
+      - name: Build macOS DMG
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+        run: make dmg VERSION=${{ env.VERSION }}
+
       - name: Generate checksums
         run: |
           cd dist
           sha256sum routatic-proxy_* > checksums.txt
+          if [ -f ../bin/RoutaticProxy.dmg ]; then
+            cp ../bin/RoutaticProxy.dmg dist/
+            sha256sum RoutaticProxy.dmg >> checksums.txt
+          fi
           cat checksums.txt
-
-      - name: Build macOS DMG
-        env:
-          VERSION: ${{ steps.version.outputs.tag }}
-        run: |
-          brew install create-dmg
-          make dmg VERSION=${{ env.VERSION }}
 
       - name: Generate AI Changelog
         id: changelog
@@ -229,8 +239,6 @@ jobs:
           OPENROUTER_TEMPERATURE: ${{ secrets.OPENROUTER_TEMPERATURE }}
           OPENROUTER_MAX_TOKENS: ${{ secrets.OPENROUTER_MAX_TOKENS }}
         run: |
-          brew install jq
-
           # Configuration with defaults
           MODEL="${OPENROUTER_MODEL:-openai/gpt-4o-mini}"
           TEMP="${OPENROUTER_TEMPERATURE:-0.3}"

@@ -1200,3 +1200,76 @@ func mustJSON(t *testing.T, v any) string {
 }
 
 func strPtr(s string) *string { return &s }
+
+// A gateway that emits text after a tool call would otherwise reuse the open
+// tool block's index. A client that places deltas by index replaces the
+// tool_use block with the text, so the tool call disappears.
+func TestProxyStream_TextAfterToolCallGetsItsOwnBlock(t *testing.T) {
+	handler := NewStreamHandler()
+	w := newMockResponseWriter()
+	body := sseLines(
+		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"toolu_1","type":"function","function":{"name":"search","arguments":"{}"}}]}}]}`,
+		`{"choices":[{"delta":{"content":"thinking out loud"}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := handler.ProxyStream(w, body, "kimi-k2.6", ctx, 0, cancel); err != nil {
+		t.Fatalf("ProxyStream error: %v", err)
+	}
+	events := parseSSEEvents(t, w.buf.String())
+
+	var starts, stops []int
+	for _, event := range events {
+		switch event.Type {
+		case "content_block_start":
+			starts = append(starts, *event.Index)
+		case "content_block_stop":
+			stops = append(stops, *event.Index)
+		}
+	}
+	if len(starts) != 2 || starts[0] != 0 || starts[1] != 1 {
+		t.Fatalf("content_block_start indices = %v, want [0 1]: text reused the tool block's index", starts)
+	}
+	if len(stops) != 2 || stops[0] != 0 || stops[1] != 1 {
+		t.Fatalf("content_block_stop indices = %v, want both blocks closed", stops)
+	}
+	// The tool block must be closed before the text block opens, or a reader
+	// still considers it open when the text's start arrives.
+	order := []string{}
+	for _, event := range events {
+		if event.Type == "content_block_start" || event.Type == "content_block_stop" {
+			order = append(order, event.Type+":"+string(rune('0'+*event.Index)))
+		}
+	}
+	if len(order) < 3 || order[1] != "content_block_stop:0" {
+		t.Fatalf("block order = %v, want the tool block closed before the text block starts", order)
+	}
+}
+
+// The upstream may stream tool calls and still report finish_reason "stop".
+// Treating that as end_turn leaves every agent loop that branches on
+// stop_reason == "tool_use" holding a tool call it never runs.
+func TestProxyStream_ToolCallsForceToolUseStopReason(t *testing.T) {
+	handler := NewStreamHandler()
+	w := newMockResponseWriter()
+	body := sseLines(
+		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"toolu_1","type":"function","function":{"name":"search","arguments":"{}"}}]}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := handler.ProxyStream(w, body, "kimi-k2.6", ctx, 0, cancel); err != nil {
+		t.Fatalf("ProxyStream error: %v", err)
+	}
+	events := parseSSEEvents(t, w.buf.String())
+	for _, event := range events {
+		if event.Type == "message_delta" && event.Delta != nil {
+			if event.Delta.StopReason != "tool_use" {
+				t.Fatalf("stop_reason = %q, want tool_use", event.Delta.StopReason)
+			}
+			return
+		}
+	}
+	t.Fatal("no message_delta event")
+}

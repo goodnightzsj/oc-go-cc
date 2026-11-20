@@ -89,7 +89,7 @@ func getWorkBuddyConfig() string {
   },
   "workbuddy": {
     "base_url": "http://127.0.0.1:7863",
-    "api_key": "YOUR_WORKBUDDY_GATEWAY_KEY",
+    "api_key": "${ROUTATIC_PROXY_WORKBUDDY_API_KEY}",
     "timeout_ms": 120000,
     "stream_timeout_ms": 150000,
     "streaming_timeout_ms": 600000
@@ -100,15 +100,21 @@ func getWorkBuddyConfig() string {
 // getProviderConfig returns a config template optimized for a specific provider.
 // Supported providers are derived from providerPresets so there is only one
 // registry to maintain.
+// providerNames lists the presets in display order, so help text and error text
+// cannot disagree with what this file actually accepts.
+func providerNames() []string {
+	supported := make([]string, 0, len(providerPresets))
+	for p := range providerPresets {
+		supported = append(supported, p)
+	}
+	slices.SortFunc(supported, config.CompareProviderDisplay)
+	return supported
+}
+
 func getProviderConfig(provider string) (string, error) {
 	preset, ok := providerPresets[provider]
 	if !ok {
-		supported := make([]string, 0, len(providerPresets))
-		for p := range providerPresets {
-			supported = append(supported, p)
-		}
-		slices.SortFunc(supported, config.CompareProviderDisplay)
-		return "", fmt.Errorf("unknown provider %q; supported: %s", provider, strings.Join(supported, ", "))
+		return "", fmt.Errorf("unknown provider %q; supported: %s", provider, strings.Join(providerNames(), ", "))
 	}
 	return preset.Generator(), nil
 }

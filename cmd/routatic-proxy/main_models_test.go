@@ -177,13 +177,11 @@ func TestRunModelsList_MissingCatalog(t *testing.T) {
 	cmd, buf := newCaptureCommand(t)
 	t.Setenv("ROUTATIC_PROXY_CONFIG", configPath)
 
+	// An error, not a silent empty listing: a script piping `models` must be able
+	// to tell "no catalog" from "no models".
 	err := runModelsList(cmd, configPath, "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	output := buf.String()
-	if !strings.Contains(output, "catalog not found") {
-		t.Fatalf("expected output containing %q, got: %s", "catalog not found", output)
+	if err == nil || !strings.Contains(err.Error(), "catalog not found") {
+		t.Fatalf("err = %v, want a catalog-not-found error (output: %s)", err, buf.String())
 	}
 }
 

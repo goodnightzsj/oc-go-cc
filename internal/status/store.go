@@ -74,16 +74,6 @@ func NewStore(ttl time.Duration) *Store {
 	}
 }
 
-func (s *Store) Update(seq uint64, snap Snapshot) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if seq < s.seq {
-		return
-	}
-	s.seq = seq
-	s.applyLocked(snap)
-}
-
 // Publish records a snapshot from the in-process request path, which has a
 // single writer and therefore does not need to supply a sequence number.
 func (s *Store) Publish(snap Snapshot) {

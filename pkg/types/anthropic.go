@@ -250,7 +250,13 @@ type ImageSource struct {
 }
 
 // Tool represents a tool definition for function calling.
+//
+// Type distinguishes a client tool from an Anthropic server tool
+// (web_search_20250305, computer_20250124, bash_20250124, text_editor_*):
+// those have no input_schema because the provider executes them, not the
+// client. Empty and "custom" both mean a client tool.
 type Tool struct {
+	Type        string          `json:"type,omitempty"`
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	InputSchema json.RawMessage `json:"input_schema"`

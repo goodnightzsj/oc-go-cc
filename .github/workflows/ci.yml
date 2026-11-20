@@ -14,11 +14,15 @@ jobs:
     name: Test & Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version-file: go.mod
+          # "1.25" follows the patch releases. `go-version-file: go.mod` resolved
+          # go.mod's "go 1.25.0" to that exact patch, so CI validated a
+          # toolchain the release never used - and that build carries reachable
+          # standard-library vulnerabilities fixed in later 1.25.x patches.
+          go-version: "1.25"
           cache: true
 
       - name: Download dependencies
@@ -56,11 +60,15 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version-file: go.mod
+          # "1.25" follows the patch releases. `go-version-file: go.mod` resolved
+          # go.mod's "go 1.25.0" to that exact patch, so CI validated a
+          # toolchain the release never used - and that build carries reachable
+          # standard-library vulnerabilities fixed in later 1.25.x patches.
+          go-version: "1.25"
           cache: true
 
       - name: golangci-lint

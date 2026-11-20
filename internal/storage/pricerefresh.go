@@ -603,10 +603,14 @@ func RefreshPrices(ctx context.Context, cfg PriceRefreshConfig, client *http.Cli
 	if orURL == "" {
 		orURL = OpenRouterPricesURL
 	}
-	if orEntries, err := FetchOpenRouterPrices(ctx, client, orURL); err != nil {
+	if orEntries, orRules, err := FetchOpenRouterPrices(ctx, client, orURL); err != nil {
 		errs[site.OpenRouter] = err
 	} else {
 		fetched[site.OpenRouter] = orEntries
+		// The payload is the only statement of which models peak when. Handing
+		// it to the history table replaces the hand-copied rules, which had
+		// already drifted from it in both directions.
+		history.SetDerivedPeakRules(site.OpenRouter, orRules)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, map[string]error{site.OpenCodeGo: err, site.CommandCode: err, site.ClinePass: err, site.OpenRouter: err}
@@ -945,7 +949,23 @@ func FetchClinePassPrices(ctx context.Context, client *http.Client, url string) 
 // scaled to this package's per-million convention. A model with a blank or
 // unparsable rate is skipped rather than recorded as free: zero is a real price
 // on this platform, and the two must not be confused.
-func FetchOpenRouterPrices(ctx context.Context, client *http.Client, url string) ([]priceEntry, error) {
+//
+// Three parts of the payload are load-bearing and were once ignored:
+//
+//   - The headline `pricing` block is the *highest* band, not the base. A model
+//     with an `overrides` entry cheaper than the headline bills at the cheaper
+//     rate outside the override's window, so the base rate this table stores is
+//     the minimum of the declared bands. Storing the headline instead made the
+//     peak multiplier in history apply to an already-peak price - a flat 1.6x
+//     overcharge on tencent/hy3's off-peak hours.
+//   - An override carrying `utc_start`/`utc_end` states a window at a different
+//     rate, which is exactly the peak schedule history needs; it is returned as
+//     a derived rule instead of a hand-maintained table that drifted from the
+//     payload.
+//   - `min_prompt_tokens` overrides are context bands, and `input_cache_read` /
+//     `input_cache_write` are real prices; dropping them priced long prompts at
+//     the short-prompt rate and cache hits at zero.
+func FetchOpenRouterPrices(ctx context.Context, client *http.Client, url string) ([]priceEntry, []history.PeakRuleSpec, error) {
 	if url == "" {
 		url = OpenRouterPricesURL
 	}
@@ -954,63 +974,219 @@ func FetchOpenRouterPrices(ctx context.Context, client *http.Client, url string)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("openrouter prices: %w", err)
+		return nil, nil, fmt.Errorf("openrouter prices: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("openrouter prices: %w", err)
+		return nil, nil, fmt.Errorf("openrouter prices: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("openrouter prices: HTTP %d", resp.StatusCode)
+		return nil, nil, fmt.Errorf("openrouter prices: HTTP %d", resp.StatusCode)
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxPricePageBytes))
 	if err != nil {
-		return nil, fmt.Errorf("openrouter prices: %w", err)
+		return nil, nil, fmt.Errorf("openrouter prices: %w", err)
 	}
+	entries, rules, err := parseOpenRouterPrices(raw)
+	if err != nil {
+		return nil, nil, fmt.Errorf("openrouter prices: %w", err)
+	}
+	return entries, rules, nil
+}
 
+// openRouterBand is one declared price band: the headline block or one override.
+type openRouterBand struct {
+	prompt     float64
+	completion float64
+	cacheRead  float64
+	cacheWrite float64
+	start      int // utc_start as HHMM, -1 when the band is not time-scoped
+	end        int
+	// ok separates "parsed as zero" from "did not parse": a free model is a
+	// real price on this platform, an unparsable one is an absence.
+	ok bool
+}
+
+type openRouterOverride struct {
+	UTCStart        *int   `json:"utc_start"`
+	UTCEnd          *int   `json:"utc_end"`
+	MinPromptTokens *int64 `json:"min_prompt_tokens"`
+	Prompt          string `json:"prompt"`
+	Completion      string `json:"completion"`
+	InputCacheRead  string `json:"input_cache_read"`
+	InputCacheWrite string `json:"input_cache_write"`
+}
+
+type openRouterModel struct {
+	ID      string `json:"id"`
+	Pricing struct {
+		Prompt          string               `json:"prompt"`
+		Completion      string               `json:"completion"`
+		InputCacheRead  string               `json:"input_cache_read"`
+		InputCacheWrite string               `json:"input_cache_write"`
+		Overrides       []openRouterOverride `json:"overrides"`
+	} `json:"pricing"`
+}
+
+func parseOpenRouterPrices(raw []byte) ([]priceEntry, []history.PeakRuleSpec, error) {
 	var payload struct {
-		Data []struct {
-			ID      string `json:"id"`
-			Pricing struct {
-				Prompt     string `json:"prompt"`
-				Completion string `json:"completion"`
-			} `json:"pricing"`
-		} `json:"data"`
+		Data []openRouterModel `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, fmt.Errorf("openrouter prices: %w", err)
+		return nil, nil, err
 	}
 
 	entries := make([]priceEntry, 0, len(payload.Data))
+	rules := make([]history.PeakRuleSpec, 0)
 	for _, m := range payload.Data {
 		id := strings.TrimSpace(m.ID)
 		if id == "" {
 			continue
 		}
-		in, inOK := perTokenToPerMillion(m.Pricing.Prompt)
-		out, outOK := perTokenToPerMillion(m.Pricing.Completion)
-		if !inOK && !outOK {
+		entry, spec, ok := openRouterEntry(id, m)
+		if !ok {
 			continue
 		}
-		entries = append(entries, priceEntry{
-			// The match is the full id, which is what OpenRouter's own listing
-			// and therefore this proxy's model ids use.
-			Match:  id,
-			Input:  in,
-			Output: out,
-		})
+		entries = append(entries, entry)
+		if spec != nil {
+			rules = append(rules, *spec)
+		}
 	}
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("openrouter prices: no usable rows")
+		return nil, nil, fmt.Errorf("no usable rows")
 	}
-	return entries, nil
+	return entries, rules, nil
 }
 
-// perTokenToPerMillion converts a per-token price to the per-million convention
-// this package uses. It reports false for a value that is missing, unparsable,
-// or negative - never 0, because 0 is a price the platform really charges.
+// openRouterEntry turns one model's payload into a rate entry and, when the
+// model publishes time windows, the peak rule that prices them.
+func openRouterEntry(id string, m openRouterModel) (priceEntry, *history.PeakRuleSpec, bool) {
+	headline := openRouterBand{start: -1, end: -1}
+	var inOK, outOK bool
+	headline.prompt, inOK = perTokenToPerMillion(m.Pricing.Prompt)
+	headline.completion, outOK = perTokenToPerMillion(m.Pricing.Completion)
+	headline.ok = inOK && outOK
+	headline.cacheRead, _ = perTokenToPerMillion(m.Pricing.InputCacheRead)
+	headline.cacheWrite, _ = perTokenToPerMillion(m.Pricing.InputCacheWrite)
+
+	bands := []openRouterBand{headline}
+	tiers := make([]priceTier, 0, len(m.Pricing.Overrides))
+	for _, override := range m.Pricing.Overrides {
+		if override.MinPromptTokens != nil && *override.MinPromptTokens > 0 {
+			input, inOK := perTokenToPerMillion(override.Prompt)
+			output, outOK := perTokenToPerMillion(override.Completion)
+			if !inOK || !outOK {
+				continue
+			}
+			cacheRead, _ := perTokenToPerMillion(override.InputCacheRead)
+			cacheWrite, _ := perTokenToPerMillion(override.InputCacheWrite)
+			tiers = append(tiers, priceTier{
+				Size:       *override.MinPromptTokens,
+				Input:      input,
+				Output:     output,
+				CacheRead:  cacheRead,
+				CacheWrite: cacheWrite,
+			})
+			continue
+		}
+		if override.UTCStart == nil || override.UTCEnd == nil {
+			continue
+		}
+		band := openRouterBand{start: *override.UTCStart, end: *override.UTCEnd}
+		input, bandInOK := perTokenToPerMillion(override.Prompt)
+		output, bandOutOK := perTokenToPerMillion(override.Completion)
+		if !bandInOK || !bandOutOK {
+			continue
+		}
+		band.ok = true
+		band.prompt, band.completion = input, output
+		band.cacheRead, _ = perTokenToPerMillion(override.InputCacheRead)
+		band.cacheWrite, _ = perTokenToPerMillion(override.InputCacheWrite)
+		bands = append(bands, band)
+	}
+
+	// The base is the cheapest declared band: that is the rate off-peak hours
+	// bill at, and the one the peak multiplier is relative to.
+	base := openRouterBand{}
+	found := false
+	for _, band := range bands {
+		if !band.ok {
+			continue
+		}
+		if !found || band.prompt < base.prompt {
+			base, found = band, true
+		}
+	}
+	if !found {
+		return priceEntry{}, nil, false
+	}
+
+	// Cache prices are stated alongside the headline rate and not repeated on
+	// every band, so a band that omits them inherits the headline's rather than
+	// pricing cache reads at zero.
+	cacheRead, cacheWrite := base.cacheRead, base.cacheWrite
+	if cacheRead == 0 {
+		cacheRead = headline.cacheRead
+	}
+	if cacheWrite == 0 {
+		cacheWrite = headline.cacheWrite
+	}
+	entry := priceEntry{
+		// The match is the full id, which is what OpenRouter's own listing and
+		// therefore this proxy's model ids use.
+		Match:      id,
+		Input:      base.prompt,
+		Output:     base.completion,
+		CacheRead:  cacheRead,
+		CacheWrite: cacheWrite,
+	}
+	if len(tiers) > 0 {
+		sortTiers(tiers)
+		entry.Tiers = tiers
+	}
+
+	// Time-scoped bands above the base rate are peak rules. The payload states
+	// no day condition on any of them today, so they apply every day; a rule
+	// that forgot that would silently drop weekend peak hours.
+	var windows []history.PeakWindow
+	multiplier := 1.0
+	for _, band := range bands {
+		if band.start < 0 || band.prompt <= base.prompt || base.prompt <= 0 {
+			continue
+		}
+		windows = append(windows, peakWindows(band.start, band.end)...)
+		multiplier = band.prompt / base.prompt
+	}
+	if len(windows) == 0 || multiplier <= 1 {
+		return entry, nil, true
+	}
+	return entry, &history.PeakRuleSpec{
+		Models:     []string{id},
+		Windows:    windows,
+		Multiplier: multiplier,
+		AllDays:    true,
+	}, true
+}
+
+// peakWindows converts one utc_start/utc_end pair, both HHMM, into hour ranges.
+// A window that crosses midnight comes back as two ranges.
+func peakWindows(startHHMM, endHHMM int) []history.PeakWindow {
+	start, end := startHHMM/100, endHHMM/100
+	if start < 0 || start > 23 || end < 0 || end > 24 || start == end {
+		return nil
+	}
+	if start < end {
+		return []history.PeakWindow{{Start: start, End: end}}
+	}
+	windows := []history.PeakWindow{{Start: start, End: 24}}
+	if end > 0 {
+		windows = append(windows, history.PeakWindow{Start: 0, End: end})
+	}
+	return windows
+}
+
 func perTokenToPerMillion(raw string) (float64, bool) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {

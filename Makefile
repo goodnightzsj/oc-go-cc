@@ -10,11 +10,11 @@ CMD = ./cmd/routatic-proxy
 # ── Development ────────────────────────────────────────────────────
 
 build: build-css
-	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
 	@ln -sf $(BINARY) bin/$(LEGACY_BINARY)
 
 build-ui: build-css
-	CGO_ENABLED=1 go build -tags darwin -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
+	CGO_ENABLED=1 go build -tags darwin -trimpath -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
 	@ln -sf $(BINARY) bin/$(LEGACY_BINARY)
 
 build-css:
@@ -93,7 +93,11 @@ PLATFORMS = \
 	windows-amd64 \
 	windows-arm64
 
+# -trimpath keeps the build machine's absolute paths out of the binary and makes
+# the same commit build the same bytes from any directory. -buildvcs=false keeps
+# a dirty working tree from changing the artifact without changing the source.
 RELEASE_LDFLAGS = $(LDFLAGS) -s -w
+RELEASE_BUILD_FLAGS = -trimpath -buildvcs=false
 
 dist-binaries: build-css
 	@$(MAKE) clean
@@ -105,7 +109,7 @@ dist-binaries: build-css
 		[ "$$GOOS" = "windows" ] && EXT=".exe"; \
 		echo "  → $$GOOS/$$GOARCH"; \
 		CGO_ENABLED=0 GOOS=$$GOOS GOARCH=$$GOARCH \
-			go build -ldflags "$(RELEASE_LDFLAGS)" \
+			go build $(RELEASE_BUILD_FLAGS) -ldflags "$(RELEASE_LDFLAGS)" \
 				-o "dist/$(BINARY)_$${platform}$${EXT}" \
 				$(CMD) || exit $$?; \
 		test -s "dist/$(BINARY)_$${platform}$${EXT}" || exit 1; \

@@ -4,6 +4,7 @@ package history
 import (
 	"encoding/json"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/routatic/proxy/internal/core"
@@ -402,34 +403,6 @@ func PeakMultiplier(model string, t time.Time) float64 {
 	return ProviderPeakMultiplier("opencode-go", model, t)
 }
 
-// PeakWindowsFor returns the hours one platform's rules charge a higher rate
-// on, and the multipliers they charge, for reporting.
-//
-// Tests only. It existed to let the dashboard check its own copy of the rule
-// against this one; that copy was deleted when the rule gained a holiday
-// calendar the browser cannot reproduce, so nothing in the running program
-// calls this now. Kept because it is how the parity tests assert the dashboard
-// has not grown a second copy back.
-//
-// A platform's rules may differ in multiplier and day coverage, so the windows
-// are returned per rule rather than flattened into one list.
-func PeakWindowsFor(provider string) []PeakRuleView {
-	s, ok := peakSchedules[site.Normalize(provider)]
-	if !ok {
-		return nil
-	}
-	out := make([]PeakRuleView, 0, len(s.rules))
-	for _, r := range s.rules {
-		out = append(out, PeakRuleView{
-			Models:     r.models,
-			Windows:    r.windows,
-			Multiplier: r.multiplier,
-			AllDays:    r.allDays,
-		})
-	}
-	return out
-}
-
 // PeakRuleView is one peak rule as reported by PeakWindowsFor. Tests only.
 type PeakRuleView struct {
 	Models     map[string]bool
@@ -473,11 +446,74 @@ func PeakMultiplierFor(provider, model string) float64 {
 // platform billed it at its peak rate. The provider is normalised first, so
 // legacy spellings resolve and an empty one means the default platform - which
 // is how records stored before the provider column existed are read.
+// PeakRuleSpec is one peak rule in the shape a price refresh derives from a
+// live payload. Models are families (models.ModelFamily), not wire ids.
+type PeakRuleSpec struct {
+	Models     []string
+	Windows    []PeakWindow
+	Multiplier float64
+	AllDays    bool
+}
+
+// derivedPeak holds rules read from a platform's own payload at refresh time.
+// It is consulted before the static table, and only replaces a platform's rules
+// once a refresh has actually produced them: a payload that failed to load must
+// not turn peak hours into off-peak ones, which would understate the bill
+// silently. The static table stays as the seed until then.
+var (
+	derivedPeakMu sync.RWMutex
+	derivedPeak   = map[string]peakSchedule{}
+)
+
+// SetDerivedPeakRules replaces the rules derived from a payload for one
+// platform. An empty set removes them, falling back to the static table.
+func SetDerivedPeakRules(provider string, specs []PeakRuleSpec) {
+	id := site.Normalize(provider)
+	derivedPeakMu.Lock()
+	defer derivedPeakMu.Unlock()
+	if len(specs) == 0 {
+		delete(derivedPeak, id)
+		return
+	}
+	schedule := peakSchedule{}
+	for _, spec := range specs {
+		if spec.Multiplier <= 1 || len(spec.Windows) == 0 {
+			continue
+		}
+		families := make(map[string]bool, len(spec.Models))
+		for _, model := range spec.Models {
+			families[models.ModelFamily(model)] = true
+		}
+		schedule.rules = append(schedule.rules, peakRule{
+			models:     families,
+			windows:    spec.Windows,
+			multiplier: spec.Multiplier,
+			allDays:    spec.AllDays,
+		})
+	}
+	if len(schedule.rules) == 0 {
+		delete(derivedPeak, id)
+		return
+	}
+	derivedPeak[id] = schedule
+}
+
+func peakScheduleFor(provider string) (peakSchedule, bool) {
+	derivedPeakMu.RLock()
+	schedule, ok := derivedPeak[provider]
+	derivedPeakMu.RUnlock()
+	if ok {
+		return schedule, true
+	}
+	schedule, ok = peakSchedules[provider]
+	return schedule, ok
+}
+
 func ProviderPeakMultiplier(provider, model string, t time.Time) float64 {
 	if t.IsZero() {
 		return 1
 	}
-	schedule, ok := peakSchedules[site.Normalize(provider)]
+	schedule, ok := peakScheduleFor(site.Normalize(provider))
 	if !ok {
 		return 1
 	}

@@ -6,3 +6,4 @@ dist/
 .tmp/
 configs/config.json
 *.md
+node_modules/

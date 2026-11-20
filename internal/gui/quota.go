@@ -72,11 +72,15 @@ type quotaLink struct {
 //
 // The authority for what an account has left is the account's own quota report
 // - OpenCode Go's 5-hour, weekly and monthly windows, reported per key in
-// Accounts. ModelLimits and ModelUsage are a breakdown of that total, not a
-// second opinion on it: ModelLimits is the per-model share parsed from the docs
-// page, and ModelUsage is this instance's own ledger, calibrated against the
-// account total so the rows sum back to it. A model whose docs row cannot be
-// parsed therefore loses its breakdown and never its spend figure.
+// Accounts. ModelLimits is the per-model allowance parsed from the docs page.
+//
+// ModelUsage is this instance's own ledger, in the same currency, and it is
+// deliberately *not* calibrated against the account total: it answers "what did
+// this proxy spend on this model", not "what is the account's monthly figure",
+// and scaling it to match the account would misstate every row by the traffic
+// that ran elsewhere. Percent is the row's share of its documented allowance.
+// Rows are driven by the ledger, so a model the docs page does not name keeps
+// its spend and simply shows no percentage.
 type quotaResponse struct {
 	Provider        string                   `json:"provider"`
 	Status          string                   `json:"status"`
@@ -762,18 +766,29 @@ func (s *Server) monthlyModelUsage(ctx context.Context, accounts []quotaAccount,
 		row.UnknownCostRequests += b.UnknownCostRequests
 		raw[name] = row
 	}
-	rows := make([]quotaModelUsage, 0, len(limits.Models))
+	// Driven by the ledger, not by the published allowance table.
+	//
+	// Iterating the table first dropped every model this instance served that
+	// the docs page does not name - a new model, a dated snapshot, a name that
+	// normalizes differently - and the rows are what the panel sums, so that
+	// spend disappeared from the total without any sign of it. A model with no
+	// documented allowance now shows its cost and no percentage.
+	allowance := make(map[string]float64, len(limits.Models))
+	display := make(map[string]string, len(limits.Models))
 	for _, m := range limits.Models {
-		row, used := raw[normalizeModelName(m.Model)]
-		if !used {
-			// Only models this instance has actually served show up; the rest
-			// of the plan table stays out of the way.
-			continue
+		key := normalizeModelName(m.Model)
+		allowance[key] = m.AllowanceUSD
+		display[key] = m.Model
+	}
+	rows := make([]quotaModelUsage, 0, len(raw))
+	for key, row := range raw {
+		row.Model = display[key]
+		if row.Model == "" {
+			row.Model = key
 		}
-		row.Model = m.Model
-		row.AllowanceUSD = m.AllowanceUSD
-		if row.UnknownCostRequests == 0 && m.AllowanceUSD > 0 {
-			percent := row.UsedUSD / m.AllowanceUSD * 100
+		row.AllowanceUSD = allowance[key]
+		if row.UnknownCostRequests == 0 && row.AllowanceUSD > 0 {
+			percent := row.UsedUSD / row.AllowanceUSD * 100
 			row.Percent = &percent
 		}
 		rows = append(rows, row)

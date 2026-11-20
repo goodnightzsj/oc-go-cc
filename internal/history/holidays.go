@@ -139,19 +139,6 @@ func parseHolidayDays(body []byte) (map[string]struct{}, error) {
 	return set, nil
 }
 
-// FetchHolidays reads the current and following year from the source. Reading
-// both is not belt-and-braces: the upstream files are keyed by the State
-// Council document's year, so a December date can live in the next year's file,
-// and the following year's file appears, empty, as soon as the notice does.
-//
-// A year that is absent is not an error - the next year's file does not exist
-// until the government publishes, and demanding it would make every refresh
-// fail for eleven months of the year. A year that exists but cannot be parsed
-// is an error, because that is a change in the source's shape.
-func FetchHolidays(ctx context.Context, client *http.Client, now time.Time) (map[string]struct{}, error) {
-	return fetchHolidaysFrom(ctx, client, now, HolidaySourceURL)
-}
-
 // fetchHolidaysFrom is FetchHolidays against an arbitrary URL pattern (%d is
 // the year), so the shape of the source - which years exist, what a malformed
 // one does - can be tested without the network.

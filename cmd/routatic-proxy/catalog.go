@@ -223,16 +223,3 @@ func logHolidayRefresh(days int, err error) {
 	}
 	slog.Info("holiday calendar refreshed", "days", days)
 }
-
-// ensureDatabase ensures the SQLite database exists and is initialized.
-// It creates the database directory and schema if missing.
-func ensureDatabase() error {
-	db, err := storage.Open(storage.DefaultConfig)
-	if err != nil {
-		return fmt.Errorf("failed to initialize database: %w", err)
-	}
-	defer func() { _ = db.Close() }()
-
-	slog.Info("initialized sqlite database", "path", storage.DefaultConfig.DatabasePath)
-	return nil
-}

@@ -4,7 +4,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION=docker
-RUN CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=${VERSION}" -o /app/routatic-proxy ./cmd/routatic-proxy
+RUN CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=${VERSION}" -o /app/routatic-proxy ./cmd/routatic-proxy
 
 FROM alpine:3.21
 LABEL org.opencontainers.image.source="https://github.com/routatic/proxy"

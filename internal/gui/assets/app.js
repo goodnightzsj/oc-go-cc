@@ -418,6 +418,7 @@ const TRANSLATIONS = {
     'filter.allChannels': 'All channels',
     'filter.model': 'Model',
     'filter.provider': 'Provider',
+    'filter.status': 'Filter by status',
     'clinepass.accountScope': 'Official plan usage. ClinePass is a flat monthly subscription measured against reference rates, so these are percentages of each window, not an amount owed. Each key is shown separately.',
     'setting.clinePassHint': 'Chat Completions only · plan usage',
     'clinepass.keyHint': 'Uses its own Cline API key; global keys are never sent to Cline.',
@@ -534,6 +535,7 @@ const TRANSLATIONS = {
     'th.firstByteHint': 'Time from the request starting to the upstream sending its first byte. What the upstream controls, as opposed to the model thinking time included in Duration.',
     'th.duration': 'Duration',
     'th.tokensPerSecond': 'Tok/s',
+    'unit.tokensPerSecond': 'tok/s',
     'th.status': 'Status',
     'empty.noHistory': 'No history yet',
     'setting.proxy': 'Proxy Service',
@@ -1097,6 +1099,7 @@ const TRANSLATIONS = {
     'filter.allChannels': '全部渠道',
     'filter.model': '模型',
     'filter.provider': '供应商',
+    'filter.status': '按状态筛选',
     'clinepass.accountScope': '官方套餐用量。ClinePass 是按月固定订阅、以参考价折算，因此这里是各窗口的百分比，而不是应付金额。每个密钥分别显示。',
     'setting.clinePassHint': '仅 Chat Completions · 套餐用量',
     'clinepass.keyHint': '使用本平台自己的 Cline API 密钥；全局密钥不会发送给 Cline。',
@@ -1213,6 +1216,7 @@ const TRANSLATIONS = {
     'th.firstByteHint': '从请求开始到上游返回第一个字节的时间。这是上游可控的部分；Duration 里还包含模型思考时间。',
     'th.duration': '耗时',
     'th.tokensPerSecond': 'Tok/s',
+    'unit.tokensPerSecond': 'tok/s',
     'th.status': '状态',
     'empty.noHistory': '暂无历史请求',
     'setting.proxy': '代理服务',
@@ -1379,6 +1383,13 @@ function removeStorage(key) {
 }
 
 let currentLang = readStorage('routatic-proxy-lang') || 'en';
+
+// localeTag is the formatting locale: the language this app is showing, not the
+// one the browser happens to prefer. Two sources on one page produced an English
+// interface with Chinese dates.
+function localeTag() {
+  return currentLang === 'zh' ? 'zh-CN' : 'en-US';
+}
 
 function t(key) {
   return (TRANSLATIONS[currentLang] && TRANSLATIONS[currentLang][key]) || key;
@@ -2660,7 +2671,7 @@ function renderOverviewUsage(data, trend, latency) {
   // Says when the figures were taken and how often they refresh, so a reader
   // can tell a stale panel from a quiet system. The interval is the same 3s the
   // overview poll actually runs at, not a rounded-down claim.
-  set('overview-generated', `${new Date().toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'})} · ${t('analytics.autoRefresh').replace('{n}', '3')}`);
+  set('overview-generated', `${new Date().toLocaleString(localeTag(), {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'})} · ${t('analytics.autoRefresh').replace('{n}', '3')}`);
   set('overview-latency', Number(latency?.avg_latency_ms || 0) > 0
     ? `· ${t('analytics.avgLatency')} ${fmtDuration(latency.avg_latency_ms)}`
     : '');
@@ -3049,10 +3060,34 @@ function renderCompactBreakdown(id, items, dimension) {
   }).join('');
 }
 
+// setSegmentedSelection marks one button of a segmented control as selected,
+// for sighted and assistive readers alike. The class alone is invisible to a
+// screen reader, so the current time range or metric could not be determined.
+function setSegmentedSelection(button) {
+  button.parentElement.querySelectorAll('button').forEach(item => {
+    const on = item === button;
+    item.classList.toggle('active', on);
+    item.setAttribute('aria-pressed', String(on));
+  });
+}
+
+// Publish the initial selection too: before the first click the state exists
+// only as a class in the markup.
+function syncSegmentedState() {
+  document.querySelectorAll('button.active').forEach(button => {
+    const group = button.parentElement;
+    if (!group) return;
+    group.querySelectorAll('button').forEach(item => {
+      item.setAttribute('aria-pressed', String(item === button));
+    });
+  });
+}
+syncSegmentedState();
+
 document.querySelectorAll('#history-breakdown-metric button').forEach(button => {
   button.addEventListener('click', () => {
     historyBreakdownMetric = button.dataset.metric;
-    button.parentElement.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
+    setSegmentedSelection(button);
     if (lastHistorySummary) renderHistorySummary(lastHistorySummary);
   });
 });
@@ -3926,7 +3961,7 @@ function fmtThroughput(v) {
 // Source rates are nullable: zero is a measured value, never "no samples".
 function fmtGenerationThroughput(value) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '—';
-  return value.toLocaleString('en-US', {minimumFractionDigits: 1, maximumFractionDigits: 1}) + ' tok/s';
+  return value.toLocaleString(localeTag(), {minimumFractionDigits: 1, maximumFractionDigits: 1}) + ' ' + t('unit.tokensPerSecond');
 }
 
 function generationThroughputHint(record, average) {
@@ -6080,8 +6115,8 @@ const FallbackModule = {
     if (model.vision) badges.push(t('catalog.vision'));
     if (model.reasoning) badges.push(t('catalog.reasoning'));
     return `
-      <li class="picker-row" role="option" tabindex="-1"
-          data-key="${escapeHtml(key)}">
+      <li class="picker-row" role="option" tabindex="-1" aria-selected="false"
+          id="picker-${escapeHtml(key).replace(/[^a-zA-Z0-9_-]/g, '-')}" data-key="${escapeHtml(key)}">
         <span class="picker-model">${escapeHtml(model.model_id)}</span>
         ${ctx ? `<span class="picker-ctx">${escapeHtml(ctx)}</span>` : ''}
         ${price
@@ -6114,8 +6149,13 @@ const FallbackModule = {
     const open = force === undefined ? pop.hidden : force;
     pop.hidden = !open;
     trigger.setAttribute('aria-expanded', String(open));
+    const searchBox = document.getElementById('fallback-add-search');
+    if (searchBox) {
+      searchBox.setAttribute?.('aria-expanded', String(open));
+      if (!open) searchBox.removeAttribute?.('aria-activedescendant');
+    }
     if (!open) return;
-    const search = document.getElementById('fallback-add-search');
+    const search = searchBox;
     // Restore the remembered query rather than clearing it: the box is how the
     // reader narrowed 500 models, and reopening to a blank box means re-typing.
     this.renderPickerList(this.pickerSearch || '');
@@ -6144,6 +6184,7 @@ const FallbackModule = {
     // provider and model_id reaches the API without its protocol.
     this.chains[this.currentScenario].push({ ...model });
     this.togglePicker(false);
+    document.getElementById('fallback-add-trigger')?.focus();
     this.renderChain();
     this.populateAddSelect();
     this.persist();
@@ -6154,7 +6195,11 @@ const FallbackModule = {
   onPickerKeydown(event) {
     const list = document.getElementById('fallback-add-list');
     if (!list) return;
-    if (event.key === 'Escape') { this.togglePicker(false); return; }
+    if (event.key === 'Escape') {
+      this.togglePicker(false);
+      document.getElementById('fallback-add-trigger')?.focus();
+      return;
+    }
     const rows = [...list.querySelectorAll('.picker-row')];
     if (rows.length === 0) return;
     const current = rows.findIndex(r => r.classList.contains('active'));
@@ -6163,8 +6208,13 @@ const FallbackModule = {
       const next = event.key === 'ArrowDown'
         ? Math.min(rows.length - 1, current + 1)
         : Math.max(0, current - 1);
-      rows.forEach(r => r.classList.remove('active'));
-      rows[next].classList.add('active');
+      rows.forEach(r => {
+        const on = r === rows[next];
+        r.classList.toggle('active', on);
+        r.setAttribute?.('aria-selected', String(on));
+      });
+      const search = document.getElementById('fallback-add-search');
+      if (search && rows[next].id) search.setAttribute?.('aria-activedescendant', rows[next].id);
       rows[next].scrollIntoView({block: 'nearest'});
     } else if (event.key === 'Enter') {
       event.preventDefault();
@@ -6777,28 +6827,28 @@ const AnalyticsModule = {
     document.querySelectorAll('#analytics-breakdown-metric button').forEach(button => {
       button.addEventListener('click', () => {
         this.breakdownMetric = button.dataset.metric;
-        button.parentElement.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
+        setSegmentedSelection(button);
         if (this.currentView) this.renderDistributions(this.currentView);
       });
     });
     document.querySelectorAll('#analytics-granularity button').forEach(button => {
       button.addEventListener('click', () => {
         this.granularity = button.dataset.granularity;
-        button.parentElement.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
+        setSegmentedSelection(button);
         this.load(true);
       });
     });
     document.querySelectorAll('#overview-range button').forEach(button => {
       button.addEventListener('click', () => {
         overviewDays = Number(button.dataset.days || 7);
-        button.parentElement.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
+        setSegmentedSelection(button);
         refreshOverviewUsage();
       });
     });
     document.querySelectorAll('#overview-breakdown-metric button').forEach(button => {
       button.addEventListener('click', () => {
         overviewBreakdownMetric = button.dataset.metric;
-        button.parentElement.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
+        setSegmentedSelection(button);
         if (lastOverviewView) renderOverviewUsage(lastOverviewView.data, lastOverviewView.trend, lastOverviewView.latency);
       });
     });
@@ -7318,7 +7368,7 @@ const AnalyticsModule = {
   trendLabel(value) {
     const date = String(value || '');
     if (date.includes('T')) {
-      return new Date(date).toLocaleString(undefined, {month:'2-digit', day:'2-digit', hour:'2-digit', timeZone:'UTC'}) + ' UTC';
+      return new Date(date).toLocaleString(localeTag(), {month:'2-digit', day:'2-digit', hour:'2-digit', timeZone:'UTC'}) + ' UTC';
     }
     return date.slice(5);
   },

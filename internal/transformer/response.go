@@ -90,6 +90,11 @@ func (t *ResponseTransformer) TransformResponse(
 	if stopReason == "end_turn" && choice.Message.Refusal != nil && *choice.Message.Refusal != "" {
 		stopReason = "refusal"
 	}
+	// The same rule the streaming path applies: tool calls mean the turn ends
+	// for the client to run them, even when the gateway says "stop".
+	if stopReason == "end_turn" && len(choice.Message.ToolCalls) > 0 {
+		stopReason = "tool_use"
+	}
 
 	// Build Anthropic response.
 	anthropicResp := &types.MessageResponse{

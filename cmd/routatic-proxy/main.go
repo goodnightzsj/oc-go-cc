@@ -23,6 +23,7 @@ import (
 	"github.com/routatic/proxy/internal/gui"
 	"github.com/routatic/proxy/internal/history"
 	"github.com/routatic/proxy/internal/server"
+	"github.com/routatic/proxy/internal/site"
 	"github.com/routatic/proxy/internal/storage"
 	"github.com/spf13/cobra"
 )
@@ -397,14 +398,16 @@ func statusCmd() *cobra.Command {
 			pidPath := getPIDPath()
 			pid, err := daemon.GetPID(pidPath)
 			if err != nil {
+				// A non-zero exit is what lets a script ask this question at
+				// all: `if routatic-proxy status` used to be always true.
 				fmt.Println("Server is not running")
-				return nil
+				return fmt.Errorf("server is not running")
 			}
 
-			if !daemon.IsProcessRunning(pid) {
+			if !daemon.IsOurProcess(pid, daemon.AppName) {
 				fmt.Println("Server is not running (stale PID file)")
 				_ = os.Remove(pidPath)
-				return nil
+				return fmt.Errorf("server is not running")
 			}
 
 			fmt.Printf("Server is running (PID %d)\n", pid)
@@ -416,22 +419,25 @@ func statusCmd() *cobra.Command {
 // initCmd returns the command to create a default configuration file.
 func initCmd() *cobra.Command {
 	var provider string
+	var initConfigPath string
 
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create default configuration file",
 		Long: `Create a default configuration file optimized for a specific provider.
 
-The --provider flag pre-configures the config with provider-specific defaults:
-  - opencode-go: OpenCode Go subscription ($5/month, powerful coding models)
-  - commandcode: CommandCode official Provider API (Messages and Chat Completions)
-  - opencode-zen: OpenCode Zen (pay-as-you-go, Claude/GPT/Gemini)
-  - aws-bedrock: AWS Bedrock Mantle (run models on your AWS infrastructure)
-  - openrouter: OpenRouter (unified API for 100+ models)
+The --provider flag pre-configures the config with provider-specific defaults.
+The accepted values are listed by the --provider flag help, which is derived
+from the presets, so it cannot fall behind them.
 
 Without --provider, a default config optimized for OpenCode Go is created.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Resolve config path, respecting ROUTATIC_PROXY_CONFIG env var.
+			// --config wins over the environment, the way every other command
+			// resolves it. Without this the only way to name a new file was an
+			// undocumented ROUTATIC_PROXY_CONFIG export.
+			if initConfigPath != "" {
+				_ = os.Setenv("ROUTATIC_PROXY_CONFIG", initConfigPath)
+			}
 			configPath := config.ResolveConfigPath()
 
 			// Check if config already exists
@@ -486,7 +492,8 @@ Without --provider, a default config optimized for OpenCode Go is created.`,
 	}
 
 	cmd.Flags().StringVar(&provider, "provider", "",
-		"Provider preset: opencode-go, commandcode, opencode-zen, aws-bedrock, openrouter")
+		"Provider preset: "+strings.Join(providerNames(), ", "))
+	cmd.Flags().StringVarP(&initConfigPath, "config", "c", "", "Path to the config file to create")
 
 	return cmd
 }
@@ -503,14 +510,24 @@ func validateCmd() *cobra.Command {
 				_ = os.Setenv("ROUTATIC_PROXY_CONFIG", configPath)
 			}
 
+			if err := config.CheckUnknownFields(config.ResolveConfigPath()); err != nil {
+				return fmt.Errorf("invalid config: %w", err)
+			}
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("invalid config: %w", err)
 			}
 
-			// Ensure SQLite database exists.
-			if err := ensureDatabase(); err != nil {
-				return fmt.Errorf("failed to initialize database: %w", err)
+			// Report the database the proxy will actually use, and do not create
+			// one: validate used to initialise the default path instead, so it
+			// both had a side effect and checked a database nothing would serve
+			// from. A path that cannot be opened is worth knowing about here,
+			// which is why the directory is checked rather than written.
+			dbDir := filepath.Dir(storageConfig(cfg).DatabasePath)
+			if info, statErr := os.Stat(dbDir); statErr != nil {
+				fmt.Printf("  Warning: database directory %s does not exist yet\n", dbDir)
+			} else if !info.IsDir() {
+				return fmt.Errorf("storage.database_path directory %s is not a directory", dbDir)
 			}
 
 			fmt.Println("Configuration is valid!")
@@ -521,9 +538,11 @@ func validateCmd() *cobra.Command {
 			} else if len(keys) == 1 {
 				fmt.Println("  Global API key: configured")
 			}
-			for _, name := range []string{"opencode-go", "commandcode", "cline-pass", "opencode-zen", "aws-bedrock", "openrouter"} {
-				if keys := cfg.ProviderAPIKeys(name); len(keys) > 0 {
-					fmt.Printf("  %s: %d key(s) available\n", name, len(keys))
+			// From the registry: the hand-written list here had already fallen
+			// behind and stopped reporting WorkBuddy.
+			for _, descriptor := range site.All() {
+				if keys := cfg.ProviderAPIKeys(descriptor.ID); len(keys) > 0 {
+					fmt.Printf("  %s: %d key(s) available\n", descriptor.ID, len(keys))
 				}
 			}
 			fmt.Printf("  Models configured: %d\n", len(cfg.Models))
@@ -698,8 +717,9 @@ func runModelsList(cmd *cobra.Command, configPath, provider string) error {
 	cat, err := catalog.LoadFromSQLite(ctx, db)
 	if err != nil {
 		slog.Warn("catalog not available", "error", err)
-		cmd.Println("catalog not found; run 'routatic-proxy catalog sync' first")
-		return nil
+		// An error, not a message: `models` printing nothing and exiting 0 reads
+		// as "there are no models" to every script that pipes it.
+		return fmt.Errorf("catalog not found; run 'routatic-proxy catalog sync' first")
 	}
 
 	// When a specific provider is requested, use it directly. Otherwise

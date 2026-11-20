@@ -254,18 +254,3 @@ func IsNewerVersion(current, candidate string) bool {
 	// Fallback for dev versions or non-semver strings
 	return candidate != current && candidate > current
 }
-
-// CheckForUpdate checks if a newer version is available
-func CheckForUpdate(currentVersion string, channel string) (*GitHubRelease, error) {
-	release, err := GetLatestRelease(channel)
-	if err != nil {
-		return nil, err
-	}
-
-	// Compare versions using semantic versioning
-	if IsNewerVersion(currentVersion, release.TagName) {
-		return release, nil
-	}
-
-	return nil, nil // No update available
-}

@@ -282,16 +282,6 @@ const (
 	KeyStrategyFillFirst = "fill_first"
 )
 
-// keyStrategyOf resolves a configured strategy, defaulting to fill-first. An
-// empty value is the documented default rather than an error, so an existing
-// config keeps working unchanged.
-func keyStrategyOf(configured string) string {
-	if v := strings.TrimSpace(configured); v != "" {
-		return v
-	}
-	return KeyStrategyFillFirst
-}
-
 // AWSBedrockConfig holds the upstream AWS Bedrock Mantle API settings.
 type AWSBedrockConfig struct {
 	BaseURL          string   `json:"base_url"`

@@ -188,7 +188,7 @@
         <select class="filter-select" id="channel-filter" aria-label="Upstream channel" data-i18n-aria-label="filter.channel" hidden>
           <option value="" data-i18n-option="filter.allChannels">All channels</option>
         </select>
-        <select class="filter-select" id="status-filter" aria-label="Filter by status">
+        <select class="filter-select" id="status-filter" aria-label="Filter by status" data-i18n-aria-label="filter.status">
           <option value="" data-i18n-option="filter.allStatuses">All statuses</option>
           <option value="true" data-i18n-option="filter.success">Success only</option>
           <option value="false" data-i18n-option="filter.failed">Failed only</option>
@@ -198,9 +198,9 @@
       <details class="history-advanced-filters" id="history-advanced-filters">
         <summary><span data-i18n="history.advanced">Advanced filters</span><span id="history-advanced-count" class="filter-count" aria-live="polite"></span></summary>
         <div class="history-advanced-grid">
-        <label><span data-i18n="filter.model">Model</span><input type="text" id="model-filter" class="history-filter-input" placeholder="Model" data-i18n-placeholder="filter.model" aria-label="Filter by model"></label>
-        <label><span data-i18n="filter.scenario">Scenario</span><input type="text" id="scenario-filter" class="history-filter-input" placeholder="Scenario" data-i18n-placeholder="filter.scenario" aria-label="Filter by scenario"></label>
-        <div><label for="streaming-filter" data-i18n="detail.requestType">Request type</label><select class="filter-select" id="streaming-filter" aria-label="Filter by request type">
+        <label><span data-i18n="filter.model">Model</span><input type="text" id="model-filter" class="history-filter-input" placeholder="Model" data-i18n-placeholder="filter.model"></label>
+        <label><span data-i18n="filter.scenario">Scenario</span><input type="text" id="scenario-filter" class="history-filter-input" placeholder="Scenario" data-i18n-placeholder="filter.scenario"></label>
+        <div><label for="streaming-filter" data-i18n="detail.requestType">Request type</label><select class="filter-select" id="streaming-filter">
           <option value="" data-i18n-option="filter.allStreams">All request types</option>
           <option value="true" data-i18n-option="filter.streaming">Streaming only</option>
           <option value="false" data-i18n-option="filter.nonStreaming">Non-streaming only</option>
@@ -224,16 +224,16 @@
         <table class="history-table w-full text-xs border-collapse">
           <thead>
             <tr>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="start_time" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.time">Time</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="success" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.status">Status</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="model" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.modelPlatform">Model / Platform</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="reasoning_effort" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.effort">Effort</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="key_hint" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.keyHint">Key</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="total_tokens" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.tokens">Tokens</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="cost_usd" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.cost">Cost</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="first_byte_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.firstByte">TTFT</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="duration_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.duration">Duration</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
-              <th class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="generation_tokens_per_second" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.tokensPerSecond">Tok/s</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+              <th scope="col" class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="start_time" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.time">Time</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+              <th scope="col" class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="success" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.status">Status</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+              <th scope="col" class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="model" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.modelPlatform">Model / Platform</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+              <th scope="col" class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="reasoning_effort" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.effort">Effort</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+              <th scope="col" class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="key_hint" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.keyHint">Key</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+              <th scope="col" class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="total_tokens" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.tokens">Tokens</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+              <th scope="col" class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="cost_usd" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.cost">Cost</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+              <th scope="col" class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="first_byte_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.firstByte">TTFT</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+              <th scope="col" class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="duration_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.duration">Duration</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+              <th scope="col" class="sortable sticky top-0 z-10 text-left px-2.5 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="generation_tokens_per_second" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="th.tokensPerSecond">Tok/s</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
             </tr>
           </thead>
           <tbody id="history-tbody">
@@ -432,14 +432,14 @@
       <table class="perf-table w-full text-xs border-collapse">
         <thead>
           <tr>
-            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="model" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.model">Model</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
-            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="count" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.count">Count</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
-            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="success_rate" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.successRate">Attempt success %</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
-            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="avg_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.avg">Avg (ms)</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
-            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="p50_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.p50">P50</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
-            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="p90_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.p90">P90</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
-            <th class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="p99_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.p99">P99</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
-            <th class="sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" title="Health"><span data-i18n="perf.th.health">Health</span></th>
+            <th scope="col" class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="model" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.model">Model</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+            <th scope="col" class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="count" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.count">Count</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+            <th scope="col" class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="success_rate" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.successRate">Attempt success %</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+            <th scope="col" class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="avg_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.avg">Avg (ms)</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+            <th scope="col" class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="p50_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.p50">P50</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+            <th scope="col" class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="p90_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.p90">P90</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+            <th scope="col" class="sortable sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" data-sort="p99_ms" aria-sort="none"><button type="button" class="sort-button"><span data-i18n="perf.th.p99">P99</span><span class="sort-icon" aria-hidden="true">↕</span></button></th>
+            <th scope="col" class="sticky top-0 z-10 text-left px-3 py-2 bg-[#2c2c2e] border-b border-[#48484a] text-[#98989d] font-medium whitespace-nowrap" title="Health"><span data-i18n="perf.th.health">Health</span></th>
           </tr>
         </thead>
         <tbody id="perf-tbody">
@@ -487,7 +487,7 @@
           </button>
           <div class="model-picker-popover" id="fallback-add-popover" hidden>
             <div class="model-picker-search">
-              <input type="search" id="fallback-add-search" autocomplete="off" spellcheck="false"
+              <input type="search" id="fallback-add-search" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="fallback-add-list" aria-autocomplete="list"
                      placeholder="Search models or platforms…" aria-label="Search models"
                      oninput="FallbackModule.filterPicker(this.value)"
                      onkeydown="FallbackModule.onPickerKeydown(event)">
@@ -595,7 +595,7 @@
       <section class="analytics-section">
         <div class="section-heading"><span data-i18n="analytics.periodDetails">Period details</span><span class="section-meta" id="analytics-period-count"></span></div>
         <div class="analytics-table-scroll"><table class="analytics-table usage-detail-table"><thead><tr>
-          <th data-i18n="analytics.period">Period</th><th data-i18n="analytics.requests">Upstream attempts</th><th data-i18n="analytics.knownErrors">Known errors</th><th data-i18n="analytics.inputTokens">Input</th><th data-i18n="analytics.outputTokens">Output</th><th data-i18n="detail.cacheRead">Cache read</th><th data-i18n="detail.cacheCreation">Cache write</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="analytics.cost">Cost</th>
+          <th scope="col" data-i18n="analytics.period">Period</th><th scope="col" data-i18n="analytics.requests">Upstream attempts</th><th scope="col" data-i18n="analytics.knownErrors">Known errors</th><th scope="col" data-i18n="analytics.inputTokens">Input</th><th scope="col" data-i18n="analytics.outputTokens">Output</th><th scope="col" data-i18n="detail.cacheRead">Cache read</th><th scope="col" data-i18n="detail.cacheCreation">Cache write</th><th scope="col" data-i18n="analytics.totalTokens">Total Tokens</th><th scope="col" data-i18n="analytics.cost">Cost</th>
         </tr></thead><tbody id="analytics-period-tbody"></tbody></table></div>
       </section>
 
@@ -610,7 +610,7 @@
       <div class="analytics-comparison-grid">
         <section class="analytics-section">
           <div class="section-heading" data-i18n="analytics.modelDetails">Model details</div>
-          <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th data-i18n="filter.model">Model</th><th data-i18n="analytics.requests">Upstream attempts</th><th data-i18n="analytics.cacheHitShort">Cache hit</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="th.tokensPerSecond">Tok/s</th><th data-i18n="analytics.cost">Cost</th></tr></thead><tbody id="analytics-model-tbody"></tbody></table></div>
+          <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th scope="col" data-i18n="filter.model">Model</th><th scope="col" data-i18n="analytics.requests">Upstream attempts</th><th scope="col" data-i18n="analytics.cacheHitShort">Cache hit</th><th scope="col" data-i18n="analytics.totalTokens">Total Tokens</th><th scope="col" data-i18n="th.tokensPerSecond">Tok/s</th><th scope="col" data-i18n="analytics.cost">Cost</th></tr></thead><tbody id="analytics-model-tbody"></tbody></table></div>
           <p class="page-meta" data-i18n="analytics.timingNote">Tok/s uses the source stream from first output to successful terminal. Missing samples and intervals under 100 ms show —; average throughput is in the tooltip.</p>
         </section>
         <section class="analytics-section">
@@ -626,7 +626,7 @@
         </div>
         <p class="page-meta scope-note" data-i18n="analytics.priceTablesNote">Cost figures are computed from the rates each platform publishes. A platform below that has not refreshed is still priced from the build-time snapshot, which may be out of date.</p>
         <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr>
-          <th data-i18n="filter.provider">Platform</th><th data-i18n="analytics.priceRules">Rules</th><th data-i18n="analytics.priceSourceCol">Source</th><th data-i18n="analytics.priceUpdated">Updated</th>
+          <th scope="col" data-i18n="filter.provider">Platform</th><th scope="col" data-i18n="analytics.priceRules">Rules</th><th scope="col" data-i18n="analytics.priceSourceCol">Source</th><th scope="col" data-i18n="analytics.priceUpdated">Updated</th>
         </tr></thead><tbody id="price-tables-tbody"></tbody></table></div>
       </section>
       <span class="analytics-retained-range" id="analytics-retained-range"></span>
@@ -738,7 +738,7 @@
           <div class="metric-cell"><div class="metric-label" id="quota-local-cost-label" data-i18n="history.filteredCost">Recorded cost</div><div class="metric-value" id="quota-local-cost">--</div><div class="metric-note" id="quota-local-cost-note"></div></div>
           <div class="metric-cell"><div class="metric-label" data-i18n="quota.unknownCosts">Attempts with unknown cost</div><div class="metric-value" id="quota-local-unknown">--</div></div>
         </div>
-        <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th data-i18n="th.modelPlatform">Model / Platform</th><th data-i18n="analytics.requests">Upstream attempts</th><th data-i18n="analytics.cacheHitShort">Cache hit</th><th data-i18n="analytics.totalTokens">Total Tokens</th><th data-i18n="th.tokensPerSecond">Tok/s</th><th data-i18n="analytics.cost">Cost</th></tr></thead><tbody id="quota-local-model-tbody"></tbody></table></div>
+        <div class="analytics-table-scroll"><table class="analytics-table"><thead><tr><th scope="col" data-i18n="th.modelPlatform">Model / Platform</th><th scope="col" data-i18n="analytics.requests">Upstream attempts</th><th scope="col" data-i18n="analytics.cacheHitShort">Cache hit</th><th scope="col" data-i18n="analytics.totalTokens">Total Tokens</th><th scope="col" data-i18n="th.tokensPerSecond">Tok/s</th><th scope="col" data-i18n="analytics.cost">Cost</th></tr></thead><tbody id="quota-local-model-tbody"></tbody></table></div>
         <p class="page-meta" data-i18n="analytics.timingNote">Tok/s uses the source stream from first output to successful terminal. Missing samples and intervals under 100 ms show —; average throughput is in the tooltip.</p>
       </section>
     </div>

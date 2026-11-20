@@ -242,6 +242,13 @@ func (w *responseWriter) sourceTerminalObserved() bool {
 
 // finish checks the observed protocol terminal event before accounting. An
 // output adapter may still fail while serializing its own terminal response.
+// hasStopped reports whether the terminal event has already been forwarded.
+func (w *responseWriter) hasStopped() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.messageStopped
+}
+
 func (w *responseWriter) finish() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -1296,7 +1303,13 @@ func (h *MessagesHandler) handleStreaming(
 
 		// OpenRouter's former Chat Completions path accepted completed empty
 		// replies. Moving its transport must not add this provider heuristic.
-		if !native && !rw.isRefusal() && providerName != client.ProviderOpenRouter && isLowValueResponse(scenario, rw.getOutputTokens(), rw.hasContent()) {
+		//
+		// Only while the stream is still open. The check runs after ProxyStream
+		// has already written message_stop for a complete response, and an error
+		// frame after the terminal event is the one ordering this proxy refuses
+		// from its own upstreams: the client would have a finished answer and a
+		// failure for the same request.
+		if !native && !rw.isRefusal() && providerName != client.ProviderOpenRouter && !rw.hasStopped() && isLowValueResponse(scenario, rw.getOutputTokens(), rw.hasContent()) {
 			h.logger.Warn("upstream returned low-value response, triggering fallback",
 				"model", model.ModelID, "provider", model.Provider,
 				"scenario", scenario, "output_tokens", rw.getOutputTokens())

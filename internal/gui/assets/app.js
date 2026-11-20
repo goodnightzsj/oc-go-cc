@@ -1399,7 +1399,10 @@ function applyTranslations() {
   AnalyticsModule?.syncDateRange?.();
   // The test dialog's option text is built on open; re-render it so an open
   // dialog follows a language switch too.
-  if (typeof TestModule !== 'undefined') {
+  // Only re-render a list that has been populated: an untouched module would
+  // replace its placeholder with "no models available".
+  if (typeof TestModule !== 'undefined'
+      && (TestModule.catalogModels?.length || TestModule.catalogError)) {
     TestModule.renderPlatforms();
     TestModule.renderModels();
   }
@@ -3302,13 +3305,16 @@ async function refreshCatalog() {
 // /api/catalog/models, which answers from the proxy's own /v1/models listing:
 // that applies the active-site scope and each platform's live roster, so the
 // browser never advertises a model that would fail on use.
-// trapModalFocus keeps Tab inside a visible aria-modal dialog. Idempotent, so
-// every open path can call it without binding twice.
+// trapModalFocus keeps Tab inside a visible aria-modal dialog. The listener is
+// on document, not on the modal: when focus sits outside the dialog (a click on
+// the backdrop blurs to <body>), a modal-bound listener never sees the event
+// and Tab walks the page behind the overlay. Idempotent, so every open path can
+// call it without binding twice.
 function trapModalFocus(modal) {
   if (!modal || modal.dataset.focusTrap) return;
   modal.dataset.focusTrap = '1';
-  modal.addEventListener('keydown', e => {
-    if (e.key !== 'Tab') return;
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Tab' || !modal.classList.contains('visible')) return;
     const focusables = [...modal.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')]
       .filter(el => !el.disabled && el.offsetParent !== null);
     if (focusables.length === 0) return;
@@ -3632,7 +3638,10 @@ function markPollOk() {
   CONN.fails = 0;
   CONN.lastOk = Date.now();
   const el = document.getElementById('conn-stale');
-  if (el) el.hidden = true;
+  if (el) {
+    el.hidden = true;
+    el.title = '';
+  }
 }
 
 function markPollFail() {
@@ -3642,9 +3651,12 @@ function markPollFail() {
   if (!el) return;
   el.hidden = false;
   const secs = CONN.lastOk ? Math.round((Date.now() - CONN.lastOk) / 1000) : null;
-  el.textContent = secs != null
-    ? t('status.staleFor').replace('{secs}', secs)
-    : t('status.stale');
+  // The element is a live region; rewriting it every poll with a changing
+  // second count interrupts a screen reader every three seconds. Keep the
+  // announced text constant and put the elapsed detail in the tooltip.
+  const text = t('status.stale');
+  if (el.textContent !== text) el.textContent = text;
+  el.title = secs != null ? t('status.staleFor').replace('{secs}', secs) : '';
   // A stale panel must not keep claiming the proxy is up.
   const dot = document.getElementById('status-dot');
   if (dot) dot.className = 'status-dot stale';
@@ -5395,23 +5407,36 @@ function closeCommandPalette() {
   }
 }
 
+function visibleCommandItems() {
+  return [...document.querySelectorAll('.command-item')].filter(item => !item.classList.contains('hidden'));
+}
+
+// selectCommandItem marks one command as the keyboard target. Nothing is
+// selected on an unfiltered list: a bare Enter must not run the first command
+// (which is "Start Proxy").
+function selectCommandItem(item) {
+  document.querySelectorAll('.command-item').forEach(candidate => {
+    const on = candidate === item;
+    candidate.classList.toggle('selected', on);
+    candidate.setAttribute('aria-selected', String(on));
+  });
+  const commandInput = document.getElementById('command-input');
+  if (commandInput) commandInput.setAttribute('aria-activedescendant', item ? item.id : '');
+  item?.scrollIntoView?.({block: 'nearest'});
+}
+
 function updateCommandList(query) {
-  const items = document.querySelectorAll('.command-item');
-  const q = query.toLowerCase();
+  const q = String(query || '').toLowerCase();
   let firstVisible = null;
-  items.forEach(item => {
+  document.querySelectorAll('.command-item').forEach(item => {
     const label = item.querySelector('.command-item-label').textContent.toLowerCase();
     const isVisible = label.includes(q);
     item.classList.toggle('hidden', !isVisible);
     if (isVisible && !firstVisible) firstVisible = item;
   });
-  // Update aria-activedescendant to first visible item
-  const commandInput = document.getElementById('command-input');
-  if (firstVisible) {
-    commandInput?.setAttribute('aria-activedescendant', firstVisible.id);
-  } else {
-    commandInput?.setAttribute('aria-activedescendant', '');
-  }
+  // A filtered list selects its top match, so Enter runs what the reader can
+  // see. An empty query selects nothing.
+  selectCommandItem(q.trim() ? firstVisible : null);
 }
 
 commandInput?.addEventListener('input', function(e) {
@@ -5422,9 +5447,24 @@ commandInput?.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') {
     e.preventDefault();
     closeCommandPalette();
-  } else if (e.key === 'Enter') {
-    const selected = document.querySelector('.command-item.selected') || document.querySelector('.command-item:not(.hidden)');
-    if (selected) executeCommand(selected.dataset.action);
+    return;
+  }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    const items = visibleCommandItems();
+    if (items.length === 0) return;
+    e.preventDefault();
+    const current = items.findIndex(item => item.classList.contains('selected'));
+    const next = e.key === 'ArrowDown'
+      ? (current < 0 ? 0 : Math.min(items.length - 1, current + 1))
+      : (current < 0 ? items.length - 1 : Math.max(0, current - 1));
+    selectCommandItem(items[next]);
+    return;
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const selected = document.querySelector('.command-item.selected');
+    if (!selected) return; // no selection: do not run a command by accident
+    executeCommand(selected.dataset.action);
     closeCommandPalette();
   }
 });
@@ -5820,7 +5860,9 @@ const FallbackModule = {
     // already loaded, so a restored value may arrive later. It is consumed
     // rather than cleared so a second call still sees it, and
     // applyPendingPlatform re-runs the filter when that happens.
-    const previous = this.pendingPlatform ?? (sel.value || this.platformFilter || '');
+    // pendingPlatform is cleared to '' after use, so ?? would never fall
+    // through; || keeps the control's own selection on later calls.
+    const previous = this.pendingPlatform || sel.value || this.platformFilter || '';
     const mkOption = (label, value) => {
       const item = document.createElement('option');
       item.value = value;

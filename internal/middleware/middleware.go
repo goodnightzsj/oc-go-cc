@@ -154,7 +154,10 @@ func GetClientIP(r *http.Request, opts ClientIPOptions) string {
 	if len(entries) > 0 {
 		// Every hop is a trusted proxy. The leftmost entry is still whatever the
 		// client sent, so it cannot serve as an identity; the direct peer is the
-		// only one the code can vouch for.
+		// only one the code can vouch for. Callers inside the trusted ranges
+		// therefore share the peer's bucket - the conservative side of the
+		// trade, and the reason trusted_proxies should list only the proxies
+		// themselves, not the client network.
 		return remoteHost
 	}
 	return remoteHost

@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -45,45 +44,35 @@ func EnsureImported(ctx context.Context, db *storage.Database, jsonPath string) 
 		return err
 	}
 
-	// Hash the file itself, not the sync lock. The lock is written after the
-	// rename, so a crash between the two leaves new content under the old
-	// hash; a file replaced out of band is invisible either way. mtime alone
-	// can be older for newer content (an rsync -t restore, or a second config
-	// sharing this database), which would skip a real update forever.
-	sha, hashErr := hashFile(jsonPath)
-	if hashErr == nil {
+	// Read once, then hash and import the same bytes. Hashing the path and
+	// letting the importer re-read it left a window where a replacement file
+	// would be described by a hash it was never imported under.
+	data, readErr := os.ReadFile(jsonPath)
+	sha := ""
+	if readErr == nil {
+		sum := sha256.Sum256(data)
+		sha = hex.EncodeToString(sum[:])
 		if stored, err := repo.ImportedSHA(ctx); err == nil && stored == sha {
 			return nil
 		}
 	} else if !last.IsZero() && !info.ModTime().Truncate(time.Second).After(last) {
-		// Without a hash, fall back to the import timestamp at the stored
-		// precision, so sub-second mtime digits do not force a re-import.
+		// Without a readable file, fall back to the import timestamp at the
+		// stored precision, so sub-second mtime digits do not force a re-import.
 		return nil
 	}
 
-	if _, _, err := ImportFromJSON(ctx, db, jsonPath); err != nil {
+	if readErr != nil {
+		return readErr
+	}
+	if _, _, err := ImportFromData(ctx, db, data); err != nil {
 		return err
 	}
-	if hashErr == nil && sha != "" {
+	if sha != "" {
 		// A failed hash write only means the next start imports once more; it
 		// must not turn a successful import into an error.
 		_ = repo.SetImportedSHA(ctx, sha)
 	}
 	return nil
-}
-
-// hashFile returns the SHA-256 of a file's contents.
-func hashFile(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = f.Close() }()
-	sum := sha256.New()
-	if _, err := io.Copy(sum, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(sum.Sum(nil)), nil
 }
 
 // ImportFromJSON reads catalog.json and replaces the SQLite catalog with its
@@ -94,9 +83,20 @@ func hashFile(path string) (string, error) {
 // downloaded a fresh catalog and then silently kept serving the first snapshot
 // it ever saw — including to cost-based routing, which picks models by price.
 func ImportFromJSON(ctx context.Context, db *storage.Database, jsonPath string) (providerCount, modelCount int, err error) {
+	data, err := os.ReadFile(jsonPath)
+	if err != nil {
+		return 0, 0, fmt.Errorf("read catalog from JSON: %w", err)
+	}
+	return ImportFromData(ctx, db, data)
+}
+
+// ImportFromData imports catalog bytes the caller has already read. The same
+// bytes can then be hashed for identity, so the recorded hash always describes
+// what was actually imported.
+func ImportFromData(ctx context.Context, db *storage.Database, data []byte) (providerCount, modelCount int, err error) {
 	repo := storage.NewCatalogRepo(db)
 
-	idx, err := Load(jsonPath)
+	idx, err := LoadBytes(data)
 	if err != nil {
 		return 0, 0, fmt.Errorf("load catalog from JSON: %w", err)
 	}

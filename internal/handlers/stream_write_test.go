@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -132,10 +133,24 @@ func TestStreamWriteStalledClientCancelsAndFinishes(t *testing.T) {
 	}
 }
 
+type countingReadCloser struct {
+	r     io.Reader
+	reads int
+}
+
+func (c *countingReadCloser) Read(p []byte) (int, error) {
+	c.reads++
+	return c.r.Read(p)
+}
+
+func (c *countingReadCloser) Close() error { return nil }
+
 func TestStreamWriteDirectCopyAndNativeError(t *testing.T) {
 	out := &deadlineCheckWriter{ResponseRecorder: httptest.NewRecorder()}
-	body := &nativeTerminalBody{chunks: []string{nativeMessageTerminal}}
-	copyStreamingResponse(t.Context(), out, body)
+	body := io.NopCloser(strings.NewReader(nativeMessageTerminal))
+	if _, err := copyStreamingResponse(t.Context(), out, body, nil); err != nil {
+		t.Fatalf("direct copy returned %v", err)
+	}
 	if out.Body.String() != nativeMessageTerminal || out.flushes != 1 || !out.deadline.IsZero() {
 		t.Fatal("direct copy did not preserve bytes and deadline lifecycle")
 	}
@@ -151,10 +166,13 @@ func TestStreamWriteDirectCopyAndNativeError(t *testing.T) {
 	}
 	// The direct copy stops reading immediately on failed delivery.
 	out = &deadlineCheckWriter{ResponseRecorder: httptest.NewRecorder(), flushErr: io.ErrClosedPipe}
-	body = &nativeTerminalBody{chunks: []string{"first", "second"}}
-	copyStreamingResponse(t.Context(), out, body)
-	if body.reads != 1 {
-		t.Fatalf("read beyond downstream failure: %d", body.reads)
+	counting := &countingReadCloser{r: strings.NewReader("firstsecond")}
+	body = counting
+	if _, err := copyStreamingResponse(t.Context(), out, body, nil); !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("direct copy error = %v, want the write failure", err)
+	}
+	if counting.reads != 1 {
+		t.Fatalf("read beyond downstream failure: %d", counting.reads)
 	}
 }
 

@@ -29,7 +29,12 @@ func Load(path string) (*IndexedCatalog, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read catalog file: %w", err)
 	}
+	return LoadBytes(data)
+}
 
+// LoadBytes parses and indexes a catalog already in memory. Callers that must
+// hash the same bytes they import use this instead of re-reading the file.
+func LoadBytes(data []byte) (*IndexedCatalog, error) {
 	var catalog Catalog
 	if err := json.Unmarshal(data, &catalog); err != nil {
 		return nil, fmt.Errorf("parse catalog json: %w", err)

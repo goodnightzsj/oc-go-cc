@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -19,23 +20,36 @@ import (
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/history"
 	"github.com/routatic/proxy/internal/metrics"
+	"github.com/routatic/proxy/internal/transformer"
 )
 
 const (
 	availabilityBackoffStart = 30 * time.Second
 	availabilityBackoffMax   = 15 * time.Minute
 	maxAnthropicBodySize     = 100 << 20
+	// The direct path has no per-model settings, so these mirror the proxy's
+	// own defaults: a header stall fails in five minutes and a silent stream in
+	// 150 seconds instead of hanging until the caller leaves.
+	directResponseHeaderTimeout = 5 * time.Minute
+	directIdleTimeout           = 150 * time.Second
 )
+
+// errClientGone marks a caller that left mid-delivery. It is not an upstream
+// failure, but it is also not a success: the caller did not get a complete
+// answer.
+var errClientGone = errors.New("client disconnected")
 
 // AnthropicFirstHandler sends inference to Anthropic and uses the existing
 // OpenCode handler only while Anthropic is unavailable.
 //
 // The direct path is a passthrough: it forwards the caller's own Anthropic
-// credentials and bytes, so it does not run admission or the platform key
-// scheduler. It does record what it can observe - one history row with usage
-// explicitly unknown, and the in-process counters - so its traffic is visible
-// in the dashboard. The config loader refuses to combine it with active_site,
-// whose promise is that every request goes through the selected platform.
+// credentials and bytes, so it does not run admission, the 100/min rate
+// limiter, or the platform key scheduler, and it buffers at most the same
+// 100 MiB request body before forwarding. It does record what it can observe -
+// one history row with usage explicitly unknown, and the in-process counters -
+// so its traffic is visible in the dashboard. The config loader refuses to
+// combine it with active_site, whose promise is that every request goes
+// through the selected platform.
 type AnthropicFirstHandler struct {
 	atomic   *config.AtomicConfig
 	fallback http.Handler
@@ -153,7 +167,13 @@ func parseRetryAfter(value string, now time.Time) (time.Duration, bool) {
 		}
 		return d
 	}
-	if seconds, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && seconds >= 0 {
+	if seconds, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
+		// A zero or negative value means "retry now", which would turn the gate
+		// into a probe-per-request loop. Treat it as absent and let the caller
+		// apply its exponential backoff.
+		if seconds <= 0 {
+			return 0, false
+		}
 		if seconds > int(availabilityBackoffMax/time.Second) {
 			return availabilityBackoffMax, true
 		}
@@ -176,6 +196,7 @@ func NewAnthropicFirstHandler(atomic *config.AtomicConfig, fallback http.Handler
 		DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: time.Second,
+		ResponseHeaderTimeout: directResponseHeaderTimeout,
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   20,
 		IdleConnTimeout:       90 * time.Second,
@@ -222,18 +243,27 @@ func metricModelForDirect(model string) string {
 // carries no usage: the passthrough never parses the caller's body, so tokens
 // and cost stay unknown (details_known=0) rather than invented. Success requires
 // both a non-error status and a complete body copy.
-func (h *AnthropicFirstHandler) recordDirect(model string, streaming bool, start time.Time, status int, copyErr error) {
+func (h *AnthropicFirstHandler) recordDirect(model string, streaming bool, start time.Time, status int, wroteAny bool, copyErr error) {
 	success := status < 400 && copyErr == nil
+	clientGone := errors.Is(copyErr, errClientGone)
 	if h.metrics != nil {
 		metricModel := metricModelForDirect(model)
 		h.metrics.RecordRequest(streaming)
-		if success {
+		switch {
+		case success:
 			h.metrics.RecordSuccess(metricModel, time.Since(start))
-		} else {
+		case clientGone && !wroteAny && status < 400:
+			// The caller left before observing anything; no model was at fault.
+		default:
 			h.metrics.RecordFailureForModel(metricModel)
 		}
 	}
 	if h.storage == nil {
+		return
+	}
+	if clientGone && !wroteAny && status < 400 {
+		// Nothing was delivered, so there is no outcome to record - the same
+		// rule the platform path applies to a pre-payload cancellation.
 		return
 	}
 	rec := history.RequestRecord{
@@ -298,6 +328,14 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	streaming := meta.Stream != nil && *meta.Stream
 	start := time.Now()
 
+	// An idle/stall budget for the upstream exchange. The direct path has no
+	// per-model settings, so it uses the proxy's own streaming defaults.
+	attemptCtx, cancelAttempt := context.WithCancel(r.Context())
+	defer cancelAttempt()
+	idleCtx, cancelIdle := transformer.WithIdleCancellation(attemptCtx, cancelAttempt)
+	defer cancelIdle()
+	r = r.WithContext(idleCtx)
+
 	attempt, allowed := h.gate.allow(time.Now(), cfg.BaseURL)
 	if !allowed {
 		h.serveFallback(w, r, body, requestID)
@@ -338,10 +376,13 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return nil
 	}); err != nil {
 		h.logger.Debug("Anthropic response delivery failed", "error", err)
+		// The caller never saw a byte; still account for the failure.
+		h.recordDirect(meta.Model, streaming, start, resp.StatusCode, false, err)
 		return
 	}
-	copyErr := copyStreamingResponse(r.Context(), w, resp.Body)
-	h.recordDirect(meta.Model, streaming, start, resp.StatusCode, copyErr)
+	ping := transformer.StartIdleWatchdog(r.Context(), cancelIdle, directIdleTimeout)
+	wroteAny, copyErr := copyStreamingResponse(r.Context(), w, resp.Body, ping)
+	h.recordDirect(meta.Model, streaming, start, resp.StatusCode, wroteAny, copyErr)
 }
 
 func newAnthropicRequest(in *http.Request, baseURL string, body []byte) (*http.Request, error) {
@@ -405,21 +446,36 @@ var streamBufPool = sync.Pool{
 	},
 }
 
-// copyStreamingResponse forwards the upstream body and reports how it ended.
-// A clean EOF or a caller cancellation is nil; a truncated upstream or a write
+// streamEndError classifies why the copy stopped when the context is done.
+// An idle watchdog cancellation is an upstream stall; anything else is the
+// caller leaving.
+func streamEndError(ctx context.Context) error {
+	if errors.Is(context.Cause(ctx), transformer.ErrStreamIdle) {
+		return transformer.ErrStreamIdle
+	}
+	return errClientGone
+}
+
+// copyStreamingResponse forwards the upstream body and reports how it ended:
+// whether any byte reached the caller, and the terminating error. A clean EOF
+// is nil; a caller cancellation is errClientGone; an upstream stall or write
 // failure is returned so the accounting row does not claim success.
-func copyStreamingResponse(ctx context.Context, w http.ResponseWriter, body io.Reader) error {
+func copyStreamingResponse(ctx context.Context, w http.ResponseWriter, body io.Reader, ping func()) (bool, error) {
 	bufPtr := streamBufPool.Get().(*[]byte)
 	defer streamBufPool.Put(bufPtr)
 	buf := *bufPtr
+	wroteAny := false
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return wroteAny, streamEndError(ctx)
 		default:
 		}
 		n, err := body.Read(buf)
 		if n > 0 {
+			if ping != nil {
+				ping()
+			}
 			if writeErr := withStreamWriteDeadline(w, keepaliveWriteTimeout, func() error {
 				written, writeErr := w.Write(buf[:n])
 				if writeErr != nil {
@@ -431,16 +487,20 @@ func copyStreamingResponse(ctx context.Context, w http.ResponseWriter, body io.R
 				return http.NewResponseController(w).Flush()
 			}); writeErr != nil {
 				if ctx.Err() != nil {
-					return nil // the caller left; not an upstream failure
+					return wroteAny, streamEndError(ctx)
 				}
-				return writeErr
+				return wroteAny, writeErr
 			}
+			wroteAny = true
 		}
 		if err != nil {
-			if err == io.EOF || ctx.Err() != nil {
-				return nil
+			if errors.Is(err, io.EOF) {
+				return wroteAny, nil
 			}
-			return err
+			if ctx.Err() != nil {
+				return wroteAny, streamEndError(ctx)
+			}
+			return wroteAny, err
 		}
 	}
 }

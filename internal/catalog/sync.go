@@ -95,42 +95,8 @@ func Sync(ctx context.Context, sourceURL, destDir string) (*Lock, error) {
 	sum := sha256.Sum256(body)
 	hash := hex.EncodeToString(sum[:])
 
-	// A unique temp file per writer: the proxy's hourly refresh and a CLI sync
-	// (or two instances) would otherwise interleave writes on one path and
-	// could publish a truncated catalog.
-	tmpFile, err := os.CreateTemp(destDir, "catalog.json.tmp-*")
-	if err != nil {
-		return nil, fmt.Errorf("create catalog temp file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-	cleanup := func() { _ = os.Remove(tmpPath) }
-	if _, err := tmpFile.Write(body); err != nil {
-		_ = tmpFile.Close()
-		cleanup()
-		return nil, fmt.Errorf("write catalog temp file: %w", err)
-	}
-	if err := tmpFile.Chmod(0644); err != nil {
-		_ = tmpFile.Close()
-		cleanup()
-		return nil, fmt.Errorf("chmod catalog temp file: %w", err)
-	}
-	// Flush before rename: a power loss between the two could otherwise leave a
-	// zero-length catalog behind a fresh lock, which suppresses re-download for
-	// the whole TTL.
-	if err := tmpFile.Sync(); err != nil {
-		_ = tmpFile.Close()
-		cleanup()
-		return nil, fmt.Errorf("sync catalog temp file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("close catalog temp file: %w", err)
-	}
-
-	finalPath := filepath.Join(destDir, catalogFileName)
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("rename catalog file: %w", err)
+	if err := writeFileAtomic(filepath.Join(destDir, catalogFileName), body); err != nil {
+		return nil, fmt.Errorf("publish catalog file: %w", err)
 	}
 
 	lock := &Lock{

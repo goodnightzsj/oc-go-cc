@@ -202,10 +202,10 @@ func TestAvailabilityGateConcurrentProbe(t *testing.T) {
 	var gate availabilityGate
 	now := time.Now()
 	attempt, _ := gate.allow(now, "upstream")
-	gate.failed(now, attempt, "0")
+	gate.failed(now, attempt, "1")
 
-	// Retry-After: 0 means the probe window opens immediately.
-	probeTime := now.Add(50 * time.Millisecond)
+	// One second later the probe window is open.
+	probeTime := now.Add(1100 * time.Millisecond)
 
 	var allowed atomic.Int32
 	var wg sync.WaitGroup
@@ -372,5 +372,21 @@ func TestMetricModelForDirectIsBounded(t *testing.T) {
 		if got := metricModelForDirect(model); got != want {
 			t.Errorf("metricModelForDirect(%q) = %q, want %q", model, got, want)
 		}
+	}
+}
+
+func TestParseRetryAfterZeroFallsBack(t *testing.T) {
+	if _, ok := parseRetryAfter("0", time.Now()); ok {
+		t.Fatal("Retry-After: 0 must not disable the backoff")
+	}
+	if _, ok := parseRetryAfter("-5", time.Now()); ok {
+		t.Fatal("a negative Retry-After must not disable the backoff")
+	}
+	d, ok := parseRetryAfter("60", time.Now())
+	if !ok || d != time.Minute {
+		t.Fatalf("parseRetryAfter(60) = %v, %v, want 1m", d, ok)
+	}
+	if d, ok := parseRetryAfter("999999", time.Now()); !ok || d != availabilityBackoffMax {
+		t.Fatalf("parseRetryAfter(huge) = %v, %v, want the cap", d, ok)
 	}
 }

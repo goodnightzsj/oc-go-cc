@@ -44,36 +44,9 @@ func WriteLock(destDir string, lock *Lock) error {
 	}
 	data = append(data, '\n')
 
-	// Unique temp file per writer; see the catalog write for why.
-	tmpFile, err := os.CreateTemp(destDir, "catalog.lock.json.tmp-*")
-	if err != nil {
-		return fmt.Errorf("create lock temp file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-	cleanup := func() { _ = os.Remove(tmpPath) }
-	if _, err := tmpFile.Write(data); err != nil {
-		_ = tmpFile.Close()
-		cleanup()
-		return fmt.Errorf("write lock temp file: %w", err)
-	}
-	if err := tmpFile.Chmod(0644); err != nil {
-		_ = tmpFile.Close()
-		cleanup()
-		return fmt.Errorf("chmod lock temp file: %w", err)
-	}
-	if err := tmpFile.Sync(); err != nil {
-		_ = tmpFile.Close()
-		cleanup()
-		return fmt.Errorf("sync lock temp file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		cleanup()
-		return fmt.Errorf("close lock temp file: %w", err)
-	}
 	finalPath := filepath.Join(destDir, lockFileName)
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		cleanup()
-		return fmt.Errorf("rename lock file: %w", err)
+	if err := writeFileAtomic(finalPath, data); err != nil {
+		return fmt.Errorf("publish lock file: %w", err)
 	}
 	return nil
 }

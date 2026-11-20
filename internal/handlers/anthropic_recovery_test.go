@@ -19,7 +19,6 @@ func TestRound2AnthropicProbeCancellationAllowsNewProbe(t *testing.T) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		switch upstreamCalls.Add(1) {
 		case 1:
-			w.Header().Set("Retry-After", "0")
 			w.WriteHeader(http.StatusServiceUnavailable)
 		case 2:
 			close(probeStarted)
@@ -41,6 +40,11 @@ func TestRound2AnthropicProbeCancellationAllowsNewProbe(t *testing.T) {
 		return httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}")).WithContext(ctx)
 	}
 	h.ServeHTTP(httptest.NewRecorder(), request(context.Background()))
+	// Open the retry window without waiting out the exponential backoff; this
+	// test is about probe ownership, not the retry schedule.
+	h.gate.mu.Lock()
+	h.gate.nextProbe = time.Now().Add(-time.Second)
+	h.gate.mu.Unlock()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan struct{})
@@ -68,22 +72,23 @@ func TestRound2AnthropicProbeCancellationAllowsNewProbe(t *testing.T) {
 func TestAvailabilityGateOldProbeCannotFinishNewGeneration(t *testing.T) {
 	var gate availabilityGate
 	now := time.Now()
+	afterRetry := now.Add(1100 * time.Millisecond)
 	initial, _ := gate.allow(now, "a")
-	gate.failed(now, initial, "0")
-	old, _ := gate.allow(now, "a")
+	gate.failed(now, initial, "1")
+	old, _ := gate.allow(afterRetry, "a")
 	gate.reset("b")
 	gate.reset("a")
-	initial, _ = gate.allow(now, "a")
-	gate.failed(now, initial, "0")
-	current, _ := gate.allow(now, "a")
+	initial, _ = gate.allow(afterRetry, "a")
+	gate.failed(afterRetry, initial, "1")
+	current, _ := gate.allow(afterRetry.Add(1100*time.Millisecond), "a")
 	gate.abandon(old)
 	gate.available(old)
-	gate.failed(now, old, "120")
-	if _, allowed := gate.allow(now, "a"); allowed {
+	gate.failed(afterRetry.Add(1100*time.Millisecond), old, "120")
+	if _, allowed := gate.allow(afterRetry.Add(1100*time.Millisecond), "a"); allowed {
 		t.Fatal("old probe released current probe")
 	}
 	gate.abandon(current)
-	if next, allowed := gate.allow(now, "a"); !allowed || !next.probe {
+	if next, allowed := gate.allow(afterRetry.Add(1100*time.Millisecond), "a"); !allowed || !next.probe {
 		t.Fatal("current probe did not release neutrally")
 	}
 }

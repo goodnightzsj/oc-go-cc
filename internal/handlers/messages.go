@@ -1431,9 +1431,12 @@ func (h *MessagesHandler) handleNonStreaming(
 		}
 		// With every candidate skipped before execution there is no model to
 		// blame; an empty key would add a phantom row to the per-model
-		// distribution.
+		// distribution. The request still failed, so the global counter moves -
+		// matching what the streaming exhaustion path does.
 		if result.Attempted > 0 {
 			h.metrics.RecordFailureForModel(result.ModelID)
+		} else {
+			h.metrics.RecordFailure()
 		}
 		h.sendError(w, http.StatusBadGateway, "all models failed", err)
 		return

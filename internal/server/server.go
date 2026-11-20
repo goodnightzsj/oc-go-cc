@@ -56,6 +56,14 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 	}))
 	slog.SetDefault(logger)
 
+	// Trusting every direct peer is only safe when the listener is reachable
+	// solely through a reverse proxy. Say so once, at startup, instead of
+	// letting a spoofable X-Forwarded-For silently decide rate-limit buckets.
+	if cfg.TrustForwardedFor && len(cfg.TrustedProxies) == 0 {
+		logger.Warn("trust_forwarded_for is on with no trusted_proxies: any direct peer may set X-Forwarded-For",
+			"hint", "list the reverse proxy addresses (for example 127.0.0.1/32)")
+	}
+
 	// Initialize components.
 	tokenCounter, err := token.NewCounter()
 	if err != nil {

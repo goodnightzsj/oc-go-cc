@@ -607,10 +607,7 @@ func IsNonRetryableRequestError(err error) bool {
 	}
 	// An unclassified local body parse failure still rejects the request.
 	var syntaxErr *json.SyntaxError
-	if errors.As(err, &syntaxErr) {
-		return true
-	}
-	return false
+	return errors.As(err, &syntaxErr)
 }
 
 // IsUsageLimitError returns true if the error is a GoUsageLimitError.

@@ -98,6 +98,6 @@ func checkConcurrentOpenOfAnOldDatabase(t *testing.T, wal bool) {
 		}
 	}
 	if dup := len(cols); dup == 0 {
-		t.Fatal(fmt.Sprintf("no columns read: %v", cols))
+		t.Fatalf("no columns read: %v", cols)
 	}
 }

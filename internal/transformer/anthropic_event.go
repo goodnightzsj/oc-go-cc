@@ -28,7 +28,7 @@ type AnthropicStreamEvent struct {
 
 func (e AnthropicStreamEvent) ValidateAfterStop(stopped bool) error {
 	if stopped && (e.Type == "message_start" || e.Type == "content_block_start" || e.Type == "content_block_delta" || e.Type == "content_block_stop") {
-		return fmt.Errorf("Anthropic content arrived after message_stop")
+		return fmt.Errorf("Anthropic content arrived after message stop")
 	}
 	return nil
 }

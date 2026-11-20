@@ -19,7 +19,7 @@ func geminiControls(req *types.MessageRequest, model config.ModelConfig, out *ty
 		gc.MaxOutputTokens = model.MaxTokens
 	}
 	if len(req.StopSequences) > 5 {
-		return fmt.Errorf("Gemini accepts at most 5 stop_sequences")
+		return fmt.Errorf("Gemini accepts at most 5 stop sequences")
 	}
 	if len(req.OutputConfig) > 0 {
 		var output struct {

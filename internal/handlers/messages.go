@@ -299,7 +299,7 @@ func (w *responseWriter) finish() error {
 			return err
 		}
 		if !w.nativeResponses.Done() {
-			return fmt.Errorf("Responses stream ended without a terminal event: %w", io.ErrUnexpectedEOF)
+			return fmt.Errorf("responses stream ended without a terminal event: %w", io.ErrUnexpectedEOF)
 		}
 	} else if !w.messageStopped || w.sseDecoder.Finish() != nil {
 		return fmt.Errorf("upstream stream ended before a complete message_stop: %w", io.ErrUnexpectedEOF)

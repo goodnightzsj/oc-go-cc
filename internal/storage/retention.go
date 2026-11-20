@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"time"
 )
@@ -16,6 +17,8 @@ type Retention struct {
 	// and the cutoff is derived from the clock: a forward step would delete more
 	// than the window without leaving any trace of why.
 	lastRun time.Time
+	// now is the clock, replaceable so a test can move it without waiting.
+	now func() time.Time
 }
 
 func NewRetention(db *Database, days int) *Retention {
@@ -38,6 +41,19 @@ func (r *Retention) Start() {
 func (r *Retention) Stop() {
 	close(r.stopCh)
 	<-r.doneCh
+}
+
+// newestRequest returns the latest created_at this table holds. Retention only
+// serves to drop old rows, so a table with nothing in it has nothing to bound.
+func (r *Retention) newestRequest() (time.Time, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var newest sql.NullString
+	if err := r.db.DB().QueryRowContext(ctx, `SELECT MAX(created_at) FROM requests`).Scan(&newest); err != nil || !newest.Valid {
+		return time.Time{}, false
+	}
+	t, err := time.Parse("2006-01-02 15:04:05", newest.String)
+	return t, err == nil
 }
 
 func (r *Retention) run() {
@@ -70,7 +86,11 @@ func (r *Retention) runOnce() {
 	// UTC() strips the monotonic reading, and that is the point: the guard below
 	// exists to notice a wall-clock step, and Sub on two monotonic values walks
 	// the monotonic clock, where a step never shows up.
-	now := time.Now().UTC()
+	clock := r.now
+	if clock == nil {
+		clock = time.Now
+	}
+	now := clock().UTC()
 	if !r.lastRun.IsZero() {
 		gap := now.Sub(r.lastRun)
 		if gap < 0 || gap > 24*time.Hour {
@@ -83,6 +103,19 @@ func (r *Retention) runOnce() {
 	r.lastRun = now
 
 	before := now.AddDate(0, 0, -r.days)
+
+	// The in-memory guard above only sees steps that happen while this process
+	// runs. A clock that jumps forward while it is stopped - a VM resumed from a
+	// snapshot, an RTC reset - arrives here as a perfectly ordinary first run,
+	// and the cutoff would sit in the future of every row. Bound it against the
+	// newest row this database holds: more than the window ahead of the newest
+	// write is a clock that cannot be trusted, not a table that is too old.
+	if newest, ok := r.newestRequest(); ok && before.After(newest.AddDate(0, 0, r.days)) {
+		slog.Warn("skipping retention cleanup: the clock is ahead of the newest record",
+			"cutoff", before.String(), "newest", newest.String(), "retention_days", r.days)
+		r.lastRun = now
+		return
+	}
 
 	stats := struct {
 		requestsDeleted int64

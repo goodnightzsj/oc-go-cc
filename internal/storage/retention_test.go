@@ -102,6 +102,33 @@ func TestOpenNormalizesLegacyRequestTimestamps(t *testing.T) {
 	}
 }
 
+// A clock that jumped forward while the process was stopped arrives as an
+// ordinary first run. Without a durable bound the first pass would delete the
+// whole table.
+func TestRetentionRefusesAClockAheadOfTheNewestRow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "retention.db")
+	db, err := Open(DefaultConfig.WithOverlay(Overlay{DatabasePath: path}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recent := time.Now().AddDate(0, 0, -1).UTC().Format("2006-01-02 15:04:05")
+	if _, err := db.DB().Exec(`INSERT INTO requests (id, model, start_time, created_at) VALUES ('r','m',?,?)`, recent, recent); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRetention(db, 7)
+	// Pretend the clock is a year ahead: the cutoff then sits far beyond the
+	// newest row, which is a clock fault, not an old table.
+	r.now = func() time.Time { return time.Now().AddDate(1, 0, 0) }
+	r.runOnce()
+	var count int
+	if err := db.DB().QueryRow(`SELECT COUNT(*) FROM requests`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("rows deleted under an implausible clock: %d left", count)
+	}
+}
+
 // The jump guard has to see wall-clock steps. Comparing two monotonic readings
 // makes Sub walk the monotonic clock, where a step does not exist.
 func TestRetentionJumpGuardUsesWallClock(t *testing.T) {

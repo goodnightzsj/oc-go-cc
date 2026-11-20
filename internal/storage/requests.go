@@ -31,6 +31,11 @@ func NewRequests(db *Database) *Requests {
 	return &Requests{db: db}
 }
 
+// storageWriteBudget bounds one write. It exceeds the 30s an aggregate may hold
+// the only connection for; past that the write is genuinely stuck rather than
+// waiting in line.
+const storageWriteBudget = 45 * time.Second
+
 // Insert stores a request record, replacing any existing record with the same ID.
 func (r *Requests) Insert(rec history.RequestRecord) error {
 	var generationStart, generationDuration, generationOutput *int64
@@ -40,7 +45,10 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 		}
 		generationStart, generationDuration, generationOutput = &s.FirstOutputMs, &s.DurationMs, &s.OutputTokens
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// The insert shares the one connection with every aggregate. A cold
+	// grouped scan is allowed 30s, so a 5s insert budget meant a request could
+	// lose its history row to an Analytics read that had nothing to do with it.
+	ctx, cancel := context.WithTimeout(context.Background(), storageWriteBudget)
 	defer cancel()
 
 	attempt := rec.Attempt

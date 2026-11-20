@@ -231,10 +231,16 @@ Press Ctrl+C to stop the server.`,
 			}
 			var guiSrv *gui.Server
 			defer func() {
-				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownDrainBudget)
 				defer cancel()
-				shutdownErr = shutdownServers(shutdownCtx, srv, guiSrv)
-				runErr = errors.Join(runErr, shutdownErr)
+				drained, released := shutdownServers(shutdownCtx, srv, guiSrv)
+				// A signal-initiated drain that ran out is not a failed process: the
+				// service was asked to stop and it stopped. Only a release failure is
+				// an error, because that is the one thing the next start cannot undo.
+				if drained != nil {
+					slog.Warn("shutdown drain did not complete", "error", drained)
+				}
+				runErr = errors.Join(runErr, released)
 			}()
 
 			// Start config watcher for hot reload.

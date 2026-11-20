@@ -592,11 +592,17 @@ func ChatUsageToAnthropic(usage *types.UsageInfo) *types.Usage {
 	}
 }
 
-// usageMeasured reports whether the object carried any recognised figure.
+// usageMeasured reports whether the object carried a figure that maps onto a
+// priced category. TotalTokens is deliberately not counted: ChatUsageToAnthropic
+// has no way to split a total into input and output, so a total-only object
+// would be recorded as measured with both counts at zero - a free request in
+// every total. The detail blocks count only when they carry a figure, for the
+// same reason.
 func usageMeasured(u *types.UsageInfo) bool {
-	return u.PromptTokens != 0 || u.CompletionTokens != 0 || u.TotalTokens != 0 ||
+	return u.PromptTokens != 0 || u.CompletionTokens != 0 ||
 		u.PromptCacheHitTokens != 0 || u.PromptCacheMissTokens != 0 || u.CompletionThinkingTokens != 0 ||
-		u.PromptTokensDetails != nil || u.CompletionTokensDetails != nil
+		(u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens > 0) ||
+		(u.CompletionTokensDetails != nil && u.CompletionTokensDetails.ReasoningTokens > 0)
 }
 
 // reasoningTokensOf reads the thinking split of the completion, under either

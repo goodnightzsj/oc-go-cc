@@ -18,7 +18,10 @@ func TestUnrecognisedUsageIsNotAMeasuredZero(t *testing.T) {
 	}{
 		{"empty-object", `,"usage":{}`, false},
 		{"zeroes", `,"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}`, false},
-		{"total-only", `,"usage":{"total_tokens":42}`, true},
+		// A total cannot be split into input and output, so recording it would
+		// claim a measured request whose cost is zero.
+		{"total-only", `,"usage":{"total_tokens":42}`, false},
+		{"details-empty", `,"usage":{"prompt_tokens_details":{}}`, false},
 		{"counts", `,"usage":{"prompt_tokens":11,"completion_tokens":7}`, true},
 		{"cache-only", `,"usage":{"prompt_cache_hit_tokens":9}`, true},
 		{"absent", ``, false},

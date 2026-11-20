@@ -27,8 +27,11 @@ check-css: build-css
 dmg: build-ui
 	@./scripts/build_dmg.sh "$(VERSION)"
 
+# `start` is the subcommand that runs the proxy and the dashboard; without it
+# this printed cobra's help and exited 0, which reads as "it is running".
+# CGO is off because the darwin tray needs the main thread (see start_gui_darwin.go).
 run:
-	go run -ldflags "$(LDFLAGS)" $(CMD)
+	CGO_ENABLED=0 go run -ldflags "$(LDFLAGS)" $(CMD) start
 
 test:
 	go test ./... -v -race

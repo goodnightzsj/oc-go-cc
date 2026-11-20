@@ -25,6 +25,12 @@ func openGUI(guiURL string) (<-chan struct{}, error) {
 
 	done := make(chan struct{})
 
+	// Known defect: systray drives AppKit, which requires the main thread, and
+	// running it here traps inside the cgo call on macOS - the panel comes up
+	// and the process dies a moment later. Fixing it means moving the start-up
+	// wait into tray callbacks, which needs a macOS GUI test this round could
+	// not run. `make run` and `make build` build with CGO_ENABLED=0 (no tray);
+	// only the packaged CGO build takes this path.
 	go func() {
 		tray.Run(tray.Callbacks{
 			InitiallyRunning:   true,

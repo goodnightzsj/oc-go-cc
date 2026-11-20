@@ -28,9 +28,16 @@ func TestMigrateColumnsIsANoOpOnACurrentSchema(t *testing.T) {
 func TestMigrateColumnsAddsMissingColumnsAndLeavesOldRowsNull(t *testing.T) {
 	db := newCostTestDB(t)
 	added := []string{"first_byte_ms", "reasoning_effort", "upstream_model", "upstream_channel", "response_model", "candidate_position"}
+	// The partial index this package creates references the column, and SQLite
+	// refuses to drop a column an index uses. Dropping the index first is what
+	// the migration path would do on a real old database - without it the test
+	// skipped on every platform and the migration had no coverage.
+	if _, err := db.DB().Exec(`DROP INDEX IF EXISTS idx_requests_upstream_channel`); err != nil {
+		t.Fatalf("drop index before simulating an old database: %v", err)
+	}
 	for _, column := range added {
 		if _, err := db.DB().Exec(`ALTER TABLE requests DROP COLUMN ` + column); err != nil {
-			t.Skipf("this SQLite cannot drop columns (%v)", err)
+			t.Fatalf("drop column %s: %v", column, err)
 		}
 	}
 	if _, err := db.DB().Exec(

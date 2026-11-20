@@ -217,7 +217,7 @@ func LoadJSON(data []byte) (*Config, error) {
 // ResolveConfigPath determines which config file to load.
 func ResolveConfigPath() string {
 	if path := envValue("ROUTATIC_PROXY_CONFIG"); path != "" {
-		return path
+		return ExpandHome(path)
 	}
 	path := ExpandHome(defaultConfigPath)
 	if _, err := os.Stat(path); err == nil {
@@ -389,6 +389,20 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Catalog.SourceURL == "" {
 		cfg.Catalog.SourceURL = defaultCatalogSourceURL
+	}
+	// Capture is off unless enabled, but `{"enabled": true}` on its own used to
+	// mean "rotate on every entry and never delete", and left prompts and
+	// responses unredacted. The example config's values are the defaults now.
+	if capture := cfg.Logging.DebugCapture; capture != nil {
+		if capture.MaxFiles <= 0 {
+			capture.MaxFiles = 100
+		}
+		if capture.MaxFileSize <= 0 {
+			capture.MaxFileSize = 100 << 20
+		}
+		if !capture.RedactAPIKeys {
+			capture.RedactAPIKeys = true
+		}
 	}
 }
 
@@ -826,6 +840,9 @@ func validateModelConfig(label string, mc ModelConfig) error {
 	case "", "auto", "openai", "anthropic", "responses", "gemini":
 	default:
 		return invalid(label+".wire_format", "wire_format", "%s has invalid wire_format %q", label, mc.WireFormat)
+	}
+	if mc.WireFormat == "gemini" && NormalizeProvider(mc.Provider) != "opencode-zen" {
+		return invalid(label+".wire_format", "gemini_unsupported", "%s: only opencode-zen implements the gemini upstream wire format", label)
 	}
 	if NormalizeProvider(mc.Provider) == "commandcode" && mc.WireFormat != "" && mc.WireFormat != "auto" && mc.WireFormat != "openai" && mc.WireFormat != "anthropic" && mc.WireFormat != "responses" {
 		return invalid(label+".wire_format", "commandcode_wire_format", "%s: commandcode supports only openai, anthropic or responses upstream wire formats", label)

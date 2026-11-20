@@ -270,6 +270,13 @@ func (s *selection) settle(verdict verdict, err error) {
 			st.consecutive = 0
 			st.blockedUntil = time.Time{}
 		}
+	case verdictIrrelevant:
+		// The key answered, but the request was wrong. That proves the
+		// connection works, so the transient streak resets; it says nothing
+		// about the credential, so an auth quarantine must survive it.
+		if s.revision == st.revision {
+			st.consecutive = 0
+		}
 	case verdictAuth:
 		// Rejected credential or exhausted budget: no number of retries fixes
 		// it, so set it aside now rather than after the transient threshold.
@@ -341,12 +348,15 @@ const (
 	verdictTransient
 	// verdictNeutral releases a reservation without changing another request's verdict.
 	verdictNeutral
+	// verdictIrrelevant is a 4xx the key is not responsible for (400, 404, 422).
+	verdictIrrelevant
 )
 
 // classify maps an error to what it says about the key.
 //
-// Anything that is not a status the key is responsible for returns
-// verdictHealthy. Cancellation returns verdictNeutral; neither cools the key.
+// A 4xx outside auth/rate/transient is verdictIrrelevant: the key is fine, but
+// that is not a success and must not lift a quarantine. Cancellation returns
+// verdictNeutral. Neither cools the key.
 func classify(err error) verdict {
 	if err == nil {
 		return verdictHealthy
@@ -371,8 +381,9 @@ func classify(err error) verdict {
 	case status == http.StatusRequestTimeout, status >= 500:
 		return verdictTransient
 	default:
-		// Other 4xx: the request was wrong, the key was not.
-		return verdictHealthy
+		// Other 4xx: the request was wrong, the key was not. This is not a
+		// success, so it must not clear a quarantine.
+		return verdictIrrelevant
 	}
 }
 

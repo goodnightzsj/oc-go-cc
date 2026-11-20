@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/routatic/proxy/internal/config"
@@ -32,6 +33,8 @@ const (
 	// 150 seconds instead of hanging until the caller leaves.
 	directResponseHeaderTimeout = 5 * time.Minute
 	directIdleTimeout           = 150 * time.Second
+	directTotalTimeout          = 10 * time.Minute
+	maxDirectResponseBytes      = 256 << 20
 )
 
 // errClientGone marks a caller that left mid-delivery. It is not an upstream
@@ -184,7 +187,10 @@ func parseRetryAfter(value string, now time.Time) (time.Duration, bool) {
 		return 0, false
 	}
 	if when.Before(now) {
-		return 0, true
+		// A date in the past means "retry now", the same trap as a zero
+		// delta-seconds value: reopening the probe window immediately would
+		// send every request to a dead upstream.
+		return 0, false
 	}
 	return capDelay(when.Sub(now)), true
 }
@@ -252,8 +258,9 @@ func (h *AnthropicFirstHandler) recordDirect(model string, streaming bool, start
 		switch {
 		case success:
 			h.metrics.RecordSuccess(metricModel, time.Since(start))
-		case clientGone && !wroteAny && status < 400:
-			// The caller left before observing anything; no model was at fault.
+		case clientGone:
+			// The caller left; no model was at fault. The history row still
+			// records the incomplete delivery when bytes were written.
 		default:
 			h.metrics.RecordFailureForModel(metricModel)
 		}
@@ -266,6 +273,9 @@ func (h *AnthropicFirstHandler) recordDirect(model string, streaming bool, start
 		// rule the platform path applies to a pre-payload cancellation.
 		return
 	}
+	// The model id is client-supplied; the column should not hold a 100 MiB
+	// string just because the body was allowed to be that large.
+	model = truncateModelID(model)
 	rec := history.RequestRecord{
 		// One row per execution, never the caller's correlation id: the table
 		// is INSERT OR REPLACE on this key, so a reused X-Request-ID would
@@ -328,9 +338,12 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	streaming := meta.Stream != nil && *meta.Stream
 	start := time.Now()
 
-	// An idle/stall budget for the upstream exchange. The direct path has no
-	// per-model settings, so it uses the proxy's own streaming defaults.
-	attemptCtx, cancelAttempt := context.WithCancel(r.Context())
+	// An idle/stall budget for the upstream exchange plus a total cap. The
+	// direct path has no per-model settings, so it uses the proxy's own
+	// streaming defaults. The total cap matters because the idle timer resets
+	// on every byte: a slow-drip upstream could otherwise hold the connection
+	// forever.
+	attemptCtx, cancelAttempt := context.WithTimeout(r.Context(), directTotalTimeout)
 	defer cancelAttempt()
 	idleCtx, cancelIdle := transformer.WithIdleCancellation(attemptCtx, cancelAttempt)
 	defer cancelIdle()
@@ -370,6 +383,36 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 
 	h.gate.available(attempt)
 	h.logger.Debug("Anthropic request succeeded", "status", resp.StatusCode)
+	ping := transformer.StartIdleWatchdog(r.Context(), cancelIdle, directIdleTimeout)
+
+	if !streaming {
+		// Buffer before committing the status. A committed 200 with a half body
+		// cannot be retried or fallen back, so a read failure must happen while
+		// the response is still uncommitted.
+		payload, readErr := readAllWithIdle(r.Context(), resp.Body, ping, maxDirectResponseBytes)
+		if readErr != nil {
+			if errors.Is(readErr, errClientGone) {
+				h.recordDirect(meta.Model, false, start, resp.StatusCode, false, readErr)
+				return
+			}
+			delay := h.gate.failed(time.Now(), attempt, "")
+			h.logger.Warn("Anthropic response failed before delivery, using OpenCode", "error", readErr, "retry_in", delay)
+			h.serveFallback(w, r, body, requestID)
+			return
+		}
+		copyHeader(w.Header(), resp.Header)
+		writeErr := withStreamWriteDeadline(w, keepaliveWriteTimeout, func() error {
+			w.WriteHeader(resp.StatusCode)
+			written, err := w.Write(payload)
+			if err == nil && written != len(payload) {
+				return io.ErrShortWrite
+			}
+			return err
+		})
+		h.recordDirect(meta.Model, false, start, resp.StatusCode, true, writeErr)
+		return
+	}
+
 	copyHeader(w.Header(), resp.Header)
 	if err := withStreamWriteDeadline(w, keepaliveWriteTimeout, func() error {
 		w.WriteHeader(resp.StatusCode)
@@ -380,9 +423,55 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		h.recordDirect(meta.Model, streaming, start, resp.StatusCode, false, err)
 		return
 	}
-	ping := transformer.StartIdleWatchdog(r.Context(), cancelIdle, directIdleTimeout)
 	wroteAny, copyErr := copyStreamingResponse(r.Context(), w, resp.Body, ping)
 	h.recordDirect(meta.Model, streaming, start, resp.StatusCode, wroteAny, copyErr)
+}
+
+// readAllWithIdle buffers a non-streaming body under the same idle and total
+// budgets as the streaming copy.
+func readAllWithIdle(ctx context.Context, body io.Reader, ping func(), limit int64) ([]byte, error) {
+	var out bytes.Buffer
+	buf := make([]byte, 32<<10)
+	var total int64
+	for {
+		if ctx.Err() != nil {
+			return nil, streamEndError(ctx)
+		}
+		n, err := body.Read(buf)
+		if n > 0 {
+			if ping != nil {
+				ping()
+			}
+			total += int64(n)
+			if total > limit {
+				return nil, fmt.Errorf("direct response exceeds %d bytes", limit)
+			}
+			out.Write(buf[:n])
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return out.Bytes(), nil
+			}
+			if ctx.Err() != nil {
+				return nil, streamEndError(ctx)
+			}
+			return nil, err
+		}
+	}
+}
+
+// truncateModelID bounds a client-supplied model id before it reaches a column
+// or a log line, cutting on a rune boundary.
+func truncateModelID(model string) string {
+	const max = 256
+	if len(model) <= max {
+		return model
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(model[cut]) {
+		cut--
+	}
+	return model[:cut]
 }
 
 func newAnthropicRequest(in *http.Request, baseURL string, body []byte) (*http.Request, error) {
@@ -450,8 +539,12 @@ var streamBufPool = sync.Pool{
 // An idle watchdog cancellation is an upstream stall; anything else is the
 // caller leaving.
 func streamEndError(ctx context.Context) error {
-	if errors.Is(context.Cause(ctx), transformer.ErrStreamIdle) {
+	cause := context.Cause(ctx)
+	if errors.Is(cause, transformer.ErrStreamIdle) {
 		return transformer.ErrStreamIdle
+	}
+	if errors.Is(cause, context.DeadlineExceeded) {
+		return fmt.Errorf("direct stream exceeded %s: %w", directTotalTimeout, context.DeadlineExceeded)
 	}
 	return errClientGone
 }

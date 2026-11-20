@@ -126,3 +126,17 @@ func TestGetClientIPNormalizesIPv6(t *testing.T) {
 		t.Fatalf("GetClientIP = %q, want the canonical IPv6 form", got)
 	}
 }
+
+func TestRateLimiterConfigureResetsBuckets(t *testing.T) {
+	rl := NewRateLimiter(1, time.Minute)
+	if !rl.Allow("client") {
+		t.Fatal("first request must pass")
+	}
+	if rl.Allow("client") {
+		t.Fatal("the old one-request limit must apply")
+	}
+	rl.Configure(2, time.Minute)
+	if !rl.Allow("client") {
+		t.Fatal("a new policy starts from a clean bucket")
+	}
+}

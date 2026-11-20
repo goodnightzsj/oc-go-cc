@@ -119,7 +119,7 @@ func catalogSyncCmd() *cobra.Command {
 			defer func() { _ = db.Close() }()
 
 			ctx := cmd.Context()
-			providers, models, err := catalog.ImportFromJSON(ctx, db, jsonPath)
+			providers, models, sha, err := catalog.ImportFromJSONHash(ctx, db, jsonPath)
 			if err != nil {
 				return fmt.Errorf("import catalog into SQLite: %w", err)
 			}
@@ -127,7 +127,7 @@ func catalogSyncCmd() *cobra.Command {
 			cmd.Printf("  SQLite: %d providers, %d models imported\n", providers, models)
 			// Stamp the imported file's identity, so the startup/refresh import
 			// check does not repeat this import.
-			_ = storage.NewCatalogRepo(db).SetImportedSHA(ctx, lock.SHA256)
+			_ = storage.NewCatalogRepo(db).SetImportedSHA(ctx, sha)
 
 			if syncedAt, err := storage.NewCatalogRepo(db).LastSync(ctx); err == nil && !syncedAt.IsZero() {
 				cmd.Printf("  Last refresh: %s\n", syncedAt.Format(time.RFC3339))

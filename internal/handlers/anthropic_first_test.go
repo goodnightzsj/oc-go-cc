@@ -390,3 +390,13 @@ func TestParseRetryAfterZeroFallsBack(t *testing.T) {
 		t.Fatalf("parseRetryAfter(huge) = %v, %v, want the cap", d, ok)
 	}
 }
+
+func TestParseRetryAfterPastDateFallsBack(t *testing.T) {
+	now := time.Now()
+	// http.TimeFormat always says GMT; format the instant in UTC or the local
+	// wall-clock digits would parse as a future time.
+	past := now.UTC().Add(-time.Hour).Format(http.TimeFormat)
+	if _, ok := parseRetryAfter(past, now); ok {
+		t.Fatal("a past Retry-After date must not reopen the probe window immediately")
+	}
+}

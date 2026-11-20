@@ -83,11 +83,21 @@ func EnsureImported(ctx context.Context, db *storage.Database, jsonPath string) 
 // downloaded a fresh catalog and then silently kept serving the first snapshot
 // it ever saw — including to cost-based routing, which picks models by price.
 func ImportFromJSON(ctx context.Context, db *storage.Database, jsonPath string) (providerCount, modelCount int, err error) {
+	providerCount, modelCount, _, err = ImportFromJSONHash(ctx, db, jsonPath)
+	return providerCount, modelCount, err
+}
+
+// ImportFromJSONHash imports a catalog file and returns the SHA-256 of the
+// bytes it actually read, so a caller can stamp identity without re-reading a
+// file that may have changed in between.
+func ImportFromJSONHash(ctx context.Context, db *storage.Database, jsonPath string) (providerCount, modelCount int, sha string, err error) {
 	data, err := os.ReadFile(jsonPath)
 	if err != nil {
-		return 0, 0, fmt.Errorf("read catalog from JSON: %w", err)
+		return 0, 0, "", fmt.Errorf("read catalog from JSON: %w", err)
 	}
-	return ImportFromData(ctx, db, data)
+	sum := sha256.Sum256(data)
+	providerCount, modelCount, err = ImportFromData(ctx, db, data)
+	return providerCount, modelCount, hex.EncodeToString(sum[:]), err
 }
 
 // ImportFromData imports catalog bytes the caller has already read. The same

@@ -1567,13 +1567,15 @@ func (s *Server) handleCatalogSync(w http.ResponseWriter, r *http.Request) {
 	// routing and cost selection change together.
 	if s.storage != nil {
 		jsonPath := filepath.Join(s.catalogDir, "catalog.json")
-		if _, _, err := catalog.ImportFromJSON(r.Context(), s.storage, jsonPath); err != nil {
+		_, _, sha, err := catalog.ImportFromJSONHash(r.Context(), s.storage, jsonPath)
+		if err != nil {
 			http.Error(w, fmt.Sprintf("catalog downloaded but SQLite import failed: %v", err), http.StatusInternalServerError)
 			return
 		}
-		// Record what was imported so the next start does not import the same
-		// file again just because only the CLI path used to stamp it.
-		_ = storage.NewCatalogRepo(s.storage).SetImportedSHA(r.Context(), lock.SHA256)
+		// Stamp the hash of the bytes that were actually imported, not the
+		// lock's copy: a file replaced between the download and the import
+		// would otherwise be recorded under the wrong identity.
+		_ = storage.NewCatalogRepo(s.storage).SetImportedSHA(r.Context(), sha)
 	}
 	// The old file's parse is still cached; a reader who re-synced expects the
 	// model list to reflect what the sync just fetched.

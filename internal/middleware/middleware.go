@@ -43,6 +43,25 @@ func NewRateLimiter(rate int, window time.Duration) *RateLimiter {
 	}
 }
 
+// Configure changes the rate and window. Buckets are reset when either
+// changes, so a new policy starts from a clean slate instead of inheriting
+// counters that were accumulated under the old one.
+func (rl *RateLimiter) Configure(rate int, window time.Duration) {
+	if rate <= 0 {
+		rate = 100
+	}
+	if window <= 0 {
+		window = time.Minute
+	}
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	if rl.rate == rate && rl.window == window {
+		return
+	}
+	rl.rate, rl.window = rate, window
+	rl.tokens = make(map[string]*clientTokenBucket)
+}
+
 // Allow checks if a request from the given IP is allowed.
 // Returns true if allowed, false if rate limited.
 func (rl *RateLimiter) Allow(clientIP string) bool {

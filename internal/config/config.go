@@ -20,6 +20,9 @@ type Config struct {
 	Host      string   `json:"host"`
 	Port      int      `json:"port"`
 	HotReload bool     `json:"hot_reload"`
+	// RateLimitPerMinute is the platform-path request limit per client. Zero
+	// uses the default (100); a negative value disables rate limiting.
+	RateLimitPerMinute int `json:"rate_limit_per_minute,omitempty"`
 	// TrustForwardedFor makes the rate limiter key on X-Forwarded-For. Only
 	// enable it when a reverse proxy in front of this one overwrites the
 	// header; otherwise any client can choose its own bucket per request.

@@ -91,6 +91,13 @@ func Sync(ctx context.Context, sourceURL, destDir string) (*Lock, error) {
 	if err := validateEnabledProviders(catalog); err != nil {
 		return nil, fmt.Errorf("validate catalog: %w", err)
 	}
+	// Run the importer's full validation before publishing. A catalog that
+	// passes the enabled-provider check but fails LoadBytes (for example a bare
+	// model key) would be written to disk and then fail every import, leaving
+	// routing on the previous snapshot.
+	if _, err := LoadBytes(body); err != nil {
+		return nil, fmt.Errorf("validate catalog: %w", err)
+	}
 
 	sum := sha256.Sum256(body)
 	hash := hex.EncodeToString(sum[:])

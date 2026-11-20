@@ -328,9 +328,9 @@ func TestClassify(t *testing.T) {
 		{"500 is transient", &client.APIError{StatusCode: 500}, verdictTransient},
 		{"502 is transient", &client.APIError{StatusCode: 502}, verdictTransient},
 		{"503 is transient", &client.APIError{StatusCode: 503}, verdictTransient},
-		{"400 is the caller's mistake", &client.APIError{StatusCode: 400}, verdictHealthy},
-		{"404 is the model's business", &client.APIError{StatusCode: 404}, verdictHealthy},
-		{"422 is the caller's mistake", &client.APIError{StatusCode: 422}, verdictHealthy},
+		{"400 is the caller's mistake", &client.APIError{StatusCode: 400}, verdictIrrelevant},
+		{"404 is the model's business", &client.APIError{StatusCode: 404}, verdictIrrelevant},
+		{"422 is the caller's mistake", &client.APIError{StatusCode: 422}, verdictIrrelevant},
 		{"a dial error is transient", errors.New("dial tcp: i/o timeout"), verdictTransient},
 	}
 	for _, tc := range cases {

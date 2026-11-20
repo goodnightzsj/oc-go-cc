@@ -487,6 +487,20 @@ func (h *MessagesHandler) publishStatus(requestID string, streaming bool, scenar
 	})
 }
 
+// rateLimitSetting returns the configured policy: 0 keeps the constructor's
+// default (100/min), a positive value replaces it, and a negative value
+// disables limiting.
+func (h *MessagesHandler) rateLimitSetting() int {
+	if h.modelRouter == nil {
+		return 0
+	}
+	cfg := h.modelRouter.Config()
+	if cfg == nil {
+		return 0
+	}
+	return cfg.RateLimitPerMinute
+}
+
 // clientIPOptions reads the live config so a hot reload can turn the trusted
 // reverse-proxy mode on or off without a restart.
 func (h *MessagesHandler) clientIPOptions() middleware.ClientIPOptions {
@@ -531,12 +545,20 @@ func (h *MessagesHandler) admitRequest(w http.ResponseWriter, r *http.Request) (
 	}
 	w.Header().Set("X-Request-ID", requestID)
 
-	// Rate limiting
+	// Rate limiting. The policy is live config: a negative value disables it,
+	// zero keeps the constructor's default, and a positive value replaces the
+	// rate. Configure is only called for an explicit rate so a test (or an
+	// operator) that injected its own limiter is not silently reset.
 	clientIP := middleware.GetClientIP(r, h.clientIPOptions())
-	if !h.rateLimiter.Allow(clientIP) {
-		h.metrics.RecordRateLimited()
-		h.logger.Warn("rate limited", "client", clientIP, "request_id", requestID)
-		return r, false
+	if setting := h.rateLimitSetting(); setting >= 0 {
+		if setting > 0 {
+			h.rateLimiter.Configure(setting, time.Minute)
+		}
+		if !h.rateLimiter.Allow(clientIP) {
+			h.metrics.RecordRateLimited()
+			h.logger.Warn("rate limited", "client", clientIP, "request_id", requestID)
+			return r, false
+		}
 	}
 	return r.WithContext(context.WithValue(r.Context(), admittedRequestKey{}, requestID)), true
 }

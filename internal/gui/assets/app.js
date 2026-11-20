@@ -383,6 +383,7 @@ const TRANSLATIONS = {
     'setting.activeSiteUnrestricted': 'Not restricted',
     'setting.activeSiteHint': 'Routes every request through the selected platform.',
     'setting.trustForwardedFor': 'Trust X-Forwarded-For',
+    'setting.rateLimit': 'Rate limit (requests/minute, -1 disables)',
     'setting.activeSiteUnavailable': 'Add an API key in Settings first.',
     'setting.activeSiteNotShown': 'Active platform "{site}" is not offered here, so these views show all platforms.',
     'detail.status': 'Status',
@@ -391,6 +392,9 @@ const TRANSLATIONS = {
     'detail.unknown': 'Unknown',
     'detail.unavailable': 'Not available',
     'detail.error': 'Error',
+    'cmd.paletteLabel': 'Command palette',
+    'cmd.placeholder': 'Type a command or search...',
+    'cmd.searchLabel': 'Command search',
     'cmd.startProxy': 'Start Proxy',
     'cmd.stopProxy': 'Stop Proxy',
     'cmd.gotoOverview': 'Go to Overview',
@@ -1055,6 +1059,7 @@ const TRANSLATIONS = {
     'setting.activeSiteUnrestricted': '不限制',
     'setting.activeSiteHint': '所有请求都走选中的平台。',
     'setting.trustForwardedFor': '信任 X-Forwarded-For',
+    'setting.rateLimit': '限流（次/分钟，-1 关闭）',
     'setting.activeSiteUnavailable': '请先在设置里填写 API 密钥。',
     'setting.activeSiteNotShown': '当前平台「{site}」未在此列出，各视图按全部平台展示。',
     'detail.status': '状态',
@@ -1063,6 +1068,9 @@ const TRANSLATIONS = {
     'detail.unknown': '未知',
     'detail.unavailable': '暂无记录',
     'detail.error': '错误信息',
+    'cmd.paletteLabel': '命令面板',
+    'cmd.placeholder': '输入命令或搜索...',
+    'cmd.searchLabel': '命令搜索',
     'cmd.startProxy': '启动代理',
     'cmd.stopProxy': '停止代理',
     'cmd.gotoOverview': '前往概览',
@@ -1397,6 +1405,15 @@ function applyTranslations() {
   window.CustomSelect?.syncAll();
   window.HistoryDateRange?.syncLabel();
   AnalyticsModule?.syncDateRange?.();
+  // A visible stale badge is not a data-i18n node; rewrite it here so a
+  // language switch does not leave the old language on screen until the next
+  // poll transition.
+  const staleBadge = document.getElementById('conn-stale');
+  if (staleBadge && !staleBadge.hidden) {
+    const secs = CONN.lastOk ? Math.round((Date.now() - CONN.lastOk) / 1000) : null;
+    staleBadge.textContent = t('status.stale');
+    staleBadge.title = secs != null ? t('status.staleFor').replace('{secs}', secs) : '';
+  }
   // The test dialog's option text is built on open; re-render it so an open
   // dialog follows a language switch too.
   // Only re-render a list that has been populated: an untouched module would
@@ -3315,6 +3332,9 @@ function trapModalFocus(modal) {
   modal.dataset.focusTrap = '1';
   document.addEventListener('keydown', e => {
     if (e.key !== 'Tab' || !modal.classList.contains('visible')) return;
+    // Only the topmost visible overlay owns the keyboard.
+    const traps = [...document.querySelectorAll('[data-focus-trap].visible')];
+    if (traps.length > 0 && traps[traps.length - 1] !== modal) return;
     const focusables = [...modal.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')]
       .filter(el => !el.disabled && el.offsetParent !== null);
     if (focusables.length === 0) return;
@@ -3322,7 +3342,7 @@ function trapModalFocus(modal) {
     const last = focusables[focusables.length - 1];
     if (!modal.contains(document.activeElement)) {
       e.preventDefault();
-      first.focus();
+      (e.shiftKey ? last : first).focus();
       return;
     }
     if (e.shiftKey && document.activeElement === first) {
@@ -4260,6 +4280,7 @@ const CONFIG_FIELDS = [
   // credential rule lives in config and must not be restated here.
   ['active_site', 'cfg-active-site', 'string'],
   ['trust_forwarded_for', 'cfg-trust-forwarded-for', 'bool'],
+  ['rate_limit_per_minute', 'cfg-rate-limit', 'int'],
 
   ['logging.level', 'cfg-log-level', 'string'],
 ];
@@ -4563,7 +4584,12 @@ function readFieldValue(field) {
     const current = deepGet(currentProxyConfig, field[0]);
     if (raw.trim() === '' && current == null) return undefined;
     const v = Number(raw);
-    if (!Number.isSafeInteger(v) || v < 0) throw settingsFailure(t('save.integer'), {field: field[0]});
+    // The rate limit uses a negative value to mean "disabled"; every other
+    // integer field is a count or a duration and must stay non-negative.
+    const allowsNegative = field[0] === 'rate_limit_per_minute';
+    if (!Number.isSafeInteger(v) || (v < 0 && !allowsNegative)) {
+      throw settingsFailure(t('save.integer'), {field: field[0]});
+    }
     return v === current ? undefined : v;
   }
   if (field[2] === 'keys') {
@@ -5421,7 +5447,10 @@ function selectCommandItem(item) {
     candidate.setAttribute('aria-selected', String(on));
   });
   const commandInput = document.getElementById('command-input');
-  if (commandInput) commandInput.setAttribute('aria-activedescendant', item ? item.id : '');
+  if (commandInput) {
+    if (item) commandInput.setAttribute('aria-activedescendant', item.id);
+    else commandInput.removeAttribute('aria-activedescendant');
+  }
   item?.scrollIntoView?.({block: 'nearest'});
 }
 
@@ -5525,9 +5554,13 @@ document.addEventListener('keydown', function(e) {
     e.preventDefault();
     if (commandPaletteOpen) {
       closeCommandPalette();
-    } else {
-      openCommandPalette();
+      return;
     }
+    // A native <dialog open> makes the rest of the page inert and sits in the
+    // top layer; opening the palette behind it would surface a phantom dialog
+    // when the modal closes.
+    if (document.querySelector('dialog[open]') || document.querySelector('.modal-overlay.visible')) return;
+    openCommandPalette();
   }
   // Search history: Cmd/Ctrl + F
   if ((e.metaKey || e.ctrlKey) && e.key === 'f') {

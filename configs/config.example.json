@@ -3,6 +3,8 @@
   "host": "127.0.0.1",
   "port": 3456,
   "hot_reload": false,
+  "//_rate_limit_per_minute": "Platform-path requests allowed per client per minute. 0 uses the default (100); a negative value disables the limiter.",
+  "rate_limit_per_minute": 0,
   "//_trust_forwarded_for": "Set true only when a reverse proxy in front of this one overwrites X-Forwarded-For; otherwise any client can spoof a fresh rate-limit bucket per request.",
   "trust_forwarded_for": false,
   "//_trusted_proxies": "With trust_forwarded_for on, only these direct peers may speak for a client (CIDRs or bare IPs). Empty means any peer; keep it empty only when the listener is reachable exclusively through the proxy.",

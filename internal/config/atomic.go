@@ -98,6 +98,13 @@ func (a *AtomicConfig) applyLoaded(cfg *Config) {
 		if debugCaptureEnabled(old.Logging) != debugCaptureEnabled(cfg.Logging) {
 			slog.Warn("debug capture settings changed but require a server restart to take effect")
 		}
+		// Trust is live, so a reload that enables it must carry the same warning
+		// the startup path prints.
+		if cfg.TrustForwardedFor && len(cfg.TrustedProxies) == 0 &&
+			(!old.TrustForwardedFor || len(old.TrustedProxies) > 0) {
+			slog.Warn("trust_forwarded_for is on with no trusted_proxies: any direct peer may set X-Forwarded-For",
+				"hint", "list the reverse proxy addresses (for example 127.0.0.1/32)")
+		}
 		// Timeout changes apply on the next request.
 		if old.OpenCodeGo.TimeoutMs != cfg.OpenCodeGo.TimeoutMs ||
 			old.OpenCodeGo.StreamingTimeoutMs != cfg.OpenCodeGo.StreamingTimeoutMs ||

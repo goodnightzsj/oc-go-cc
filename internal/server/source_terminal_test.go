@@ -92,7 +92,14 @@ func TestSourceTerminalSemanticsReachBothInbounds(t *testing.T) {
 							t.Fatalf("history total=%d err=%v", total, err)
 						}
 						row := rows[0]
-						if !row.OutcomeKnown || row.Success == failed || row.InputTokens != 11 || row.OutputTokens != 7 {
+						// Gemini's failure arm replaces the body with an error object,
+						// so that wire has no usage to retain; every other arm carries
+						// a partial usage before the failure.
+						wantIn, wantOut := 11, 7
+						if failed && wire == "gemini" && outcome == "error" {
+							wantIn, wantOut = 0, 0
+						}
+						if !row.OutcomeKnown || row.Success == failed || row.InputTokens != wantIn || row.OutputTokens != wantOut {
 							t.Fatalf("outcome/partial usage lost: %+v", row)
 						}
 					})
@@ -114,7 +121,12 @@ func sourceTerminalFixture(wire, outcome string, stream bool) (string, string) {
 		}
 		return fmt.Sprintf(`{"choices":[{"message":{"role":"assistant","content":"answer"},"finish_reason":%q}],"usage":{"prompt_tokens":11,"completion_tokens":7}}`, reason), ""
 	case "gemini":
-		reason := map[string]string{"normal": "STOP", "budget": "MAX_TOKENS", "refusal": "SAFETY", "error": "MALFORMED_FUNCTION_CALL"}[outcome]
+		// The failure arm is an upstream error object: every finishReason Gemini
+		// documents is a terminal, including MALFORMED_FUNCTION_CALL.
+		if outcome == "error" {
+			return `{"error":{"code":500,"message":"synthetic"}}`, ""
+		}
+		reason := map[string]string{"normal": "STOP", "budget": "MAX_TOKENS", "refusal": "SAFETY"}[outcome]
 		if stream {
 			return `{"candidates":[{"content":{"role":"model","parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":11,"candidatesTokenCount":7}}`, fmt.Sprintf(`{"candidates":[{"finishReason":%q}]}`, reason)
 		}

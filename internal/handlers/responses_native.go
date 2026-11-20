@@ -113,7 +113,6 @@ func (w *responseWriter) observeNativeResponses(data []byte) (streamMilestones, 
 		}
 		return nil
 	})
-	w.contentWritten = w.contentWritten || observed.content
 	return observed, err
 }
 

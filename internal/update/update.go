@@ -205,6 +205,14 @@ func DownloadAndInstall(url, filename, checksumURL string) error {
 		_ = tmpFile.Close()
 		return fmt.Errorf("download exceeds the %d byte limit", int64(maxUpdateBytes))
 	}
+	// Sync before close: the rename below is atomic but does not order the
+	// file's contents on disk, so a power loss after it can leave a truncated
+	// executable where a working one used to be. The config and catalog writers
+	// already do this.
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("failed to sync temp file: %w", err)
+	}
 	if err := tmpFile.Close(); err != nil {
 		return fmt.Errorf("failed to close temp file: %w", err)
 	}

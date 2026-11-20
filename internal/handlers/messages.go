@@ -78,9 +78,8 @@ type MessagesHandler struct {
 // stream proxy) don't interleave SSE frames.
 type responseWriter struct {
 	http.ResponseWriter
-	mu             sync.Mutex
-	wroteHeader    bool
-	contentWritten bool
+	mu          sync.Mutex
+	wroteHeader bool
 	// payloadWritten records that something besides this proxy's own framing
 	// reached the caller: an upstream event, or content this proxy generated.
 	// Opening message_start and keepalive comment frames do not count - the
@@ -90,7 +89,6 @@ type responseWriter struct {
 	payloadWritten bool
 	sseDecoder     sse.Decoder
 	messageStopped bool
-	stopReason     string
 	streamErr      error
 	// sourceErrored records that the upstream's own terminal error event has
 	// already reached the caller, so the handler does not append a second one.
@@ -232,7 +230,6 @@ func (w *responseWriter) observeSSEEvent(name string, data []byte, needContent b
 	switch event.Type {
 	case "message_delta":
 		if event.Delta.StopReason != "" {
-			w.stopReason = event.Delta.StopReason
 		}
 	case "message_stop":
 		w.messageStopped = true
@@ -241,7 +238,6 @@ func (w *responseWriter) observeSSEEvent(name string, data []byte, needContent b
 		w.sourceErrored = true
 	}
 	if event.Type == "content_block_start" || event.Type == "content_block_delta" {
-		w.contentWritten = true
 	}
 	usage := event.Usage
 	if event.Type == "message_start" {
@@ -364,24 +360,6 @@ func (w *responseWriter) recordedResponseModel(body io.ReadCloser) string {
 		return w.sourceModel
 	}
 	return client.ServedModelOf(body)
-}
-
-func (w *responseWriter) hasContent() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.contentWritten
-}
-
-func (w *responseWriter) isRefusal() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.stopReason == "refusal"
-}
-
-func (w *responseWriter) getOutputTokens() int {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.usage.outputTokens
 }
 
 // headerWritten returns true if headers have been written to the response.

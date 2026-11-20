@@ -39,6 +39,8 @@ const (
 	defaultCommandCodeAnthropicBaseURL = "https://api.commandcode.ai/provider/v1/messages"
 	defaultCommandCodeResponsesBaseURL = "https://api.commandcode.ai/provider/v1/responses"
 	defaultClinePassBaseURL            = "https://api.cline.bot/api/v1/chat/completions"
+	defaultBedrockBaseURL              = "https://bedrock-mantle.us-east-1.api.aws/v1/chat/completions"
+	defaultBedrockAnthropicBaseURL     = "https://bedrock-mantle.us-east-1.api.aws/v1/messages"
 	DefaultClinePassChannel            = "deepseek"
 )
 
@@ -510,6 +512,20 @@ func validate(cfg *Config) error {
 	if err := cfg.AWSBedrock.Billing.Validate(); err != nil {
 		return err
 	}
+	// The OpenAI path parsed an empty base_url successfully and failed at send
+	// time with an opaque transport error; the Anthropic path at least said what
+	// was missing. Both endpoints are required whenever a key is configured.
+	if keys := cfg.AWSBedrock.EffectiveAPIKeys(); len(keys) > 0 {
+		for field, endpoint := range map[string]string{
+			"aws_bedrock.base_url":           cfg.AWSBedrock.BaseURL,
+			"aws_bedrock.anthropic_base_url": cfg.AWSBedrock.AnthropicBaseURL,
+		} {
+			u, err := url.Parse(endpoint)
+			if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
+				return invalid(field, "plain_url", "%s must be an absolute http or https URL without credentials or fragment when an AWS Bedrock key is configured", field)
+			}
+		}
+	}
 
 	if err := validateSingleAPIKey(cfg.OpenRouter.APIKey); err != nil {
 		return AtField("openrouter", err)
@@ -912,6 +928,8 @@ func applySiteDefaults(cfg *Config) {
 		{&cfg.CommandCode.AnthropicBaseURL, defaultCommandCodeAnthropicBaseURL},
 		{&cfg.CommandCode.ResponsesBaseURL, defaultCommandCodeResponsesBaseURL},
 		{&cfg.ClinePass.BaseURL, defaultClinePassBaseURL},
+		{&cfg.AWSBedrock.BaseURL, defaultBedrockBaseURL},
+		{&cfg.AWSBedrock.AnthropicBaseURL, defaultBedrockAnthropicBaseURL},
 	} {
 		if *row.target == "" {
 			*row.target = row.value

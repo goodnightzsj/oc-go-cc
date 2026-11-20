@@ -7666,7 +7666,20 @@ const QUOTA_RING_RADIUS = 54;
 const QUOTA_RING_LENGTH = 2 * Math.PI * QUOTA_RING_RADIUS;
 
 const QuotaModule = {
-  provider: 'opencode-go',
+  // The provider is the control's value, not a copy of it. Every other page
+  // reads its selector at request time; this module kept its own field, so any
+  // path that changed the control without firing `change` (restoring view
+  // state, the active-site sync) left the page querying one platform while
+  // showing another - and a platform whose key does not carry a subscription
+  // answers with exactly that error.
+  get provider() {
+    const el = document.getElementById('quota-provider');
+    return (el && el.value) || this._provider || 'opencode-go';
+  },
+  set provider(value) {
+    this._provider = value;
+  },
+  _provider: '',
   accountProvider: '',
   view: null,
   loadSeq: 0,

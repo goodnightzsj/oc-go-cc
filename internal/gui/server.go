@@ -570,9 +570,8 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Prefer the persistent SQLite history (full dataset) with pagination. When
-	// storage is unavailable there is no queryable history to serve: the
-	// in-memory ring buffer is a live tail, not a filterable/paginated dataset,
-	// so say so instead of shipping a second, divergent query engine.
+	// storage is unavailable there is no queryable history to serve at all, so
+	// say so instead of shipping a second, divergent query engine.
 	if s.storage == nil {
 		http.Error(w, "history storage is unavailable", http.StatusServiceUnavailable)
 		return

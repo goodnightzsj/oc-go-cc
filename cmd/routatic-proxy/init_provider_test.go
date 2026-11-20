@@ -8,6 +8,7 @@ import (
 
 	"github.com/routatic/proxy/internal/config"
 	"github.com/routatic/proxy/internal/site"
+	"strings"
 )
 
 func TestInitCmd_ProviderFlag(t *testing.T) {
@@ -224,6 +225,17 @@ func TestGetProviderConfig_UnknownProvider(t *testing.T) {
 // hand-written list, which is what it used to be. That list had five names and
 // omitted cline-pass, so `init --provider cline-pass` would have failed at
 // runtime with "unknown provider" and no test would have said so.
+// providerJSONBlock names the config block each preset's template fills.
+var providerJSONBlock = map[string]string{
+	"opencode-go":  "opencode_go",
+	"opencode-zen": "opencode_zen",
+	"aws-bedrock":  "aws_bedrock",
+	"openrouter":   "openrouter",
+	"commandcode":  "commandcode",
+	"cline-pass":   "cline_pass",
+	"workbuddy":    "workbuddy",
+}
+
 func TestGetProviderConfig_AllProviders(t *testing.T) {
 	providers := make([]string, 0, len(site.All()))
 	for _, d := range site.All() {
@@ -265,6 +277,28 @@ func TestGetProviderConfig_AllProviders(t *testing.T) {
 			actualProvider, _ := defaultModel["provider"].(string)
 			if actualProvider != provider {
 				t.Errorf("default model provider = %q, want %q", actualProvider, provider)
+			}
+
+			// Every template must agree on the listening port and on the
+			// platform's published endpoints. They are literals in six places
+			// while the runtime defaults live in internal/config, so nothing
+			// but this comparison keeps the two from drifting apart.
+			if port, _ := cfg["port"].(float64); port != 3456 {
+				t.Errorf("port = %v, want 3456", port)
+			}
+			// Each template restates its platform's base_url as a literal; the
+			// preset carries the same value. A typo here is only discovered by an
+			// operator whose freshly generated config cannot reach anything.
+			// WorkBuddy is the one platform whose config takes the gateway origin
+			// rather than the chat path: the model roster and the request path are
+			// both derived from it.
+			want := providerPresets[provider].BaseURL
+			if provider == "workbuddy" {
+				want = strings.TrimSuffix(strings.TrimSuffix(want, "/v1/chat/completions"), "/")
+			}
+			block, _ := cfg[providerJSONBlock[provider]].(map[string]any)
+			if got, _ := block["base_url"].(string); got != want {
+				t.Errorf("%s block base_url = %q, want %q", provider, got, providerPresets[provider].BaseURL)
 			}
 		})
 	}

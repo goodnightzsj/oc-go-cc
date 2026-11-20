@@ -1,4 +1,6 @@
-// Package history maintains an in-memory ring buffer of recent proxy requests.
+// Package history holds the request record written to storage, the peak-price
+// schedule applied to it, and the stream-timing helpers that turn observations
+// into rates. SQLite (internal/storage) is the only history store.
 package history
 
 import (

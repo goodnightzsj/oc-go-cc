@@ -269,6 +269,10 @@ func (h *AnthropicFirstHandler) recordDirect(model string, streaming bool, start
 	clientGone := errors.Is(copyErr, errClientGone)
 	if h.metrics != nil {
 		metricModel := metricModelForDirect(model)
+		// Counted here, with the outcome, and only for traffic this path
+		// actually served. Counting at entry double-counted every request that
+		// fell back, because the platform handler counts the same request too.
+		h.metrics.RecordRequest(streaming)
 		switch {
 		case success:
 			h.metrics.RecordSuccess(metricModel, time.Since(start))
@@ -363,14 +367,6 @@ func (h *AnthropicFirstHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	_ = json.Unmarshal(body, &meta)
 	streaming := meta.Stream != nil && *meta.Stream
 	start := time.Now()
-	// Count the request once, before any upstream work - the platform path
-	// counts at the same point. It used to be counted at completion inside
-	// recordDirect, so a caller that left before the headers never appeared as
-	// received, and received stopped equalling success plus failure.
-	if h.metrics != nil {
-		h.metrics.RecordRequest(streaming)
-	}
-
 	// An idle/stall budget for the upstream exchange plus a total cap. The
 	// direct path has no per-request settings, so it uses the proxy's own
 	// streaming defaults. The total cap matters because the idle timer resets
@@ -638,7 +634,10 @@ func streamEndError(ctx context.Context) error {
 		return transformer.ErrStreamIdle
 	}
 	if errors.Is(cause, context.DeadlineExceeded) {
-		return fmt.Errorf("direct stream exceeded %s: %w", directTotalTimeout, context.DeadlineExceeded)
+		// No duration here: the budget is a handler field so a test can shrink
+		// it, and a constant in this message would then describe a limit that
+		// was never applied.
+		return fmt.Errorf("direct stream exceeded its total budget: %w", context.DeadlineExceeded)
 	}
 	return errClientGone
 }

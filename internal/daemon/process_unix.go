@@ -20,6 +20,27 @@ func IsProcessRunning(pid int) bool {
 	return err == nil
 }
 
+// IsOurProcess reports whether pid is running and belongs to this program.
+//
+// A bare existence check is not enough for the startup guard: after an unclean
+// exit the PID file survives, the system can reuse that PID, and treating the
+// stranger as "already running" makes a Restart=always unit loop forever with
+// no way in but deleting the file by hand.
+func IsOurProcess(pid int, appName string) bool {
+	if !IsProcessRunning(pid) {
+		return false
+	}
+	if appName == "" {
+		return true
+	}
+	name, ok := processIdentity(pid)
+	if !ok {
+		// No identity source on this platform; existence is all we have.
+		return true
+	}
+	return processMatches(name, appName)
+}
+
 // StopProcess sends SIGTERM to a process and waits for it to exit. appName
 // guards against a recycled PID: after a crash the PID file can name a process
 // that now belongs to something else entirely.

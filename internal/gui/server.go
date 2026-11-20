@@ -448,14 +448,21 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // ── API handlers ──────────────────────────────────────────────────────────────
 
 type metricsResponse struct {
-	ProxyRunning      bool             `json:"proxy_running"`
-	ConnectedExisting bool             `json:"connected_to_existing"`
-	Port              int              `json:"port"`
-	RequestsReceived  int64            `json:"requests_received"`
-	RequestsStreamed  int64            `json:"requests_streamed"`
-	RequestsSuccess   int64            `json:"requests_success"`
-	RequestsFailed    int64            `json:"requests_failed"`
-	ModelCounts       map[string]int64 `json:"model_counts"`
+	ProxyRunning      bool  `json:"proxy_running"`
+	ConnectedExisting bool  `json:"connected_to_existing"`
+	Port              int   `json:"port"`
+	RequestsReceived  int64 `json:"requests_received"`
+	RequestsStreamed  int64 `json:"requests_streamed"`
+	RequestsSuccess   int64 `json:"requests_success"`
+	RequestsFailed    int64 `json:"requests_failed"`
+	// RateLimited is here because /health was the only place it appeared: a
+	// deployment whose traffic is being throttled looked healthy everywhere the
+	// dashboard looked.
+	RateLimited int64            `json:"rate_limited"`
+	ModelCounts map[string]int64 `json:"model_counts"`
+	// ModelFailures counts failures per model. It was recorded but never
+	// published, so the panel could not show which model was failing.
+	ModelFailures map[string]int64 `json:"model_failures,omitempty"`
 	// CircuitBreakers maps a model key to closed/half_open/open. Absent when no
 	// fallback handler is wired, which the dashboard shows as unknown.
 	CircuitBreakers map[string]string `json:"circuit_breakers,omitempty"`
@@ -475,6 +482,8 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		RequestsStreamed:  snap.RequestsStreamed,
 		RequestsSuccess:   snap.RequestsSuccess,
 		RequestsFailed:    snap.RequestsFailed,
+		RateLimited:       snap.RateLimited,
+		ModelFailures:     snap.ModelFailed,
 		ModelCounts:       snap.ModelCounts,
 	}
 	if s.circuitStates != nil {
@@ -1687,6 +1696,13 @@ var crossOriginWrite = http.NewCrossOriginProtection()
 func securityHeadersMiddleware(next http.Handler, extraHosts map[string]bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !dashboardHostAllowed(r.Host, extraHosts) {
+			// The response stays a bare refusal, but the journal has to name the
+			// rejected host: a panel behind a reverse proxy answers 403 to every
+			// page until the operator declares its public name, and without this
+			// line nothing says which name that is.
+			slog.Warn("dashboard rejected an unexpected Host header",
+				"host", r.Host,
+				"hint", "declare the public name in ROUTATIC_PROXY_GUI_ALLOWED_HOSTS")
 			http.Error(w, "unexpected Host header", http.StatusForbidden)
 			return
 		}

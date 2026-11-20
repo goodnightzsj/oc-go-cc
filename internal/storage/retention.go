@@ -58,10 +58,11 @@ func (r *Retention) run() {
 	}
 }
 
-func (r *Retention) runOnce() {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
+// retentionBatch bounds one DELETE. Stopping the process waits for the batch in
+// flight, so the batch - not the whole cleanup - is what has to be short.
+const retentionBatch = 5000
 
+func (r *Retention) runOnce() {
 	before := time.Now().AddDate(0, 0, -r.days)
 
 	stats := struct {
@@ -73,10 +74,30 @@ func (r *Retention) runOnce() {
 	// one-time migration in Open normalizes rows written by older versions in
 	// RFC3339Nano. A mixed table made a text comparison delete up to a day
 	// more than configured (' ' sorts before 'T'), and forced a full scan.
-	if requests, err := r.db.DB().ExecContext(ctx, `DELETE FROM requests WHERE created_at < ?`, before.UTC().Format("2006-01-02 15:04:05")); err == nil {
-		stats.requestsDeleted, _ = requests.RowsAffected()
-	} else {
-		slog.Warn("retention cleanup failed", "table", "requests", "error", err)
+	// Batched, and checked between batches: a single unbounded DELETE held the
+	// only connection for up to a minute and made Ctrl+C or a systemd stop wait
+	// for it.
+	cutoff := before.UTC().Format("2006-01-02 15:04:05")
+	for {
+		select {
+		case <-r.stopCh:
+			return
+		default:
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		requests, err := r.db.DB().ExecContext(ctx,
+			`DELETE FROM requests WHERE rowid IN (SELECT rowid FROM requests WHERE created_at < ? LIMIT ?)`,
+			cutoff, retentionBatch)
+		cancel()
+		if err != nil {
+			slog.Warn("retention cleanup failed", "table", "requests", "error", err)
+			return
+		}
+		deleted, _ := requests.RowsAffected()
+		stats.requestsDeleted += deleted
+		if deleted < retentionBatch {
+			break
+		}
 	}
 
 	if stats.requestsDeleted > 0 {

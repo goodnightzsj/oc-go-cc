@@ -51,6 +51,22 @@ func processIdentity(pid int) (string, bool) {
 // process without cleanup. In-flight requests are dropped and deferred functions
 // do not run. A future improvement could use a named pipe or event for graceful
 // shutdown.
+// IsOurProcess reports whether pid is running and belongs to this program.
+// See the Unix implementation for why existence alone is not enough.
+func IsOurProcess(pid int, appName string) bool {
+	if !IsProcessRunning(pid) {
+		return false
+	}
+	if appName == "" {
+		return true
+	}
+	name, ok := processIdentity(pid)
+	if !ok {
+		return true
+	}
+	return processMatches(name, appName)
+}
+
 func StopProcess(pid int, appName string) error {
 	if appName != "" {
 		if name, ok := processIdentity(pid); ok && !processMatches(name, appName) {

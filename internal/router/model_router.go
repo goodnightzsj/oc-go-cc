@@ -28,9 +28,13 @@ type ModelRouter struct {
 	db          *storage.Database
 	catalogPath string
 	catMu       sync.Mutex
-	cat         *catalog.IndexedCatalog
-	catErr      error
-	catCache    time.Time
+	// catLoading is closed when the load in flight finishes. It is what turns
+	// "every request waits on the same mutex across a database read" into "one
+	// request loads, the rest wait on a channel they can abandon".
+	catLoading chan struct{}
+	cat        *catalog.IndexedCatalog
+	catErr     error
+	catCache   time.Time
 
 	siteMu    sync.Mutex
 	siteCache map[string]siteModelCache
@@ -270,31 +274,60 @@ func NewModelRouterWithCatalog(atomic *config.AtomicConfig, catalogPath string) 
 	return &ModelRouter{atomic: atomic, catalogPath: catalogPath}
 }
 
+const catalogCacheTTL = 30 * time.Second
+
+// catalog returns the cached catalog, loading it once when it expires.
+//
+// The load used to run under catMu, so the first request after expiry held the
+// mutex across a SQLite read and every other request queued behind it - and a
+// blocked goroutine cannot notice that its client has gone. Now exactly one
+// request loads, the rest wait on a channel they can abandon.
 func (r *ModelRouter) catalog(ctx context.Context) (*catalog.IndexedCatalog, error) {
 	if r.db == nil && r.catalogPath == "" {
 		slog.Warn("catalog not available — model resolution falling back to legacy config")
 		return nil, nil
 	}
 
-	r.catMu.Lock()
-	defer r.catMu.Unlock()
+	for {
+		r.catMu.Lock()
+		if r.cat != nil && time.Since(r.catCache) < catalogCacheTTL {
+			cat, err := r.cat, r.catErr
+			r.catMu.Unlock()
+			return cat, err
+		}
+		if loading := r.catLoading; loading != nil {
+			r.catMu.Unlock()
+			select {
+			case <-loading:
+				continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		loaded := make(chan struct{})
+		r.catLoading = loaded
+		r.catMu.Unlock()
 
-	if r.cat != nil && time.Since(r.catCache) < 30*time.Second {
-		return r.cat, nil
-	}
+		loadCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		var cat *catalog.IndexedCatalog
+		var err error
+		if r.db != nil {
+			cat, err = catalog.LoadFromSQLite(loadCtx, r.db)
+		} else {
+			cat, err = catalog.Load(r.catalogPath)
+		}
+		cancel()
 
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	if r.db != nil {
-		r.cat, r.catErr = catalog.LoadFromSQLite(ctx, r.db)
-	} else if r.catalogPath != "" {
-		r.cat, r.catErr = catalog.Load(r.catalogPath)
+		r.catMu.Lock()
+		r.cat, r.catErr = cat, err
+		if err == nil {
+			r.catCache = time.Now()
+		}
+		r.catLoading = nil
+		close(loaded)
+		r.catMu.Unlock()
+		return cat, err
 	}
-	if r.catErr == nil {
-		r.catCache = time.Now()
-	}
-	return r.cat, r.catErr
 }
 
 // isRespectRequestedModel returns true when the client-specified model should be

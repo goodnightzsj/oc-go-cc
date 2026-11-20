@@ -109,7 +109,10 @@ func (d *Database) cachedChannels(provider, revision string) ([]string, bool) {
 func (d *Database) storeChannels(provider, revision string, channels []string) {
 	d.channelsMu.Lock()
 	defer d.channelsMu.Unlock()
-	if d.channelsRevision != revision {
+	// The key is a query parameter, so the map needs the same ceiling the
+	// summary cache has; without it a page sweeping ?provider= grows it without
+	// bound, and every miss runs a full-table GROUP BY.
+	if d.channelsRevision != revision || len(d.channels) >= summaryCacheLimit {
 		d.channels = make(map[string][]string, summaryCacheLimit)
 		d.channelsRevision = revision
 	}
@@ -213,7 +216,11 @@ func Open(cfg Config) (*Database, error) {
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Schema work is fast and must not be starved; the backfills below scan the
+	// whole request table and need their own budget. They used to share this
+	// one, so a large database spent it on migrations and then failed every
+	// backfill with deadline exceeded on each start.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := db.PingContext(ctx); err != nil {
@@ -264,20 +271,27 @@ func Open(cfg Config) (*Database, error) {
 	// Seed default model prices so analytics dashboard shows meaningful
 	// cost numbers immediately for new/existing installs. Idempotent.
 	_ = database.SeedDefaultModelPrices(ctx)
-	if _, err := database.BackfillRequestCosts(ctx); err != nil {
+
+	backfillCtx, cancelBackfill := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelBackfill()
+	if _, err := database.BackfillRequestCosts(backfillCtx); err != nil {
 		slog.Warn("request cost backfill warning", "err", err)
 	}
-	if n, err := database.BackfillPeakMultipliers(ctx); err != nil {
+	if n, err := database.BackfillPeakMultipliers(backfillCtx); err != nil {
 		slog.Warn("peak multiplier backfill warning", "err", err)
 	} else if n > 0 {
 		slog.Info("restored peak markers on imported requests", "rows", n)
 	}
 
 	if cfg.VacuumOnStartup {
-		if _, err := db.ExecContext(ctx, "VACUUM"); err != nil {
-			_ = database.Close()
-			return nil, fmt.Errorf("vacuum: %w", err)
+		// Maintenance, not a precondition: a vacuum that cannot finish says
+		// nothing about whether the database can serve, and failing startup over
+		// it turned a slow disk into an outage.
+		vacuumCtx, cancelVacuum := context.WithTimeout(context.Background(), 10*time.Minute)
+		if _, err := db.ExecContext(vacuumCtx, "VACUUM"); err != nil {
+			slog.Warn("vacuum on startup did not finish; continuing", "err", err)
 		}
+		cancelVacuum()
 	}
 	if err := secureDatabaseFiles(path); err != nil {
 		_ = database.Close()

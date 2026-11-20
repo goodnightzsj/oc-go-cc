@@ -52,6 +52,12 @@ func (r *Requests) Insert(rec history.RequestRecord) error {
 		return err
 	}
 
+	// INSERT OR REPLACE deletes and re-inserts, so a conflict would reset
+	// created_at (pushing the retention cutoff forward) and clear usage_trusted.
+	// No current writer reuses an id - each attempt generates its own - so this
+	// is the idempotent-import hazard to keep in mind rather than a live
+	// defect; the fix would be an ON CONFLICT DO UPDATE listing these columns
+	// explicitly.
 	_, err = r.db.DB().ExecContext(ctx, `
 		INSERT OR REPLACE INTO requests (
 			id, model, requested_model, provider, scenario, start_time, duration_ms,

@@ -108,6 +108,11 @@ func (s *Storage) ensureDirectory() error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("creating debug directory %s: %w", dir, err)
 	}
+	// MkdirAll leaves an existing directory's mode alone, so an upgraded
+	// install would keep the 0755 it was created with.
+	if err := os.Chmod(dir, 0700); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("restricting debug directory %s: %w", dir, err)
+	}
 
 	return nil
 }
@@ -230,6 +235,10 @@ func (s *Storage) scanExistingFiles() error {
 		name := entry.Name()
 		if strings.HasPrefix(name, "capture-") && strings.HasSuffix(name, ".jsonl") {
 			count++
+			// Files captured before the permissions were tightened are still
+			// world-readable; opening them again never happens, so this pass is
+			// the only place that can fix them.
+			_ = os.Chmod(filepath.Join(dir, name), 0600)
 		}
 	}
 

@@ -2,6 +2,10 @@
 Description=routatic-proxy — OpenCode Go proxy for Claude Code
 After=network-online.target
 Wants=network-online.target
+# A crash loop that never backs off is invisible: the only symptom is a journal
+# full of the same line. Bound it so the unit lands in failed state instead.
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -12,6 +16,10 @@ Restart=always
 RestartSec=5
 TimeoutStopSec=630
 Environment=HOME=/root
+# The dashboard answers only to loopback names unless the public name is
+# declared here (or in the EnvironmentFile). A panel behind nginx needs it:
+# nginx forwards the original Host, so every page is refused otherwise.
+# Environment=ROUTATIC_PROXY_GUI_ALLOWED_HOSTS=dashboard.example.com
 EnvironmentFile=-/root/oc-go-cc/.env
 NoNewPrivileges=yes
 PrivateTmp=yes

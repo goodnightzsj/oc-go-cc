@@ -2,7 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WATCH_INTERVAL="${WATCH_INTERVAL:-1}"
+# Each poll re-fingerprints the whole tree (a find plus a hash over ~550 files),
+# so a one-second interval spends a measurable share of a core on a machine that
+# is also serving traffic. Five seconds is still faster than a human can type a
+# second save.
+WATCH_INTERVAL="${WATCH_INTERVAL:-5}"
 
 source "${ROOT_DIR}/scripts/go-common.sh"
 

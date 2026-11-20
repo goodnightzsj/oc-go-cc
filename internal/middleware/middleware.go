@@ -92,7 +92,8 @@ func (rl *RateLimiter) Allow(clientIP string) bool {
 		return true
 	}
 
-	rl.logger.Warn("rate limited", "client", clientIP, "remaining", bucket.tokens)
+	// The caller logs the rejection with the request id; logging it here too
+	// doubled every line on the busiest path in the proxy.
 	return false
 }
 

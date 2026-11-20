@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -542,5 +543,115 @@ func TestTruncateModelIDCutsOnRuneBoundary(t *testing.T) {
 	}
 	if short := truncateModelID("claude-sonnet-4-6"); short != "claude-sonnet-4-6" {
 		t.Fatalf("short id changed: %q", short)
+	}
+}
+
+// The counters are shared with the platform handler, which counts the same
+// inbound request when the direct path falls back. Counting at entry therefore
+// reported every fallback twice; only the path that served may count.
+func TestAnthropicFirstCountsOnlyTheTrafficItServed(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer upstream.Close()
+
+	met := metrics.New()
+	h := newAnthropicFirstTestHandler(upstream.URL, true, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	h.SetAccounting(nil, met)
+
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-6"}`)))
+
+	if got := met.GetSnapshot().RequestsReceived; got != 0 {
+		t.Fatalf("received = %d, want 0: the fallback path counts this request itself", got)
+	}
+
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"id":"msg_1"}`)
+	}))
+	defer healthy.Close()
+	direct := newAnthropicFirstTestHandler(healthy.URL, true, http.NotFoundHandler())
+	direct.SetAccounting(nil, met)
+	direct.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-6"}`)))
+
+	if got := met.GetSnapshot().RequestsReceived; got != 1 {
+		t.Fatalf("received = %d, want 1 for a request this path served", got)
+	}
+}
+
+// A buffered answer reaches the client in chunks, each with its own write
+// deadline. The single-write version truncated a large response to a slow
+// reader, and a chunking bug would only show above the chunk size.
+func TestAnthropicFirstDeliversABufferedBodyInChunks(t *testing.T) {
+	payload := make([]byte, 3*streamChunkSize+1234)
+	for i := range payload {
+		payload[i] = byte('a' + i%26)
+	}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(payload)
+	}))
+	defer upstream.Close()
+
+	h := newAnthropicFirstTestHandler(upstream.URL, true, http.NotFoundHandler())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-6"}`)))
+
+	if !bytes.Equal(rec.Body.Bytes(), payload) {
+		t.Fatalf("body = %d bytes, want the %d the upstream sent", rec.Body.Len(), len(payload))
+	}
+}
+
+// A stream that dies mid-delivery is an upstream failure: the next request must
+// go to the platform instead of hitting the same dead upstream again. Without
+// this, a half-open upstream truncates every response forever.
+func TestAnthropicFirstCoolsThePathAfterATruncatedStream(t *testing.T) {
+	var upstreamCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamCalls.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Content-Length", "4096")
+		_, _ = io.WriteString(w, "event: message_start\ndata: {}\n\n")
+	}))
+	defer upstream.Close()
+
+	var fallbackCalls atomic.Int32
+	h := newAnthropicFirstTestHandler(upstream.URL, true, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fallbackCalls.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	body := `{"model":"claude-sonnet-4-6","stream":true}`
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body)))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body)))
+
+	if fallbackCalls.Load() != 1 {
+		t.Fatalf("fallback ran %d times, want 1", fallbackCalls.Load())
+	}
+	if upstreamCalls.Load() != 1 {
+		t.Fatalf("upstream called %d times, want 1: a truncated stream must open the backoff", upstreamCalls.Load())
+	}
+}
+
+// A clean stream is not a failure, so the path stays warm.
+func TestAnthropicFirstKeepsThePathAfterAHealthyStream(t *testing.T) {
+	var upstreamCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamCalls.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: message_stop\ndata: {}\n\n")
+	}))
+	defer upstream.Close()
+
+	h := newAnthropicFirstTestHandler(upstream.URL, true, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("fallback called for a healthy stream")
+	}))
+	body := `{"model":"claude-sonnet-4-6","stream":true}`
+	for i := 0; i < 2; i++ {
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body)))
+	}
+	if upstreamCalls.Load() != 2 {
+		t.Fatalf("upstream called %d times, want 2", upstreamCalls.Load())
 	}
 }

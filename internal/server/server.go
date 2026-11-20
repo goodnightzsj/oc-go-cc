@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,44 @@ import (
 	"github.com/routatic/proxy/internal/storage"
 	"github.com/routatic/proxy/internal/token"
 )
+
+// keyAvailabilityChecker is the part of provider.KeyAvailability this decision
+// needs, so the probe can be tested without building providers.
+type keyAvailabilityChecker interface {
+	CredentialsExhausted(provider string) bool
+}
+
+// readinessProbe reports a durable reason this instance cannot serve, for
+// /health to answer 503 on. It is the deploy gate's only signal, so it must not
+// fire on a healthy deployment:
+//
+//   - keys that are merely cooling are not degraded (CredentialsExhausted
+//     ignores them);
+//   - an empty active_site means "any platform may serve", so only an instance
+//     with no usable credential anywhere is degraded;
+//   - when the direct passthrough is enabled, this endpoint cannot judge it and
+//     stays quiet rather than guessing.
+func readinessProbe(atomic *config.AtomicConfig, keys keyAvailabilityChecker) func() (string, bool) {
+	return func() (string, bool) {
+		cfg := atomic.Get()
+		if cfg == nil || cfg.AnthropicFirst.Enabled {
+			return "", false
+		}
+		if active := strings.TrimSpace(cfg.ActiveSite); active != "" {
+			target := site.Normalize(active)
+			if keys.CredentialsExhausted(target) {
+				return "no usable credential for " + target, true
+			}
+			return "", false
+		}
+		for _, descriptor := range site.All() {
+			if !keys.CredentialsExhausted(descriptor.ID) {
+				return "", false
+			}
+		}
+		return "no usable credential on any platform", true
+	}
+}
 
 // Server represents the proxy server.
 type Server struct {
@@ -162,23 +201,7 @@ func NewServer(atomic *config.AtomicConfig, captureLogger *debug.CaptureLogger) 
 		storageWriter,
 	)
 	healthHandler := handlers.NewHealthHandler(tokenCounter, fallbackHandler, metrics, statusStore)
-	// A release that starts with no usable credential must fail the deploy
-	// gate rather than silently serve nothing. Keys that are only cooling are
-	// not a degraded state - see provider.KeyAvailability.CredentialsExhausted.
-	keyAvailability := provider.NewKeyAvailability(atomic)
-	healthHandler.SetReadiness(func() (string, bool) {
-		cfg := atomic.Get()
-		if cfg == nil || cfg.AnthropicFirst.Enabled {
-			// The direct path has its own availability gate, which this
-			// endpoint does not expose; do not guess about it here.
-			return "", false
-		}
-		target := site.Normalize(cfg.ActiveSite)
-		if keyAvailability.CredentialsExhausted(target) {
-			return "no usable credential for " + target, true
-		}
-		return "", false
-	})
+	healthHandler.SetReadiness(readinessProbe(atomic, provider.NewKeyAvailability(atomic)))
 	modelsHandler := handlers.NewModelsHandler(modelRouter)
 	// The statusline endpoint was wired but never fed; publish the routing
 	// decision from the request path so it reports live data.

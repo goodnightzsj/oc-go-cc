@@ -15,6 +15,11 @@ type CaptureLogger struct {
 	entryChan chan CaptureEntry
 	wg        sync.WaitGroup
 	closeOnce sync.Once
+	// mu serialises closing against sending. sync.Once only makes Close
+	// idempotent; it does not stop a send that is already in flight from
+	// landing on a closed channel, which is an unrecoverable panic.
+	mu     sync.RWMutex
+	closed bool
 }
 
 // NewCaptureLogger creates a new async capture logger.
@@ -94,6 +99,12 @@ func (c *CaptureLogger) CaptureUpstreamResponse(requestID, provider string, data
 // sendEntry sends an entry to the background worker via the buffered channel.
 // It uses a non-blocking select with default to avoid blocking if the channel is full.
 func (c *CaptureLogger) sendEntry(entry CaptureEntry) {
+	c.mu.RLock()
+	if c.closed {
+		c.mu.RUnlock()
+		return
+	}
+	defer c.mu.RUnlock()
 	select {
 	case c.entryChan <- entry:
 		// Entry queued successfully
@@ -125,8 +136,12 @@ func (c *CaptureLogger) Close() error {
 	}
 
 	c.closeOnce.Do(func() {
-		// Close the channel to signal the worker to exit
+		// Take the write lock: it waits for every in-flight send, so the channel
+		// cannot be closed under one.
+		c.mu.Lock()
+		c.closed = true
 		close(c.entryChan)
+		c.mu.Unlock()
 
 		// Wait for the worker to finish processing remaining entries
 		c.wg.Wait()

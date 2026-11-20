@@ -103,7 +103,9 @@ func runCostsReconcile(cmd *cobra.Command, configPath, inputPath, targetProvider
 	}
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
-	report, reconcileErr := db.ReconcileProviderCosts(ctx, targetProvider, capture.Rows, apply)
+	report, reconcileErr := storage.RetryOnBusy(ctx, func() (storage.ProviderCostReport, error) {
+		return db.ReconcileProviderCosts(ctx, targetProvider, capture.Rows, apply)
+	})
 	encoder := json.NewEncoder(cmd.OutOrStdout())
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(report); err != nil {
@@ -157,7 +159,9 @@ func runCostsSyncRequests(cmd *cobra.Command, configPath string, apply bool) err
 	}
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
-	report, syncErr := db.SyncProviderUsageRequests(ctx, apply)
+	report, syncErr := storage.RetryOnBusy(ctx, func() (storage.ProviderRequestSyncReport, error) {
+		return db.SyncProviderUsageRequests(ctx, apply)
+	})
 	encoder := json.NewEncoder(cmd.OutOrStdout())
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(report); err != nil {

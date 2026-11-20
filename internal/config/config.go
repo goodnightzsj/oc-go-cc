@@ -429,6 +429,11 @@ var keyPoolFields = []keyPoolField{
 	{"openrouter", site.OpenRouter, "ROUTATIC_PROXY_OPENROUTER", func(c *Config) *string { return &c.OpenRouter.APIKey }, func(c *Config) *[]string { return &c.OpenRouter.APIKeys }},
 	{"commandcode", site.CommandCode, "ROUTATIC_PROXY_COMMANDCODE", func(c *Config) *string { return &c.CommandCode.APIKey }, func(c *Config) *[]string { return &c.CommandCode.APIKeys }},
 	{"cline_pass", site.ClinePass, "ROUTATIC_PROXY_CLINE_PASS", func(c *Config) *string { return &c.ClinePass.APIKey }, func(c *Config) *[]string { return &c.ClinePass.APIKeys }},
+	// WorkBuddy was the one platform missing from this table, so its documented
+	// environment variable was never read: `init --provider workbuddy` printed
+	// an export line that the loader silently dropped, and the placeholder in
+	// the file was then sent to the gateway as if it were a credential.
+	{"workbuddy", site.WorkBuddy, "ROUTATIC_PROXY_WORKBUDDY", func(c *Config) *string { return &c.WorkBuddy.APIKey }, func(c *Config) *[]string { return &c.WorkBuddy.APIKeys }},
 }
 
 // KeyPoolIndices maps display rows to the raw array after safe migration.

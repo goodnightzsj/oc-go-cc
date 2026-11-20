@@ -37,7 +37,7 @@ func (p *ClinePassProvider) StartHealthLoop(ctx context.Context) {
 	// An auth rejection re-judges the key immediately instead of waiting for
 	// the next periodic pass. The hook is wired here rather than in the
 	// constructor so a provider whose loop was never started never probes.
-	p.keys.authNotify = p.probeKeyAsync
+	p.keys.setAuthNotify(p.probeKeyAsync)
 	firstCtx, cancel := context.WithTimeout(ctx, keyHealthFirstPassTimeout)
 	probed, excluded := p.probeKeyHealth(firstCtx)
 	cancel()

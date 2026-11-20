@@ -1,10 +1,16 @@
 package gui
 
 import (
+	"context"
+	"io"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The dashboard holds the operator's credentials and binds to loopback, but a
@@ -101,5 +107,48 @@ func TestGuiAllowedHostsFromEnvironment(t *testing.T) {
 	}
 	if dashboardHostAllowed("evil.example:443", extra) {
 		t.Fatal("undeclared host allowed")
+	}
+}
+
+// The middleware only protects anything if Start actually mounts it with the
+// declared hosts. This is the failure that shipped once: every unit test passed
+// while the public dashboard answered 403 to every page.
+func TestStartMountsTheDeclaredDashboardHosts(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ROUTATIC_PROXY_GUI_PORT", strconv.Itoa(ln.Addr().(*net.TCPAddr).Port))
+	_ = ln.Close()
+	t.Setenv("ROUTATIC_PROXY_GUI_ALLOWED_HOSTS", "dashboard.example")
+
+	s := &Server{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	url, err := s.Start(ctx)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	t.Cleanup(func() { _ = s.srv.Close() })
+
+	status := func(host string) int {
+		req, err := http.NewRequest(http.MethodGet, url, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = host
+		resp, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
+		if err != nil {
+			t.Fatalf("request as %q: %v", host, err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		return resp.StatusCode
+	}
+
+	if got := status("dashboard.example"); got == http.StatusForbidden {
+		t.Fatal("a declared host was refused by the server Start actually built")
+	}
+	if got := status("evil.example"); got != http.StatusForbidden {
+		t.Fatalf("undeclared host = %d, want 403", got)
 	}
 }

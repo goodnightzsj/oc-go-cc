@@ -6,7 +6,43 @@ PROD_DIR="${ROOT_DIR}/.tmp/prod"
 RELEASES_DIR="${PROD_DIR}/releases"
 CURRENT_LINK="${PROD_DIR}/current"
 SERVICE_NAME="${OC_GO_CC_SERVICE_NAME:-oc-go-cc.service}"
-HEALTH_URL="${OC_GO_CC_HEALTH_URL:-http://127.0.0.1:3456/health}"
+# The health URL follows the deployed config unless it is overridden. A fixed
+# 127.0.0.1:3456 meant any change to host or port turned every deploy into a
+# rollback: the service restarts fine and the check can never reach it.
+health_url_from_config() {
+  local config="${OC_GO_CC_CONFIG:-}"
+  if [[ -z "${config}" ]]; then
+    # Same lookup the loader performs: the current path, then the one the
+    # renamed binary still reads on hosts that were installed as oc-go-cc.
+    for candidate in "${HOME:-/root}/.config/routatic-proxy/config.json" \
+                     "${HOME:-/root}/.config/oc-go-cc/config.json"; do
+      if [[ -r "${candidate}" ]]; then
+        config="${candidate}"
+        break
+      fi
+    done
+  fi
+  [[ -n "${config}" && -r "${config}" ]] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 - "${config}" <<'PY'
+import json, sys
+try:
+    cfg = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+host = str(cfg.get("host") or "127.0.0.1")
+if host in ("0.0.0.0", "::", ""):
+    host = "127.0.0.1"
+elif host == "::1":
+    host = "[::1]"
+print(f"http://{host}:{cfg.get('port') or 3456}/health")
+PY
+}
+HEALTH_URL="${OC_GO_CC_HEALTH_URL:-}"
+if [[ -z "${HEALTH_URL}" ]]; then
+  HEALTH_URL="$(health_url_from_config)"
+  HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3456/health}"
+fi
 KEEP_RELEASES="${OC_GO_CC_KEEP_RELEASES:-5}"
 START_TIMEOUT="${OC_GO_CC_START_TIMEOUT:-30}"
 
@@ -96,7 +132,8 @@ cleanup() {
     fi
     if (( status == 0 )); then status=1; fi
   fi
-  if ! rmdir -- "${DEPLOY_LOCK}"; then
+  # rm, not rmdir: the lock now holds the owner's pid.
+  if ! rm -rf -- "${DEPLOY_LOCK}"; then
     echo "[prod] CRITICAL: deployment lock cleanup failed" >&2
     if (( status == 0 )); then status=1; fi
   fi
@@ -108,15 +145,38 @@ HASHER="$(hash_cmd)"
 
 mkdir -p "${PROD_DIR}"
 DEPLOY_LOCK="${PROD_DIR}/deploy.lock"
+# The lock records its owner, so a SIGKILLed deploy cannot wedge the watcher
+# forever: a lock is reclaimed only once the process that wrote it is gone.
+stale_deploy_lock() {
+  local owner age now
+  owner="$(cat "${DEPLOY_LOCK}/pid" 2>/dev/null || true)"
+  if [[ -n "${owner}" ]]; then
+    kill -0 "${owner}" 2>/dev/null && return 1
+    return 0
+  fi
+  # No owner recorded: it died between mkdir and the write.
+  now="$(date +%s)"
+  age=$(( now - $(stat -c %Y "${DEPLOY_LOCK}" 2>/dev/null || echo "${now}") ))
+  (( age > 60 ))
+}
+
 if ! mkdir "${DEPLOY_LOCK}" 2>/dev/null; then
-  if [[ -d "${DEPLOY_LOCK}" ]]; then
+  if [[ -d "${DEPLOY_LOCK}" ]] && stale_deploy_lock; then
+    echo "[prod] reclaiming stale deployment lock at ${DEPLOY_LOCK}" >&2
+    rm -rf "${DEPLOY_LOCK}"
+    if ! mkdir "${DEPLOY_LOCK}" 2>/dev/null; then
+      echo "[prod] refusing to deploy: deployment lock is held" >&2
+      exit 75
+    fi
+  elif [[ -d "${DEPLOY_LOCK}" ]]; then
     echo "[prod] refusing to deploy: deployment lock exists at ${DEPLOY_LOCK}; check the active deploy or stale lock" >&2
     exit 75 # Temporary contention; watchers must retry this source version.
+  else
+    echo "[prod] refusing to deploy: cannot create deployment lock at ${DEPLOY_LOCK}" >&2
+    exit 1
   fi
-  echo "[prod] refusing to deploy: cannot create deployment lock at ${DEPLOY_LOCK}" >&2
-  exit 1
 fi
-# Fail closed after SIGKILL; remove a stale lock only after confirming no deploy owns it.
+echo "$$" > "${DEPLOY_LOCK}/pid"
 NEEDS_ROLLBACK=0
 OLD_TARGET=""
 trap cleanup EXIT

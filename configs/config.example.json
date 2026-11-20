@@ -1,5 +1,8 @@
 {
-  "api_keys": ["${ROUTATIC_PROXY_API_KEY}"],
+  "api_keys": [
+    "${ROUTATIC_PROXY_API_KEY}"
+  ],
+  "api_key": "",
   "host": "127.0.0.1",
   "port": 3456,
   "hot_reload": false,
@@ -11,6 +14,7 @@
   "trusted_proxies": [],
   "enable_streaming_scenario_routing": false,
   "respect_requested_model": false,
+  "enable_cross_platform_fallback": false,
   "//_active_site": "Restricts routing to one platform. Cannot be combined with anthropic_first.enabled: the first routes every request to a platform, the second sends it to Anthropic before any platform is considered.",
   "active_site": "",
   "enable_cost_based_routing": false,
@@ -560,6 +564,14 @@
     "streaming_timeout_ms": 600000,
     "zero_data_retention": false
   },
+  "cline_pass": {
+    "base_url": "https://api.cline.bot",
+    "api_keys": [],
+    "key_strategy": "fill_first",
+    "timeout_ms": 120000,
+    "stream_timeout_ms": 150000,
+    "streaming_timeout_ms": 600000
+  },
   "workbuddy": {
     "//": "Points at a local workbuddy2api-panel gateway, which owns the WorkBuddy sign-in and refreshes it. This proxy only needs its address and key. base_url is required whenever a WorkBuddy key is configured.",
     "base_url": "http://127.0.0.1:7863",
@@ -578,5 +590,15 @@
       "max_file_size": 104857600,
       "redact_api_keys": true
     }
+  },
+  "catalog": {
+    "enabled": true,
+    "source_url": "https://models.dev/catalog.json",
+    "max_age_hours": 24
+  },
+  "storage": {
+    "database_path": "",
+    "retention_days": 7,
+    "vacuum_on_startup": false
   }
 }

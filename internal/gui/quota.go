@@ -332,15 +332,31 @@ func (s *Server) handleBedrockBilling(w http.ResponseWriter, r *http.Request, cf
 	manual := r.Method == http.MethodPost
 	began := time.Now().UTC()
 	identity := []string{billing.Profile, billing.LinkedAccountID, began.Format(time.DateOnly)}
-	s.bedrockBillingMu.Lock()
-	defer s.bedrockBillingMu.Unlock()
-	if cached := s.cachedQuota(resp.Provider, resp.Endpoint, identity, false); cached != nil && (!manual || cached.FetchedAt.After(began)) {
-		writeJSON(w, *cached)
-		return
-	}
 	if !manual {
+		// A poll only ever reads: it needs no exclusive access at all.
+		if cached := s.cachedQuota(resp.Provider, resp.Endpoint, identity, false); cached != nil {
+			writeJSON(w, *cached)
+			return
+		}
 		resp.Status, resp.Reason = "unavailable", "aws_billing_refresh_required"
 		writeJSON(w, resp)
+		return
+	}
+	// A paid query is a network round trip. Waiting on a mutex across it cannot
+	// be abandoned by the browser that is waiting, so a second request during a
+	// refresh gets the cache or an honest "busy" instead of queueing.
+	if !s.bedrockBillingMu.TryLock() {
+		if cached := s.cachedQuota(resp.Provider, resp.Endpoint, identity, false); cached != nil {
+			writeJSON(w, *cached)
+			return
+		}
+		resp.Status, resp.Reason = "unavailable", "aws_billing_refresh_in_progress"
+		writeJSON(w, resp)
+		return
+	}
+	defer s.bedrockBillingMu.Unlock()
+	if cached := s.cachedQuota(resp.Provider, resp.Endpoint, identity, false); cached != nil && cached.FetchedAt.After(began) {
+		writeJSON(w, *cached)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), quota.RequestTimeout)
@@ -654,7 +670,7 @@ func quotaCacheKey(endpoint string, keys []string) string {
 func (s *Server) modelLimitsSnapshot() *quota.ModelLimits {
 	s.limitsMu.Lock()
 	defer s.limitsMu.Unlock()
-	if s.modelLimits == nil || time.Since(s.modelLimitsAt) >= limitsRefreshTTL {
+	if s.modelLimits == nil || s.modelLimitsAt.IsZero() || time.Since(s.modelLimitsAt) >= limitsRefreshTTL {
 		select {
 		case s.limitsRefresh <- struct{}{}:
 		default:

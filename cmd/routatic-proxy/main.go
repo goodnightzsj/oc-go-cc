@@ -174,8 +174,10 @@ Press Ctrl+C to stop the server.`,
 			// Check if already running before writing this process' PID.
 			if !daemonize {
 				if pid, err := daemon.GetPID(pidPath); err == nil {
-					// Check if process is still running.
-					if daemon.IsProcessRunning(pid) {
+					// Identity, not mere existence: a PID left behind by a
+					// SIGKILL can be reused by any process, and under
+					// Restart=always that turns a stale file into a crash loop.
+					if daemon.IsOurProcess(pid, daemon.AppName) {
 						return fmt.Errorf("server is already running (PID %d)", pid)
 					}
 					// Stale PID file, clean up.

@@ -244,3 +244,32 @@ func TestJSONLFormat(t *testing.T) {
 		t.Error("expected data field in JSON")
 	}
 }
+
+// Capture holds whole prompts and responses. The permission bits are the only
+// thing keeping another account on the host from reading them, and they were
+// silently 0644/0755 before.
+func TestStorageTightensExistingCaptureFiles(t *testing.T) {
+	dir := t.TempDir()
+	legacy := filepath.Join(dir, "capture-old.jsonl")
+	if err := os.WriteFile(legacy, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := NewStorage(config.DebugCapture{Enabled: true, Directory: dir, MaxFileSize: 1 << 20, MaxFiles: 5})
+	if err != nil {
+		t.Fatalf("new storage: %v", err)
+	}
+	if err := s.WriteEntry(CaptureEntry{Phase: "original", Data: "x"}); err != nil {
+		t.Fatalf("write entry: %v", err)
+	}
+
+	if info, err := os.Stat(dir); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("directory mode = %v (%v), want 0700", info.Mode().Perm(), err)
+	}
+	if info, err := os.Stat(legacy); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("existing capture file mode = %v (%v), want 0600", info.Mode().Perm(), err)
+	}
+}

@@ -78,12 +78,14 @@ func (s ModelLatencyStats) MarshalJSON() ([]byte, error) {
 const maxSamplesPerModel = 20000
 
 // LatencySnapshot is everything the performance panels need: the per-model
-// percentile table and the outcome counts, read in one pass over the same rows.
+// percentile table and the outcome counts.
 //
-// They were two queries, and the dashboard asks for both on the same poll. The
-// scan is what costs, not the arithmetic - modernc.org/sqlite reads this table
-// roughly 15x slower than the C library does - so the two are answered together
-// and cached until the table changes.
+// They are still two grouped queries - one for the percentiles, one for the
+// outcome counts - and the dashboard asks for both on the same poll. The scan is
+// what costs, not the arithmetic (modernc.org/sqlite reads this table roughly
+// 15x slower than the C library does), so the pair is cached against the
+// request table's revision and normally costs one counter read. Merging them
+// into a single pass is a possible optimisation, not something this code does.
 type LatencySnapshot struct {
 	Stats    []ModelLatencyStats
 	Success  map[string]int64

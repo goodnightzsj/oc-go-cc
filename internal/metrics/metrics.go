@@ -97,6 +97,11 @@ func (m *Metrics) RecordFailure() {
 func (m *Metrics) RecordFailureForModel(model string) {
 	m.requestsFailed.Add(1)
 
+	// A failing model belongs in the distribution too. Counting only successes
+	// made model_counts answer "requests served", not "requests made", and hid
+	// the model that was actually failing.
+	m.recordModel(model)
+
 	m.modelFailedMu.Lock()
 	m.modelFailed[model]++
 	m.modelFailedMu.Unlock()

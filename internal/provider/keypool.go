@@ -307,6 +307,16 @@ func (s *selection) settle(verdict verdict, err error) {
 	}
 }
 
+// setAuthNotify installs the hook that fires when a key is rejected with an
+// auth verdict. It is written once, but it is read on the scheduler path under
+// p.mu; setting it here makes that contract explicit instead of depending on
+// the loop having started before the server accepts requests.
+func (p *keyPool) setAuthNotify(fn func(key string)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.authNotify = fn
+}
+
 func laterDeadline(a, b time.Time) time.Time {
 	if a.After(b) {
 		return a

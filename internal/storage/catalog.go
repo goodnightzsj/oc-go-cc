@@ -213,11 +213,11 @@ func (r *CatalogRepo) ReplaceBatch(ctx context.Context, providers []ProviderReco
 		}
 
 		_, err := tx.ExecContext(ctx, `
-			INSERT OR REPLACE INTO models (id, provider, name, display_name, context_window, max_output_tokens, cost_input_per_m, cost_output_per_m, cost_tiers, supports_tools, supports_vision, supports_reasoning, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM models WHERE id = ?), ?))
+			INSERT INTO models (id, provider, name, display_name, context_window, max_output_tokens, cost_input_per_m, cost_output_per_m, cost_tiers, supports_tools, supports_vision, supports_reasoning, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 			m.ID, provider, modelName, m.Name, m.ContextWindow, maxOutput, costInput, costOutput,
-			encodeTiers(m.Tiers), supportsTools, supportsVision, supportsReasoning, m.ID, now)
+			encodeTiers(m.Tiers), supportsTools, supportsVision, supportsReasoning, now)
 		if err != nil {
 			return err
 		}
